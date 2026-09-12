@@ -204,7 +204,7 @@ export default function WritePage() {
   */
   useEffect(() => {
     if (sessionLoading || profile) return;
-    router.replace(loginHref("/write"));
+    router.replace(loginHref("/studio/write"));
   }, [sessionLoading, profile, router]);
 
   const loadChapters = useCallback((novelId: string) => {
@@ -622,7 +622,7 @@ export default function WritePage() {
             {/* Trang nay tao MOT chuong moi lan. Voi mot bo 50-500 chuong thi
                 do la 50-500 lan bam nut, nen loi vao "nhap hang loat" phai nam
                 ngay day chu khong an trong menu. */}
-            <Link className="btn" href="/write/import">
+            <Link className="btn" href="/studio/write/import">
               Nhập nhiều chương
             </Link>
             <Link className="btn" href="/fanfic" prefetch={false}>

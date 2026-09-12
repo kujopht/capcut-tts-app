@@ -261,21 +261,21 @@ export default function AccountPage() {
           <IconCompass size={19} /> Lối tắt
         </h2>
         <div className="quick-grid">
-          <Link className="quick-card" href="/write" prefetch={false}>
+          <Link className="quick-card" href="/studio/write" prefetch={false}>
             <span className="quick-icon" aria-hidden="true">
               <IconFeather size={19} />
             </span>
             <strong>Khu vực tác giả</strong>
             <span className="hint">Tạo truyện, thêm chương, xuất bản.</span>
           </Link>
-          <Link className="quick-card" href="/studio" prefetch={false}>
+          <Link className="quick-card" href="/studio/audio" prefetch={false}>
             <span className="quick-icon" aria-hidden="true">
               <IconMic size={19} />
             </span>
             <strong>Audio Studio</strong>
             <span className="hint">Dán văn bản bất kỳ và tạo MP3.</span>
           </Link>
-          <Link className="quick-card" href="/library" prefetch={false}>
+          <Link className="quick-card" href="/studio/library" prefetch={false}>
             <span className="quick-icon" aria-hidden="true">
               <IconHeadphones size={19} />
             </span>

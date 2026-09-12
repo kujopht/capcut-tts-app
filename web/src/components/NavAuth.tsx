@@ -20,9 +20,10 @@ import { Avatar } from "@/components/Avatar";
  * rang viet truyen la viec phu — trong khi khong co tac gia thi khong co gi
  * de doc.
  *
- * Audio Studio KHONG nam o day. No la mot CONG CU rieng (`/studio`): dan van
- * ban bat ky, chon giong, tai MP3 — khong lien quan den viec quan ly truyen.
- * Cho cua no la menu "Công cụ".
+ * Tung CONG CU khong nam o day. Chung la module trong Fanfic Studio
+ * (`/studio/*`), va loi vao cua ca bo la mot lien ket `/studio` o ben phai
+ * header — xem `StudioLink`. Thanh chinh danh cho cac khu vuc DUYET noi dung;
+ * san xuat noi dung thi o Studio.
  *
  * `/fanfic` giu nguyen duong dan, chi mang nhan "Khám phá": doi duong dan se
  * lam hong moi lien ket da chia se.
@@ -43,8 +44,8 @@ const LINKS = [
   { href: "/fanfic", label: "Khám phá" },
   { href: "/animation", label: "Animation" },
   { href: "/community", label: "Cộng đồng" },
-  { href: "/library", label: "Thư viện" },
-  { href: "/write", label: "Viết truyện", cta: true },
+  { href: "/studio/library", label: "Thư viện" },
+  { href: "/studio/write", label: "Viết truyện", cta: true },
 ];
 
 export function NavLinks() {
@@ -144,8 +145,12 @@ export function NavLinks() {
 /**
  * Menu bat/tat dung duoc bang ban phim.
  *
- * Tach thanh hook vi header co HAI menu — "Công cụ" va tai khoan — va ca hai
- * can dung mot hanh vi: Escape dong VA tra tieu diem ve nut mo (neu khong,
+ * Con MOT nguoi dung: menu tai khoan. ("Công cụ" da thanh mot lien ket
+ * `/studio` phang, khong con la menu.) Giu nguyen hook thay vi noi nguoc vao
+ * `AccountMenu` — hanh vi ban phim o day la thu de lam sai khi viet lai, va
+ * menu thu hai rat co the quay lai.
+ *
+ * Hanh vi can giu: Escape dong VA tra tieu diem ve nut mo (neu khong,
  * tieu diem roi ve `<body>` va nguoi dung ban phim mat cho dung), bam ra
  * ngoai cung dong.
  */
@@ -177,44 +182,26 @@ function useMenu() {
 }
 
 /**
- * Menu "Công cụ".
+ * Loi vao Fanfic Studio.
  *
- * LUON co mat, ke ca khi chua dang nhap. `/studio` tu no da xu ly truong hop
- * chua dang nhap; an muc nay di chi lam nguoi dung khong tim thay cong cu chu
- * khong bao ve duoc gi.
+ * Truoc day day la mot menu tha xuong "Công cụ" liet ke bon ung dung roi
+ * nhau (Audio Studio / Image Studio / Dịch tiểu thuyết / Subtitle Studio).
+ * Menu do bat nguoi dung quyet dinh HO CAN CONG CU NAO truoc khi cho ho
+ * nhin thay bat ky cong cu nao — tuc la no chi phuc vu nguoi da biet san
+ * cau tra loi.
+ *
+ * Nay la MOT lien ket. Viec chon cong cu chuyen vao trong Studio, noi ca
+ * sau cong cu nam canh nhau kem mot dong mo ta, va noi thanh ben cho phep
+ * doi cong cu ma khong phai quay ra ngoai.
+ *
+ * LUON co mat, ke ca khi chua dang nhap: `/studio` la mot trang tinh, va
+ * tung cong cu tu xu ly truong hop chua dang nhap theo cach cua no.
  */
-function ToolsMenu() {
-  const { open, setOpen, close, boxRef, buttonRef } = useMenu();
-
+function StudioLink() {
   return (
-    <div className="menu" ref={boxRef}>
-      <button
-        ref={buttonRef}
-        type="button"
-        className="btn btn-ghost btn-sm"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        Công cụ
-      </button>
-      {open ? (
-        <div className="menu-panel" role="menu" aria-label="Công cụ">
-          <Link href="/studio" className="menu-item" role="menuitem" onClick={close}>
-            <span aria-hidden="true">🎙</span> Audio Studio
-          </Link>
-          <Link href="/image-studio" className="menu-item" role="menuitem" onClick={close}>
-            <span aria-hidden="true">🖼</span> Image Studio
-          </Link>
-          <Link href="/translate" className="menu-item" role="menuitem" onClick={close}>
-            <span aria-hidden="true">🈺</span> Dịch tiểu thuyết
-          </Link>
-          <Link href="/tools/subtitles" className="menu-item" role="menuitem" onClick={close}>
-            <span aria-hidden="true">🎬</span> Subtitle Studio
-          </Link>
-        </div>
-      ) : null}
-    </div>
+    <Link href="/studio" className="btn btn-ghost btn-sm" prefetch={false}>
+      Studio
+    </Link>
   );
 }
 
@@ -297,7 +284,7 @@ function AccountMenu() {
 export function NavAuth() {
   return (
     <div className="row nav-right">
-      <ToolsMenu />
+      <StudioLink />
       <StreakBadge />
       {/* Chuông đứng TRƯỚC menu tài khoản: nó là thứ người ta nhìn thường
           xuyên hơn, và đặt nó sau avatar sẽ đẩy nó ra rìa màn hình ở mobile. */}

@@ -195,8 +195,12 @@ test("6 diem den (cong chinh + ve tinh) CHI tro toi duong da co that", () => {
   const phuSrc = src.slice(atPhu, atHetPhu);
   const hrefsCua = (s) => [...s.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]);
   const hrefs = [...hrefsCua(chinhSrc), ...hrefsCua(phuSrc)];
+  // Ba cong cu (Audio/Sang tac/Hinh anh) nay la module trong Fanfic Studio,
+  // nen cong tren trang chu tro THANG toi dia chi moi. Duong cu van chay nho
+  // chuyen huong 308, nhung mot cong o trang chu khong nen ton mot vong.
   assert.deepEqual(hrefs, [
-    "/fanfic", "/animation", "/studio", "/community", "/write", "/image-studio",
+    "/fanfic", "/animation", "/studio/audio",
+    "/community", "/studio/write", "/studio/image",
   ]);
   // Va cac thu muc route nay phai THAT SU ton tai trong web/src/app.
   for (const href of hrefs) {

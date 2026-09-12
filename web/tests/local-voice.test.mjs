@@ -67,7 +67,7 @@ test("Ngoc Huyen KHONG duoc dat lam giong mac dinh", async () => {
 /* ------------------------------------------- noi ro dang cho worker, khong doan */
 
 test("trang studio noi ro job dang cho may tao giong", () => {
-  const src = read("../src/app/studio/page.tsx");
+  const src = read("../src/app/studio/audio/page.tsx");
 
   const i = src.indexOf('activeJob.status === "pending"');
   assert.ok(i > 0, "khong tim thay nhanh hien thi trang thai pending");
@@ -90,7 +90,7 @@ test("giao dien KHONG con gia dinh worker chay tren may nguoi dung", () => {
   // "máy riêng" / "máy đang tắt" / "khi máy bật lại" deu la tan du cua thoi
   // worker chay tren laptop, va deu goi y sai rang nguoi dung phai co may cua
   // rieng ho. Quet CA HAI tep vi ca hai deu tung noi cau do.
-  for (const p of ["../src/app/studio/page.tsx", "../src/app/layout.tsx"]) {
+  for (const p of ["../src/app/studio/audio/page.tsx", "../src/app/layout.tsx"]) {
     const src = read(p);
     for (const cam of ["máy riêng", "máy đang tắt", "khi máy bật lại"]) {
       assert.ok(!src.includes(cam), `${p} còn câu "${cam}"`);
@@ -102,7 +102,7 @@ test("giao dien noi ro he thong KHONG tu doi sang giong khac", () => {
   // Quy tac cung cua ca he thong (CLAUDE.md): tong hop that bai hay worker tat
   // deu khong duoc am tham doi giong. Nguoi dung phai duoc noi dieu do — neu
   // khong, ho se tuong audio nhan duoc la giong ho da chon.
-  const src = read("../src/app/studio/page.tsx");
+  const src = read("../src/app/studio/audio/page.tsx");
 
   assert.match(
     src,
@@ -522,8 +522,8 @@ test("khong trang nao tu dung ten giong — tat ca di qua voiceOptionLabel", () 
   // se thoat khoi moi quy tac o `voices.ts` va khong bo test nao o tren bat
   // duoc. Quet toan bo `src/app` va `src/components`, khong chi hai trang.
   const files = [
-    "../src/app/studio/page.tsx",
-    "../src/app/write/page.tsx",
+    "../src/app/studio/audio/page.tsx",
+    "../src/app/studio/write/page.tsx",
     "../src/app/layout.tsx",
   ];
   for (const p of files) {
@@ -535,7 +535,7 @@ test("khong trang nao tu dung ten giong — tat ca di qua voiceOptionLabel", () 
 });
 
 test("hai trang deu co dung HAI muc chon giong", () => {
-  for (const p of ["../src/app/studio/page.tsx", "../src/app/write/page.tsx"]) {
+  for (const p of ["../src/app/studio/audio/page.tsx", "../src/app/studio/write/page.tsx"]) {
     const src = read(p);
     assert.match(src, /optgroup label={RECOMMENDED_LABEL}/, p);
     assert.match(src, /optgroup label={ALL_VOICES_LABEL}/, p);

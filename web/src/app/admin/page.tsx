@@ -16,12 +16,96 @@ import { adminApi, type AdminOverview } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { ChuaCauHinh, DanhSachTrangThai, OSo } from "@/components/AdminShell";
 import {
+  IconBook,
   IconChart,
   IconFeather,
   IconGear,
+  IconInbox,
   IconLink,
+  IconShield,
   IconSparkles,
 } from "@/components/Icons";
+
+/**
+ * Bang "Cần bạn xử lý".
+ *
+ * VAN DE no giai quyet: bang tong quan co hon 30 o SO LIEU va truoc day dung
+ * MOT o nhac viec (don tac gia). Nhung con so con lai deu doc duoc nhu nhau —
+ * "Báo cáo đang chờ: 3" trong nhu "Chương: 1.284" — nen mot viec DANG CHO
+ * nguoi that xu ly khong noi hon mot con so chi de biet. Nguoi quan tri phai
+ * quet ca trang de tim ra thu can bam vao.
+ *
+ * KHONG o so lieu nao bi bo di. Bang nay la mot lop DOC THEM dat len tren:
+ * cung nhung con so do, nhung chi nhung con so KEO THEO MOT HANH DONG, va moi
+ * cai la mot lien ket toi dung hang doi cua no.
+ *
+ * TRANG THAI RONG duoc ve RO RANG chu khong an di. Mot bang bien mat khi het
+ * viec khong phan biet duoc voi mot bang hong — va "khong con viec" la thong
+ * tin nguoi truc ca can biet.
+ */
+function CanBanXuLy({ data }: { data: AdminOverview }) {
+  // Truyen o trang thai nhap = tong - da xuat ban. Day la cho cac ban nhap do
+  // may gat (Story Harvester/farmer) tao ra hien ra: chung duoc tao o trang
+  // thai `draft` va cho mot nguoi xem lai truoc khi len song.
+  const nhap = Math.max(0, data.content.novels_total - data.published_novels);
+
+  const viec = [
+    {
+      so: data.pending_applications,
+      nhan: "đơn tác giả đang chờ duyệt",
+      href: "/admin/authors/applications?status=pending",
+      icon: IconFeather,
+    },
+    {
+      so: data.content.pending_reports,
+      nhan: "báo cáo kiểm duyệt đang chờ",
+      href: "/admin/reports",
+      icon: IconShield,
+    },
+    {
+      so: nhap,
+      nhan: "truyện ở bản nháp, chưa xuất bản",
+      href: "/admin/stories?state=draft",
+      icon: IconBook,
+    },
+    {
+      so: data.trusted_sources.pending_total ?? 0,
+      nhan: "video chờ duyệt nhập",
+      href: "/admin/animation/import-queue",
+      icon: IconInbox,
+    },
+    {
+      so: data.trusted_sources.error_total ?? 0,
+      nhan: "nguồn video đang lỗi/xung đột",
+      href: "/admin/animation/sources",
+      icon: IconLink,
+    },
+  ].filter((v) => v.so > 0);
+
+  return (
+    <div className="stack-2">
+      <h3 className="section-title-sm">Cần bạn xử lý</h3>
+      {viec.length === 0 ? (
+        <p className="hint admin-khong-viec">
+          Không có việc nào đang chờ — hàng đợi duyệt, báo cáo và nhập video
+          đều trống.
+        </p>
+      ) : (
+        <div className="stack-2">
+          {viec.map(({ so, nhan, href, icon: Icon }) => (
+            <Link key={href} className="card admin-nhac" href={href}>
+              <Icon size={19} />
+              <span>
+                <strong>{so.toLocaleString("vi-VN")}</strong> {nhan}
+              </span>
+              <span className="hint">Xem hàng đợi →</span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AdminDashboard() {
   const nap = useCallback(() => adminApi.overview(), []);
@@ -41,16 +125,7 @@ export default function AdminDashboard() {
       >
         {data ? (
           <div className="stack-3">
-            {data.pending_applications > 0 ? (
-              <Link className="card admin-nhac" href="/admin/authors/applications?status=pending">
-                <IconFeather size={19} />
-                <span>
-                  <strong>{data.pending_applications}</strong> đơn tác giả đang
-                  chờ duyệt
-                </span>
-                <span className="hint">Xem hàng đợi →</span>
-              </Link>
-            ) : null}
+            <CanBanXuLy data={data} />
 
             {/* ---------------------------------------------------- USERS */}
             <div>

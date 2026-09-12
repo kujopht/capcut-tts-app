@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const studio = () => read("../src/app/studio/page.tsx");
+const studio = () => read("../src/app/studio/audio/page.tsx");
 
 /** Bo chu thich truoc khi quet — xem `job-recovery.test.mjs`. */
 const codeOnly = (src) =>

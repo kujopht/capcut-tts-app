@@ -150,7 +150,7 @@ export default function ChapterPage({
             <IconHeadphones size={15} /> Nghe chương này
           </Link>
         ) : isOwner ? (
-          <Link className="btn btn-sm btn-ghost" href="/write" prefetch={false}>
+          <Link className="btn btn-sm btn-ghost" href="/studio/write" prefetch={false}>
             <span aria-hidden="true">🎙️</span> Tạo audio cho chương
           </Link>
         ) : null}

@@ -42,50 +42,53 @@ test("'Viết truyện' nam trong dieu huong chinh, ngang hang cac muc khac", as
   // trong menu tai khoan. Ghim ca danh sach o hai cho la hai cho phai sua moi
   // lan them mot muc.
   assert.ok(
-    order.some(([href, label]) => href === "/write" && label === "Viết truyện"),
+    order.some(([href, label]) => href === "/studio/write" && label === "Viết truyện"),
     "'Viết truyện' không có trong thanh điều hướng chính",
   );
   assert.equal(order[0][0], "/", "'Trang chủ' phải đứng đầu");
-  assert.equal(order.at(-1)?.[0], "/write",
+  assert.equal(order.at(-1)?.[0], "/studio/write",
     "'Viết truyện' đứng cuối hàng — nó là điểm đến, không phải điểm ghé qua");
 });
 
 test("route cu khong doi: /write va /studio deu con", () => {
-  for (const p of ["../src/app/write/page.tsx", "../src/app/studio/page.tsx"]) {
+  for (const p of ["../src/app/studio/write/page.tsx", "../src/app/studio/audio/page.tsx"]) {
     assert.ok(existsSync(new URL(p, import.meta.url)), `mất ${p}`);
   }
 });
 
-test("Audio Studio nam trong menu Cong cu, KHONG trong thanh chinh", () => {
+test("Audio Studio nam trong Studio, KHONG trong thanh chinh", () => {
   const nav = read("../src/components/NavAuth.tsx");
   const links = nav.slice(
     nav.indexOf("const LINKS"),
     nav.indexOf("export function NavLinks"),
   );
-  assert.ok(!links.includes("/studio"));
+  assert.ok(!links.includes('"/studio/audio"'));
 
-  const tools = nav.slice(
-    nav.indexOf("function ToolsMenu"),
+  // Loi vao la MOT lien ket `/studio`, khong con la menu "Công cụ" liet ke
+  // tung ung dung. Chinh trang `/studio` dan tiep toi Audio.
+  const studio = nav.slice(
+    nav.indexOf("function StudioLink"),
     nav.indexOf("function AccountMenu"),
   );
-  assert.match(tools, /Công cụ/);
-  assert.match(tools, /href="\/studio"/);
+  assert.match(studio, /href="\/studio"/);
+  const shell = read("../src/components/StudioShell.tsx");
+  assert.match(shell, /href: "\/studio\/audio"/, "Studio mất mục Audio");
 });
 
-test("menu Cong cu va menu tai khoan la HAI menu tach biet", () => {
+test("loi vao Studio va menu tai khoan la HAI thu tach biet", () => {
   const nav = read("../src/components/NavAuth.tsx");
-  assert.match(nav, /function ToolsMenu/);
+  assert.match(nav, /function StudioLink/);
   assert.match(nav, /function AccountMenu/);
   // Menu tai khoan khong duoc chua cong cu, va nguoc lai.
   const account = nav.slice(nav.indexOf("function AccountMenu"));
-  assert.ok(!account.includes("/studio"), "Audio Studio lọt vào menu tài khoản");
+  assert.ok(!account.includes("/studio"), "Studio lọt vào menu tài khoản");
 });
 
 test("Audio Studio KHONG bi gop vao /write", () => {
   // Hai trang phuc vu hai viec: `/studio` la dan van ban bat ky roi tai MP3,
   // `/write` la quan ly truyen va chuong. Nhan ban form cua Studio sang
   // `/write` la tao ra hai cho lam cung mot viec, roi chung lech nhau.
-  const write = read("../src/app/write/page.tsx");
+  const write = read("../src/app/studio/write/page.tsx");
   assert.ok(!write.includes("ensureStudioNovel"), "/write dùng kho chứa Studio");
   assert.ok(!write.includes("MAX_CHARS"), "/write có giới hạn của Studio");
 
@@ -95,9 +98,9 @@ test("Audio Studio KHONG bi gop vao /write", () => {
   }
 });
 
-test("chua dang nhap vao /write thi sang /login?next=/write", () => {
-  const write = read("../src/app/write/page.tsx");
-  assert.match(write, /router\.replace\(loginHref\("\/write"\)\)/);
+test("chua dang nhap vao /studio/write thi sang /login?next=/studio/write", () => {
+  const write = read("../src/app/studio/write/page.tsx");
+  assert.match(write, /router\.replace\(loginHref\("\/studio\/write"\)\)/);
   // `replace` chu khong phai `push`: nut Back phai ve trang truoc do, khong
   // phai ve mot trang se lai day ho sang dang nhap.
   assert.ok(!/router\.push\(loginHref/.test(write));

@@ -158,7 +158,7 @@ export default function LibraryPage() {
         title="Audio của tôi"
         lead="Tất cả audio đã tạo, gồm cả bản tạo nhanh ở Audio Studio và audio của các chương fanfic."
         action={
-          <Link className="btn btn-primary" href="/studio" prefetch={false}>
+          <Link className="btn btn-primary" href="/studio/audio" prefetch={false}>
             <IconMic size={17} /> Tạo audio mới
           </Link>
         }
@@ -197,10 +197,10 @@ export default function LibraryPage() {
           hint="Tạo audio đầu tiên ở Audio Studio, hoặc thêm audio cho chương truyện của bạn."
           action={
             <div className="row">
-              <Link className="btn btn-primary" href="/studio" prefetch={false}>
+              <Link className="btn btn-primary" href="/studio/audio" prefetch={false}>
                 Mở Audio Studio
               </Link>
-              <Link className="btn" href="/write" prefetch={false}>
+              <Link className="btn" href="/studio/write" prefetch={false}>
                 Khu vực tác giả
               </Link>
             </div>

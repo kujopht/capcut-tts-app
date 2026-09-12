@@ -26,10 +26,10 @@ test("moi route cu VAN con nguyen", () => {
   // quan trong nhat: no ra khoi thanh dieu huong chinh, KHONG ra khoi san pham.
   for (const route of [
     "../src/app/page.tsx",
-    "../src/app/studio/page.tsx",
+    "../src/app/studio/audio/page.tsx",
     "../src/app/fanfic/page.tsx",
-    "../src/app/write/page.tsx",
-    "../src/app/library/page.tsx",
+    "../src/app/studio/write/page.tsx",
+    "../src/app/studio/library/page.tsx",
     "../src/app/account/page.tsx",
     "../src/app/login/page.tsx",
     "../src/app/novels/[id]/page.tsx",
@@ -40,7 +40,7 @@ test("moi route cu VAN con nguyen", () => {
 });
 
 test("Audio Studio giu nguyen chuc nang, chi doi cho dung trong dieu huong", () => {
-  const studio = read("../src/app/studio/page.tsx");
+  const studio = read("../src/app/studio/audio/page.tsx");
   for (const dau_hieu of [
     "MAX_CHARS",          // gioi han ky tu
     ".createJob(",        // tao job that
@@ -59,24 +59,28 @@ test("Audio Studio giu nguyen chuc nang, chi doi cho dung trong dieu huong", () 
 
 /* ============================================================ dieu huong */
 
-test("thanh chinh khong con Audio Studio, nhung menu Cong cu thi co", () => {
+test("thanh chinh khong con tung cong cu, chi con MOT loi vao Studio", () => {
   const nav = read("../src/components/NavAuth.tsx");
   const links = nav.slice(
     nav.indexOf("const LINKS"),
     nav.indexOf("export function NavLinks"),
   );
-  assert.ok(!links.includes("/studio"));
+  assert.ok(!links.includes('"/studio/audio"'));
   assert.ok(!links.includes("Audio Studio"));
 
-  // Audio Studio la mot CONG CU rieng, khong phai mot khu vuc san pham. Cho
-  // cua no la menu "Công cụ" — tach han khoi menu tai khoan.
-  const tools = nav.slice(
-    nav.indexOf("function ToolsMenu"),
+  // Tung cong cu KHONG con dung ten rieng o header. Chung la module ben
+  // trong mot san pham, va ten cua san pham do la "Studio".
+  const studio = nav.slice(
+    nav.indexOf("function StudioLink"),
     nav.indexOf("function AccountMenu"),
   );
-  assert.match(tools, /Công cụ/);
-  assert.match(tools, /href="\/studio"/, "menu Công cụ thiếu Audio Studio");
-  assert.match(tools, /Audio Studio/);
+  assert.match(studio, /href="\/studio"/, "header thiếu lối vào Studio");
+  // Khop tren DUONG DAN da ve, khong tren ca tep: chu thich trong `NavAuth`
+  // van nhac ten cu de giai thich VI SAO menu bien mat, va mot bai kiem cam
+  // nhac lich su la mot bai kiem cam viet chu thich.
+  for (const cu of ["/image-studio", "/tools/subtitles", "/translate"]) {
+    assert.ok(!nav.includes(`href="${cu}"`), `header vẫn trỏ tới ${cu}`);
+  }
 });
 
 test("menu ben phai dung duoc bang ban phim va bang doc man hinh", () => {
@@ -104,8 +108,8 @@ test("muc dieu huong 'Trang chu' khop CHINH XAC, khong dung startsWith", () => {
   assert.match(nav, /const active = link\.href === dangXem;/);
 });
 
-test("Audio Studio VAN co loi vao o footer cho nguoi khong mo menu", () => {
-  assert.match(read("../src/app/layout.tsx"), /href="\/studio"/);
+test("Studio VAN co loi vao o footer cho nguoi khong mo menu", () => {
+  assert.match(read("../src/app/layout.tsx"), /href="\/studio\/audio"/);
 });
 
 /* ============================================================ tim kiem */
@@ -249,7 +253,14 @@ test("footer chi tro toi route CO THAT", () => {
   const hrefs = [...footer.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
   assert.ok(hrefs.length >= 5, "footer quá nghèo nàn");
 
-  const co_that = new Set(["/", "/fanfic", "/library", "/write", "/studio", "/account"]);
+  const co_that = new Set([
+    "/", "/fanfic", "/account",
+    // Cong cu nay nam duoi `/studio/*` (Fanfic Studio). Duong dan cu van
+    // chay nho chuyen huong 308 trong `next.config.mjs`, nhung footer thi
+    // tro THANG toi dia chi moi — mot lien ket noi bo khong nen ton mot
+    // vong chuyen huong.
+    "/studio", "/studio/library", "/studio/write", "/studio/audio",
+  ]);
   for (const href of hrefs) {
     assert.ok(co_that.has(href), `footer trỏ tới route không tồn tại: ${href}`);
   }

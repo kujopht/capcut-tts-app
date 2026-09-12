@@ -528,8 +528,15 @@ export default function SubtitleStudioPage() {
         </p>
       </section>
 
+      {/*
+        Truoc day o day la "← Về Audio Studio", tu thoi Phu de con la mot
+        trang con cua cong cu audio. Nay hai cai la ANH EM trong Studio va
+        thanh ben lo viec chuyen qua lai, nen mot duong lui rieng toi mot
+        cong cu khac la sai quan he. Giu mot loi ve TONG QUAN thi van co ich
+        tren mobile, noi thanh ben mac dinh dong.
+      */}
       <p className="hint">
-        <Link href="/studio" prefetch={false}>← Về Audio Studio</Link>
+        <Link href="/studio" prefetch={false}>← Về Tổng quan Studio</Link>
       </p>
     </div>
   );

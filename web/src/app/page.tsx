@@ -240,7 +240,7 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
         <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
           Khám phá
         </Link>
-        <Link className="btn btn-outline" href="/write" prefetch={false}>
+        <Link className="btn btn-outline" href="/studio/write" prefetch={false}>
           Viết truyện
         </Link>
       </div>
@@ -315,7 +315,7 @@ const DIEM_DEN_CHINH: DiemDen[] = [
     mota: "Xem các series và tập mới",
   },
   {
-    href: "/studio",
+    href: "/studio/audio",
     icon: <IconHeadphones size={19} />,
     ten: "Audio",
     mota: "Nghe truyện bằng giọng đọc",
@@ -331,13 +331,13 @@ const DIEM_DEN_PHU: DiemDen[] = [
     mota: "Thảo luận và chia sẻ",
   },
   {
-    href: "/write",
+    href: "/studio/write",
     icon: <IconFeather size={17} />,
     ten: "Sáng tác",
     mota: "Viết và xuất bản truyện",
   },
   {
-    href: "/image-studio",
+    href: "/studio/image",
     icon: <IconSparkles size={17} />,
     ten: "Image Studio",
     mota: "Tạo hình ảnh cho thế giới của bạn",
@@ -484,7 +484,7 @@ function KeTrongNoiBat() {
           Chưa có truyện nào được xuất bản — chỗ đầu tiên đang chờ tác giả
           đầu tiên.
         </span>
-        <Link className="btn btn-primary btn-sm" href="/write" prefetch={false}>
+        <Link className="btn btn-primary btn-sm" href="/studio/write" prefetch={false}>
           Viết câu chuyện đầu tiên
         </Link>
       </span>
@@ -736,7 +736,7 @@ export default function HomePage() {
             <h2 className="section-title" id="home-tiep-tuc">
               Tiếp tục của bạn
             </h2>
-            <Link className="section-more" href="/library" prefetch={false}>
+            <Link className="section-more" href="/studio/library" prefetch={false}>
               Thư viện của bạn <span aria-hidden="true">→</span>
             </Link>
           </div>
@@ -945,10 +945,10 @@ export default function HomePage() {
           </p>
         </div>
         <div className="row">
-          <Link className="btn btn-primary" href="/write" prefetch={false}>
+          <Link className="btn btn-primary" href="/studio/write" prefetch={false}>
             Bắt đầu viết
           </Link>
-          <Link className="btn" href="/studio" prefetch={false}>
+          <Link className="btn" href="/studio/audio" prefetch={false}>
             Thử Audio Studio
           </Link>
         </div>

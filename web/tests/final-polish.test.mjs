@@ -17,7 +17,7 @@ const callsApi = (src, method) =>
   new RegExp(`api\\s*\\.\\s*${method}\\s*\\(`).test(src);
 
 const fanfic = () => read("../src/app/fanfic/page.tsx");
-const studio = () => read("../src/app/studio/page.tsx");
+const studio = () => read("../src/app/studio/audio/page.tsx");
 const home = () => read("../src/app/page.tsx");
 const api = () => read("../src/lib/api.ts");
 const css = () => read("../src/app/globals.css");
@@ -219,7 +219,7 @@ test("L4: khong con hex mau nao trong cac trang tsx", () => {
   // `opengraph-image.tsx` va `apple-icon.tsx` buoc phai hardcode: Satori khong
   // doc duoc CSS variable. Cac trang khac thi khong duoc.
   for (const f of ["../src/app/page.tsx", "../src/app/fanfic/page.tsx",
-                   "../src/app/studio/page.tsx", "../src/app/write/page.tsx",
+                   "../src/app/studio/audio/page.tsx", "../src/app/studio/write/page.tsx",
                    "../src/app/novels/[id]/page.tsx",
                    "../src/app/chapters/[id]/page.tsx"]) {
     const hex = read(f).match(/#[0-9a-fA-F]{6,8}\b/g) || [];
@@ -284,7 +284,7 @@ test("khong pha M2/M3/M4: cac tinh nang van con", () => {
   // M2: nghe tai cho da doi thanh lien ket sang `/listen/[id]` (overnight
   // Phase 2, Phan 2A) — dong co toan cuc DUY NHAT thay vi mot AudioPlayer
   // rieng cho tung hang. Kiem o `ui.test.mjs`.
-  assert.match(read("../src/app/write/page.tsx"), /api\.reorderChapters\(/);  // M3
+  assert.match(read("../src/app/studio/write/page.tsx"), /api\.reorderChapters\(/);  // M3
   assert.match(novel(), /chapter\.audio_outdated \?/);                        // M4
   assert.match(read("../src/app/listen/[id]/page.tsx"), /audioOutdated/);
 });
@@ -310,7 +310,7 @@ test("Subtitle Studio: nut chon tep video/audio dung .btn, khong phai input tho"
   // <label className="btn ..."> de trong giong nut cua he thong thay vi
   // hop chon tep mac dinh cua trinh duyet. Muc "1. Chon video/audio" phai
   // theo cung mot khuon, khong de sot lai input tho.
-  const src = read("../src/app/tools/subtitles/page.tsx");
+  const src = read("../src/app/studio/subtitle/page.tsx");
   const m = src.match(/<label className="btn[^>]*">[\s\S]*?<\/label>/g) ?? [];
   const boBoc = m.some((block) => /accept="video\/\*,audio\/\*"/.test(block));
   assert.ok(boBoc, "input chon video/audio phai duoc boc trong <label className=\"btn ...\">");

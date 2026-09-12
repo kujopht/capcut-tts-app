@@ -3690,6 +3690,27 @@ class ControlCenter:
             return False
 
         pb.changes = that                   # bao cao noi dung THAT
+        # VA CA TRANG THAI. Day la ve thu hai, va thieu no thi ca cuoc doi
+        # soat chi chua duoc mot nua:
+        #
+        # Ben goi (`_chay`) dung ket qua `True` de nang TRANG THAI VIEC len
+        # `DONE`, nhung phong bi thi VAN mang `status="failed"` +
+        # `failure_reason="gate_diff"`. Hai cai nhin ve CUNG mot su that lai
+        # noi nguoc nhau, va moi tang doc sau do doc phai cai sai:
+        #   * `HopDongKetQua` dung tu phong bi -> `status="failed"` -> tang
+        #     BUOC ket luan buoc HONG va di sua chua, DU viec da `DONE`;
+        #   * su kien phien in ra "việc hỏng; phiên giữ ấm để dùng lại" ngay
+        #     duoi mot dong `TASK_FINISHED DONE`.
+        # Do duoc (Fanfic that, ex_ca0dc426af20): `ghi_tailieu` DAT doi soat
+        # ba lan lien tiep, ba lan deu `RUNNING -> DONE`, va ca ba lan tang
+        # buoc van xep KHONG_DAT roi sua chua -> lap lai ke hoach -> BLOCKED.
+        # Tep da nam tren dia voi dung dau xac nhan tu lan dau.
+        #
+        # Da doi soat tren tap THAT va moi cong khac deu dat, nen ket luan
+        # dung la "viec NAY xong". Giu `failed` o day la mot loi khai sai do
+        # CHINH ta viet ra, khong phai loi cua worker.
+        pb.status = "ok"
+        pb.failure_reason = ""
         pb.warnings.append(
             f"worker KHÔNG khai `changes` nhưng đĩa đổi {len(that)} tệp. "
             f"Đã đối soát với `git`: mọi tệp đều trong phạm vi và mọi cổng "
@@ -4152,7 +4173,14 @@ class ControlCenter:
                       "findings": pb.findings[:10], "risks": pb.risks[:10],
                       "placement": p.key, "duration": round(pb.duration, 2),
                       "fail_sig": self._chu_ky_hong(pb)})
-            ctx.sessions.ket_thuc_viec(session_id, task_id, ok=kq.ok, pid=pid)
+            # `moi`, khong phai `kq.ok`: sau một cuộc ĐỐI SOÁT đạt, `kq.ok`
+            # vẫn `False` (nó đọc cổng `diff` đã hỏng) trong khi việc đã
+            # `DONE`. Dùng `kq.ok` ở đây in ra "việc hỏng; phiên giữ ấm" ngay
+            # dưới một dòng `TASK_FINISHED DONE` — cùng một sự thật, hai câu
+            # trả lời ngược nhau, và người vận hành đọc sổ sẽ tin câu sai.
+            ctx.sessions.ket_thuc_viec(
+                session_id, task_id,
+                ok=moi in (TaskState.DONE, TaskState.REVIEW), pid=pid)
             # NHA KHOA NGAY KHI VIEC DA O TRANG THAI CUOI — truoc khi thu lai,
             # truoc khi bao chat, truoc khi gop vao cha. Hai ly do do that:
             #   * Toa: `_tong_hop_toa` chay TRONG luong cua con cuoi, nen neu

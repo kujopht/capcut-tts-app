@@ -333,6 +333,39 @@ class Test05DoiSoatKhaiThieuTheoCONG(unittest.TestCase):
         finally:
             cc.shutdown()
 
+    def test_doi_soat_DAT_thi_PHONG_BI_cung_phai_noi_xong(self):
+        """Vế thứ hai của cuộc đối soát — thiếu nó thì chỉ chữa được một nửa.
+
+        Bên gọi nâng TRẠNG THÁI VIỆC lên `DONE`, nhưng nếu phong bì vẫn mang
+        `status="failed"` thì `HopDongKetQua` dựng từ nó sẽ nói bước HỎNG, và
+        tầng bước đi sửa chữa một việc vừa `DONE`. Đo được trên Fanfic thật
+        (ex_ca0dc426af20): `ghi_tailieu` đạt đối soát BA lần, ba lần
+        `RUNNING -> DONE`, ba lần tầng bước vẫn xếp KHÔNG_ĐẠT rồi lập lại kế
+        hoạch cho tới BLOCKED — trong khi tệp đã nằm trên đĩa từ lần đầu.
+        """
+        cc = self._cc()
+        try:
+            kq, hd = self._dung(changes=[])
+            self.assertTrue(cc._doi_soat_khai_thieu(_CtxGia(cc), "t1", hd, kq))
+            self.assertEqual(kq.envelope.status, "ok")
+            self.assertEqual(kq.envelope.failure_reason, "")
+            # Và hợp đồng kết quả mà tầng bước thật sự đọc cũng phải nói xong.
+            from scripts.control_center.execution.ket_qua import tu_envelope
+            self.assertEqual(tu_envelope(kq.envelope, buoc_id="b1").status,
+                             "ok")
+        finally:
+            cc.shutdown()
+
+    def test_doi_soat_TU_CHOI_thi_KHONG_duoc_dong_vao_trang_thai(self):
+        """Từ chối = việc vẫn hỏng. Không được lén chữa phong bì."""
+        cc = self._cc()
+        try:
+            kq, hd = self._dung(changes=["docs/reports/a.md"], observed=())
+            self.assertFalse(cc._doi_soat_khai_thieu(_CtxGia(cc), "t1", hd, kq))
+            self.assertEqual(kq.envelope.status, "failed")
+        finally:
+            cc.shutdown()
+
     def test_changes_RONG_van_duoc_doi_soat_nhu_cu(self):
         cc = self._cc()
         try:

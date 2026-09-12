@@ -102,6 +102,44 @@ def _kiem_ten(ten: str, nhan: str) -> None:
             f"{nhan} không hợp lệ: {ten!r} — chỉ cho phép chữ, số, `.`, `_`, `-`.")
 
 
+#: Token nghia la "GOC CAY LAM VIEC" — tuc CA worktree.
+_GOC_SCOPE = frozenset((".", "./", "", "/", "*", "**"))
+
+
+def chuan_hoa_scope(write_scope: Sequence[str]) -> Optional[List[str]]:
+    """Chuẩn hoá `write_scope` -> danh sách tiền tố, hoặc `None` = cả cây.
+
+    VÌ SAO CÓ HÀM NÀY (hỏng đo được 2026-09-13, RouterDogfood02): V0.9.3 cấp
+    phạm vi ghi "gốc cây làm việc" bằng token `.` (chính là `locks.GOC` mà
+    cả hệ đã dùng). Nhưng phép so phạm vi làm thế này:
+
+        tep == "." or tep.startswith("./")
+
+    nên `app.js` ở NGAY GỐC cây không khớp gì cả, và cổng `scope` đánh hỏng
+    một lượt agent đã làm ĐÚNG:
+
+        ghi NGOÀI write_scope: ['README.md','app.js','index.html','style.css']
+
+    Agent viết đúng chỗ, hợp đồng cấp đúng quyền, cổng vẫn chấm hỏng — vì
+    hai tầng hiểu chữ `.` khác nhau. Đây là bản sao của chính căn bệnh
+    V0.9.3: **hai cái nhìn về một sự thật**.
+
+    Trả `None` (không phải `[]`) cho gốc cây: `[]` nghĩa là "không cho ghi
+    gì", còn gốc cây nghĩa là "cho ghi mọi chỗ trong cây" — hai điều ngược
+    nhau, và nhầm chúng là mở toang một rào. Rào THẬT vẫn là bản thân
+    worktree cô lập: `git status` chỉ thấy tệp BÊN TRONG nó.
+    """
+    ra: List[str] = []
+    for s in write_scope:
+        c = str(s).replace("\\", "/").strip()
+        if c.strip("/") in _GOC_SCOPE or c in _GOC_SCOPE:
+            return None
+        c = c.strip("/")
+        if c:
+            ra.append(c)
+    return ra
+
+
 def branch_name(worker_id: str, task_id: str) -> str:
     _kiem_ten(worker_id, "worker_id")
     _kiem_ten(task_id, "task_id")
@@ -343,7 +381,9 @@ class WorktreeManager:
                       errors="replace")
         if p.returncode != 0:
             raise WorktreeError(f"không đọc được trạng thái worktree: {p.stderr[:200]}")
-        cho_phep = [s.replace("\\", "/").strip("/") for s in write_scope]
+        cho_phep = chuan_hoa_scope(write_scope)
+        if cho_phep is None:                # gốc cây = cả worktree
+            return []
         vi_pham = []
         for dong in (p.stdout or "").splitlines():
             tep = dong[3:].strip().strip('"').replace("\\", "/")

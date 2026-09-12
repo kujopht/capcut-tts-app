@@ -265,7 +265,37 @@ def tao_du_an(cc, ten: str, *, goc: Optional[object] = None,
         ma, ra = _git(dich, "init", "-q")
         if ma != 0:
             raise TaoDuAnLoi(f"`git init` hỏng: {ra[:200]}")
-        kq.ghi_chu.append("đã khởi tạo kho git (chưa có commit)")
+        # COMMIT ĐẦU TIÊN — V0.9.3, và nó KHÔNG phải thứ làm cho đẹp.
+        #
+        # `git init` trần để lại một kho KHÔNG CÓ `HEAD`, và `git rev-parse
+        # HEAD` trên kho đó hỏng. Tầng worktree của Router gọi đúng lệnh ấy
+        # để lấy `base_sha`, nên MỌI việc GHI trên một dự án vừa tạo đều
+        # chết ngay lúc xin cây làm việc:
+        #
+        #     không cấp được cây làm việc: git rev-parse HEAD thất bại:
+        #     fatal: ambiguous argument 'HEAD': unknown revision
+        #
+        # Đo được trên RouterDogfood02 (2026-09-13), NGAY SAU khi V0.9.3 đã
+        # sửa xong phạm vi ghi: gói việc đúng rồi mà vẫn không chạy được.
+        # Đây là cái ngõ cụt THỨ HAI của cùng một dự án mới.
+        #
+        # Sâu hơn một lỗi git: toàn bộ mô hình kiểm định của Router là SO
+        # VỚI MỘT MỐC (`base_sha`, `git status` trong worktree). Một dự án
+        # không có commit nào thì không có mốc để so — nên "kho vừa tạo"
+        # phải có một mốc, đúng như mọi kho thật đều có.
+        #
+        # `-c user.*` đặt TẠI LỆNH: máy chưa cấu hình `user.email` toàn cục
+        # là chuyện thường, và một dự án mới không được hỏng vì điều đó.
+        ma, ra = _git(dich, "add", "-A")
+        if ma != 0:
+            raise TaoDuAnLoi(f"`git add` hỏng: {ra[:200]}")
+        ma, ra = _git(dich, "-c", "user.name=Router Control Center",
+                      "-c", "user.email=router@localhost",
+                      "commit", "-q", "-m",
+                      "chore: khung dự án do Router Control Center tạo")
+        if ma != 0:
+            raise TaoDuAnLoi(f"commit đầu tiên hỏng: {ra[:200]}")
+        kq.ghi_chu.append("đã khởi tạo kho git kèm commit đầu tiên")
     except (OSError, TaoDuAnLoi) as exc:
         kq.ly_do = f"Không tạo được dự án: {exc}"
         _hoan_tac(da_tao)

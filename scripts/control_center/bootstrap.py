@@ -105,6 +105,40 @@ def la_kho_git(duong) -> bool:
     return p.returncode == 0 and (p.stdout or "").strip() == "true"
 
 
+def co_moc_git(duong) -> bool:
+    """Kho đã có MỘT COMMIT chưa — tức `HEAD` có phân giải được không.
+
+    `la_kho_git` ở trên hứa bắt lỗi kho "ở CỔNG VÀO … chứ không để `git
+    rev-parse HEAD` ném ra giữa đường điều phối". Nhưng nó hỏi
+    `--is-inside-work-tree`, và câu đó trả `true` cho một kho `git init`
+    CHƯA CÓ COMMIT NÀO. Nên đúng cái nó hứa chặn vẫn lọt qua, rồi nổ ở tầng
+    worktree bằng một câu git thô.
+
+    Đo được trên RouterDogfood02 (2026-09-13): dự án do chính V0.9.2 tạo ra
+    (`git init` trần) khiến mọi việc GHI dừng ở `BLOCKED` với
+
+        không cấp được cây làm việc: git rev-parse HEAD thất bại
+
+    Tách thành một hàm RIÊNG chứ không nhét vào `la_kho_git`: hai câu hỏi
+    khác nhau. "Có phải kho git không" quyết định dự án có hợp lệ không;
+    "đã có mốc chưa" chỉ chặn những việc CẦN một cây làm việc. Một việc chỉ
+    đọc trên kho chưa commit vẫn chạy được bình thường.
+    """
+    if not duong:
+        return False
+    d = Path(duong)
+    if not d.is_dir():
+        return False
+    try:
+        p = subprocess.run(["git", "-C", str(d), "rev-parse", "--verify",
+                            "-q", "HEAD"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=30, **an_cua_so())
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return p.returncode == 0 and bool((p.stdout or "").strip())
+
+
 def du_an_mac_dinh(*, root: Optional[Path] = None) -> List[Project]:
     """Hai dự án mặc định: Fanfic (sản phẩm) và Router (chính hạ tầng này).
 

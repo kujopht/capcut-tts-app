@@ -51,7 +51,7 @@ from scripts.router_v4.modes import hop_dong_review
 from scripts.router_v4.scheduler import Demand, Scheduler
 
 from scripts.control_center import leader
-from scripts.control_center.bootstrap import la_kho_git
+from scripts.control_center.bootstrap import co_moc_git, la_kho_git
 from scripts.control_center.execution import dieu_phoi as DP
 from scripts.control_center.execution import ghi_nho as EGN
 from scripts.control_center.execution import ke_hoach as EKH
@@ -3298,6 +3298,34 @@ class ControlCenter:
             self._sang_waiting(t, qd.reason)
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": qd.reason, "decision": qd.to_dict()}
+
+        # V0.9.3 — KHO CHUA CO COMMIT NAO thi noi thang ra dieu do.
+        #
+        # `la_kho_git` o cong vao tra `true` cho mot kho `git init` chua
+        # commit, nen truong hop nay lot toi tan tang worktree roi nо bang
+        # `fatal: ambiguous argument 'HEAD'` — mot cau khong noi cho ai biet
+        # phai lam gi. Do duoc tren RouterDogfood02 (2026-09-13).
+        #
+        # Router KHONG tu commit ho vao kho cua nguoi dung: mot kho da nhan
+        # nuoi la tai san cua ho, va tu tao commit trong do la mot dot bien
+        # khong ai xin. Du an do CHINH Router tao thi da co commit dau tien
+        # tu `tao_du_an` — xem ghi chu o do.
+        if (hd.execution.worktree_required
+                and not co_moc_git(ctx.project.repo_path)):
+            lm.tra(t.project_id, t.task_id)
+            cau = (f"kho {ctx.project.repo_path} chưa có commit nào, nên "
+                   f"Router không dựng được cây làm việc cô lập (không có "
+                   f"mốc để so). Hãy tạo commit đầu tiên trong kho đó rồi "
+                   f"gửi lại việc này.")
+            self.store.ghi_su_kien(
+                "PROJECT_REPO_NO_BASELINE",
+                project_id=ctx.project.project_id, task_id=t.task_id,
+                level="ERROR", detail=cau,
+                meta={"repo_path": str(ctx.project.repo_path)})
+            self.store.doi_trang_thai(t.task_id, TaskState.BLOCKED,
+                                      reason=cau[:400])
+            return {"task_id": t.task_id, "dispatched": False,
+                    "reason": cau[:200]}
 
         try:
             if qd.action is SessionAction.REUSE:

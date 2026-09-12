@@ -34,8 +34,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from scripts.router_v3.packet import TaskResult, scan_for_secrets
 from scripts.router_v3.worktree import (WorktreeError, WorktreeHandle,
-                                        WorktreeManager,
-                                        _boc_an_cua_so)
+                                        WorktreeManager, _boc_an_cua_so,
+                                        chuan_hoa_scope)
 
 #: Duong dan KHONG worker nao duoc sua, du `write_scope` co noi gi. Day la
 #: rao cuoi: mot goi viec dung sai (hoac mot worker tu y mo rong pham vi) van
@@ -310,8 +310,11 @@ def kiem_dinh(kq: TaskResult, *, worktree: Optional[Path] = None,
             except WorktreeError as exc:
                 bc.scope_violations = [f"(không kiểm được: {exc})"]
         else:
-            cho_phep = [s.replace("\\", "/").strip("/") for s in write_scope]
-            bc.scope_violations = sorted(
+            # CUNG luat voi `WorktreeManager.verify_scope` — dung chung mot
+            # ham chuan hoa. Hai ban sao cua cung phep so la cach mot ban
+            # duoc sua con ban kia thi khong; da thay that o V0.9.3.
+            cho_phep = chuan_hoa_scope(write_scope)
+            bc.scope_violations = [] if cho_phep is None else sorted(
                 t for t in bc.files_changed_observed
                 if not any(t == c or t.startswith(c + "/") for c in cho_phep))
         bc.gates.append(GateResult(

@@ -210,11 +210,29 @@ _DUONG_DAN = re.compile(r"\b([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)+/?)")
 _DOAN_THUONG = re.compile(r"^[a-z0-9][a-z0-9._*-]*$")
 
 
+#: Cap tu VAN XUOI noi bang dau gach cheo — KHONG phai cay thu muc.
+#:
+#: Tieng Viet lan tieng Anh ky thuat deu viet kieu nay de noi "hoac":
+#: "tu repair/replan", "test/verify", "start/stop", "doc/ghi". Chung khop
+#: `_DUONG_DAN` y het mot duong dan hai doan.
+#:
+#: DANH SACH NGAN VA CU THE, khong phai mot bo doan y: chi nhung dong tu
+#: thuong gap trong cau CHI DAO QUY TRINH cua nguoi dung. Mot thu muc that
+#: ten `repair` van qua duoc khi cau viet no nhu mot duong dan
+#: (`repair/`, `src/repair`, hoac no ton tai trong kho).
+_TU_QUY_TRINH = frozenset((
+    "repair", "replan", "retry", "rollback", "verify", "test", "tests",
+    "debug", "fix", "review", "start", "stop", "build", "deploy",
+    "read", "write", "doc", "ghi", "sua", "kiem", "chay",
+    "and", "or", "va", "hoac",
+))
+
+
 def _la_duong_dan(p: str, cau: str) -> bool:
     """`p` khớp `_DUONG_DAN` rồi — nhưng nó có THỰC SỰ là đường dẫn không?
 
     `HTML/CSS/JS` và `repair/replan` đều khớp mẫu, và cả hai đều KHÔNG phải
-    thư mục. Ba dấu hiệu, có một là đủ:
+    thư mục. Dấu hiệu CHẤP NHẬN, có một là đủ:
 
     * kết thúc bằng `/` — người viết đang chỉ một thư mục (`docs/`);
     * có phần mở rộng tệp ở đoạn cuối (`web/app.js`);
@@ -223,6 +241,18 @@ def _la_duong_dan(p: str, cau: str) -> bool:
     `A/B/C` viết HOA toàn bộ là một liệt kê ("HTML/CSS/JS"), không phải cây
     thư mục. Chữ hoa trong đường dẫn thật vẫn qua được khi có dấu hiệu khác
     (`docs/README.md` có phần mở rộng; `src/Main/` có gạch chéo cuối).
+
+    VÀ MỘT PHÉP TỪ CHỐI, thêm sau một hỏng ĐO ĐƯỢC (2026-09-13): câu uỷ
+    quyền thật có cụm *"tự repair/replan trong phạm vi cần thiết"*. Leader
+    chép cụm đó vào mục tiêu, `repair/replan` được đọc thành đường dẫn, và
+    nó trở thành PHẠM VI GHI của việc. Agent làm đúng phạm vi được giao —
+    nên cả ứng dụng Todo (6 tệp, 30 KB) nằm gọn trong một thư mục tên
+    `repair/replan/`. Việc vẫn `DONE`, cổng kiểm định vẫn xanh; chỉ có sản
+    phẩm là ở sai chỗ.
+
+    Hai đoạn ĐỀU là từ chỉ quy trình thì đó là văn xuôi, không phải thư mục
+    — trừ khi câu viết nó như đường dẫn (`/` cuối, phần mở rộng) hoặc nó có
+    thật trong kho.
     """
     if p.endswith("/") or f"{p}/" in cau:
         return True
@@ -231,6 +261,8 @@ def _la_duong_dan(p: str, cau: str) -> bool:
         return False
     if re.search(r"\.[A-Za-z0-9]{1,5}$", doan[-1]):
         return True
+    if len(doan) >= 2 and all(d.lower() in _TU_QUY_TRINH for d in doan):
+        return False
     return all(_DOAN_THUONG.match(x) for x in doan)
 
 #: Dau hieu RUI RO CAO -> can suy luan manh hon.
@@ -713,6 +745,30 @@ class RulePlanner:
             "tiếp (không cần lệnh). Nếu việc BẮT BUỘC phải chạy một lệnh KHÁC "
             "những lệnh trên mới xong được, trả `blocked` và nói rõ cần lệnh gì "
             "— ĐỪNG thử biến thể, mọi biến thể đều trượt.")
+        if scope:
+            # V0.9.3 — VIEC GHI: NOI THANG RANG KIEM THU KHONG PHAI VIEC CUA
+            # AGENT.
+            #
+            # Do duoc tren RouterDogfood02 (2026-09-13): mot viec
+            # `type=testing` co pham vi ghi `.` chet sau 27 giay voi
+            # `tool_permission_denied` — agent voi lay `command` ngay o buoc
+            # dau, va CA LUOT MAT TRANG (nhat ky tho chi con dung mot dong
+            # cua agy, khong co mot chu nao cua agent).
+            #
+            # Khoi CONG CU o tren LIET KE lenh chay duoc, nen no doc ra nhu
+            # "chay lenh la mot phan binh thuong cua viec nay". Voi mot viec
+            # ten `testing` thi agent di thang toi `npm test`/`pytest`.
+            #
+            # Cach dung KHONG phai noi quyen (xem ghi chu dai o tren, va
+            # `CLAUDE.md`: da tra gia BON lan). Cach dung la noi dung su that
+            # ve phan cong: agent LAM RA TEP, Router CHAY KIEM DINH.
+            d.append(
+                "PHÂN CÔNG: việc này là việc TẠO/SỬA TỆP. Hãy hoàn thành nó "
+                "CHỈ bằng công cụ đọc/ghi tệp. ĐỪNG chạy lệnh để build, cài "
+                "đặt, khởi động server hay chạy test — môi trường này không "
+                "cho, và một lần thử là mất trắng cả lượt. Phần kiểm thử và "
+                "verify do ROUTER chạy sau bằng cổng kiểm định của nó; bạn "
+                "không cần (và không nên) tự chạy.")
         if scope:
             # KHAI BAO `changes` KHONG PHAI THU TUC GIAY TO — no la dieu kien
             # de viec duoc tinh la xong.

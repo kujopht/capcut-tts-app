@@ -218,8 +218,30 @@ class PermissionEnvelope:
         # agent phai tu doan dong nao that. Thay vi bat no doan: viec khong co
         # pham vi ghi thi khong liet ke thao tac ghi.
         _ghi = {"edit_in_owned_worktree", "local_commit"}
+        # V0.9.3 (lan thu hai, do tren RouterDogfood02 2026-09-13) — VA CUNG
+        # DUNG QUANG CAO THAO TAC MA RUNTIME KHONG LAM DUOC.
+        #
+        # `run_tests`/`run_lint`/`run_build` deu can quyen `command`. Agent
+        # cua Router chay headless (`agy --print`), va headless TU CHOI
+        # `command` vi no khong hoi nguoi dung duoc — mot lan thu la MAT
+        # TRANG ca luot (nhat ky tho chi con dung mot dong cua agy).
+        #
+        # Hau qua do duoc: mot viec `type=testing` co pham vi ghi dung, hop
+        # dong da noi thang "DUNG chay lenh de build/test", ma NGAY DUOI do
+        # phong bi van liet ke `run_tests`, `run_lint`, `run_build` trong
+        # muc "DUOC TU LAM". Agent tin phong bi, goi mot lenh, va chet. Hai
+        # lan lien tiep, cung mot chu ky.
+        #
+        # Khong noi quyen (`CLAUDE.md` da tra gia BON lan cho bai hoc do).
+        # Chi thoi noi doi: phan viec dung la AGENT LAM RA TEP, ROUTER CHAY
+        # KIEM DINH. Khoi CONG CU cua hop dong moi la noi noi lenh nao chay
+        # duoc, va no chi co hai lenh.
+        _can_shell = {"run_tests", "run_lint", "run_build",
+                      "inspect_dependencies"}
         d += [f"    - {o}" for o in self.auto_operations
-              if self.owned_scope or o not in _ghi]
+              if (self.owned_scope or o not in _ghi) and o not in _can_shell]
+        d += ["  Chạy lệnh: CHỈ những lệnh nêu trong khối CÔNG CỤ ở trên. "
+              "Việc chạy test/lint/build do ROUTER làm sau, không phải bạn."]
         if self.owned_scope:
             d += ["  Chỉ được GHI trong phạm vi sở hữu:"]
             d += [f"    - {p}" for p in self.owned_scope]

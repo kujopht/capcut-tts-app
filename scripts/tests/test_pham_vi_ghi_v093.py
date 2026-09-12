@@ -164,6 +164,32 @@ class TestDuongDan(unittest.TestCase):
         self.assertEqual(
             RulePlanner.duong_dan_trong("giao diện HTML/CSS/JS thuần"), ())
 
+    def test_10b_cap_tu_QUY_TRINH_khong_phai_duong_dan(self):
+        """Hỏng ĐO ĐƯỢC 2026-09-13 — cái giá là sản phẩm nằm sai chỗ.
+
+        Câu uỷ quyền thật có *"tự repair/replan trong phạm vi cần thiết"*.
+        Leader chép cụm đó vào mục tiêu; `repair/replan` thành PHẠM VI GHI;
+        agent làm đúng phạm vi được giao, nên cả ứng dụng Todo (6 tệp) nằm
+        trong thư mục `repair/replan/`. Việc vẫn `DONE`, cổng kiểm định vẫn
+        xanh — chỉ có sản phẩm là ở sai chỗ. Không một phép kiểm nào của
+        Router bắt được, vì mọi tầng đều nhất quán với một tiền đề sai.
+        """
+        for cau in ("tự repair/replan trong phạm vi cần thiết",
+                    "chạy test/verify từ đầu tới cuối",
+                    "start/stop dịch vụ"):
+            with self.subTest(cau=cau):
+                self.assertEqual(RulePlanner.duong_dan_trong(cau), ())
+
+    def test_10c_thu_muc_THAT_trung_ten_van_qua_duoc(self):
+        """Phép từ chối không được nuốt một thư mục có thật.
+
+        Viết nó NHƯ một đường dẫn thì nó vẫn là đường dẫn.
+        """
+        self.assertIn("src/repair",
+                      RulePlanner.duong_dan_trong("sửa trong src/repair"))
+        self.assertIn("repair/build.py",
+                      RulePlanner.duong_dan_trong("sửa repair/build.py"))
+
     def test_11_duong_dan_THAT_van_nhan_ra(self):
         for cau, cho in (
                 ("fix the bug in web/admin/content-queue",
@@ -304,8 +330,29 @@ class TestPhongBi(unittest.TestCase):
 
     def test_27_quyen_chi_doc_van_con_du(self):
         van = envelope_for("t1", objective="đọc kho").render_for_agent()
-        for o in ("repo_read", "repo_search", "run_tests"):
+        for o in ("repo_read", "repo_search"):
             self.assertIn(o, van)
+
+    def test_27b_KHONG_quang_cao_thao_tac_CAN_SHELL(self):
+        """Bài kiểm này TRƯỚC ĐÂY đòi `run_tests` phải CÓ trong phong bì.
+
+        Nó khẳng định sai, và khẳng định sai đó có giá đo được: hai lượt
+        agent liên tiếp trên RouterDogfood02 chết vì `tool_permission_denied`
+        trong 27s, `changes=[]`, nhật ký thô rỗng. Hợp đồng nói "ĐỪNG chạy
+        lệnh để build/test", rồi NGAY DƯỚI phong bì liệt kê `run_tests`,
+        `run_lint`, `run_build` trong mục "ĐƯỢC TỰ LÀM". Agent tin phong bì.
+
+        `agy --print` (headless) tự chối quyền `command`, nên ba thao tác đó
+        KHÔNG BAO GIỜ khả dụng cho agent của Router. Quảng cáo chúng là nói
+        dối, và cái giá là cả lượt.
+        """
+        for scope in ((), (".",)):
+            with self.subTest(scope=scope):
+                van = envelope_for("t1", objective="triển khai",
+                                   owned_scope=scope).render_for_agent()
+                for o in ("run_tests", "run_lint", "run_build"):
+                    self.assertNotIn(o, van)
+                self.assertIn("do ROUTER làm sau", van)
 
 
 # ==========================================================================
@@ -421,6 +468,141 @@ class TestKhongTaiTaoCONG(unittest.TestCase):
                           owned_scope=(".",))
         self.assertIs(pb.decision, PermissionClass.GATED)
         self.assertTrue(pb.gate_hits)
+
+
+# ==========================================================================
+# 9. TOKEN GỐC CÂY — hai tầng phải hiểu `.` GIỐNG NHAU
+# ==========================================================================
+
+class TestTokenGocCay(unittest.TestCase):
+    """Hỏng ĐO ĐƯỢC 2026-09-13, và là bản sao của chính căn bệnh V0.9.3.
+
+    V0.9.3 cấp phạm vi ghi "gốc cây làm việc" bằng token `.` (`locks.GOC`).
+    Cổng `scope` thì so bằng `tep == "." or tep.startswith("./")`, nên
+    `app.js` NGAY GỐC cây không khớp gì cả. Kết quả: agent viết đúng chỗ,
+    hợp đồng cấp đúng quyền, cổng vẫn đánh hỏng —
+
+        gate_scope: ghi NGOÀI write_scope:
+        ['README.md','app.js','index.html','style.css']
+
+    Hai cái nhìn về một sự thật, lần này về nghĩa của một dấu chấm.
+    """
+
+    def test_35_goc_cay_nghia_la_CA_CAY(self):
+        from scripts.router_v3.worktree import chuan_hoa_scope
+        for s in ([".", ], ["./"], ["/"], [".", "web"]):
+            with self.subTest(s=s):
+                self.assertIsNone(chuan_hoa_scope(s))
+
+    def test_36_RONG_khac_GOC_CAY___khong_duoc_nham(self):
+        """`[]` = không cho ghi gì. Gốc cây = cho ghi mọi chỗ TRONG cây.
+
+        Hai điều ngược nhau; nhầm chúng là mở toang một rào.
+        """
+        from scripts.router_v3.worktree import chuan_hoa_scope
+        self.assertEqual(chuan_hoa_scope([]), [])
+        self.assertIsNotNone(chuan_hoa_scope([]))
+
+    def test_37_pham_vi_thuong_van_duoc_chuan_hoa_nhu_cu(self):
+        from scripts.router_v3.worktree import chuan_hoa_scope
+        self.assertEqual(chuan_hoa_scope(["web/", "/docs", "a\\b"]),
+                         ["web", "docs", "a/b"])
+
+    def test_38_cong_scope_KHONG_danh_hong_tep_o_goc_cay(self):
+        """Chạy đúng cổng thật, trên một worktree thật."""
+        import subprocess
+        from scripts.router_v3.packet import TaskResult
+        from scripts.router_v3.pool.validation import kiem_dinh
+
+        tmp = Path(tempfile.mkdtemp(prefix="scope-goc-"))
+        try:
+            subprocess.run(["git", "-C", str(tmp), "init", "-q"],
+                           capture_output=True)
+            for ten in ("index.html", "app.js", "style.css"):
+                (tmp / ten).write_text("x", encoding="utf-8")
+            kq = TaskResult(task_id="t1", worker_id="w1", status="ok",
+                            files_changed=["index.html", "app.js",
+                                           "style.css"])
+            bc = kiem_dinh(kq, worktree=tmp, write_scope=["."])
+            cong = {g.name: g for g in bc.gates}
+            self.assertIn("scope", cong)
+            self.assertTrue(cong["scope"].passed,
+                            f"vi phạm: {bc.scope_violations}")
+            self.assertEqual(bc.scope_violations, [])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_39_cong_scope_VAN_bat_duoc_ghi_ngoai_pham_vi_hep(self):
+        """Phép sửa KHÔNG được làm cổng mù với phạm vi hẹp."""
+        import subprocess
+        from scripts.router_v3.packet import TaskResult
+        from scripts.router_v3.pool.validation import kiem_dinh
+
+        tmp = Path(tempfile.mkdtemp(prefix="scope-hep-"))
+        try:
+            subprocess.run(["git", "-C", str(tmp), "init", "-q"],
+                           capture_output=True)
+            (tmp / "web").mkdir()
+            (tmp / "web" / "ok.js").write_text("x", encoding="utf-8")
+            (tmp / "ngoai.js").write_text("x", encoding="utf-8")
+            kq = TaskResult(task_id="t1", worker_id="w1", status="ok",
+                            files_changed=["web/ok.js", "ngoai.js"])
+            bc = kiem_dinh(kq, worktree=tmp, write_scope=["web"])
+            cong = {g.name: g for g in bc.gates}
+            self.assertFalse(cong["scope"].passed)
+            self.assertIn("ngoai.js", bc.scope_violations)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+    def test_40_HOP_DONG_cung_hieu_goc_cay_nhu_hai_tang_kia(self):
+        """Chỗ THỨ BA của cùng phép so — `TaskContract.scope_violations`.
+
+        Sau khi sửa hai chỗ đầu, lượt agent tiếp theo vẫn hỏng, lần này với
+        `gate_contract_scope`. Một agent đã viết đủ 5 tệp (50 test) bị đánh
+        hỏng vì tầng hợp đồng vẫn hiểu `.` theo nghĩa cũ.
+        """
+        from scripts.router_v4.capabilities import Requirements
+        from scripts.router_v4.contract import TaskContract
+
+        hd = TaskContract(task_id="t1", objective="x",
+                          allowed_scope=(".",),
+                          requirements=Requirements(repo_write=True))
+        self.assertEqual(
+            hd.scope_violations(["index.html", "app.js",
+                                 "tests/todo.test.js"]), [])
+
+    def test_41_hop_dong_VAN_bat_pham_vi_hep_va_forbidden(self):
+        from scripts.router_v4.capabilities import Requirements
+        from scripts.router_v4.contract import TaskContract
+
+        hd = TaskContract(task_id="t1", objective="x",
+                          allowed_scope=("web",),
+                          requirements=Requirements(repo_write=True))
+        self.assertEqual(hd.scope_violations(["web/a.js", "ngoai.js"]),
+                         ["ngoai.js"])
+        # `forbidden_scope` THẮNG, kể cả khi phạm vi là cả cây.
+        hd2 = TaskContract(task_id="t2", objective="x",
+                           allowed_scope=(".",),
+                           forbidden_scope=(".env",),
+                           requirements=Requirements(repo_write=True))
+        self.assertIn(".env", hd2.scope_violations(["app.js", ".env"]))
+
+    def test_42_BA_tang_dong_y_voi_nhau(self):
+        """Bất biến thật: ba phép so phải cho CÙNG câu trả lời.
+
+        Ba bản sao là ba cơ hội để lệch nhau — bài kiểm này neo chúng lại.
+        """
+        from scripts.router_v3.worktree import chuan_hoa_scope
+        from scripts.router_v4.capabilities import Requirements
+        from scripts.router_v4.contract import TaskContract
+
+        tep = ["index.html", "app.js", "tests/todo.test.js"]
+        hd = TaskContract(task_id="t1", objective="x", allowed_scope=(".",),
+                          requirements=Requirements(repo_write=True))
+        self.assertIsNone(chuan_hoa_scope(["."]))          # tầng worktree
+        self.assertEqual(hd.scope_violations(tep), [])     # tầng hợp đồng
+        # tầng kiểm định đã có `test_38`, chạy trên worktree thật.
 
 
 if __name__ == "__main__":

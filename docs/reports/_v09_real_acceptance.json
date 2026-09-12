@@ -1,83 +1,119 @@
 {
-  "ts": 1789182607.5120506,
-  "tong": 25,
-  "dat": 24,
-  "hong": 1,
+  "ts": 1789198776.9831307,
+  "tong": 28,
+  "dat": 28,
+  "hong": 0,
   "khang_dinh": [
     {
-      "kich_ban": "C",
-      "ten": "kế hoạch có LỚP song song (fan-out)",
+      "kich_ban": "R",
+      "ten": "bắt được khoảnh khắc GIỮA LÚC SỬA để tắt máy",
       "dat": true,
-      "chi_tiet": "lớp 1 = ['ghi_kiemthu', 'ghi_tailieu']"
+      "chi_tiet": "v2: 2/2 bước còn dở (ghi_r1__143627-3050, sua1_1)"
     },
     {
-      "kich_ban": "C",
-      "ten": "giao SONG SONG ≥2 bước trong một nhịp",
+      "kich_ban": "R",
+      "ten": "đường phục hồi CÓ chạy",
       "dat": true,
-      "chi_tiet": "đã giao ['ghi_tailieu', 'ghi_kiemthu']"
+      "chi_tiet": "{\"kiem\": 1, \"mo_coi\": [\"ex_00727cacf676/ghi_r1__143627-3050\"], \"con_song\": [], \"chan\": [\"ex_00727cacf676\"]}"
     },
     {
-      "kich_ban": "C",
-      "ten": "lần thực thi ĐỨNG LẠI trong hạn",
+      "kich_ban": "R",
+      "ten": "execution_id KHÔNG đổi",
       "dat": true,
-      "chi_tiet": "trạng thái cuối = BLOCKED"
+      "chi_tiet": "ex_00727cacf676 -> ex_00727cacf676"
     },
     {
-      "kich_ban": "C",
-      "ten": "kết thúc ở DONE",
-      "dat": false,
-      "chi_tiet": "BLOCKED — kiểm định không đạt nhưng không xác định được thứ gì để sửa — cần bạn xem"
-    },
-    {
-      "kich_ban": "C",
-      "ten": "mọi bước có hợp đồng kết quả CÓ CẤU TRÚC",
+      "kich_ban": "R",
+      "ten": "bản kế hoạch v1 vẫn còn",
       "dat": true,
-      "chi_tiet": "[{\"ghi_kiemthu\": \"ok\"}, {\"ghi_tailieu\": \"ok\"}]"
+      "chi_tiet": "các bản: [1, 2]"
     },
     {
-      "kich_ban": "C",
-      "ten": "agent GHI THẬT vào worktree cô lập",
+      "kich_ban": "R",
+      "ten": "BẰNG CHỨNG hỏng của v1 vẫn còn",
       "dat": true,
-      "chi_tiet": "2 tệp: docs/reports/_v09_ghi_chu_kiemthu.md, docs/reports/_v09_ghi_chu_handoff.md"
+      "chi_tiet": "tiêu chí nghiệm thu chưa đạt, sửa có mục tiêu: docs/reports/_v09_ghi_chu_khoidonglai.md phải chứa dòng V09-RESTART-OK"
     },
     {
-      "kich_ban": "C",
-      "ten": "docs/reports/_v09_ghi_chu_handoff.md có V09-ACCEPT-HANDOFF",
+      "kich_ban": "R",
+      "ten": "bản ĐANG HIỆU LỰC là v2",
+      "dat": true,
+      "chi_tiet": "hiệu lực: [2]"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "KHÔNG nhân đôi bản kế hoạch",
+      "dat": true,
+      "chi_tiet": "[1, 2] -> [1, 2]"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "KHÔNG nhân đôi lần thực thi",
+      "dat": true,
+      "chi_tiet": "56 (trước 56)"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "bước ĐÃ XONG không bị lùi/giao lại",
+      "dat": true,
+      "chi_tiet": "0 bước giữ XONG"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "việc SỬA chạy tiếp và dừng trong hạn",
+      "dat": true,
+      "chi_tiet": "DONE"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "KẾT THÚC Ở DONE sau khởi động lại",
+      "dat": true,
+      "chi_tiet": "DONE — 2 bước đạt, 1 tiêu chí nghiệm thu bắt buộc đạt"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "kiểm định lại ĐẠT",
       "dat": true,
       "chi_tiet": ""
     },
     {
-      "kich_ban": "C",
-      "ten": "docs/reports/_v09_ghi_chu_kiemthu.md có V09-ACCEPT-KIEMTHU",
+      "kich_ban": "R",
+      "ten": "sổ sự kiện KHÔNG mất lịch sử",
+      "dat": true,
+      "chi_tiet": "15 -> 24"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "khoá được đối soát (không còn khoá mồ côi)",
+      "dat": true,
+      "chi_tiet": "sạch"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "Leader MỚI trả lời được 'đang làm tới đâu'",
+      "dat": true,
+      "chi_tiet": "`ex_181f8dd29fbe` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,"
+    },
+    {
+      "kich_ban": "R",
+      "ten": "0 việc khảo sát sinh thêm khi hỏi trạng thái",
       "dat": true,
       "chi_tiet": ""
     },
     {
-      "kich_ban": "C",
-      "ten": "git diff của worktree KHÔNG rỗng",
+      "kich_ban": "R",
+      "ten": "docs/reports/_v09_ghi_chu_khoidonglai.md có V09-RESTART-OK sau khi sửa",
       "dat": true,
-      "chi_tiet": ""
+      "chi_tiet": "worktree=['C:\\\\Users\\\\nguye\\\\Documents\\\\CapCut-TTS-App\\\\.router\\\\worktrees\\\\AG01\\\\fanfic.ghi_r1__143627-3050-v2-r1-c91ad0']"
     },
     {
-      "kich_ban": "C",
+      "kich_ban": "R",
       "ten": "kho Fanfic THẬT vẫn sạch",
       "dat": true,
-      "chi_tiet": "git status của cây làm việc chính"
-    },
-    {
-      "kich_ban": "C",
-      "ten": "đã qua pha KIỂM ĐỊNH",
-      "dat": true,
       "chi_tiet": ""
     },
     {
-      "kich_ban": "C",
-      "ten": "KHÔNG nhảy thẳng RUNNING -> DONE",
-      "dat": true,
-      "chi_tiet": ""
-    },
-    {
-      "kich_ban": "C",
+      "kich_ban": "R",
       "ten": "0 thay đổi production",
       "dat": true,
       "chi_tiet": ""
@@ -86,7 +122,7 @@
       "kich_ban": "D-synth",
       "ten": "có câu kết luận TỰ ĐỘNG",
       "dat": true,
-      "chi_tiet": "21 câu"
+      "chi_tiet": "43 câu"
     },
     {
       "kich_ban": "D-synth",
@@ -116,31 +152,13 @@
       "kich_ban": "B-fb",
       "ten": "tổng bản ghi không giảm",
       "dat": true,
-      "chi_tiet": "17 -> 17"
+      "chi_tiet": "26 -> 26"
     },
     {
       "kich_ban": "E-mem",
       "ten": "phiên MỚI thấy lịch sử thực thi",
       "dat": true,
       "chi_tiet": "20 lần thực thi trong sổ"
-    },
-    {
-      "kich_ban": "E-mem",
-      "ten": "nhớ NGƯỜI DÙNG đã uỷ quyền gì",
-      "dat": true,
-      "chi_tiet": "viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao, một về bộ kiểm thử"
-    },
-    {
-      "kich_ban": "E-mem",
-      "ten": "nhớ KẾ HOẠCH đã chạy",
-      "dat": true,
-      "chi_tiet": ""
-    },
-    {
-      "kich_ban": "E-mem",
-      "ten": "nhớ KẾT QUẢ kiểm định",
-      "dat": true,
-      "chi_tiet": "kiểm định không đạt nhưng không xác định được thứ gì để sửa — cần bạn xem"
     },
     {
       "kich_ban": "E-mem",
@@ -156,79 +174,40 @@
     }
   ],
   "kich_ban": {
-    "C": {
-      "da_giao": [
-        "ghi_tailieu",
-        "ghi_kiemthu"
+    "R": {
+      "execution_id": "ex_00727cacf676",
+      "trang_thai": "DONE",
+      "moc_tat_may": "v2: 2/2 bước còn dở (ghi_r1__143627-3050, sua1_1)",
+      "ban_truoc": [
+        1,
+        2
       ],
-      "lop": [
-        [
-          "ghi_kiemthu",
-          "ghi_tailieu"
-        ]
+      "ban_sau": [
+        1,
+        2
       ],
-      "execution_id": "ex_8cb881f8d88e",
-      "trang_thai": "BLOCKED",
+      "buoc_truoc": {
+        "ghi_r1__143627-3050@v1": "RUNNING",
+        "sua1_1@v1": "CHUA_CHAY"
+      },
+      "buoc_sau": {
+        "ghi_r1__143627-3050@v1": "CHUA_CHAY",
+        "sua1_1@v1": "CHUA_CHAY"
+      },
       "worktree": [
-        "C:\\Users\\nguye\\Documents\\CapCut-TTS-App\\.router\\worktrees\\AG02\\fanfic.ghi_kiemthu-d32476",
-        "C:\\Users\\nguye\\Documents\\CapCut-TTS-App\\.router\\worktrees\\AG01\\fanfic.ghi_tailieu-176ffe"
+        "C:\\Users\\nguye\\Documents\\CapCut-TTS-App\\.router\\worktrees\\AG01\\fanfic.ghi_r1__143627-3050-v2-r1-c91ad0"
       ],
       "tep_da_ghi": [
-        "docs/reports/_v09_ghi_chu_kiemthu.md",
-        "docs/reports/_v09_ghi_chu_handoff.md"
-      ],
-      "buoc": [
-        {
-          "buoc_id": "ghi_kiemthu",
-          "state": "DONE",
-          "xac_minh": "DAT",
-          "task_id": "fanfic.ghi_kiemthu"
-        },
-        {
-          "buoc_id": "ghi_tailieu",
-          "state": "DONE",
-          "xac_minh": "DAT",
-          "task_id": "fanfic.ghi_tailieu"
-        }
-      ],
-      "worker": [
-        {
-          "buoc": "ghi_kiemthu",
-          "provider": "antigravity",
-          "model": "gemini-3.1-pro-low",
-          "runtime": "AG02"
-        },
-        {
-          "buoc": "ghi_tailieu",
-          "provider": "antigravity",
-          "model": "gemini-3.1-pro-low",
-          "runtime": "AG01"
-        }
-      ],
-      "su_kien": [
-        "EXEC_STATE",
-        "EXEC_STATE",
-        "EXEC_VERIFIED",
-        "REVIEW_GATE",
-        "EXEC_STATE",
-        "STEP_VERIFIED",
-        "STEP_VERIFIED",
-        "EXEC_STATE",
-        "STEP_DISPATCHED",
-        "STEP_DISPATCHED",
-        "EXEC_STATE",
-        "EXEC_STATE",
-        "EXEC_CREATED"
-      ],
-      "so_viec": 2
+        "docs/reports/_v09_ghi_chu_khoidonglai.md"
+      ]
     },
     "D-synth": {
-      "so_cau": 21,
-      "cau_cuoi": "Đã huỷ theo yêu cầu.\n\nMục tiêu: viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao, một về bộ kiểm thử\n\nKiểm định: THIEU_BANG_CHUNG — 2 bước chưa chứng minh được: ghi_tailieu, ghi_kiemthu\n- [KHONG_DAT] docs/reports/_v09_ghi_chu_handoff.md tồn tại và chứa V09-ACCEPT-HANDOFF\n- [KHONG_DAT] docs/reports/_v09_ghi_chu_kiemthu.md tồn tại và chứa V09-ACCEPT-KIEMTHU\n- [THIEU_BANG_CHUNG] hai ghi chú có thực sự mô tả đúng kho Fanfic và đủ để người đọc biết nên làm gì tiếp không\n\nChưa chứng minh được: ghi_tailieu, ghi_kiemthu\n\nĐã lưu vào Ký ức dự án: incident."
+      "so_cau": 43,
+      "cau_cuoi": "Xong rồi bro.\n\nMục tiêu: viết ghi chú khảo sát vào docs/reports/_v09_ghi_chu_khoidonglai.md đạt tiêu chí nghiệm thu\n\nTôi đã làm:\n- ghi_r1__143627-3050\n- sua1_1\n\nKiểm định: DAT — 2 bước đạt, 1 tiêu chí nghiệm thu bắt buộc đạt\n- [DAT] docs/reports/_v09_ghi_chu_khoidonglai.md phải chứa dòng V09-RESTART-OK\n\nĐã lưu vào Ký ức dự án: episodic."
     },
     "B-fb": {
-      "truoc": 17,
-      "sau": 17,
+      "truoc": 26,
+      "sau": 26,
       "quan_sat_ket_qua": 1,
       "mau_toi_thieu": 3,
       "mau": [
@@ -242,7 +221,7 @@
     },
     "E-mem": {
       "so_thuc_thi": 20,
-      "tra_loi": "`ex_8cb881f8d88e` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v1 — 2/2 bước đã kiểm định xong (100%)\n  (!) CẦN BẠN: kiểm định không đạt nhưng không xác định được thứ gì để sửa — cần bạn xem\n\n`ex_b6072e6a1522` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v3 — 0/2 bước đã kiểm định xong (0%)\n  (!) 2 bước chưa đạt\n  (!) CẦN BẠN: [CHUA_GIAO] việc chưa từng được giao ",
+      "tra_loi": "`ex_181f8dd29fbe` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v1 — 2/2 bước đã kiểm định xong (100%)\n  (!) CẦN BẠN: kiểm định không đạt nhưng không xác định được thứ gì để sửa — cần bạn xem\n\n`ex_8cb881f8d88e` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v1 — 2/2 bước đã kiểm định xong (100%)\n  (!) CẦN BẠN: kiểm định không đạt nhưng không xác định được thứ gì để s",
       "episodic": 50
     }
   },

@@ -99,6 +99,36 @@ def _chay_het(cc: ControlCenter, eid: str, *, giay: float = 40.0) -> bool:
                 and (y.trang_thai.ket_thuc or y.trang_thai.can_nguoi))
 
 
+def _chan_doan(cc: ControlCenter, eid: str) -> str:
+    """Lần thực thi đang KẸT Ở ĐÂU — để một lần đỏ ở CI nói ra được điều đó.
+
+    Không có hàm này, hết hạn chỉ in "vẫn chạy sau Ns", và câu đó không phân
+    biệt được ba chuyện rất khác nhau: máy chậm, một bước không bao giờ báo
+    về, hay vòng lặp thật sự không có đáy. Ba chuyện đó cần ba cách sửa khác
+    nhau, nên bài kiểm phải nói nó thấy gì.
+    """
+    try:
+        y = cc.so_thuc_thi.y_dinh(eid)
+        sk = cc.so_thuc_thi.su_kien(eid)
+        loai = {}
+        for e in sk:
+            loai[e["kind"]] = loai.get(e["kind"], 0) + 1
+        buoc = []
+        for b in (getattr(y, "buoc", None) or []):
+            d = b if isinstance(b, dict) else getattr(b, "__dict__", {})
+            buoc.append(f"{d.get('buoc_id')}={d.get('state') or d.get('trang_thai')}"
+                        f"/task={d.get('task_id')}")
+        viec = [f"{t.task_id[:8]}:{t.state.value}"
+                for t in cc.store.tasks(PID)]
+        return (f"\n  trạng thái   = {getattr(getattr(y,'trang_thai',None),'value',None)}"
+                f"\n  số lần lặp   = {getattr(y,'so_lan_lap_lai',None)}"
+                f"\n  sự kiện      = {loai}"
+                f"\n  bước         = {buoc}"
+                f"\n  việc Router  = {viec}")
+    except Exception as exc:                                # noqa: BLE001
+        return f"\n  (không đọc được chẩn đoán: {type(exc).__name__}: {exc})"
+
+
 class _Nen(unittest.TestCase):
 
     def setUp(self):
@@ -269,8 +299,10 @@ class Test03KhongFalseDone(_Nen):
         # Bài này giao việc THẬT ~8 lần, mỗi lần tạo một worktree git
         # (subprocess + I/O đĩa), nên nó phụ thuộc máy chứ không phụ thuộc
         # logic. Runner GitHub 2 nhân còn chật hơn cái mô phỏng trên.
-        self.assertTrue(_chay_het(self.cc, eid, giay=600.0),
-                        "vòng lặp phục hồi KHÔNG có đáy — vẫn chạy sau 600s")
+        self.assertTrue(
+            _chay_het(self.cc, eid, giay=600.0),
+            "vòng lặp phục hồi KHÔNG có đáy — vẫn chạy sau 600s"
+            + _chan_doan(self.cc, eid))
         y = self.cc.so_thuc_thi.y_dinh(eid)
         self.assertTrue(y.trang_thai.ket_thuc or y.trang_thai.can_nguoi,
                         f"kẹt ở {y.trang_thai.value}")

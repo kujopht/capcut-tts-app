@@ -1889,6 +1889,11 @@ async function napCaiDatUI() {
   apDungNen();
 }
 
+// TRA VE co/khong, va do la phan quan trong: ham nay NUOT loi (dung y — mot
+// lan luu hong khong duoc lam gay tay keo thanh truot). Nguoi goi nao can
+// biet ket qua thi phai doc gia tri tra ve; `try/catch` quanh no KHONG BAO
+// GIO chay, nen mot lan luu bi backend TU CHOI van se bao "da luu" neu
+// nguoi goi doan theo `catch`.
 async function luuCaiDatUI(d) {
   try {
     caiDatUI = await api('/api/ui', {
@@ -1897,7 +1902,8 @@ async function luuCaiDatUI(d) {
     }) || caiDatUI;
     apDungNen();
     noi('đã lưu cài đặt giao diện');
-  } catch (e) { noi(`không lưu được — ${e.message}`); }
+    return true;
+  } catch (e) { noi(`không lưu được — ${e.message}`); return false; }
 }
 
 function veXemTruocNen() {
@@ -2008,11 +2014,12 @@ Chế độ định tuyến ECO/AUTO/STRONG/MAX hiện đổi được ở tần
   if (nutGoc) {
     nutGoc.onclick = async () => {
       const v = ($('#cd-goc')?.value || '').trim();
-      try {
-        await luuCaiDatUI({ thu_muc_du_an_mac_dinh: v });
+      // CHI bao thanh cong khi backend THAT SU nhan — `luuCaiDatUI` da dat
+      // cau tu choi vao thanh trang thai roi, ghi de len no la noi doi.
+      if (await luuCaiDatUI({ thu_muc_du_an_mac_dinh: v })) {
         noi(v ? `thư mục dự án mặc định: ${v}`
               : 'đã bỏ thiết lập — dùng mặc định C:\\RouterProjects');
-      } catch (err) { noi(`không lưu được — ${err.message}`); }
+      }
     };
   }
 };

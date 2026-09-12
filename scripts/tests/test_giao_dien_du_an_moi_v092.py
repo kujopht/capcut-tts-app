@@ -359,6 +359,24 @@ class TestClickPath(unittest.TestCase):
         self.assertIn('id="cd-goc-luu"', self.js)
         self.assertIn(f"luuCaiDatUI({{ {KHOA_THU_MUC_GOC}:", self.js)
 
+    def test_26_luuCaiDatUI_TRA_VE_ket_qua_chu_khong_nem_loi(self):
+        """Hỏng #4: báo «đã lưu» cho một giá trị backend vừa TỪ CHỐI.
+
+        `luuCaiDatUI` NUỐT lỗi (cố ý — một lần lưu hỏng không được làm gãy
+        tay kéo thanh trượt). Nên `try { await luuCaiDatUI(...) } catch` là
+        một phép kiểm KHÔNG BAO GIỜ chạy, và nhánh «thành công» chạy cho cả
+        lần thất bại. Chỉ lộ ra trong trình duyệt — không một phép kiểm
+        Python nào chạm tới nó.
+        """
+        i = self.js.index("async function luuCaiDatUI")
+        than = self.js[i:self.js.index("\n}", i)]
+        self.assertIn("return true", than)
+        self.assertIn("return false", than)
+        # Người gọi phải ĐỌC giá trị trả về, không được đoán bằng `catch`.
+        j = self.js.index("#cd-goc-luu")
+        goi = self.js[j:j + 700]
+        self.assertIn(f"if (await luuCaiDatUI({{ {KHOA_THU_MUC_GOC}:", goi)
+
 
 if __name__ == "__main__":
     unittest.main()

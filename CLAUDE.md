@@ -359,6 +359,35 @@ ghi vào `.router/v4/benchmark-reasoning.jsonl` (tệp RIÊNG, không trộn l�
 worker) và `BoDinhTuyenVai` đọc lại chính tệp đó — vòng phản hồi đã đóng,
 chỉ chờ đủ `MAU_TOI_THIEU = 3` mẫu để lấn át tiên nghiệm.
 
+**V0.9** (nhánh `feat/v09-closed-loop-execution`, dựng từ `main` đã phát
+hành `03b6652`; **chưa merge/tag**) đóng nốt VÒNG: thảo luận → "ok làm đi"
+→ Ý ĐỊNH THỰC THI bền → KẾ HOẠCH có DAG + TIÊU CHÍ NGHIỆM THU → việc cho
+Router V4 → HỢP ĐỒNG KẾT QUẢ → KIỂM ĐỊNH theo MỤC TIÊU GỐC → (đạt) ký ức +
+điểm dừng, (hỏng) lập lại kế hoạch CÓ TRẦN → Leader nói tiếp mà không cần ai
+hỏi. Mã ở `scripts/control_center/execution/`; đầy đủ ở
+`docs/reports/CLOSED_LOOP_V09.md` và `docs/CONTROL_CENTER.md` §24 (luật
+29–35). **Nghiệm thu MODEL THẬT trên Fanfic: 59/60 (D chạy lại 20/20),
+0 thay đổi production, kho thật SẠCH.** Reviewer ngữ nghĩa được bộ điều phối
+TỰ gọi (phán xử `REJECT` từ `codex/codex-default`, độc lập=True). Năm điều
+hay vấp nhất:
+
+* **`RUNNING -> DONE` bị CẤM CỨNG.** Mọi đường tới `DONE` đi qua
+  `VERIFYING`, và `force=True` cũng không mở được. Mã thoát 0 không phải
+  bằng chứng; "không sinh ra gì" không phải DONE; một bước GHI không chạm
+  đĩa là `THIEU_BANG_CHUNG`.
+* **Kiểm định chấm MỤC TIÊU GỐC.** Bốn việc con cùng `DONE` không chứng minh
+  gì. Tiêu chí nghiệm thu không buộc được vào phép kiểm nào thì báo
+  `THIEU_BANG_CHUNG`, KHÔNG mặc nhiên đạt.
+* **Môi giới kiểm phải chạy TRONG worktree của bước.** Chạy ở gốc kho thì
+  `git status` thấy một cây SẠCH và MỌI bước ghi bị chấm là hỏng — đã vấp
+  thật.
+* **Một tầng duy nhất sở hữu vòng phục hồi.** Tầng bước bỏ một lượt thì lượt
+  đó phải chết hẳn; để tầng việc tự thử lại nữa là hai việc cùng xin một
+  khoá ghi rồi đứng im vĩnh viễn — đã vấp thật. Trần cộng dồn qua MỌI bản
+  kế hoạch, không đếm lại theo từng bản.
+* **"ok làm đi" KHÔNG mở được cổng ngoài kho.** Quét cả mục tiêu lẫn câu
+  gốc; một lần chạm là `WAITING_AUTHORITY`, chỉ người bấm mới mở.
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,
@@ -383,12 +412,42 @@ python scripts/tim.py --kiem                           # chính sách loại tr�
 git grep -n "TrangThai" -- scripts/                    # cửa thứ hai
 ```
 
+**HAI HÌNH DẠNG BỊ CHẶN CỨNG — hook từ chối, không phải hỏi:**
+
+```bash
+cd <đường> && grep ...        # và find / sed / awk / cat / head / tail /
+cd <đường> ;  grep ...        # ls / wc / rg / strings / stat / type …
+python - <<'EOF' … EOF        # và bash/sh/node <<EOF, `python -`, `<<<`
+```
+
+Gặp một trong hai, `guard_indirect_exec.py` trả `deny` kèm dòng
+`REMEDIATION:` nói thẳng phải dùng gì thay thế. **Đừng xin duyệt, đừng đổi
+cách gõ dấu nháy, đừng `--dangerously-skip-permissions`, và đừng thêm
+`Bash(grep:*)` / `Bash(find:*)` / `Bash(sed:*)` vào `allow`** — luật cuối
+thay phép cho-phép-CÓ-KIỂM-CỜ của Claude Code bằng một phép vô điều kiện và
+mở lại `find -delete` / `sed -i` thật (đo 2026-08-28).
+
+Thay bằng, theo thứ tự ưu tiên:
+
+1. công cụ **Read / Grep / Glob** với đường dẫn tường minh;
+2. `python scripts/tim.py …` (ở trên);
+3. `git grep -n "…" -- <đường>` — **không** `cd` trong cùng lệnh;
+4. sửa tệp bằng **Edit / Write**, không bằng heredoc/`sed -i`.
+
 **Đây không phải một quy ước cho ngoan — nó là cách duy nhất phạm vi đọc
 tự chứng minh được.** Claude Code phân giải những đường dẫn mà một lệnh
 Bash NHẮC TÊN rồi đối chiếu với các luật `Read(...)` deny. Sau một `cd`,
 thư mục hiệu lực không suy ra được TĨNH, nên nó không thể chứng minh phép
 tìm không chạm `.env` — và phải hỏi người. `tim.py` suy gốc kho từ **vị
 trí của chính tệp đó**, nên `cd` trở thành vô nghĩa thay vì bị cấm.
+
+**Vì sao phải CHẶN chứ không chỉ dặn** (sự cố 2026-09-11): mục này đã tồn
+tại và đã được đọc, mà một phiên làm việc thật vẫn sinh ra `cd <kho> &&
+grep …` nhiều lần trong một buổi — vì `cd <kho> &&` là một **phản xạ**, không
+phải một quyết định. Một lời nhắc `ask` không sửa được điều đó: người dùng
+bấm Yes rồi agent gõ lại y hệt một phút sau. Một `deny` thì tới ngay trong
+lượt đó và agent sửa được liền. Thư mục làm việc của phiên **đã là gốc kho**,
+nên tiền tố `cd` không mua được gì ngay cả khi nó được phép.
 
 Hai điều nữa đã đo được, và cả hai đổi cách làm việc:
 

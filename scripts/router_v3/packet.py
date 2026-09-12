@@ -118,9 +118,13 @@ class TaskPacket:
         dong += [
             "",
             "TRẢ VỀ một khối JSON DUY NHẤT, không kèm giải thích ngoài khối:",
-            '{"status":"ok|failed|blocked","summary":"...","files_changed":[],'
-            '"tests":"...","artifacts":[],"warnings":[],"failure_reason":"",'
-            '"findings":[],"blockers":[],"integration_notes":"..."}',
+            # `changes` la ten DUOC DAY di trong loi nhac cua Control Center;
+            # lieu ke ca hai o day de lai luoc do va loi nhac khong noi hai
+            # thu khac nhau. Bo phan tich nhan ca hai — xem `parse_result`.
+            '{"status":"ok|failed|blocked","summary":"...","changes":[],'
+            '"files_changed":[],"tests":"...","artifacts":[],"warnings":[],'
+            '"failure_reason":"","findings":[],"blockers":[],'
+            '"integration_notes":"..."}',
         ]
         return "\n".join(dong)
 
@@ -287,12 +291,32 @@ def parse_result(task_id: str, worker_id: str, raw: str,
     kq.integration_notes = redact(d.get("integration_notes"))[:600]
     kq.branch = redact(d.get("branch"))[:200]
     kq.failure_reason = redact(d.get("failure_reason"))[:120]
-    for ten, dich in (("files_changed", kq.files_changed),
-                      ("findings", kq.findings), ("blockers", kq.blockers),
-                      ("artifacts", kq.artifacts), ("warnings", kq.warnings)):
-        gt = d.get(ten)
+    # `changes` LA BI DANH CUA `files_changed`, khong phai mot truong khac.
+    #
+    # KHUYET TAT DO DUOC (2026-09-12, 9/9 viec ghi that): loi nhac gui cho
+    # worker BAT BUOC no khai vao `changes` (`control_center/planner.py`:
+    # «liệt kê ĐƯỜNG DẪN … vào trường `changes`»), con bo phan tich nay chi
+    # doc `files_changed`. Worker LAM DUNG — moi phong bi tho deu co
+    # `"changes": ["docs/reports/....md"]` — nhung `kq.files_changed` van
+    # RONG, nen `cong_diff` ket luan "worker khong khai sua gi nhung dia doi"
+    # va MOI viec ghi deu HONG mot cach tat dinh. `envelope.py` da nhan ca
+    # hai ten tu truoc (`d.get("changes") or d.get("files_changed")`); chi
+    # duong V3 nay con lech.
+    #
+    # Gop CA HAI thay vi doi ten: hai tu vung nay cung ton tai trong kho va
+    # mot worker cu van co the tra ve `files_changed`.
+    ds_doi = list(d.get("files_changed") or []) + list(d.get("changes") or [])
+    for ten, dich, gt in (
+            ("files_changed", kq.files_changed, ds_doi),
+            ("findings", kq.findings, d.get("findings")),
+            ("blockers", kq.blockers, d.get("blockers")),
+            ("artifacts", kq.artifacts, d.get("artifacts")),
+            ("warnings", kq.warnings, d.get("warnings"))):
         if isinstance(gt, list):
-            dich.extend(redact(x)[:200] for x in gt[:50])
+            for x in gt[:50]:
+                v = redact(x)[:200]
+                if v not in dich:
+                    dich.append(v)
     # Mot worker bao "ok" nhung liet ke blocker la mau thuan — tin blocker.
     if kq.status == "ok" and kq.blockers:
         kq.status = "blocked"

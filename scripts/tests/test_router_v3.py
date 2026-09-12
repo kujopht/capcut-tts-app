@@ -320,6 +320,38 @@ class DocKetQuaTest(unittest.TestCase):
     def test_json_hong_la_that_bai(self):
         self.assertFalse(parse_result("t", "W", '{"status": bad}', 1.0).ok)
 
+    # -- `changes` la BI DANH cua `files_changed` --------------------------
+    #
+    # KHUYET TAT THAT (2026-09-12): loi nhac gui worker BAT BUOC no khai
+    # duong dan vao `changes`, con bo phan tich chi doc `files_changed`.
+    # Worker lam dung, `kq.files_changed` van rong, `cong_diff` ket luan
+    # "khong khai sua gi nhung dia doi" — 9/9 viec ghi that HONG tat dinh
+    # trong khi tep da duoc ghi dung.
+
+    def test_doc_duoc_truong_changes(self):
+        r = parse_result("t", "W",
+                         '{"status":"ok","summary":"s",'
+                         '"changes":["docs/a.md"]}', 1.0)
+        self.assertEqual(r.files_changed, ["docs/a.md"])
+
+    def test_van_doc_duoc_ten_cu_files_changed(self):
+        r = parse_result("t", "W",
+                         '{"status":"ok","summary":"s",'
+                         '"files_changed":["docs/a.md"]}', 1.0)
+        self.assertEqual(r.files_changed, ["docs/a.md"])
+
+    def test_ca_hai_ten_thi_GOP_va_khong_trung(self):
+        r = parse_result("t", "W",
+                         '{"status":"ok","summary":"s",'
+                         '"files_changed":["docs/a.md"],'
+                         '"changes":["docs/a.md","docs/b.md"]}', 1.0)
+        self.assertEqual(sorted(r.files_changed), ["docs/a.md", "docs/b.md"])
+
+    def test_luoc_do_yeu_cau_dung_ten_ma_loi_nhac_day(self):
+        """Lược đồ và lời nhắc không được nói hai thứ khác nhau."""
+        p = packet_for(_n("t", []), base_sha="abc").render()
+        self.assertIn('"changes"', p)
+
     def test_bao_ok_nhung_co_blocker_thi_KHONG_phai_ok(self):
         """Mâu thuẫn — tin blocker."""
         r = parse_result("t", "W",

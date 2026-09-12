@@ -154,13 +154,25 @@ class TestTokenBatBuoc(_Nen):
                  # V0.8 — dinh tuyen suy luan. `/api/reasoning` doc ra ca ten
                  # model, chinh sach du an va han muc do duoc; mot trang web
                  # bat ky KHONG duoc doc no.
-                 "/api/reasoning")
+                 "/api/reasoning",
+                 # V0.9 — vong kin. `/api/execution` doc ra muc tieu, ke
+                 # hoach, bang chung va lich su ban ke hoach cua mot du an
+                 # that; `/api/executions` liet ke moi muc tieu dang chay.
+                 "/api/executions", "/api/execution?id=ex_1")
     DUONG_POST = ("/api/chat", "/api/task/p.t1/pause",
                   "/api/task/p.t1/resume", "/api/task/p.t1/stop",
                   "/api/task/p.t1/approve", "/api/project",
                   # V0.8 — doi che do chat luong la mot thao tac GHI: no doi
                   # model nao chay cho moi luot sau do.
-                  "/api/reasoning/mode")
+                  "/api/reasoning/mode",
+                  # V0.9 — `approve` la duong DUY NHAT mo mot cong tham
+                  # quyen NGOAI KHO. Neu no khong doi token thi mot trang web
+                  # bat ky dang mo co the duyet mot lan deploy production.
+                  # Day la tuyen nhay cam nhat ma v0.9 them vao.
+                  "/api/execution/ex_1/approve",
+                  "/api/execution/ex_1/pause",
+                  "/api/execution/ex_1/resume",
+                  "/api/execution/ex_1/cancel")
 
     def test_GET_khong_token_thi_401(self):
         for d in self.DUONG_GET:
@@ -232,6 +244,88 @@ class TestTokenBatBuoc(_Nen):
         là *chỉ* chúng.
         """
         self.assertEqual(self.cl.get("/").status_code, 200)
+
+
+class TestVongKinV09(_Nen):
+    """§20 + §23 — bề mặt thực thi qua HTTP, và cổng thẩm quyền của nó."""
+
+    def _mot_lan(self, goal: str = "sửa docs cho gọn"):
+        from scripts.control_center.execution import ke_hoach as KH
+        from scripts.control_center.execution import y_dinh as YD
+        y = YD.tao_y_dinh(project_id="p", goal=goal, cau_nguoi_dung=goal)
+        kh = KH.KeHoachThucThi(
+            execution_id=y.execution_id,
+            buoc=(KH.BuocKeHoach(buoc_id="b1", tieu_de="b1",
+                                 muc_tieu="khảo sát docs"),))
+        return self.cc.dieu_phoi("p").bat_dau(y, kh)
+
+    def test_liet_ke_va_anh_chup(self):
+        y = self._mot_lan()
+        r = self.cl.get("/api/executions?project=p", headers=self.h)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(any(x["execution_id"] == y.execution_id
+                            for x in r.json()["ket_qua"]))
+        d = self.cl.get(f"/api/execution?id={y.execution_id}",
+                        headers=self.h).json()
+        for k in ("y_dinh", "ke_hoach", "buoc", "ban_ke_hoach", "su_kien",
+                  "tien_do", "ngan_sach", "chi_phi"):
+            self.assertIn(k, d, k)
+
+    def test_id_khong_co_thi_404(self):
+        self.assertEqual(
+            self.cl.get("/api/execution?id=ex_khong_ton_tai",
+                        headers=self.h).status_code, 404)
+
+    def test_snapshot_mang_phan_gon(self):
+        y = self._mot_lan()
+        d = self.cl.get("/api/state?project=p", headers=self.h).json()
+        self.assertTrue(any(x["execution_id"] == y.execution_id
+                            for x in d.get("thuc_thi") or []))
+
+    def test_tam_dung_va_tiep_tuc(self):
+        y = self._mot_lan()
+        eid = y.execution_id
+        self.assertEqual(
+            self.cl.post(f"/api/execution/{eid}/pause", headers=self.h)
+            .json()["y_dinh"]["trang_thai"], "PAUSED")
+        self.cl.post(f"/api/execution/{eid}/resume", headers=self.h)
+        self.assertNotEqual(
+            self.cc.so_thuc_thi.y_dinh(eid).trang_thai.value, "PAUSED")
+
+    def test_huy_giu_bang_chung(self):
+        y = self._mot_lan()
+        eid = y.execution_id
+        r = self.cl.post(f"/api/execution/{eid}/cancel", headers=self.h,
+                         json={"ly_do": "đổi hướng"})
+        self.assertEqual(r.json()["y_dinh"]["trang_thai"], "CANCELLED")
+        self.assertTrue(self.cc.so_thuc_thi.buoc(eid))
+        self.assertTrue(self.cc.so_thuc_thi.su_kien(eid))
+
+    def test_cong_tham_quyen_KHONG_tu_mo(self):
+        """Đường DUY NHẤT mở cổng NGOÀI KHO — và nó phải cần một POST rõ ràng."""
+        y = self._mot_lan("deploy lên production")
+        eid = y.execution_id
+        self.assertEqual(y.trang_thai.value, "WAITING_AUTHORITY")
+        self.assertEqual(y.duyet.value, "CHO_NGUOI")
+        # Doc trang thai, goi tick, xem anh chup — KHONG cai nao mo duoc cong.
+        self.cl.get("/api/executions?project=p", headers=self.h)
+        self.cl.get(f"/api/execution?id={eid}", headers=self.h)
+        self.cc.tick()
+        self.assertEqual(
+            self.cc.so_thuc_thi.y_dinh(eid).duyet.value, "CHO_NGUOI")
+        r = self.cl.post(f"/api/execution/{eid}/approve", headers=self.h,
+                         json={"dong_y": True, "boi": "user"})
+        self.assertEqual(r.json()["y_dinh"]["duyet"], "DA_DUYET")
+
+    def test_tu_choi_cong_thi_CANCELLED(self):
+        y = self._mot_lan("deploy lên production")
+        r = self.cl.post(f"/api/execution/{y.execution_id}/approve",
+                         headers=self.h, json={"dong_y": False})
+        self.assertEqual(r.json()["y_dinh"]["trang_thai"], "CANCELLED")
+
+    def test_loi_tra_ve_400_chu_khong_no(self):
+        r = self.cl.post("/api/execution/ex_khong_co/pause", headers=self.h)
+        self.assertEqual(r.status_code, 400)
 
 
 class TestChanDNSRebinding(_Nen):

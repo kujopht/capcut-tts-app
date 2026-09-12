@@ -58,6 +58,12 @@ NGUONG_NGUOI = 900.0
 #: Trung voi tran "3 WRITE worker" cua router toan cuc.
 MAX_SESSIONS_MOI_DU_AN = 3
 
+#: Bao lau mot phien duoc phep o `STARTING` ma chua co PID truoc khi
+#: `recover()` coi no la CHET. Rong rai co chu dich: mot phien Leader lanh
+#: do duoc 67,87s (ghi trong `CLAUDE.md`), nen 15 phut khong the reap nham
+#: mot phien dang khoi dong that. Xem `SessionManager.recover`.
+HAN_KHOI_DONG = 900.0
+
 
 def _giao_nhau_pham_vi(a: Sequence[str], b: Sequence[str]) -> bool:
     """Hai phạm vi ghi có giẫm lên nhau không — so THEO ĐOẠN đường dẫn."""
@@ -255,10 +261,29 @@ class SessionManager:
         # Xet TRUOC luat dung lai: mot phien dang chay viec khac tren cung
         # pham vi thi khong duoc dung lai VA cung khong duoc de viec moi
         # dung phien khac chay song song vao do.
+        # `BUSY` MỘT MÌNH KHÔNG ĐỦ — phải là ĐANG GIỮ MỘT VIỆC SỐNG.
+        #
+        # Khuyết tật đo được (`ex_16da77a00864`, 2026-09-12): phiên
+        # `s-e06bf55e23` ở `BUSY` suốt 65 PHÚT với `current_task=fanfic.ghi_v1`
+        # trong khi chính việc đó đang `WAITING`, `attempts=0`,
+        # `owner_session=""` — tức là nó KHÔNG chạy trong phiên ấy. Mọi việc
+        # mới có phạm vi ghi giẫm lên đều nhận `WAIT` vĩnh viễn, và lần thực
+        # thi đứng im ở `RUNNING` mà không ai báo lỗi.
+        #
+        # Nguồn thẩm quyền đúng là TRẠNG THÁI VIỆC, không phải cái nhãn phiên
+        # còn nhớ — CÙNG một vị từ mà luật 2b đã dùng (`_dang_giu_viec`), chỉ
+        # là trước đây chưa được áp ở đây. Không tra cứu được thì FAIL CLOSED:
+        # thà chờ hơn để hai agent cùng ghi một chỗ.
         if not chi_doc:
             for s in phien:
                 if s.state is SessionState.BUSY and \
                         _giao_nhau_pham_vi(s.scope, pham_vi):
+                    if not self._dang_giu_viec(s):
+                        vet.append(
+                            f"bỏ qua {s.session_id}: mang nhãn BẬN với việc "
+                            f"{s.current_task or '(trống)'} nhưng việc đó "
+                            f"KHÔNG còn sống — nhãn cũ, không chặn")
+                        continue
                     vet.append(f"phiên {s.session_id} đang BẬN với phạm vi "
                                f"giẫm lên {list(pham_vi)}")
                     return SessionDecision(
@@ -286,10 +311,13 @@ class SessionManager:
                     vet.append(f"toả: bỏ qua {len(bo)} phiên rảnh ở runtime anh em "
                                f"đang chạy {sorted(tranh)}")
                 ung_vien = khac
+        # Phien RANH ma luat 2 TU CHOI dung lai — giu lai de luat 2b thu hoi.
+        tu_choi: List[Session] = []
         for s in sorted(ung_vien, key=lambda x: -x.last_activity):
             if s.idle_seconds > NGUONG_NGUOI:
                 vet.append(f"bỏ qua {s.session_id}: nguội "
                            f"{s.idle_seconds:.0f}s > {NGUONG_NGUOI:.0f}s")
+                tu_choi.append(s)
                 continue
             if chi_doc:
                 vet.append(f"dùng lại {s.session_id}: việc CHỈ ĐỌC, mọi phiên "
@@ -311,6 +339,71 @@ class SessionManager:
                     trace=tuple(vet))
             vet.append(f"bỏ qua {s.session_id}: phạm vi {list(pham_vi)} vượt "
                        f"ra ngoài {list(s.scope)}")
+            tu_choi.append(s)
+
+        # Luat 2b — THU HOI khe cua phien RANH ma luat 2 vua TU CHOI.
+        #
+        # KHUYET TAT DO DUOC (so chinh tac, 2026-09-12): luat 2 va luat 3 doc
+        # CUNG mot phien theo hai cach TRAI NGUOC nhau.
+        #   - Luat 2 noi: "bỏ qua {id}: nguội 1200s > 900s" / "phạm vi vượt ra
+        #     ngoài" -> KHONG dung lai duoc.
+        #   - Luat 3 lai DEM chinh phien do vao `len(phien)` -> no VAN chiem
+        #     mot khe, roi CHO no.
+        # Va cai cho do khong bao gio ket thuc: luat 3 cho `min(last_activity)`,
+        # nhung mot phien RANH da rANH roi — no khong "xong viec" de nha khe
+        # cho ai ca. Chi phien BAN moi co the tu do ra. Cho mot phien RANH la
+        # be khoa. `recover()` cung khong go duoc: no chi reap PID chet va
+        # `STARTING` qua han, con day la `IDLE` PID-con-song.
+        #
+        # HAU QUA do duoc: moi buoc GHI co pham vi rieng nen khong bao gio
+        # dung lai duoc phien cua buoc khac -> moi lan thu tao MOT phien moi
+        # -> sau ~12 luot (2 buoc x 3 phien ban x sua chua) thi cham tran, va
+        # MOI lan giao viec sau do tra ve `WAIT: đã có 12/12 phiên sống`. Viec
+        # khong bao gio duoc giao -> tang buoc doc ra "lượt trả về RỖNG" ->
+        # can bac thang -> BLOCKED. Day la ly do THAT cua nhung luot bi goi
+        # nham la "loi provider": lan chay do KHONG HE goi provider lan nao.
+        #
+        # Sua o dung cho: mot phien ma luat 2 vua tuyen bo la KHONG dung lai
+        # duoc thi cung khong duoc tinh la dang chiem cho. Thu hoi no (chi
+        # DANH DAU; `dung()` khong xoa worktree) roi dem lai. An toan vi mot
+        # phien chi la mot tien trinh AM dung lai duoc — dung no di thi lan
+        # sau dung lai mat them mot lan khoi dong, con be khoa thi mat ca lan
+        # chay.
+        if len(phien) >= self.max_sessions:
+            # Hai hang, theo thu tu CHAC CHAN VO DUNG truoc.
+            #
+            # Hang 1 — `STARTING` khong PID va qua han khoi dong: phien RO.
+            # Khong adapter nao mat 15 phut de bao san sang. `recover()` cung
+            # don loai nay, nhung no CHI chay luc khoi dong — vo dung giua
+            # mot lan chay dai, tuc dung luc be can khe.
+            ket = sorted((s for s in phien
+                          if s.state is SessionState.STARTING and s.pid is None
+                          and s.idle_seconds > HAN_KHOI_DONG),
+                         key=lambda x: x.last_activity)
+            # Hang 2 — phien RANH khong giu viec song, ma luat 2 vua tu choi.
+            # Nguoi truoc (chac chan vo dung), roi den LRU.
+            ranh = sorted((s for s in tu_choi
+                           if s.state is SessionState.IDLE
+                           and not self._dang_giu_viec(s)),
+                          key=lambda x: (x.idle_seconds <= NGUONG_NGUOI,
+                                         x.last_activity))
+            for s in [*ket, *ranh]:
+                if len(phien) < self.max_sessions:
+                    break
+                chet = s.state is SessionState.STARTING
+                self.dung(
+                    s.session_id,
+                    state=SessionState.DEAD if chet else SessionState.STOPPED,
+                    reason=((f"kẹt ở STARTING {s.idle_seconds:.0f}s mà chưa "
+                             f"từng có PID — không khởi động được")
+                            if chet else
+                            (f"rảnh {s.idle_seconds:.0f}s và luật 2 đã từ chối "
+                             f"dùng lại cho việc này — nhả khe thay vì giữ chỗ "
+                             f"mà không ai dùng được")))
+                phien = [x for x in phien if x.session_id != s.session_id]
+                vet.append(f"thu hồi {s.session_id} "
+                           f"({'kẹt STARTING' if chet else 'rảnh'} "
+                           f"{s.idle_seconds:.0f}s): nhả khe")
 
         # Luat 3 — het tran phien -> CHO, khong dung them.
         if len(phien) >= self.max_sessions:
@@ -454,6 +547,32 @@ class SessionManager:
             session_id=session_id,
             detail=f"việc {'xong' if ok else 'hỏng'}; phiên giữ ấm để dùng lại")
 
+    def _dang_giu_viec(self, s: Session) -> bool:
+        """Phiên này có đang thật sự giữ một việc SỐNG không?
+
+        `current_task` khác rỗng là CHƯA ĐỦ để kết luận. Đo được trên sổ
+        chính tắc 2026-09-12: ba phiên `IDLE` nguội hơn BỐN TIẾNG vẫn mang
+        `current_task` trỏ tới những việc đã `FAILED` từ lâu — không đường
+        nào xoá, vì `recover()` chỉ dọn `current_task` cho phiên `BUSY`.
+        Tin vào một mình `current_task` thì ba phiên xác đó giữ ba khe vĩnh
+        viễn, và luật 2b vừa thêm cũng không gỡ được.
+
+        Nguồn thẩm quyền đúng là TRẠNG THÁI CỦA VIỆC, không phải cái nhãn
+        phiên còn nhớ: chỉ `TaskState.active` (RUNNING/REVIEW) mới nghĩa là
+        có một agent đang chiếm phiên này. Không tra được việc thì FAIL
+        CLOSED — coi như còn giữ, thà chờ hơn là cắt một agent đang ghi.
+        """
+        ma = str(s.current_task or "").strip()
+        if not ma:
+            return False
+        try:
+            t = self.store.task(ma)
+        except Exception:
+            return True
+        if t is None:
+            return False
+        return bool(t.state.active)
+
     def dung(self, session_id: str, *, reason: str = "",
              state: SessionState = SessionState.STOPPED) -> Optional[Session]:
         """Dừng một phiên. KHÔNG xoá worktree của nó."""
@@ -518,11 +637,43 @@ class SessionManager:
                 gan_lai.append(s.session_id)
                 continue
             if s.pid is None:
+                # `STARTING` KHÔNG có PID và đã quá hạn khởi động -> `DEAD`.
+                #
+                # Đây là NGOẠI LỆ DUY NHẤT của luật "không PID thì không kết
+                # luận là chết" ở docstring, và nó có lý do riêng: `IDLE`/
+                # `BUSY` không PID có thể là một adapter nhiều khe hoặc cầu
+                # nối HTTP đang chạy thật, còn `STARTING` nghĩa là "đã bắt
+                # đầu sinh tiến trình và CHƯA BÁO SẴN SÀNG". Một phiên ở
+                # trạng thái đó suốt `HAN_KHOI_DONG` thì đã không khởi động
+                # được — không có adapter nào mất 15 phút để báo sẵn sàng.
+                #
+                # VÌ SAO PHẢI REAP: `SessionState.STARTING.alive` là `True`,
+                # nên một phiên như thế CHIẾM MỘT KHE VĨNH VIỄN. Đo được trên
+                # sổ chính tắc 2026-09-11: 12/12 khe bị giữ bởi các phiên
+                # `STARTING`/`pid=None` treo ~50 phút, và MỌI lần giao việc
+                # sau đó trả về `WAIT: đã có 12/12 phiên sống` — cả Router
+                # đứng im mà không một thứ gì báo lỗi.
+                if (s.state is SessionState.STARTING
+                        and s.idle_seconds > HAN_KHOI_DONG):
+                    chet.append(s.session_id)
+                    self.dung(s.session_id, state=SessionState.DEAD,
+                              reason=(f"kẹt ở STARTING {s.idle_seconds:.0f}s "
+                                      f"mà chưa từng có PID — không khởi động "
+                                      f"được; nhả khe cho việc khác"))
+                    continue
                 khong_ro.append(s.session_id)
                 if s.state is SessionState.BUSY:
                     self.store.dat_trang_thai_session(
                         s.session_id, SessionState.IDLE, current_task="",
                         note="phục hồi: không có PID để kiểm, coi như rảnh")
+                elif s.current_task and not self._dang_giu_viec(s):
+                    # `IDLE` mà vẫn mang nhãn một việc đã kết thúc. Nhánh
+                    # trên chỉ dọn cho `BUSY`, nên cái nhãn này ở lại mãi và
+                    # bảng điều khiển báo một việc đang chạy mà không có.
+                    self.store.dat_trang_thai_session(
+                        s.session_id, SessionState.IDLE, current_task="",
+                        note=(f"phục hồi: việc {s.current_task} đã kết thúc, "
+                              f"xoá nhãn còn sót"))
                 continue
             if tien_trinh_con_song(s.pid):
                 gan_lai.append(s.session_id)

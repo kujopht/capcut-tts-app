@@ -181,6 +181,99 @@ CREATE TABLE IF NOT EXISTS leader (
     created_at   REAL NOT NULL,
     updated_at   REAL NOT NULL
 );
+-- V0.9 — VONG KIN THUC THI. Bon bang, va chung la THEM VAO: khong cot nao
+-- cua V0.8 doi, nen mot ban V0.8 mo cung mot so van chay binh thuong (no chi
+-- khong thay bon bang nay). Do la ly do `PHIEN_BAN_KHO` KHONG bi tang o
+-- V0.9 — xem `docs/CONTROL_CENTER.md` §24.
+CREATE TABLE IF NOT EXISTS executions (
+    execution_id    TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL,
+    goal            TEXT NOT NULL DEFAULT '',
+    state           TEXT NOT NULL DEFAULT 'DRAFT',
+    pha             TEXT NOT NULL DEFAULT '',
+    tham_quyen      TEXT NOT NULL DEFAULT 'REPO_LOCAL',
+    duyet           TEXT NOT NULL DEFAULT 'KHONG_CAN',
+    duyet_boi       TEXT NOT NULL DEFAULT '',
+    duyet_luc       REAL NOT NULL DEFAULT 0,
+    rui_ro          TEXT NOT NULL DEFAULT 'LOW',
+    tac_dong_prod   INTEGER NOT NULL DEFAULT 0,
+    cong_gated_json TEXT NOT NULL DEFAULT '[]',
+    nguon_message   INTEGER NOT NULL DEFAULT 0,
+    nguon_de_xuat   TEXT NOT NULL DEFAULT '',
+    nguon_cau       TEXT NOT NULL DEFAULT '',
+    pham_vi_json    TEXT NOT NULL DEFAULT '[]',
+    rang_buoc_json  TEXT NOT NULL DEFAULT '[]',
+    tieu_chi_json   TEXT NOT NULL DEFAULT '[]',
+    ban_ke_hoach    INTEGER NOT NULL DEFAULT 0,
+    so_lan_thu_lai  INTEGER NOT NULL DEFAULT 0,
+    so_lan_lap_lai  INTEGER NOT NULL DEFAULT 0,
+    ket_luan        TEXT NOT NULL DEFAULT '',
+    ly_do_dung      TEXT NOT NULL DEFAULT '',
+    created_at      REAL NOT NULL,
+    updated_at      REAL NOT NULL,
+    ended_at        REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS execution_plans (
+    execution_id  TEXT NOT NULL,
+    phien_ban     INTEGER NOT NULL,
+    buoc_json     TEXT NOT NULL DEFAULT '[]',
+    -- TIEU CHI NGHIEM THU cua CA muc tieu (§8). Thieu cot nay thi chung
+    -- bien mat khi doc lai ke hoach, va `_tong_hop` roi vao nhanh "khong co
+    -- tieu chi nao" -> SUY_GIAM -> DONE. Tuc la §8 bi vo hieu hoa mot cach
+    -- IM LANG. Do duoc 2026-09-11 boi bai kiem §A.
+    nghiem_thu_json TEXT NOT NULL DEFAULT '[]',
+    ly_do_sua     TEXT NOT NULL DEFAULT '',
+    thay_doi_json TEXT NOT NULL DEFAULT '[]',
+    bang_chung_json TEXT NOT NULL DEFAULT '[]',
+    dang_hieu_luc INTEGER NOT NULL DEFAULT 1,
+    created_at    REAL NOT NULL,
+    PRIMARY KEY (execution_id, phien_ban)
+);
+CREATE TABLE IF NOT EXISTS execution_steps (
+    execution_id  TEXT NOT NULL,
+    phien_ban     INTEGER NOT NULL,
+    buoc_id       TEXT NOT NULL,
+    task_id       TEXT NOT NULL DEFAULT '',
+    state         TEXT NOT NULL DEFAULT 'CHUA_CHAY',
+    xac_minh      TEXT NOT NULL DEFAULT 'CHUA_KIEM',
+    ket_qua_json  TEXT NOT NULL DEFAULT '',
+    kiem_json     TEXT NOT NULL DEFAULT '[]',
+    so_lan_thu    INTEGER NOT NULL DEFAULT 0,
+    updated_at    REAL NOT NULL,
+    PRIMARY KEY (execution_id, phien_ban, buoc_id)
+);
+CREATE TABLE IF NOT EXISTS execution_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    execution_id  TEXT NOT NULL,
+    project_id    TEXT NOT NULL DEFAULT '',
+    kind          TEXT NOT NULL,
+    level         TEXT NOT NULL DEFAULT 'INFO',
+    buoc_id       TEXT NOT NULL DEFAULT '',
+    detail        TEXT NOT NULL DEFAULT '',
+    meta_json     TEXT NOT NULL DEFAULT '{}',
+    ts            REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS de_xuat (
+    ma            TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL,
+    message_id    INTEGER NOT NULL DEFAULT 0,
+    tom_tat       TEXT NOT NULL DEFAULT '',
+    cac_buoc_json TEXT NOT NULL DEFAULT '[]',
+    rui_ro        TEXT NOT NULL DEFAULT 'LOW',
+    tac_dong_prod INTEGER NOT NULL DEFAULT 0,
+    tu_vai        TEXT NOT NULL DEFAULT 'strategist',
+    -- V0.9 §B: AI da de xuat. Khong co ba cot nay thi vong phan hoi
+    -- `chien luoc -> ket qua` khong gan duoc ket qua vao model nao.
+    provider      TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    runtime_id    TEXT NOT NULL DEFAULT '',
+    execution_id  TEXT NOT NULL DEFAULT '',
+    ts            REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_exec_proj  ON executions(project_id, state);
+CREATE INDEX IF NOT EXISTS ix_exstep_ex  ON execution_steps(execution_id, phien_ban);
+CREATE INDEX IF NOT EXISTS ix_exev_ex    ON execution_events(execution_id, id DESC);
+CREATE INDEX IF NOT EXISTS ix_dexuat_pr  ON de_xuat(project_id, ts DESC);
 CREATE INDEX IF NOT EXISTS ix_att_msg  ON attachments(project_id, message_id);
 CREATE INDEX IF NOT EXISTS ix_att_task ON attachments(task_id);
 CREATE INDEX IF NOT EXISTS ix_att_sha  ON attachments(sha256);
@@ -276,6 +369,17 @@ class ControlStore:
             c.execute("PRAGMA foreign_keys=ON")
             self._local.conn = c
         return c
+
+    def ket_noi(self) -> sqlite3.Connection:
+        """Kết nối của LUỒNG HIỆN TẠI — cửa CÔNG KHAI của `_c()`.
+
+        Tồn tại cho `execution/so.py` (V0.9): sổ thực thi là một tập bảng
+        THÊM VÀO, và nó phải đi qua ĐÚNG kết nối này để dùng chung WAL,
+        `busy_timeout` và — quan trọng nhất — `giao_dich_ghi()`. Một kết nối
+        thứ hai tới cùng tệp sẽ biến `BEGIN IMMEDIATE` thành vô nghĩa: hai
+        người ghi tưởng mình đang tuần tự hoá mà thực ra không.
+        """
+        return self._c()
 
     def close(self) -> None:
         c = getattr(self._local, "conn", None)

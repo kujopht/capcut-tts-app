@@ -69,6 +69,29 @@ THU_TU_NAP: Dict[VaiTro, Tuple[str, ...]] = {
         "hoi_thoai"),
 }
 
+#: SÀN DÀNH RIÊNG (V0.9, §16) — phần trần token mà một khối THẨM QUYỀN CAO
+#: giữ chỗ trước, và không khối nào xếp sau nó được tiêu vào.
+#:
+#: VÌ SAO CẦN, và vì sao đổi thứ tự nạp KHÔNG đủ:
+#:
+#: `rang_buoc` đã đứng thứ ba trong `THU_TU_NAP[REVIEWER]`, tức là nó ĐÃ
+#: được ưu tiên. Nhưng `ban_chien_luoc` đứng trước nó và không có trần —
+#: một bản chiến lược dài 2000 token ăn hết ngân sách trước khi tới lượt
+#: `rang_buoc`, và ràng buộc an toàn của dự án biến mất. Đó chính là số đo
+#: 2724/3400 ở nghiệm thu V0.8.
+#:
+#: Nên thứ tự là điều kiện CẦN, không phải đủ. Sàn là điều kiện đủ: khối có
+#: sàn được nạp TRƯỚC MỌI KHỐI KHÁC (kể cả khối xếp trên nó), trong phần
+#: ngân sách của riêng nó; phần dư trả lại cho vòng nạp thường.
+#:
+#: §16 cấm nâng trần toàn cục, nên tổng sàn LUÔN < 1: đây là cách phân phối
+#: lại cùng một ngân sách, không phải cách xin thêm.
+SAN_DANH_RIENG: Dict[VaiTro, Dict[str, float]] = {
+    VaiTro.REVIEWER: {"rang_buoc": 0.35},
+    VaiTro.STRATEGIST: {"rang_buoc": 0.30},
+    VaiTro.LEADER: {"rang_buoc": 0.20},
+}
+
 #: Nhãn cho người đọc — hiện trong dòng báo cắt, nên nó phải NÓI ĐƯỢC cái gì
 #: bị thiếu, không chỉ một khoá kỹ thuật.
 NHAN_KHOI: Dict[str, str] = {
@@ -129,6 +152,11 @@ class GoiNguCanhVai:
     khoi: Tuple[KhoiNguCanh, ...] = ()
     da_cat: Tuple[str, ...] = ()
     tran_token: int = 0
+    #: Khối được nạp ở BẢN GỌN thay vì bản đầy đủ (V0.9, §16). Bản gọn tự
+    #: nêu tên những mục nó lược, nên đây không phải một khối bị cắt ngầm —
+    #: nhưng kê khai vẫn phải nói ra, không thì "đã nạp" đọc thành "đã nạp
+    #: đủ".
+    da_gon: Tuple[str, ...] = ()
 
     @property
     def token(self) -> int:
@@ -146,6 +174,12 @@ class GoiNguCanhVai:
             d += [f"--- BẮT ĐẦU DỮ LIỆU: {k.nhan}"
                   + (f" (nguồn: {k.nguon})" if k.nguon else "") + " ---",
                   k.van.strip(), "--- HẾT DỮ LIỆU ---", ""]
+        if self.da_gon:
+            d += [("(!) CÁC KHỐI DƯỚI ĐÂY ĐƯỢC NẠP Ở BẢN GỌN, không phải bản "
+                   "đầy đủ: " + ", ".join(NHAN_KHOI.get(t, t)
+                                          for t in self.da_gon)
+                   + ". Mỗi bản gọn tự nêu tên những mục nó đã lược — đọc "
+                     "dòng đó, đừng coi phần hiện ra là toàn bộ."), ""]
         if self.da_cat:
             # DONG BAO CAT PHAI NEU TEN. Xem mục 1 của docstring module.
             d += [("(!) CÁC KHỐI DỰ ÁN CÓ DỮ LIỆU NHƯNG LƯỢT NÀY CHƯA NẠP "
@@ -167,12 +201,19 @@ class GoiNguCanhVai:
                 "token": self.token,
                 "khoi_da_cap": [k.to_dict() for k in self.khoi],
                 "khoi_da_cat": list(self.da_cat),
+                "khoi_da_gon": list(self.da_gon),
                 "ten_khoi_da_cap": [k.ten for k in self.khoi]}
+
+
+def san_cua(vai: VaiTro, ten: str, tran: int) -> int:
+    """Số token khối `ten` giữ chỗ trước cho vai này. `0` = không có sàn."""
+    return int(tran * SAN_DANH_RIENG.get(vai, {}).get(ten, 0.0))
 
 
 def dung_goi(vai: VaiTro, *, khoi_san_co: Dict[str, str],
              nguon: Optional[Dict[str, str]] = None,
-             huong_dan: str = "", tran_token: int = 0) -> GoiNguCanhVai:
+             huong_dan: str = "", tran_token: int = 0,
+             khoi_gon: Optional[Dict[str, str]] = None) -> GoiNguCanhVai:
     """Dựng gói ngữ cảnh cho `vai` từ những khối engine đã có sẵn.
 
     `khoi_san_co` là `{tên khối: văn bản}`. Tên lạ bị BỎ và KHÔNG âm thầm —
@@ -183,18 +224,56 @@ def dung_goi(vai: VaiTro, *, khoi_san_co: Dict[str, str],
     vừa trần thì bị cắt TOÀN BỘ, không bị cắt một nửa: một viên nang mất
     nửa dưới trông y như một viên nang đầy đủ, và đó là cách một khối bị
     thiếu trở nên vô hình.
+
+    V0.9 (§16) thêm hai thứ, và chúng KHÔNG phá luật trên:
+
+    * `SAN_DANH_RIENG` — khối có sàn được nạp TRƯỚC MỌI KHỐI KHÁC, trong
+      phần ngân sách riêng của nó. Phần dư trả lại vòng nạp thường.
+    * `khoi_gon` — bản GỌN của một khối, do bên gọi dựng sẵn (`rang_buoc.
+      KhoiRangBuoc.render(tran)`). Nó KHÔNG phải "cắt một nửa": bản gọn là
+      một khối hoàn chỉnh khác, tự nêu tên những mục nó đã lược. Chỉ dùng
+      khi bản đầy đủ không vừa sàn; nếu bản gọn cũng không vừa thì khối vẫn
+      bị cắt toàn bộ như cũ.
     """
     h = ho_so(vai)
     tran = int(tran_token or h.tran_token_ngu_canh)
     ng = dict(nguon or {})
+    gon = dict(khoi_gon or {})
     thu_tu = THU_TU_NAP.get(vai, THU_TU_NAP[VaiTro.LEADER])
 
     la = [t for t in khoi_san_co if t not in KHOI_BIET]
     con = tran - uoc_token(huong_dan) - uoc_token(RANH_GIOI_VAI)
     giu: List[KhoiNguCanh] = []
     cat: List[str] = list(la)
+    da_gon: List[str] = []
+
+    # --- vong 1: KHOI CO SAN, nap truoc, trong ngan sach rieng ---
+    #
+    # Thu tu duyet theo THU_TU_NAP de ket qua tat dinh khi co nhieu san.
+    xong: set = set()
+    for ten in thu_tu:
+        s = san_cua(vai, ten, tran)
+        if not s:
+            continue
+        van = (khoi_san_co.get(ten) or "").strip()
+        if not van:
+            continue
+        dung = van
+        if uoc_token(van) > s and (gon.get(ten) or "").strip():
+            dung = gon[ten].strip()
+            if uoc_token(dung) <= s:
+                da_gon.append(ten)
+            else:
+                dung = van                  # ban gon cung khong vua -> xet nhu thuong
+        if uoc_token(dung) <= min(s, con) or uoc_token(dung) <= con:
+            k = KhoiNguCanh(ten=ten, van=dung, nguon=ng.get(ten, ""))
+            giu.append(k)
+            con -= k.token
+            xong.add(ten)
 
     for ten in thu_tu:
+        if ten in xong:
+            continue
         van = (khoi_san_co.get(ten) or "").strip()
         if not van:
             continue
@@ -206,6 +285,13 @@ def dung_goi(vai: VaiTro, *, khoi_san_co: Dict[str, str],
         if k.token <= con:
             giu.append(k)
             con -= k.token
+            continue
+        g = (gon.get(ten) or "").strip()
+        if g and uoc_token(g) <= con:
+            k = KhoiNguCanh(ten=ten, van=g, nguon=ng.get(ten, ""))
+            giu.append(k)
+            con -= k.token
+            da_gon.append(ten)
         else:
             cat.append(ten)
 
@@ -214,4 +300,5 @@ def dung_goi(vai: VaiTro, *, khoi_san_co: Dict[str, str],
     thu_hang = {t: i for i, t in enumerate(thu_tu)}
     giu.sort(key=lambda k: thu_hang.get(k.ten, 99))
     return GoiNguCanhVai(vai=vai, huong_dan=huong_dan, khoi=tuple(giu),
-                         da_cat=tuple(cat), tran_token=tran)
+                         da_cat=tuple(cat), tran_token=tran,
+                         da_gon=tuple(dict.fromkeys(da_gon)))

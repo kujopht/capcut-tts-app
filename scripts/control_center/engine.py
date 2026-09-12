@@ -52,6 +52,16 @@ from scripts.router_v4.scheduler import Demand, Scheduler
 
 from scripts.control_center import leader
 from scripts.control_center.bootstrap import la_kho_git
+from scripts.control_center.execution import dieu_phoi as DP
+from scripts.control_center.execution import ghi_nho as EGN
+from scripts.control_center.execution import ke_hoach as EKH
+from scripts.control_center.execution import kiem_dinh as EKD
+from scripts.control_center.execution import lap_ke_hoach as ELK
+from scripts.control_center.execution import ket_qua as EKQ
+from scripts.control_center.execution import tiep_noi as ETN
+from scripts.control_center.execution import y_dinh as EYD
+from scripts.control_center.execution.so import SoThucThi
+from scripts.control_center.execution.trang_thai import TrangThaiThucThi
 from scripts.control_center.locks import (LockManager, chuoi_tai_nguyen,
                                           doc_chuoi_tai_nguyen)
 from scripts.control_center.model import (LockKind, PermissionClass, Project,
@@ -99,6 +109,34 @@ CHO_LANG_KET_QUA = 8.0
 #: DUNG mot nhanh, nhanh doi hoi `status=="ok" and not khai and that` — nen
 #: no la dau hieu chinh xac, khong phai suy doan. Khoa lai bang bai kiem.
 DAU_HIEU_KHAI_THIEU = "worker không khai sửa gì nhưng đĩa đổi"
+
+
+def _loai_viec_cua(b) -> str:
+    """Loại việc của một bước — dùng lại từ vựng của `planner.RulePlanner`.
+
+    Một từ vựng thứ hai ở đây sẽ làm `_hop_dong` chọn sai `Requirements`, và
+    hậu quả là một bước viết mã bị xếp lên một model không có `coding`.
+
+    `che_do_ghi` THẮNG MỌI TỪ KHOÁ, và nó phải được hỏi TRƯỚC. Bản đầu để
+    phép kiểm `not b.ghi` ở CUỐI, nên một bước CHỈ ĐỌC có chữ "tài liệu"
+    trong mục tiêu ("đọc tài liệu bàn giao") bị xếp `documentation` — một
+    loại CÓ GHI. Hậu quả đo được trên Fanfic thật (2026-09-11): agent đọc
+    đúng, tóm tắt đúng, rồi cổng `diff` của Router V4 đánh hỏng với
+    "báo ok cho một việc CÓ GHI nhưng không tệp nào đổi" — ba lần liên tiếp,
+    cho một việc mà đề bài nói rõ là chỉ đọc.
+
+    Kế hoạch KHAI `CheDoGhi.DOC` là một tuyên bố, không phải một gợi ý.
+    """
+    if not b.ghi:
+        return "review" if any(
+            x in (b.tieu_de + " " + b.muc_tieu).lower()
+            for x in ("review", "phản biện", "soi")) else "analysis"
+    van = (b.tieu_de + " " + b.muc_tieu).lower()
+    if any(x in van for x in ("test", "bài kiểm", "kiểm thử")):
+        return "testing"
+    if any(x in van for x in ("tài liệu", "doc", "readme")):
+        return "documentation"
+    return "implementation"
 
 
 @dataclass
@@ -227,6 +265,15 @@ class ControlCenter:
         #: Nguon goc dinh tuyen cua LUOT GAN NHAT, theo du an — thu §12 hien
         #: len giao dien. Chi giu luot cuoi: lich su dai da co o `cc_events`.
         self._nguon_goc_suy_luan: Dict[str, Dict] = {}
+        #: V0.9 — VONG KIN THUC THI. So dung chung `control.db`; bo dieu
+        #: phoi dung muon vi no can `MoiGioiKiem` gan vao DUNG kho cua du
+        #: an, ma du an chua chac da co luc khoi tao.
+        self.so_thuc_thi = SoThucThi(self.store)
+        self._dieu_phoi: Dict[str, DP.BoDieuPhoi] = {}
+        self._khoa_thuc_thi = threading.Lock()
+        #: Lan thuc thi DA bao ket luan ve o chat — chan bao hai lan, cung
+        #: khuon `_da_bao_ket_qua`.
+        self._da_bao_thuc_thi: set = set()
         #: BUOC DANG LAM cua `chat()`, theo du an: `{pid: (nhan, tu_luc)}`.
         #:
         #: VI SAO CAN. `chat()` chay DONG BO trong mot luong; mot lan mo
@@ -785,6 +832,22 @@ class ControlCenter:
             self.store.gan_dinh_kem_cho_message(aid, tin.message_id)
             dk_hop_le.append(aid)
 
+        # V0.9 — BA CỔNG TRƯỚC LEADER, và cả ba đều TẤT ĐỊNH (0 lượt model,
+        # 0 việc khảo sát). Thứ tự có nghĩa:
+        #
+        #   1. ĐIỀU KHIỂN ("dừng task này")  — §13. Phải đứng trước hết: câu
+        #      này chứa động từ hành động và sẽ bị `xet_tiep_noi` hiểu nhầm
+        #      thành một lệnh XIN LÀM nếu để sau.
+        #   2. HỎI TRẠNG THÁI ("xong chưa bro?") — §12. Trả lời TỪ SỔ.
+        #   3. TIẾP NỐI ("ok làm đi") — §1. Nối về đúng đề xuất trước đó.
+        #
+        # Hai cổng đầu chỉ mở khi dự án THẬT SỰ có lần thực thi còn sống —
+        # không thì "dừng đi" giữa một cuộc trò chuyện bình thường sẽ rơi
+        # vào nhánh điều khiển và không ai trả lời.
+        cong = self._cong_thuc_thi(project_id, text, tin, dk_hop_le)
+        if cong is not None:
+            return cong
+
         # V0.3: ĐI QUA LEADER. Một tin nhắn KHÔNG còn mặc nhiên thành việc.
         #
         # Leader quyết CHAT/STATUS/CONTROL/WORK trong MỘT lượt (ảnh chụp dự
@@ -928,6 +991,186 @@ class ControlCenter:
                 "plan": kh.to_dict(), "toa": toa_meta, "message_id": tin.message_id,
                 "attachment_ids": list(dk_hop_le),
                 "leader": (qd.to_dict() if qd else None)}
+
+    # -- 2a. Ba cong TAT DINH truoc Leader (V0.9) ---------------------------
+
+    def _cong_thuc_thi(self, project_id: str, text: str, tin,
+                       dk_hop_le: List[str]) -> Optional[Dict]:
+        """Điều khiển / hỏi trạng thái / tiếp nối. `None` = không cổng nào mở.
+
+        Mọi nhánh ở đây trả lời mà KHÔNG gọi một model nào và KHÔNG tạo một
+        việc khảo sát nào. Đó là yêu cầu §12 viết thành mã, không phải một
+        tối ưu: một Leader phải uỷ thác một việc để biết trạng thái của
+        chính mình là một vòng lặp vô nghĩa mà người dùng trả tiền.
+        """
+        song = self.so_thuc_thi.dang_chay(project_id)
+
+        # 1. DIEU KHIEN — §13
+        lenh = ETN.lenh_dieu_khien(text)
+        if lenh and song:
+            y = song[0]
+            bd = self.dieu_phoi(project_id)
+            try:
+                if lenh == "huy":
+                    y2 = bd.huy(y.execution_id, ly_do=f"người dùng: {text[:120]}")
+                    loi = (f"Đã huỷ `{y.execution_id}` — {y.goal[:100]}\n\n"
+                           f"Việc con đang bay đã được dừng, khoá đã nhả. "
+                           f"Lịch sử và bằng chứng GIỮ NGUYÊN, không xoá gì.")
+                elif lenh == "tam_dung":
+                    y2 = bd.tam_dung(y.execution_id,
+                                     ly_do=f"người dùng: {text[:120]}")
+                    loi = (f"Đã tạm dừng `{y.execution_id}`. Lượt agent đang "
+                           f"bay vẫn chạy nốt và vẫn trả kết quả — nhưng "
+                           f"không bước mới nào được giao. Nói 'tiếp tục' "
+                           f"khi muốn chạy lại.")
+                else:
+                    bd.tiep_tuc(y.execution_id)
+                    y2 = self.so_thuc_thi.y_dinh(y.execution_id) or y
+                    loi = (f"Đang chạy tiếp `{y.execution_id}`.\n\n"
+                           + DP.cau_trang_thai(self.so_thuc_thi, project_id))
+            except Exception as exc:                        # noqa: BLE001
+                loi = (f"Không đổi được trạng thái `{y.execution_id}`: "
+                       f"{type(exc).__name__}: {exc}")
+                y2 = y
+            t2 = self.store.them_chat(
+                project_id, "assistant", loi,
+                meta={"loai": "dieu_khien_thuc_thi", "lenh": lenh,
+                      "execution_id": y.execution_id,
+                      "trang_thai": getattr(y2, "trang_thai", y.trang_thai).value})
+            return {"reply": loi, "tasks": [], "plan": None,
+                    "message_id": tin.message_id,
+                    "attachment_ids": list(dk_hop_le), "leader": None,
+                    "control": [{"lenh": lenh, "execution_id": y.execution_id}],
+                    "assistant_message_id": t2.message_id}
+
+        # 2. HOI TRANG THAI — §12
+        if song and ETN.la_cau_hoi_trang_thai(text):
+            loi = DP.cau_trang_thai(self.so_thuc_thi, project_id)
+            self.store.ghi_su_kien(
+                "EXEC_STATUS_ANSWERED", project_id=project_id,
+                detail=(f"trả lời trạng thái TỪ SỔ cho {len(song)} lần thực "
+                        f"thi — 0 việc khảo sát"))
+            t2 = self.store.them_chat(
+                project_id, "assistant", loi,
+                meta={"loai": "trang_thai_thuc_thi",
+                      "execution_id": [y.execution_id for y in song]})
+            return {"reply": loi, "tasks": [], "plan": None,
+                    "message_id": tin.message_id,
+                    "attachment_ids": list(dk_hop_le), "leader": None,
+                    "control": [], "assistant_message_id": t2.message_id}
+
+        # 3. TIEP NOI — §1
+        kn = ETN.giai_quyet(text,
+                            self.so_thuc_thi.de_xuat(project_id, chua_dung=True),
+                            nguon="user")
+        if kn.noi_duoc:
+            return self._khoi_dong_tu_de_xuat(project_id, text, tin,
+                                              dk_hop_le, kn)
+        return None
+
+    def _khoi_dong_tu_de_xuat(self, project_id: str, text: str, tin,
+                              dk_hop_le: List[str], kn) -> Dict:
+        """"ok làm đi" -> ý định thực thi + kế hoạch + chạy. §1, §2, §3, §4.
+
+        Người dùng KHÔNG phải nhắc lại kế hoạch: mục tiêu lấy từ đề xuất đã
+        lưu. Nhưng THẨM QUYỀN thì không thừa hưởng: `tao_y_dinh` quét lại cả
+        mục tiêu lẫn câu người dùng vừa gõ, và một kế hoạch chạm production
+        dừng ở `WAITING_AUTHORITY` dù người dùng vừa nói "ok làm đi".
+        """
+        self._dat_buoc(project_id, "đang dựng ý định thực thi")
+        ctx = self.ctx(project_id)
+        dx = kn.de_xuat
+        y = EYD.tao_y_dinh(
+            project_id=project_id, goal=kn.muc_tieu, cau_nguoi_dung=text,
+            message_id=tin.message_id, de_xuat=(dx.ma if dx else ""),
+            rang_buoc=tuple(dx.cac_buoc[:0]) if dx else ())
+        kq: PlanResult = ctx.planner.plan(kn.muc_tieu, ctx.project)
+        if kn.tin_hieu.pham_vi_noi_ro:
+            kq = ELK.cat_theo_pham_vi(kq, kn.tin_hieu.pham_vi_noi_ro)
+        if not kq.tasks:
+            loi = (f"Mình nối được câu này về đề xuất `{dx.ma if dx else '?'}` "
+                   f"nhưng không phân rã ra bước nào chạy được. Nói rõ hơn "
+                   f"phần nào cần làm nhé.")
+            self.store.them_chat(project_id, "assistant", loi,
+                                 meta={"loai": "tiep_noi_rong"})
+            return {"reply": loi, "tasks": [], "plan": None,
+                    "message_id": tin.message_id,
+                    "attachment_ids": list(dk_hop_le), "leader": None,
+                    "control": []}
+        kh = ELK.tu_plan_result(y, kq, ctx.project)
+        bd = self.dieu_phoi(project_id)
+        y = bd.bat_dau(y, kh)
+        if dx is not None:
+            self.so_thuc_thi.danh_dau_de_xuat(dx.ma, y.execution_id)
+        for aid in dk_hop_le:
+            for st in self.so_thuc_thi.buoc(y.execution_id, kh.phien_ban):
+                if st["task_id"]:
+                    self.store.gan_dinh_kem_cho_task(aid, st["task_id"])
+
+        d = [f"Ok bro — {kn.ly_do}.", "", f"Mục tiêu: {y.goal}", "",
+             kh.render()]
+        if y.trang_thai is TrangThaiThucThi.WAITING_AUTHORITY:
+            d += ["", EYD.cau_hoi_tham_quyen(y)]
+        else:
+            bd.tick(y.execution_id)
+            d += ["", "Đã bắt đầu. Hỏi 'xong chưa bro?' bất cứ lúc nào — "
+                      "mình trả lời từ sổ, không tạo thêm việc nào."]
+        loi = "\n".join(d)
+        t2 = self.store.them_chat(
+            project_id, "assistant", loi,
+            meta={"loai": "bat_dau_thuc_thi", "execution_id": y.execution_id,
+                  "de_xuat": (dx.ma if dx else ""),
+                  "plan": kh.to_dict(), "tiep_noi": kn.to_dict(),
+                  "attachment_ids": list(dk_hop_le)})
+        return {"reply": loi, "tasks": [], "plan": kh.to_dict(),
+                "execution": y.to_dict(), "message_id": tin.message_id,
+                "attachment_ids": list(dk_hop_le), "leader": None,
+                "control": [], "assistant_message_id": t2.message_id}
+
+    def _luu_de_xuat(self, project_id: str, message_id: int) -> Optional[str]:
+        """Chiến lược vừa nói ra -> một `DeXuat` BỀN. §1.
+
+        Không lưu thì "ok làm đi" ở lượt sau chỉ còn hai chữ và Leader phải
+        đoán — đúng thứ vòng kín tồn tại để bỏ đi. Lưu KHÔNG khởi động gì:
+        một đề xuất là một đề xuất cho tới khi người dùng xin làm.
+        """
+        with self._khoa:
+            ng = dict(self._nguon_goc_suy_luan.get(project_id) or {})
+        cl = ng.get("chien_luoc") or {}
+        if not isinstance(cl, dict) or not cl:
+            return None
+        tom = str(cl.get("de_xuat") or cl.get("muc_tieu") or "").strip()
+        buoc = [str(x) for x in (cl.get("viec_can_lam")
+                                 or cl.get("phuong_an") or ())][:12]
+        if not tom:
+            tom = (buoc[0] if buoc else "")
+        if not tom:
+            return None
+        van = tom + " " + " ".join(buoc)
+        lop, hits = EYD.phan_lop_tham_quyen(van)
+        ma = f"dx_{uuid.uuid4().hex[:10]}"
+        # AI ĐÃ ĐỀ XUẤT (§B). `nguon_goc` là danh sách `NguonGocVai`; lấy của
+        # đúng vai STRATEGIST. Không ghim được thì để rỗng — và lúc đó
+        # `phan_hoi.dung_quan_sat` trả `None`, tức là KHÔNG sinh một mẫu vô
+        # danh. Thà không có dữ liệu còn hơn có dữ liệu không gắn được vào ai.
+        nv = next((x for x in (ng.get("nguon_goc") or [])
+                   if isinstance(x, dict) and x.get("vai") == "strategist"), {})
+        chon = (nv.get("chon") or {}) if isinstance(nv, dict) else {}
+        self.so_thuc_thi.luu_de_xuat(ETN.DeXuat(
+            ma=ma, project_id=project_id, message_id=int(message_id or 0),
+            tom_tat=tom, cac_buoc=tuple(buoc),
+            rui_ro=("HIGH" if hits else "LOW"),
+            tac_dong_production=bool(
+                {h.operation for h in hits} & EYD.GATED_PRODUCTION),
+            tu_vai="strategist",
+            provider=str(chon.get("provider") or ""),
+            model=str(chon.get("model_id") or ""),
+            runtime_id=str(chon.get("runtime_id") or "")))
+        self.store.ghi_su_kien(
+            "RECOMMENDATION_SAVED", project_id=project_id,
+            detail=f"{ma}: {tom[:160]}",
+            meta={"ma": ma, "so_buoc": len(buoc), "tham_quyen": lop.value})
+        return ma
 
     def _tao_toa(self, ctx: ProjectContext, project_id: str, yc, kh: PlanResult,
                  goal: str):
@@ -1401,13 +1644,21 @@ class ControlCenter:
             # no la mot khoi du lieu NUA trong nhac nho cua Leader: mot luot,
             # khong phai hai. Cau tam thuong khong goi vai nao va khoi nay rong
             # — xem `reasoning/phan_loai.py` mục CONG TAM THUONG.
+            # V0.9 (§16) — KHOI RANG BUOC: quyet dinh dang hieu luc + rang
+            # buoc an toan + yeu cau, xep theo THAM QUYEN va co SAN ngan sach
+            # rieng trong goi cua moi vai. V0.8 khong dung khoi nay, nen rang
+            # buoc phai canh tranh voi lich su du an trong cung mot cuc van
+            # ban — do la ly do do duoc cua 2724/3400 o nghiem thu that.
+            khoi_rb, gon_rb = self._khoi_rang_buoc(pid)
             khoi_hd = self._khoi_hoi_dong(
                 pid, text, bg,
                 khoi={"vien_nang": khoi_nang, "ky_uc": khoi_ky_uc,
                       "trang_thai_song": khoi_song,
                       "bang_chung_van_hanh": khoi_probe,
                       "noi_dung_web": khoi_web,
-                      "trang_thai_kho": anh.tom_tat()})
+                      "rang_buoc": khoi_rb,
+                      "trang_thai_kho": anh.tom_tat()},
+                khoi_gon={"rang_buoc": gon_rb})
             nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
                                       khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa,
                                       la_lich_su=la_lich_su, khoi_web=khoi_web,
@@ -1435,8 +1686,43 @@ class ControlCenter:
                         + " — rơi về phân rã trực tiếp"))
             return None
 
+    def _khoi_rang_buoc(self, project_id: str) -> Tuple[str, str]:
+        """`(bản đầy đủ, bản gọn)` của khối ràng buộc — V0.9 §16.
+
+        Bản GỌN được dựng SẴN ở đây chứ không để `ngu_canh.py` tự cắt: cắt
+        một khối văn xuôi làm đôi thì nửa còn lại trông y như một khối đầy
+        đủ. Bản gọn của `rang_buoc.KhoiRangBuoc` là một khối hoàn chỉnh
+        khác — nó tự NÊU TÊN những mã nó đã lược.
+
+        Hỏng ở đây KHÔNG được làm vỡ lượt chat, cùng nguyên tắc
+        `_khoi_ky_uc`: mất khối ràng buộc thì phản biện kém đi, không phải
+        cả cuộc trò chuyện hỏng.
+        """
+        try:
+            from scripts.control_center.reasoning import rang_buoc as RB
+            from scripts.control_center.reasoning.ngu_canh import san_cua
+            from scripts.control_center.reasoning.vai import VaiTro, ho_so
+            k = RB.dung_khoi(self.ky_uc, project_id)
+            if k.rong:
+                return "", ""
+            day, _ = k.render()
+            # San CHAT NHAT trong ba vai — mot ban gon vua san hep nhat thi
+            # vua moi san.
+            hep = min(san_cua(v, "rang_buoc", ho_so(v).tran_token_ngu_canh)
+                      for v in (VaiTro.LEADER, VaiTro.STRATEGIST,
+                                VaiTro.REVIEWER))
+            gon, _luoc = k.render(tran_token=hep)
+            return day, gon
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "CONSTRAINT_BLOCK_ERROR", project_id=project_id,
+                level="WARNING",
+                detail=f"khối ràng buộc: {type(exc).__name__}: {exc}"[:300])
+            return "", ""
+
     def _khoi_hoi_dong(self, project_id: str, text: str, bg,
-                       khoi: Dict[str, str]) -> str:
+                       khoi: Dict[str, str],
+                       khoi_gon: Optional[Dict[str, str]] = None) -> str:
         """Chạy hội đồng suy luận và trả KHỐI cho nhắc nhở Leader, hoặc `""`.
 
         Ba tính chất, mỗi cái ứng với một chế độ hỏng thật:
@@ -1488,11 +1774,14 @@ class ControlCenter:
             kq = self.hoi_dong.chay(
                 cau=text, phan_loai=pl, che_do=cd,
                 khoi_san_co={k: v for k, v in (khoi or {}).items() if v},
-                nguon_khoi={"vien_nang": "viên nang dự án (V0.7)",
+                nguon_khoi={"rang_buoc": "ký ức dự án — quyết định/ràng buộc "
+                                         "đang hiệu lực (V0.9)",
+                            "vien_nang": "viên nang dự án (V0.7)",
                             "ky_uc": "ký ức dự án (V0.6)",
                             "trang_thai_song": "probe sống (V0.5)",
                             "bang_chung_van_hanh": "ProductionProbeBroker (V0.7)",
                             "trang_thai_kho": "git + sổ Control Center"},
+                khoi_gon={k: v for k, v in (khoi_gon or {}).items() if v},
                 chinh_sach=self.chinh_sach_cao_cap(project_id),
                 project_id=project_id)
             with self._khoa:
@@ -1562,15 +1851,27 @@ class ControlCenter:
                     "reassign_task": "GIAO LẠI"}.get(d["loai"], d["loai"])
             loi += (f"\n\n⚠ Mình **không tự** {nhan} được — việc này cần "
                     f"bạn bấm. Mở `{d['task_id']}` ở tab Tasks rồi xác nhận.")
-        self.store.them_chat(pid, "assistant", loi,
-                             meta={"leader": qd.to_dict(),
-                                   "loai": qd.y_dinh.lower(),
-                                   "ket_qua_dieu_khien": ket,
-                                   "attachment_ids": list(dk_hop_le)})
+        t2 = self.store.them_chat(pid, "assistant", loi,
+                                  meta={"leader": qd.to_dict(),
+                                        "loai": qd.y_dinh.lower(),
+                                        "ket_qua_dieu_khien": ket,
+                                        "attachment_ids": list(dk_hop_le)})
+        # V0.9 (§1) — LUU DE XUAT, KHONG chay no. Day la mot cau THAO LUAN
+        # (`_leader_khong_uy_thac` chi vao khi y dinh KHAC `WORK`), nen viec
+        # duy nhat ta lam them la ghi nho lai loi khuyen de lan sau nguoi
+        # dung noi "ok lam di" thi khong phai nhac lai ca ke hoach.
+        ma_dx = None
+        try:
+            ma_dx = self._luu_de_xuat(pid, t2.message_id)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "RECOMMENDATION_SAVE_ERROR", project_id=pid, level="WARNING",
+                detail=f"{type(exc).__name__}: {exc}"[:200])
         return {"reply": loi, "tasks": [], "plan": None,
                 "message_id": tin.message_id,
                 "attachment_ids": list(dk_hop_le),
-                "leader": qd.to_dict(), "control": ket}
+                "leader": qd.to_dict(), "control": ket, "de_xuat": ma_dx,
+                "assistant_message_id": t2.message_id}
 
     def _bao_ket_qua_ve_chat(self, ctx, task_id: str) -> Optional[Dict]:
         """Việc kết thúc -> MỘT tin nhắn assistant trong đúng hội thoại đó.
@@ -1610,6 +1911,17 @@ class ControlCenter:
             toa = (t.contract or {}).get("_toa") or {}
             if toa and not toa.get("cha") and tt in ("DONE", "FAILED"):
                 self.store.ghi_da_bao_ket_qua(task_id, tt, project_id=t.project_id,
+                                              message_id=0)
+                return None
+
+            # V0.9 — BUOC cua mot lan thuc thi: ket qua di vao KIEM DINH roi
+            # vao MOT cau tong hop cua ca lan thuc thi (§21), khong rai N tin
+            # nhan. `BLOCKED` van bao rieng: no can nguoi, va cau tong hop co
+            # the con lau moi toi.
+            tx = (t.contract or {}).get("_thuc_thi") or {}
+            if tx.get("execution_id") and tt in ("DONE", "FAILED"):
+                self.store.ghi_da_bao_ket_qua(task_id, tt,
+                                              project_id=t.project_id,
                                               message_id=0)
                 return None
 
@@ -1845,6 +2157,744 @@ class ControlCenter:
         pq = (t.contract or {}).get("_permission") or {}
         return bool(pq.get("approved_by"))
 
+    # -- 2b. VONG KIN THUC THI (V0.9) ---------------------------------------
+
+    def dieu_phoi(self, project_id: str) -> DP.BoDieuPhoi:
+        """Bộ điều phối của MỘT dự án. Dựng muộn, giữ lại.
+
+        Một bộ mỗi dự án chứ không một bộ dùng chung: `MoiGioiKiem` phải neo
+        vào ĐÚNG kho của dự án đó, và một môi giới dùng chung sẽ chạy `git
+        status` của kho A để kiểm định một bước của kho B.
+        """
+        with self._khoa_thuc_thi:
+            bd = self._dieu_phoi.get(project_id)
+            if bd is not None:
+                return bd
+            p = self.store.project(project_id)
+            mg = None
+            if p is not None and p.repo_path:
+                try:
+                    mg = EKD.MoiGioiKiem(p.repo_path)
+                except Exception:                           # noqa: BLE001
+                    mg = None
+            bd = DP.BoDieuPhoi(
+                self.so_thuc_thi,
+                tao_viec=self._tao_viec_cho_buoc,
+                trang_thai_viec=self._trang_thai_viec,
+                dung_viec=self._dung_viec_cua_thuc_thi,
+                nha_tai_nguyen=lambda pid, tid: LockManager(self.store).tra(
+                    pid, tid),
+                moi_gioi=mg, goi_phan_bien=self._phan_bien_ket_qua,
+                song_song=self.max_parallel)
+            self._dieu_phoi[project_id] = bd
+            return bd
+
+    def _trang_thai_viec(self, task_id: str) -> str:
+        t = self.store.task(task_id)
+        return t.state.value if t is not None else ""
+
+    def _phan_bien_ket_qua(self, y, kh, bc) -> Optional[Dict]:
+        """Gọi Reviewer NGỮ NGHĨA trên một kết quả đã chạy — V0.9 §A.
+
+        Bộ điều phối đã quyết ĐỊNH CÓ GỌI HAY KHÔNG (`nen_goi_reviewer`);
+        hàm này chỉ lo chạy. Ba điều nó phải làm đúng:
+
+        1. **Đưa BẰNG CHỨNG, không đưa lời khai.** Khối gửi Reviewer là mục
+           tiêu gốc + tiêu chí nghiệm thu + phán quyết từng phép kiểm tất
+           định + tệp đã đổi. Không có tóm tắt tự khen của worker.
+        2. **ĐỘC LẬP THẬT.** `ho_tac_gia` là họ model ĐÃ LÀM VIỆC, lấy từ
+           chính hợp đồng kết quả. Không truyền thì `doi_doc_lap=True` không
+           có gì để tránh và "độc lập" thành một nhãn dán.
+        3. **Hỏng thì trả `None`.** Mất Reviewer là SUY GIẢM, và bộ điều phối
+           nói ra điều đó — không phải một lần kiểm định bị vỡ.
+        """
+        from scripts.control_center.reasoning.phan_loai import phan_loai_luot
+        pid = y.project_id
+        try:
+            hd = self.hoi_dong
+        except Exception:                                   # noqa: BLE001
+            return None
+        if hd is None:
+            return None
+
+        # HO MODEL DA LAM VIEC — de bo dinh tuyen tranh dung ho do.
+        ho = ""
+        tep: List[str] = []
+        for st in self.so_thuc_thi.buoc(y.execution_id, kh.phien_ban):
+            d = st.get("ket_qua") or {}
+            tep += list(d.get("files_changed") or ())
+            if not ho and d.get("model"):
+                try:
+                    m = self.fabric.models.get(str(d.get("model")))
+                    ho = str(getattr(m, "model_family", "") or "")
+                except Exception:                           # noqa: BLE001
+                    ho = ""
+
+        # GOI TIN CO NHAN NGUON GOC.
+        #
+        # Ban truoc tron ba loai noi dung vao mot danh sach phang, va Reviewer
+        # da chi ra dung cho do (`ex_181f8dd29fbe`): no che dong
+        # "BƯỚC CHƯA CHỨNG MINH: (không)" mau thuan voi dong
+        # "[THIEU_BANG_CHUNG] <tieu chi ngu nghia>" ngay ben tren. Ca hai deu
+        # do ROUTER sinh, va ca hai deu dung theo nghia rieng cua chung — "khong
+        # buoc nao thieu bang chung" va "mot TIEU CHI thieu bang chung" — nhung
+        # khong co nhan nguon goc thi chung doc nhu mot loi khai tu mau thuan
+        # cua agent. Reviewer cham cai mau thuan do cho AGENT, va mot lan chay
+        # dung bi danh REVISE.
+        #
+        # Nen: tach MUC ro rang, noi thang muc nao do AI sinh, va khong bao gio
+        # dat van ban cua Router canh van ban cua worker nhu the chung cung
+        # loai.
+        ngu = [t.mo_ta for t in kh.nghiem_thu
+               if not any(c.tat_dinh for c, _ in t.cach_kiem)]
+        d = ["=== MỤC TIÊU GỐC (NGƯỜI DÙNG viết) ===", y.goal, "",
+             "=== TIÊU CHÍ NGHIỆM THU (siêu dữ liệu của KẾ HOẠCH) ==="]
+        d += [f"  [{i + 1}] {'BẮT BUỘC' if t.bat_buoc else 'NÊN CÓ'} · "
+              f"{'NGỮ NGHĨA' if t.mo_ta in ngu else 'TẤT ĐỊNH'} · {t.mo_ta}"
+              for i, t in enumerate(kh.nghiem_thu)] or \
+             ["  (kế hoạch không khai tiêu chí nào)"]
+        d += ["",
+              "=== HIỆN VẬT DO AGENT TẠO (worker-produced) ===",
+              f"  tệp đã đổi ({len(set(tep))}): "
+              f"{', '.join(sorted(set(tep))[:25]) or '(không)'}",
+              "",
+              "=== BẰNG CHỨNG THỰC THI (MÁY đo, không phải lời khai) ==="]
+        for t in bc.tieu_chi:
+            d.append(f"  [{t.trang_thai.value}] {t.mo_ta}"
+                     + ("" if t.bat_buoc else "  (nên có)"))
+            for k in t.kiem[:4]:
+                goc = (f" @ {Path(k.nguon).name}" if getattr(k, "nguon", "")
+                       else "")
+                d.append(f"      {'✓' if k.dat else '✗'} {k.cach}: "
+                         f"{k.chi_tiet[:160]}{goc}")
+            if not t.kiem:
+                d.append("      (không có phép kiểm tất định nào — tiêu chí "
+                         "này CHỜ CHÍNH BẠN phán đoán)")
+        d += ["",
+              "=== SIÊU DỮ LIỆU CỦA ROUTER (do Router sinh, KHÔNG phải lời "
+              "khai của agent) ===",
+              f"  bước đã qua kiểm định: {', '.join(bc.buoc_dat) or '(không)'}",
+              f"  bước chưa chứng minh được: "
+              f"{', '.join(bc.buoc_thieu_bang_chung) or '(không)'}"]
+        if ngu:
+            # NOI RO vi sao hai dong tren KHONG mau thuan voi cac dong
+            # `[THIEU_BANG_CHUNG]` o muc bang chung.
+            d.append("  lưu ý: 'bước' và 'tiêu chí' là HAI thứ khác nhau — "
+                     "mọi BƯỚC có thể đã chứng minh xong trong khi một TIÊU "
+                     "CHÍ ngữ nghĩa vẫn chờ bạn chấm. Hai dòng trên nói về "
+                     "BƯỚC.")
+        d += ["", "=== CÂU HỎI CHO BẠN ===",
+              "Công việc trên có THỰC SỰ đạt mục tiêu gốc không?",
+              "Chấm theo TIÊU CHÍ ở trên. Nếu lời chê của bạn nhắm vào chính "
+              "các mục 'SIÊU DỮ LIỆU CỦA ROUTER' (cách Router trình bày), "
+              "hãy nói rõ — đó là lỗi của Router, không phải của agent."]
+
+        khoi_rb, gon_rb = self._khoi_rang_buoc(pid)
+        try:
+            self._dam_bao_suc_khoe("phản biện ngữ nghĩa kết quả")
+            ban, ng = hd.phan_bien_ket_qua(
+                cau=y.goal, ban_ket_qua="\n".join(d),
+                phan_loai=phan_loai_luot(y.goal),
+                che_do=self.leader_ban_ghi(pid).che_do_enum(),
+                khoi_san_co={"rang_buoc": khoi_rb,
+                             "vien_nang": self._khoi_vien_nang(pid, y.goal)},
+                khoi_gon={"rang_buoc": gon_rb},
+                ho_tac_gia=ho, chinh_sach=self.chinh_sach_cao_cap(pid),
+                project_id=pid)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "REVIEW_ERROR", project_id=pid, level="WARNING",
+                detail=f"{type(exc).__name__}: {exc}"[:300])
+            return None
+        if ban is None:
+            return None
+        chon = ng.chon
+        return {"phan_xu": ban.phan_xu.value,
+                "doc_lap": bool(chon.doc_lap) if chon else False,
+                "suy_giam": bool(chon.suy_giam) if chon else True,
+                "provider": (chon.provider if chon else ""),
+                "model": (chon.model_id if chon else ""),
+                "ho_model": (chon.model_family if chon else ""),
+                "ho_tac_gia": ho,
+                "ly_do": ban.to_khoi_leader()[:1500]}
+
+    def _dung_viec_cua_thuc_thi(self, task_id: str, ly_do: str) -> None:
+        """Dừng một việc con THAY MẶT tầng bước — và CẤM tầng việc thử lại nó.
+
+        HAI TẦNG CÙNG THỬ LẠI MỘT VIỆC LÀ MỘT LỖI KIẾN TRÚC, và nó đã khoá
+        chết một lần thực thi thật (đo 2026-09-11):
+
+            tầng BƯỚC bỏ lượt cũ, giao lượt mới   (§9 — nó sở hữu vòng phục hồi)
+            tầng VIỆC thấy việc cũ `FAILED` và
+              tự đưa về `QUEUED` (`_thu_lai_neu_dang`)
+            -> hai việc cùng xin khoá ghi `web`
+            -> cả hai nằm `WAITING`, `in_flight` rỗng, đứng im vĩnh viễn
+
+        Không tầng nào sai một mình; cái sai là cả hai cùng chủ động. Tầng
+        bước là tầng biết về kế hoạch, tiêu chí nghiệm thu và trần §9, nên
+        nó thắng — và cách nói điều đó cho tầng việc là làm cạn lượt thử của
+        việc bị bỏ. `_thu_lai_neu_dang` đọc đúng con số đó rồi dừng.
+        """
+        t = self.store.task(task_id)
+        if t is not None and t.attempts < MAX_ATTEMPTS:
+            t.attempts = MAX_ATTEMPTS
+            self.store.luu_task(t)
+            self.store.ghi_su_kien(
+                "TASK_ABANDONED", project_id=t.project_id, task_id=task_id,
+                level="WARNING",
+                detail=("tầng thực thi bỏ việc này; cạn lượt thử để tầng việc "
+                        f"KHÔNG tự chạy lại — {ly_do}")[:300])
+        self.stop(task_id, reason=ly_do)
+
+    def _tao_viec_cho_buoc(self, y: EYD.YDinhThucThi, b: EKH.BuocKeHoach,
+                           lan: int, phien_ban: int = 1) -> str:
+        """Một BƯỚC kế hoạch -> một `Task` thật của Router V4.
+
+        Đi qua ĐÚNG những rào mà `_chat` đã đi: `permissions.envelope_for`
+        quét cả mục tiêu bước lẫn câu gốc người dùng, và một bước chạm lớp
+        GATED vào thẳng `BLOCKED`. Bước đó KHÔNG BAO GIỜ được `QUEUED` chỉ
+        vì lần thực thi cha đã được duyệt — cổng của lần thực thi và cổng
+        của một việc là hai cổng khác nhau.
+        """
+        from scripts.control_center import permissions as PERM
+        pid = y.project_id
+        ctx = self.ctx(pid)
+        # PHẠM VI GHI CHỈ TỒN TẠI CHO BƯỚC GHI.
+        #
+        # Bước CHỈ ĐỌC phải có phạm vi RỖNG: `RulePlanner._hop_dong` suy
+        # `chi_doc = kind in _CHI_DOC or not scope`, nên một phạm vi mặc định
+        # không rỗng đủ để biến một bước đọc thành một việc đòi `repo_write`
+        # + worktree, và rồi cổng `diff` đánh hỏng nó vì "không tệp nào đổi".
+        # Bản đầu viết `scope if b.ghi else scope` — một phép chọn vô nghĩa
+        # do gõ nhầm, và nó che đúng lỗi này.
+        scope: Tuple[str, ...] = ()
+        if b.ghi:
+            scope = tuple(x for _k, x, m in b.tai_nguyen if m == "write") or \
+                self._scope_mac_dinh(ctx.project)
+        # MÃ VIỆC MANG CẢ BẢN KẾ HOẠCH. Không mang thì lượt đầu của bản v2
+        # trùng mã với bản v1, `luu_task` ghi đè một việc đã kết thúc về
+        # `QUEUED`, và lịch sử của bản trước biến mất — đúng thứ §10 tồn tại
+        # để giữ.
+        tid = (f"{pid}.{b.buoc_id}"
+               + (f"-v{phien_ban}" if int(phien_ban or 1) > 1 else "")
+               + (f"-r{lan}" if lan else ""))
+        pb = PERM.envelope_for(tid, objective=b.muc_tieu,
+                               intent=y.nguon_cau_nguoi_dung or y.goal,
+                               owned_scope=scope if b.ghi else ())
+        hd = ctx.planner._hop_dong(                         # noqa: SLF001
+            tid, b.muc_tieu, _loai_viec_cua(b), scope,
+            cau_goc=y.nguon_cau_nguoi_dung or y.goal, deps=())
+        d = hd.to_dict()
+        d["task_id"] = tid
+        d["objective"] = b.muc_tieu + "\n\n" + pb.render_for_agent()
+        d["_permission"] = pb.to_dict()
+        d["_thuc_thi"] = {"execution_id": y.execution_id, "buoc_id": b.buoc_id,
+                          "tieu_chi": list(b.tieu_chi_dat)}
+        # Router doc HO nhung thu agent headless khong doc duoc — cung khuon
+        # `_chat`. Quyen cua agent KHONG doi.
+        if any(k is LockKind.GIT for k, _r, _m in b.tai_nguyen):
+            self._kem_nhat_ky_git(ctx.project.repo_path, d)
+        self._kem_web_vao_hd(y.nguon_cau_nguoi_dung or y.goal, d)
+        self._kem_probe_vao_hd(self._khoi_probe(b.muc_tieu, pid), d)
+
+        t = Task(task_id=tid, project_id=pid, title=b.tieu_de or b.buoc_id,
+                 objective=b.muc_tieu,
+                 state=TaskState.BLOCKED if pb.gated else TaskState.QUEUED,
+                 priority=40, contract=d, permission=pb.decision.value,
+                 gate_reason=pb.ly_do(),
+                 blocked_reason=(pb.cau_hoi_cho_nguoi_dung() if pb.gated
+                                 else ""),
+                 resources=tuple(chuoi_tai_nguyen(k, r, m)
+                                 for k, r, m in b.tai_nguyen))
+        self.store.luu_task(t)
+        self.store.ghi_su_kien(
+            "TASK_CREATED", project_id=pid, task_id=tid,
+            level="WARNING" if pb.gated else "INFO",
+            detail=f"bước {b.buoc_id} của {y.execution_id}: {t.title}",
+            meta={"execution_id": y.execution_id, "buoc_id": b.buoc_id,
+                  "permission": t.permission})
+        return tid
+
+    def _quet_thuc_thi(self) -> Dict:
+        """Một nhịp cho MỌI lần thực thi còn sống. Gọi từ `tick()`.
+
+        Ba việc, theo thứ tự:
+
+        1. Việc con đã KẾT THÚC -> đưa kết quả vào bộ điều phối để chấm.
+        2. Đẩy mỗi lần thực thi đi tiếp một nhịp.
+        3. Lần thực thi vừa KẾT THÚC -> nói một câu trong chat (§21) và ghi
+           ký ức (§14), ĐÚNG MỘT LẦN.
+
+        Hỏng ở đây KHÔNG được làm vỡ vòng lặp điều phối: một lần thực thi
+        hỏng không được kéo theo mọi việc lẻ khác.
+        """
+        ra: Dict = {"nhan": [], "tick": [], "ket_luan": []}
+        for y in self.so_thuc_thi.dang_chay():
+            bd = self.dieu_phoi(y.project_id)
+            kh = self.so_thuc_thi.ke_hoach(y.execution_id)
+            if kh is None:
+                continue
+            for st in self.so_thuc_thi.buoc(y.execution_id, kh.phien_ban):
+                if st["state"] != DP.TrangThaiBuoc.DANG_CHAY.value:
+                    continue
+                t = self.store.task(st["task_id"]) if st["task_id"] else None
+                if t is None or not t.state.terminal:
+                    continue
+                # TIÊU THỤ KẾT QUẢ NGAY KHI VIỆC KẾT THÚC — KHÔNG chờ tầng
+                # việc cạn lượt.
+                #
+                # Đã thử chiều ngược lại (chờ `attempts >= MAX_ATTEMPTS` rồi
+                # mới đọc) để tránh vứt đi một lượt thử sau đó thành công.
+                # Nó gây DEADLOCK đo được: tầng bước không tiêu thụ nên không
+                # gọi `bo_viec`, không ai nhả khoá ghi, và lượt kế tiếp nằm
+                # `WAITING` vĩnh viễn với `in_flight` rỗng — thang phục hồi
+                # từ 4,0 giây thành không bao giờ dừng.
+                #
+                # Cuộc đua "tầng việc thử lại sau khi tầng bước đã bỏ" đã
+                # được chặn ở NGUỒN: `_dung_viec_cua_thuc_thi` làm CẠN lượt
+                # thử của việc bị bỏ, nên tầng việc không thể hồi sinh nó.
+                # Chặn ở một chỗ là đủ; chặn ở cả hai thì hai tầng cùng chờ
+                # nhau.
+                pb = ((t.result or {}).get("envelope") or {}) if t.result else {}
+                kq = EKQ.HopDongKetQua(
+                    task_id=t.task_id, buoc_id=st["buoc_id"],
+                    status=str(pb.get("status")
+                               or ("ok" if t.state is TaskState.DONE
+                                   else "failed")),
+                    summary=str(pb.get("summary") or ""),
+                    artifacts=tuple(pb.get("artifacts") or ()),
+                    files_changed=tuple(pb.get("changes") or ()),
+                    tests_run=dict(pb.get("tests") or {}),
+                    evidence=tuple(x for x in
+                                   [f"log:{pb.get('raw_log_ref')}"
+                                    if pb.get("raw_log_ref") else "",
+                                    f"commit:{pb.get('commit')}"
+                                    if pb.get("commit") else ""] if x),
+                    warnings=tuple(pb.get("warnings") or ()),
+                    known_limitations=tuple(pb.get("risks") or ()),
+                    follow_up_needed=tuple(pb.get("followups") or ()),
+                    provider=str(pb.get("provider") or ""),
+                    model=str(pb.get("model") or ""),
+                    runtime_id=str(pb.get("worker") or ""),
+                    duration=float(pb.get("duration") or 0.0),
+                    commit=str(pb.get("commit") or ""),
+                    branch=str(pb.get("branch") or ""),
+                    raw_log_ref=str(pb.get("raw_log_ref") or ""),
+                    # WORKTREE la cho KIEM DINH phai chay. Xem
+                    # `BoDieuPhoi._moi_gioi_cua`: chay `git status` o goc kho
+                    # se thay mot cay SACH va moi buoc ghi bi cham la hong.
+                    worktree=str(t.worktree or ""))
+                try:
+                    bd.nhan_ket_qua(t.task_id, kq,
+                                    premium_tier=self._bac_gia(pb.get("model")))
+                    ra["nhan"].append(f"{y.execution_id}/{st['buoc_id']}")
+                except Exception as exc:                    # noqa: BLE001
+                    self.store.ghi_su_kien(
+                        "EXEC_RESULT_ERROR", project_id=y.project_id,
+                        level="WARNING",
+                        detail=f"{y.execution_id}: {type(exc).__name__}: {exc}"
+                        [:300])
+            if y.trang_thai is TrangThaiThucThi.REPLANNING:
+                self._lap_lai_ke_hoach(y, kh)
+                continue
+            try:
+                kt = bd.tick(y.execution_id)
+                ra["tick"].append(kt.to_dict())
+            except Exception as exc:                        # noqa: BLE001
+                self.store.ghi_su_kien(
+                    "EXEC_TICK_ERROR", project_id=y.project_id, level="WARNING",
+                    detail=f"{y.execution_id}: {type(exc).__name__}: {exc}"[:300])
+        for y in self.so_thuc_thi.danh_sach(dang_song=False, limit=20):
+            k = self._ket_luan_thuc_thi(y)
+            if k:
+                ra["ket_luan"].append(k)
+        return ra
+
+    def _tieu_chi_chua_dat(self, eid: str):
+        """`[(mô tả, cách kiểm)]` của tiêu chí nghiệm thu CHƯA ĐẠT.
+
+        Đọc từ sự kiện `EXEC_VERIFIED` gần nhất — đó là bản chấm THẬT vừa
+        chạy, nên bước sửa nhắm vào đúng thứ đã trượt chứ không vào một bản
+        chấm dựng lại có thể khác đi.
+        """
+        from scripts.control_center.execution.ke_hoach import CachKiem
+        bc = None
+        for e in self.so_thuc_thi.su_kien(eid, limit=120):
+            if e["kind"] == "EXEC_VERIFIED":
+                bc = e.get("meta") or {}
+                break
+        if not bc:
+            return []
+        kh = self.so_thuc_thi.ke_hoach(eid)
+        theo_mo = {t.mo_ta: t for t in (kh.nghiem_thu if kh else ())}
+        ra = []
+        for t in (bc.get("tieu_chi") or []):
+            if str(t.get("trang_thai")) in ("DAT", "SUY_GIAM"):
+                continue
+            if not t.get("bat_buoc", True):
+                continue
+            mo = str(t.get("mo_ta") or "")
+            goc = theo_mo.get(mo)
+            ra.append((mo, tuple(goc.cach_kiem) if goc is not None else ()))
+        del CachKiem
+        return ra
+
+    def _sua_theo_chien_luoc(self, y, kh, tieu_chi, *, lan: int):
+        """(B) Tiêu chí NGỮ NGHĨA -> hỏi Strategist một bản sửa CÓ BIÊN.
+
+        KHÔNG phải mọi lần sửa đều gọi model: đường này chỉ chạy khi
+        `buoc_sua_tieu_chi` đã từ chối, tức là tiêu chí không đo một đường
+        dẫn nào và máy không suy ra được việc cần làm.
+
+        HAI RÀO giữ cho một đề xuất của model không nở ra thành một lần viết
+        lại kho:
+
+        * **phạm vi ghi do TA cấp, không do model chọn** — lấy từ phạm vi
+          ghi mà kế hoạch hiện tại đã khai. Model chỉ nói LÀM GÌ, không nói
+          ĐƯỢC GHI Ở ĐÂU.
+        * **vẫn qua `lap_lai_ke_hoach`**, nên nó chịu đúng `TRAN_LAP_KE_HOACH`
+          như mọi bản sửa khác.
+
+        Hỏng/không có hội đồng -> trả rỗng, và bên gọi dừng cho người.
+        """
+        from scripts.control_center.reasoning.phan_loai import phan_loai_luot
+        pid = y.project_id
+        duong = sorted({r for b in kh.buoc for _k, r, m in b.tai_nguyen
+                        if m == "write"})
+        if not duong:
+            duong = list(self._scope_mac_dinh(self.ctx(pid).project))
+        try:
+            hd = self.hoi_dong
+        except Exception:                                   # noqa: BLE001
+            hd = None
+        if hd is None or not duong:
+            return [], "", []
+
+        cau = (f"Mục tiêu gốc: {y.goal}\n\n"
+               "TIÊU CHÍ NGHIỆM THU CHƯA ĐẠT:\n"
+               + "\n".join(f"  - {m}" for m, _ in tieu_chi)
+               + "\n\nKế hoạch hiện tại đã chạy xong và MỌI BƯỚC ĐỀU ĐẠT, "
+                 "nhưng tiêu chí trên vẫn chưa đạt. Đề xuất MỘT việc sửa CÓ "
+                 "BIÊN để đạt nó. Chỉ được sửa trong: "
+               + ", ".join(duong)
+               + ".\nĐừng đề xuất đổi tiêu chí, đừng đề xuất nới phạm vi.")
+        try:
+            self._dam_bao_suc_khoe("chiến lược sửa")
+            kq = hd.chay(cau=cau, phan_loai=phan_loai_luot(cau),
+                         che_do=self.leader_ban_ghi(pid).che_do_enum(),
+                         khoi_san_co={"rang_buoc": self._khoi_rang_buoc(pid)[0],
+                                      "vien_nang": self._khoi_vien_nang(pid, cau)},
+                         chinh_sach=self.chinh_sach_cao_cap(pid),
+                         project_id=pid)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "REPAIR_STRATEGY_ERROR", project_id=pid, level="WARNING",
+                detail=f"{type(exc).__name__}: {exc}"[:300])
+            return [], "", []
+        cl = kq.chien_luoc
+        if cl is None or not cl.dung_duoc:
+            return [], "", []
+        muc = (cl.de_xuat or "").strip()
+        if cl.viec_can_lam:
+            muc += "\n\nViệc cần làm:\n" + "\n".join(
+                f"  - {x}" for x in cl.viec_can_lam[:6])
+        buoc = ELK.buoc_tu_de_xuat_sua(kh, muc_tieu=muc, duong=duong, lan=lan)
+        if not buoc:
+            return [], "", []
+        ng = next((x for x in kq.nguon_goc
+                   if getattr(x, "vai", None) and x.vai.value == "strategist"),
+                  None)
+        chon = getattr(ng, "chon", None)
+        self.so_thuc_thi.ghi_su_kien(
+            y.execution_id, "REPAIR_STRATEGY", project_id=pid,
+            detail=(f"Strategist đề xuất bản sửa · "
+                    f"{getattr(chon, 'provider', '?')}/"
+                    f"{getattr(chon, 'model_id', '?')}")[:300],
+            meta={"provider": getattr(chon, "provider", ""),
+                  "model": getattr(chon, "model_id", ""),
+                  "pham_vi": duong})
+        return (buoc,
+                "tiêu chí NGỮ NGHĨA chưa đạt — Strategist đề xuất bản sửa",
+                [f"tieu_chi:{m[:60]}" for m, _ in tieu_chi])
+
+    def _lap_lai_ke_hoach(self, y: EYD.YDinhThucThi, kh) -> Optional[Dict]:
+        """`REPLANNING` -> bản kế hoạch kế tiếp, hoặc `BLOCKED`. §9, §10.
+
+        MỘT lần thực thi ở `REPLANNING` mà không ai lập lại kế hoạch là một
+        lần thực thi KẸT — nó không kết thúc, không chạy, và không ai được
+        báo. Đó đúng là lỗi đo được ở lát cắt dọc đầu tiên của V0.9.
+
+        Bản mới do `lap_ke_hoach.buoc_sua_chua` dựng: giữ bước đã đạt, thay
+        bước hỏng bằng bước CÙNG MÃ mang thêm BẰNG CHỨNG hỏng. Không thêm
+        được gì (đã sửa đủ số lần, hoặc không bước nào sửa được) thì DỪNG
+        cho người — chứ không sinh ra một bản v3 giống hệt v2.
+        """
+        eid = y.execution_id
+        bd = self.dieu_phoi(y.project_id)
+        hong: Dict[str, str] = {}
+        for st in self.so_thuc_thi.buoc(eid, kh.phien_ban):
+            if st["xac_minh"] in ("DAT", "SUY_GIAM"):
+                continue
+            ly = "; ".join(
+                f"{k.get('cach')}: {k.get('chi_tiet')}"
+                for k in (st.get("kiem") or []) if not k.get("dat"))
+            hong[st["buoc_id"]] = ly or (
+                f"trạng thái {st['state']}, xác minh {st['xac_minh']}")
+        buoc = ELK.buoc_sua_chua(kh, hong) if hong else []
+        ly_do_sua = (f"{len(hong)} bước không qua kiểm định: "
+                     + ", ".join(sorted(hong)))
+        bang_chung = [f"buoc:{k}" for k in sorted(hong)]
+
+        # --- TIÊU CHÍ NGHIỆM THU CHƯA ĐẠT: SỬA, chứ không bỏ cuộc (§1) ------
+        #
+        # `hong` rỗng nghĩa là MỌI BƯỚC ĐỀU ĐẠT và thứ chưa đạt là TIÊU CHÍ
+        # của mục tiêu GỐC. Bản đầu dừng luôn ở `BLOCKED` — và đó là một lần
+        # bỏ cuộc quá sớm: nếu tiêu chí ĐO MỘT ĐƯỜNG DẪN và lần thực thi đã
+        # có thẩm quyền ghi ở đó, thì việc cần làm rất cụ thể và hoàn toàn
+        # nằm trong quyền đã cấp.
+        if not buoc:
+            tc = self._tieu_chi_chua_dat(eid)
+            if tc:
+                lan = kh.phien_ban
+                # (C) CẦN THẨM QUYỀN MỚI -> KHÔNG tự sửa.
+                if y.can_tham_quyen_moi:
+                    self.so_thuc_thi.doi_trang_thai(
+                        eid, TrangThaiThucThi.WAITING_AUTHORITY,
+                        ly_do=(EYD.cau_hoi_tham_quyen(y)
+                               or "cần bạn cho phép trước khi sửa"),
+                        pha="chờ bạn cho phép")
+                    return None
+                # (A) SỬA TẤT ĐỊNH — tiêu chí đo một đường dẫn cụ thể.
+                buoc = ELK.buoc_sua_tieu_chi(kh, tc, lan=lan)
+                if buoc:
+                    ly_do_sua = ("tiêu chí nghiệm thu chưa đạt, sửa có mục "
+                                 "tiêu: " + "; ".join(m[:80] for m, _ in tc[:2]))
+                    bang_chung = [f"tieu_chi:{m[:60]}" for m, _ in tc]
+                else:
+                    # (B) TIÊU CHÍ NGỮ NGHĨA -> để STRATEGIST đề xuất.
+                    buoc, ly_do_sua, bang_chung = self._sua_theo_chien_luoc(
+                        y, kh, tc, lan=lan)
+
+        if not buoc:
+            tc = self._tieu_chi_chua_dat(eid)
+            if hong:
+                ly = ("lập lại kế hoạch không thêm được gì — bước hỏng đã "
+                      "được sửa hết số lần cho phép. Cần bạn xem: "
+                      + "; ".join(f"{k}: {v[:120]}"
+                                  for k, v in list(hong.items())[:3]))
+            elif tc:
+                ly = ("MỌI BƯỚC ĐỀU ĐẠT nhưng tiêu chí nghiệm thu chưa đạt, "
+                      "và Router KHÔNG suy ra được một việc sửa CÓ BIÊN cho "
+                      "nó (tiêu chí không đo một đường dẫn nào, và Strategist "
+                      "cũng không đề xuất được). Cần bạn quyết: "
+                      + "; ".join(m[:90] for m, _ in tc[:2]))
+            else:
+                ly = ("kiểm định không đạt nhưng không xác định được thứ gì "
+                      "để sửa — cần bạn xem")
+            self.so_thuc_thi.doi_trang_thai(
+                eid, TrangThaiThucThi.BLOCKED, ly_do=ly, pha="cần bạn xem")
+            bd.nha_tai_nguyen(self.so_thuc_thi.y_dinh(eid) or y)
+            return None
+        try:
+            moi = bd.lap_lai_ke_hoach(eid, buoc, ly_do=ly_do_sua,
+                                      bang_chung=bang_chung)
+        except RuntimeError as exc:
+            self.so_thuc_thi.doi_trang_thai(
+                eid, TrangThaiThucThi.BLOCKED, ly_do=str(exc)[:400],
+                pha="cần bạn xem")
+            bd.nha_tai_nguyen(self.so_thuc_thi.y_dinh(eid) or y)
+            return None
+        bd.tick(eid)
+        return {"execution_id": eid, "phien_ban": moi.phien_ban}
+
+    def _bac_gia(self, model_id) -> int:
+        try:
+            m = self.fabric.models.get(str(model_id or ""))
+            return int(getattr(m, "premium_tier", 0) or 0)
+        except Exception:                                   # noqa: BLE001
+            return 0
+
+    def _ket_luan_thuc_thi(self, y: EYD.YDinhThucThi) -> Optional[Dict]:
+        """§21 + §14 — nói một câu và ghi ký ức, ĐÚNG MỘT LẦN.
+
+        Dùng `ket_qua_da_bao` (bảng BỀN) chứ không một `set` trong RAM: một
+        lần khởi động lại giữa chừng không được làm mất câu kết luận, và
+        cũng không được làm nó hiện ra hai lần.
+        """
+        khoa = f"exec:{y.execution_id}"
+        with self._khoa_bao:
+            if self.store.da_bao_ket_qua(khoa, y.trang_thai.value):
+                return None
+            bc = None
+            try:
+                kh = self.so_thuc_thi.ke_hoach(y.execution_id)
+                if kh is not None:
+                    # CÙNG bối cảnh kiểm định với tầng điều phối — kể cả
+                    # `moi_gioi_khac`. Bản trước chỉ đưa `moi_gioi` chung,
+                    # nên phán quyết ghi vào KÝ ỨC và vào vòng phản hồi chất
+                    # lượng có thể nói một bước ĐÃ ĐẠT là hỏng, chỉ vì nó
+                    # sống ở cây của bước anh em.
+                    dp = self.dieu_phoi(y.project_id)
+                    kqb, mg, khac = dp.canh_kiem(y.execution_id, kh)
+                    bc = EKD.kiem_dinh_thuc_thi(
+                        y, kh, kqb, moi_gioi=mg, moi_gioi_khac=khac)
+            except Exception:                               # noqa: BLE001
+                bc = None
+            ghi = self._ghi_ky_uc_thuc_thi(y, bc)
+            # §B — VÒNG PHẢN HỒI CHẤT LƯỢNG. Nằm TRONG khối đã khoá chống
+            # trùng của `_ket_luan_thuc_thi`, nên một lần thực thi sinh ĐÚNG
+            # MỘT quan sát kể cả khi app khởi động lại giữa chừng: khoá là
+            # bảng `ket_qua_da_bao` trên đĩa, không phải một `set` trong RAM.
+            qs = self._phan_hoi_chat_luong(y, bc)
+            van = DP.cau_ket_thuc(y, bc, ghi_nho=ghi)
+            tin = self.store.them_chat(
+                y.project_id, "assistant", van,
+                meta={"loai": "ket_luan_thuc_thi",
+                      "execution_id": y.execution_id,
+                      "trang_thai": y.trang_thai.value,
+                      "kiem_dinh": (bc.to_dict() if bc else None),
+                      "ky_uc": ghi, "phan_hoi": qs})
+            self.store.ghi_da_bao_ket_qua(khoa, y.trang_thai.value,
+                                          project_id=y.project_id,
+                                          message_id=tin.message_id)
+            self.so_thuc_thi.dat_ket_luan(y.execution_id, van)
+        self.store.ghi_su_kien(
+            "EXEC_REPORTED", project_id=y.project_id,
+            detail=f"{y.execution_id} [{y.trang_thai.value}] -> "
+                   f"tin nhắn #{tin.message_id}")
+        return {"execution_id": y.execution_id,
+                "message_id": tin.message_id, "text": van}
+
+    def _phan_hoi_chat_luong(self, y: EYD.YDinhThucThi, bc) -> Optional[Dict]:
+        """§B — kết quả đã kiểm định -> MỘT quan sát trong lịch sử VAI.
+
+        Nối `chiến lược -> kế hoạch -> thực thi -> kiểm định -> kết quả` bằng
+        `de_xuat` mà `_khoi_dong_tu_de_xuat` đã ghim vào ý định. Không có đề
+        xuất (người dùng gõ thẳng một việc, không qua một lời khuyên nào) thì
+        KHÔNG có ai để gắn kết quả vào, và `dung_quan_sat` trả `None` — im
+        lặng là câu trả lời đúng, không phải một mẫu vô danh.
+
+        Hỏng ở đây KHÔNG được làm hỏng câu kết luận: một dòng telemetry
+        không đáng đổi lấy việc người dùng không biết việc đã xong.
+        """
+        from scripts.control_center.execution import phan_hoi as EPH
+        try:
+            dx = self.so_thuc_thi.de_xuat_theo_ma(y.nguon_de_xuat)
+            giay = None
+            try:
+                giay = self.dieu_phoi(y.project_id).chi_phi(
+                    y.execution_id).tong_giay or None
+            except Exception:                               # noqa: BLE001
+                giay = None
+            pb = None
+            for e in self.so_thuc_thi.su_kien(y.execution_id, limit=80):
+                if e["kind"] == "REVIEW_VERDICT":
+                    pb = e.get("meta") or {}
+                    break
+            qs = EPH.dung_quan_sat(y, bc, de_xuat=dx, phan_bien=pb, giay=giay)
+            if qs is None:
+                return None
+            ra = EPH.ghi_phan_hoi(self._lich_su_vai(), qs,
+                                  rubric="docs/reports/CLOSED_LOOP_V09.md")
+            if ra:
+                self.so_thuc_thi.ghi_su_kien(
+                    y.execution_id, "QUALITY_OBSERVED",
+                    project_id=y.project_id,
+                    detail=(f"{qs.task_type} · {qs.provider}/{qs.model_id} · "
+                            f"{'ĐẠT' if qs.thanh_cong else 'KHÔNG ĐẠT'} · "
+                            f"lập lại {qs.so_lan_lap_lai}")[:300],
+                    meta=ra)
+            return ra
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "QUALITY_FEEDBACK_ERROR", project_id=y.project_id,
+                level="WARNING",
+                detail=f"{y.execution_id}: {type(exc).__name__}: {exc}"[:300])
+            return None
+
+    def _lich_su_vai(self):
+        """`BenchmarkStore` của tệp VAI — CÙNG tệp mà `HoiDong` đang ghi.
+
+        Lấy qua `self.hoi_dong` chứ không dựng một kho thứ hai: hai
+        `BenchmarkStore` trỏ cùng một tệp sẽ có hai bộ đệm lệch nhau, và
+        `summary_for` sẽ trả hai con số khác nhau cho cùng một câu hỏi.
+        """
+        try:
+            hd = self.hoi_dong
+        except Exception:                                   # noqa: BLE001
+            return None
+        return getattr(hd, "lich_su", None) if hd is not None else None
+
+    def _ghi_ky_uc_thuc_thi(self, y: EYD.YDinhThucThi, bc) -> List[Dict]:
+        """§14 — kết quả đã kiểm định -> ký ức. Hỏng thì bỏ qua, không nổ."""
+        if bc is None:
+            return []
+        try:
+            g = EGN.GhiNhoThucThi(self.ky_uc)
+            if not g.dung_duoc:
+                return []
+            tep = sorted({x for st in self.so_thuc_thi.buoc(y.execution_id)
+                          for x in ((st.get("ket_qua") or {})
+                                    .get("files_changed") or ())})
+            ds = EGN.phan_loai_ghi_nho(y, bc, tep_da_sua=tep)
+            ra = g.ghi(y.project_id, ds)
+            g.diem_dung(y.project_id, y, bc)
+            return ra
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "EXEC_MEMORY_ERROR", project_id=y.project_id, level="WARNING",
+                detail=f"{y.execution_id}: {type(exc).__name__}: {exc}"[:300])
+            return []
+
+    # -- 2c. API cong khai cua vong kin -------------------------------------
+
+    def thuc_thi_danh_sach(self, project_id: str = "",
+                           dang_song: Optional[bool] = None) -> List[Dict]:
+        return [y.to_dict() for y in
+                self.so_thuc_thi.danh_sach(project_id, dang_song=dang_song)]
+
+    def thuc_thi_anh_chup(self, execution_id: str) -> Dict:
+        d = self.so_thuc_thi.anh_chup(execution_id)
+        if d:
+            ns = self.dieu_phoi(d["y_dinh"]["project_id"]).ngan_sach(
+                execution_id)
+            d["ngan_sach"] = ns.to_dict() if ns else None
+            d["chi_phi"] = self.dieu_phoi(
+                d["y_dinh"]["project_id"]).chi_phi(execution_id).to_dict()
+        return d
+
+    def thuc_thi_duyet(self, execution_id: str, *, boi: str = "user",
+                       dong_y: bool = True) -> Dict:
+        """NGƯỜI duyệt cổng thẩm quyền. Chỉ người — không đường tự động nào."""
+        y = self.so_thuc_thi.y_dinh(execution_id)
+        if y is None:
+            raise KeyError(execution_id)
+        bd = self.dieu_phoi(y.project_id)
+        y2 = bd.duyet(execution_id, boi=boi, dong_y=dong_y)
+        if dong_y:
+            bd.tick(execution_id)
+        return y2.to_dict()
+
+    def thuc_thi_tam_dung(self, execution_id: str, *, ly_do: str = "") -> Dict:
+        y = self.so_thuc_thi.y_dinh(execution_id)
+        if y is None:
+            raise KeyError(execution_id)
+        return self.dieu_phoi(y.project_id).tam_dung(
+            execution_id, ly_do=ly_do or "người dùng tạm dừng").to_dict()
+
+    def thuc_thi_tiep_tuc(self, execution_id: str) -> Dict:
+        y = self.so_thuc_thi.y_dinh(execution_id)
+        if y is None:
+            raise KeyError(execution_id)
+        return self.dieu_phoi(y.project_id).tiep_tuc(execution_id).to_dict()
+
+    def thuc_thi_huy(self, execution_id: str, *, ly_do: str = "") -> Dict:
+        y = self.so_thuc_thi.y_dinh(execution_id)
+        if y is None:
+            raise KeyError(execution_id)
+        return self.dieu_phoi(y.project_id).huy(
+            execution_id, ly_do=ly_do or "người dùng huỷ").to_dict()
+
     # -- 3. Vong lap dieu phoi ----------------------------------------------
 
     def tick(self) -> Dict:
@@ -1862,6 +2912,14 @@ class ControlCenter:
             self._quet_ket_qua_chua_bao()
         except Exception:                                   # noqa: BLE001
             pass
+        # V0.9 — NHIP CUA VONG KIN. Chay TRUOC phep kiem tran song song,
+        # cung ly do: mot buoc da ket thuc thi khong con chiem khe nao, va
+        # phan quyet kiem dinh cua no khong duoc phai cho mot khe trong.
+        try:
+            self._quet_thuc_thi()
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien("EXEC_SCAN_ERROR", level="WARNING",
+                                   detail=f"{type(exc).__name__}: {exc}"[:300])
         with self._khoa:
             đang = len([t for t in self._dang_chay.values() if t.is_alive()])
             self._dang_chay = {k: v for k, v in self._dang_chay.items()
@@ -2024,6 +3082,38 @@ class ControlCenter:
                                + "\n" + mo)
         return hd
 
+    def _nha_phien_moi(self, ctx: "ProjectContext", session_id: str,
+                       ly_do: str) -> None:
+        """Trả lại một phiên VỪA DỰNG khi lần giao hỏng sau đó.
+
+        KHUYẾT TẬT ĐÃ RÒ (đo trên sổ chính tắc 2026-09-12, 8 phiên `STARTING`
+        rò trong MỘT lần chạy): `_giao_khong_luoi` dựng phiên ở bước (2), rồi
+        bước (3) (hết lease runtime) và bước (4) (việc bị vòng khác nhận
+        trước) `return` mà chỉ trả KHOÁ và LEASE — phiên vừa dựng ở lại sổ
+        mãi ở `STARTING`.
+
+        `SessionState.STARTING.alive` là `True`, nên mỗi lần giao hỏng ĂN
+        VĨNH VIỄN một khe. Sau ~12 lần thì `WAIT: đã có 12/12 phiên sống` và
+        không việc nào được giao nữa. `recover()` có dọn `STARTING` quá hạn
+        nhưng nó CHỈ chạy lúc khởi động, nên trong một lần chạy dài thì vô
+        nghĩa — đó là lý do một lần nghiệm thu tự bóp cổ chính nó giữa chừng.
+
+        Chỉ gọi cho phiên do CHÍNH lần giao này dựng. Phiên DÙNG LẠI thì
+        không được đụng: nó đã sống từ trước và có thể vừa được giao việc
+        khác.
+        """
+        if not session_id:
+            return
+        try:
+            ctx.sessions.dung(session_id, state=SessionState.STOPPED,
+                              reason=f"lần giao không thành: {ly_do}"[:280])
+        except Exception as exc:                              # noqa: BLE001
+            # Không để việc dọn dẹp làm hỏng đường trả lời của lần giao.
+            self.store.ghi_su_kien(
+                "SESSION_RELEASE_FAILED", project_id=ctx.project.project_id,
+                session_id=session_id, level="WARNING",
+                detail=f"{type(exc).__name__}: {exc}"[:200])
+
     def _giao_khong_luoi(self, t: Task, ctx: "ProjectContext",
                          lm: LockManager) -> Dict:
         """Thân thật của `_giao`. Thứ tự giành tài nguyên cố định — xem
@@ -2088,7 +3178,7 @@ class ControlCenter:
             if qd.action is SessionAction.REUSE:
                 s = ctx.sessions.reuse(qd.session_id, t, contract=hd)
             else:
-                s = ctx.sessions.create(qd, t, contract=hd)
+                s = ctx.sessions.create(qd, t, contract=hd)  # RÒ ở (3)/(4)
         except (WorktreeError, ValueError) as exc:
             lm.tra(t.project_id, t.task_id)
             self.store.doi_trang_thai(
@@ -2097,12 +3187,17 @@ class ControlCenter:
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": str(exc)[:200]}
 
+        # Phien VUA DUNG cho lan giao nay. Neu lan giao hong o (3) hoac (4)
+        # thi no chua tung chay gi, va phai duoc tra lai — xem `_nha_phien_moi`.
+        moi = s.session_id if qd.action is not SessionAction.REUSE else ""
+
         # (3) lease KHE runtime cua Router V4
         khoa_lease = self._muon_lease(ctx, s.runtime_id, t.task_id)
         if khoa_lease is None:
             lm.tra(t.project_id, t.task_id)
             ly_do = (f"runtime {s.runtime_id} hết khe đồng thời — chờ lượt "
                      f"sau thay vì đẩy thêm vào một tài khoản đã đầy")
+            self._nha_phien_moi(ctx, moi, ly_do)
             self._sang_waiting(t, ly_do)
             return {"task_id": t.task_id, "dispatched": False, "reason": ly_do}
 
@@ -2110,6 +3205,8 @@ class ControlCenter:
         if not self.store.claim_task(t.task_id, s.session_id):
             ctx.leases.release(khoa_lease, self.owner)
             lm.tra(t.project_id, t.task_id)
+            self._nha_phien_moi(
+                ctx, moi, "việc đã bị một vòng lập lịch khác nhận trước")
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": "việc đã bị một vòng lập lịch khác nhận trước"}
 
@@ -2555,12 +3652,43 @@ class ControlCenter:
             return False                    # con cong khac hong -> giu FAILED
 
         pb = kq.envelope
-        khai = {str(t).replace("\\", "/").strip("/") for t in pb.changes if t}
         that = sorted({str(t).replace("\\", "/").strip("/")
                        for t in bc.files_changed_observed if t})
-        # CHI trường hợp khai RỖNG mà đĩa CÓ đổi.
-        if khai or not that:
+        # ĐĨA PHẢI CÓ ĐỔI. Chiều ngược lại ("khai có sửa mà đĩa SẠCH") là
+        # thất bại im lặng thật sự và KHÔNG BAO GIỜ được chấp nhận ở đây —
+        # nhánh đó đã bị `cong_diff` chặn và ta không đụng tới.
+        if not that:
             return False
+        # KHÔNG tự suy lại "worker có khai gì không" từ `pb.changes`.
+        #
+        # ĐÂY LÀ KHUYẾT TẬT ĐÃ LÀM HỎNG CẢ MỘT ĐỢT NGHIỆM THU THẬT, và nó
+        # nằm hoàn toàn trong mã của ta chứ không phải ở nhà cung cấp:
+        #
+        # `cong_diff` phán "worker không khai sửa gì" dựa trên `TaskResult.
+        # files_changed` — một bản ĐÃ LỌC, chỉ giữ thứ trông như đường dẫn.
+        # Hàm này lại đọc `pb.changes` THÔ. Khi model điền vào `changes` một
+        # CÂU MÔ TẢ ("Tạo docs/reports/x.md với tiêu đề, 4 gạch đầu dòng…")
+        # thay vì một đường dẫn, hai cái nhìn lệch nhau: cổng thấy RỖNG nên
+        # nó báo khai thiếu, còn hàm này thấy CÓ nên nó từ chối đối soát —
+        # và một việc LÀM ĐÚNG bị đánh hỏng.
+        #
+        # ĐO ĐƯỢC (Fanfic thật, 2026-09-12): 9/9 lượt worker ghi ĐÚNG tệp,
+        # đúng phạm vi, `scope`/`security`/`artifacts` đều xanh, `diff` là
+        # cổng DUY NHẤT hỏng — và cả 9 đều `FAILED`.
+        #
+        # GỐC RỄ của 9 lần đó đã được sửa Ở CHỖ KHÁC và nó còn tầm thường
+        # hơn: `parse_result` của V3 chỉ đọc `files_changed`, trong khi lời
+        # nhắc của Control Center BẮT BUỘC worker khai vào `changes`. Cổng
+        # chấm worker trên một trường mà chính ta không bao giờ yêu cầu nó
+        # điền, nên MỌI việc ghi đều hỏng một cách tất định — không phải may
+        # rủi theo nhà cung cấp. Xem `router_v3/packet.py::parse_result`.
+        #
+        # Hàm này VẪN cần thiết sau khi sửa gốc: khi model điền `changes`
+        # bằng một CÂU MÔ TẢ thay vì đường dẫn (đã thấy thật), lời khai và
+        # đĩa vẫn lệch nhau, và đây là nơi đối soát trên tập THẬT.
+        #
+        # Nguồn sự thật DUY NHẤT về việc worker đã khai gì LÚC QUA CỔNG là
+        # chính thông điệp của cổng, và nó được khớp ngay dưới đây.
         # KHONG duoc hoi `pb.status` o day — no da BI GHI DE.
         #
         # `Executor.run` dat `pb.status = "failed"` va
@@ -2604,6 +3732,27 @@ class ControlCenter:
             return False
 
         pb.changes = that                   # bao cao noi dung THAT
+        # VA CA TRANG THAI. Day la ve thu hai, va thieu no thi ca cuoc doi
+        # soat chi chua duoc mot nua:
+        #
+        # Ben goi (`_chay`) dung ket qua `True` de nang TRANG THAI VIEC len
+        # `DONE`, nhung phong bi thi VAN mang `status="failed"` +
+        # `failure_reason="gate_diff"`. Hai cai nhin ve CUNG mot su that lai
+        # noi nguoc nhau, va moi tang doc sau do doc phai cai sai:
+        #   * `HopDongKetQua` dung tu phong bi -> `status="failed"` -> tang
+        #     BUOC ket luan buoc HONG va di sua chua, DU viec da `DONE`;
+        #   * su kien phien in ra "việc hỏng; phiên giữ ấm để dùng lại" ngay
+        #     duoi mot dong `TASK_FINISHED DONE`.
+        # Do duoc (Fanfic that, ex_ca0dc426af20): `ghi_tailieu` DAT doi soat
+        # ba lan lien tiep, ba lan deu `RUNNING -> DONE`, va ca ba lan tang
+        # buoc van xep KHONG_DAT roi sua chua -> lap lai ke hoach -> BLOCKED.
+        # Tep da nam tren dia voi dung dau xac nhan tu lan dau.
+        #
+        # Da doi soat tren tap THAT va moi cong khac deu dat, nen ket luan
+        # dung la "viec NAY xong". Giu `failed` o day la mot loi khai sai do
+        # CHINH ta viet ra, khong phai loi cua worker.
+        pb.status = "ok"
+        pb.failure_reason = ""
         pb.warnings.append(
             f"worker KHÔNG khai `changes` nhưng đĩa đổi {len(that)} tệp. "
             f"Đã đối soát với `git`: mọi tệp đều trong phạm vi và mọi cổng "
@@ -3066,7 +4215,14 @@ class ControlCenter:
                       "findings": pb.findings[:10], "risks": pb.risks[:10],
                       "placement": p.key, "duration": round(pb.duration, 2),
                       "fail_sig": self._chu_ky_hong(pb)})
-            ctx.sessions.ket_thuc_viec(session_id, task_id, ok=kq.ok, pid=pid)
+            # `moi`, khong phai `kq.ok`: sau một cuộc ĐỐI SOÁT đạt, `kq.ok`
+            # vẫn `False` (nó đọc cổng `diff` đã hỏng) trong khi việc đã
+            # `DONE`. Dùng `kq.ok` ở đây in ra "việc hỏng; phiên giữ ấm" ngay
+            # dưới một dòng `TASK_FINISHED DONE` — cùng một sự thật, hai câu
+            # trả lời ngược nhau, và người vận hành đọc sổ sẽ tin câu sai.
+            ctx.sessions.ket_thuc_viec(
+                session_id, task_id,
+                ok=moi in (TaskState.DONE, TaskState.REVIEW), pid=pid)
             # NHA KHOA NGAY KHI VIEC DA O TRANG THAI CUOI — truoc khi thu lai,
             # truoc khi bao chat, truoc khi gop vao cha. Hai ly do do that:
             #   * Toa: `_tong_hop_toa` chay TRONG luong cua con cuoi, nen neu
@@ -3394,6 +4550,15 @@ class ControlCenter:
                         detail=(f"nhả {nha} khoá của một việc mồ côi — nó "
                                 f"không còn chạy nữa"))
                 bc["tasks"].append(t.task_id)
+        # V0.9 (§11) — DOI SOAT VONG KIN. Sau viec le, vi no doc trang thai
+        # viec da duoc doi soat o tren: mot buoc coi la mo coi chi khi viec
+        # cua no that su khong con.
+        try:
+            bc["thuc_thi"] = DP.BoDieuPhoi(
+                self.so_thuc_thi, tao_viec=self._tao_viec_cho_buoc,
+                trang_thai_viec=self._trang_thai_viec).doi_soat_khoi_dong()
+        except Exception as exc:                            # noqa: BLE001
+            bc["thuc_thi"] = {"loi": f"{type(exc).__name__}: {exc}"[:200]}
         self.store.ghi_su_kien(
             "RECOVERED", level="WARNING",
             detail=(f"phục hồi: {len(bc['tasks'])} việc mồ côi, "
@@ -3590,7 +4755,49 @@ class ControlCenter:
             "dong": list(ngg.get("dong_nguon_goc") or []),
             "ts": ngg.get("ts") or 0.0,
         } if ngg else None)
+        # V0.9 — VONG KIN. Phan GON di theo nhip nhanh (giong `suy_luan`):
+        # muc tieu, trang thai, tien do, cong tham quyen. Anh chup DAY DU cua
+        # mot lan thuc thi o `GET /api/execution?id=…` — nhoi ca ke hoach +
+        # bang chung vao moi nhip mot giay se bien o quan sat thanh voi.
+        try:
+            d["thuc_thi"] = self._thuc_thi_gon(pid)
+        except Exception:                                   # noqa: BLE001
+            d["thuc_thi"] = []
         return d
+
+    def _thuc_thi_gon(self, project_id: str) -> List[Dict]:
+        """Dòng GỌN cho mỗi lần thực thi — đủ cho thanh tiến độ và nút bấm."""
+        from scripts.control_center.execution.so import tien_do
+        ra: List[Dict] = []
+        ds = self.so_thuc_thi.dang_chay(project_id) or             self.so_thuc_thi.danh_sach(project_id, limit=5)
+        for y in ds[:8]:
+            kh = self.so_thuc_thi.ke_hoach(y.execution_id)
+            bs = {b["buoc_id"]: b
+                  for b in self.so_thuc_thi.buoc(y.execution_id,
+                                                 kh.phien_ban if kh else 1)}
+            ra.append({
+                "execution_id": y.execution_id, "goal": y.goal,
+                "trang_thai": y.trang_thai.value,
+                "trang_thai_nhan": y.trang_thai.nhan,
+                "pha": y.pha, "ban_ke_hoach": y.ban_ke_hoach,
+                "tham_quyen": y.tham_quyen.value, "duyet": y.duyet.value,
+                "can_tham_quyen_moi": y.can_tham_quyen_moi,
+                "tac_dong_production": y.tac_dong_production,
+                "ly_do_dung": y.ly_do_dung,
+                "so_lan_thu_lai": y.so_lan_thu_lai,
+                "so_lan_lap_lai": y.so_lan_lap_lai,
+                "ket_thuc": y.trang_thai.ket_thuc,
+                "tien_do": tien_do(kh, bs),
+                "buoc": [{"buoc_id": m, "state": b["state"],
+                          "xac_minh": b["xac_minh"], "task_id": b["task_id"],
+                          "tieu_de": (kh.buoc_theo_ma(m).tieu_de
+                                      if kh and kh.buoc_theo_ma(m) else m),
+                          "che_do_ghi": (kh.buoc_theo_ma(m).che_do_ghi.value
+                                         if kh and kh.buoc_theo_ma(m) else ""),
+                          "phu_thuoc": (list(kh.buoc_theo_ma(m).phu_thuoc)
+                                        if kh and kh.buoc_theo_ma(m) else [])}
+                         for m, b in sorted(bs.items())]})
+        return ra
 
     def log_cua_viec(self, task_id: str, *, limit: int = 400) -> str:
         """Nhật ký của một việc: sự kiện + nhật ký THÔ của agent nếu có.

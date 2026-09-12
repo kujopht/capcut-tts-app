@@ -387,6 +387,142 @@ FILE_REDIRECT = re.compile(r">\s*(?!&)")
 STREAM_REDIRECT = re.compile(r"\d?>&\d?")
 
 
+# ---------------------------------------------------------------------------
+# Tier 1c: cwd-LAUNDERED repository discovery, and stdin-fed inline source.
+#
+# WHY THIS IS HERE AND NOT IN settings.json, AND WHY IT DENIES RATHER THAN ASKS
+# ---------------------------------------------------------------------------
+# Measured, repeatedly, by agents working in this repo (latest: 2026-09-11):
+#
+#     cd <repo> && grep -n "sym" path/to/file.py
+#
+# Claude Code resolves the paths a Bash command NAMES and checks them against
+# the `Read(...)` deny rules. After a `cd`, the effective directory is not
+# statically derivable, so it cannot prove the search never touches `.env` --
+# and it drops to ASK. `scripts/kiem_quyen.py` has documented that mechanism
+# since 2026-09-10, and `CLAUDE.md` has told agents to use `scripts/tim.py`
+# instead for just as long.
+#
+# Prose did not hold. An agent that has read both still emits the shape out of
+# habit, because `cd <repo> &&` is a reflex prefix rather than a decision. The
+# result is an interactive prompt in the middle of an unattended run -- the one
+# failure mode the whole permission profile exists to avoid.
+#
+# So this is enforcement, not advice, and it DENIES:
+#
+#   * an ASK stalls the session and teaches nothing -- the operator clicks Yes
+#     and the agent emits the same shape a minute later;
+#   * a DENY arrives in-band, in the same turn, carrying a REMEDIATION line
+#     the agent can act on immediately. Measured in this very session: the
+#     guard's `python -c` denial redirected an agent on the first try.
+#
+# It is NOT a read-access restriction. Every one of these reads is still
+# available -- through `Read`/`Grep`/`Glob`, through `scripts/tim.py`, through
+# `git grep`, or through the same command with an explicit path and no `cd`.
+# Nothing here widens anything, and the secret/destructive tiers above are
+# untouched.
+CD_BINARIES = {"cd", "chdir", "pushd", "set-location", "sl"}
+
+#: Binaries whose READ SCOPE is what a `cd` makes unprovable. Deliberately
+#: excludes `git`, `python`, `node`, `npm`: `cd <repo> && git status` and
+#: `cd <repo> && python -m unittest ...` name no ambiguous read path, are
+#: already sanctioned in `scripts/kiem_quyen.py`'s safe matrix, and must keep
+#: running untouched.
+REPO_DISCOVERY = {
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "sed", "awk", "gawk",
+    "cat", "bat", "head", "tail", "more", "less", "nl", "strings", "tac",
+    "ls", "dir", "wc", "findstr", "select-string", "sls", "tree", "du",
+    "stat", "file", "type", "get-content", "gc",
+}
+
+#: The one canonical answer, repeated verbatim in both remediations so an
+#: agent parsing `REMEDIATION:` always gets an actionable next step.
+REMEDY_SEARCH = (
+    "REMEDIATION: drop the `cd` and use one of these instead -- "
+    "(1) the Read/Grep/Glob tools with an explicit repo-relative or absolute "
+    "path; (2) `python scripts/tim.py \"<pattern>\" <path>` "
+    "(or `--doc <file> --tu N --den M` to read a range); "
+    "(3) `git grep -n \"<pattern>\" -- <path>`. "
+    "All three prove their read scope without changing the working directory. "
+    "See CLAUDE.md section \"Tim/doc trong kho\"."
+)
+
+REMEDY_EDIT = (
+    "REMEDIATION: use the Edit or Write tool to change a file, and the Read "
+    "tool to inspect one. If a script really must run, save it under the "
+    "session scratchpad directory and run it by PATH "
+    "(`python <scratchpad>/x.py`), never by feeding source on stdin. "
+    "See CLAUDE.md section \"Tim/doc trong kho\"."
+)
+
+
+def cwd_laundered_read(command: str) -> str | None:
+    """`cd <path> && grep ...` and its family. None when the shape is absent.
+
+    Relationship BETWEEN segments, so it runs on the whole command rather than
+    per segment like the rest of tier 1. Order matters: a reader BEFORE the
+    `cd` is unaffected, because its paths still resolve statically.
+    """
+    saw_cd = False
+    for raw in SEGMENT_SPLIT.split(command):
+        flat = raw.strip()
+        if not flat:
+            continue
+        tokens = tokenize(flat)
+        if not tokens:
+            continue
+        name = binary_name(tokens[0])
+        if name in CD_BINARIES:
+            # A bare `cd` with nothing after it changes nothing that can be
+            # laundered -- and `cd "$(git rev-parse --show-toplevel)"` is a
+            # normal, already-tested command.
+            saw_cd = len(tokens) > 1
+            continue
+        if saw_cd and name in REPO_DISCOVERY:
+            return (
+                f"repository discovery behind a `cd` ({name}). After a `cd` "
+                f"the effective directory is not statically derivable, so "
+                f"Claude Code cannot prove this read never touches a denied "
+                f"path (`.env`, keys) and falls back to an interactive "
+                f"prompt -- which stalls unattended work. {REMEDY_SEARCH}"
+            )
+    return None
+
+
+#: Heredoc redirects. `<<<` (here-STRING) is deliberately included: it feeds
+#: source on stdin exactly the same way.
+HEREDOC = re.compile(r"<<-?<?")
+
+
+def stdin_inline_source(segment: str, tokens: list[str], name: str) -> str | None:
+    """`python - <<'EOF'`, `bash <<EOF`, `node -` -- inline source via stdin.
+
+    Same class as `python -c`, which tier 1 has always denied, and the same
+    reason: arbitrary code that never appears as a reviewable file. The `-c`
+    check misses it because the source arrives on a pipe rather than in argv,
+    so an agent blocked from `python -c` simply reaches for a heredoc -- which
+    is precisely what happened in this repo (2026-09-11, eight times in one
+    session) while making ordinary file edits.
+    """
+    if name not in INLINE_SOURCE_FLAGS:
+        return None
+    fed_by_heredoc = bool(HEREDOC.search(segment))
+    reads_stdin_script = any(
+        t == "-" for t in tokens[1:]
+    ) and not any(t in ("-m", "--module") for t in tokens[1:])
+    if not (fed_by_heredoc or reads_stdin_script):
+        return None
+    # `python -m unittest <<EOF` feeds DATA to a named module, not source.
+    if any(t in ("-m", "--module") for t in tokens[1:]) and not reads_stdin_script:
+        return None
+    how = "a heredoc" if fed_by_heredoc else "stdin (`-`)"
+    return (
+        f"inline code execution via {how} ({name}). This is the same "
+        f"unreviewable arbitrary execution as `{name} -c`, which is denied "
+        f"above; feeding the source on stdin only hides it. {REMEDY_EDIT}"
+    )
+
+
 def is_bypass(mode: str) -> bool:
     """True only for the exact bypassPermissions string -- unknown fails safe."""
     return mode == BYPASS_MODE
@@ -956,6 +1092,10 @@ def evaluate(segment: str) -> str | None:
     if name in MUTATION_BINARIES:
         return MUTATION_BINARIES[name]
 
+    reason = stdin_inline_source(flat, tokens, name)
+    if reason:
+        return reason
+
     if name in INLINE_SOURCE_FLAGS:
         # `-m module` is legitimate; inline source is not.
         #
@@ -1042,6 +1182,18 @@ def main() -> int:
 
         command = STREAM_REDIRECT.sub(" ", command)
         mode = payload.get("permission_mode") or ""
+
+        # Tier 1c -- a relationship BETWEEN segments, so it cannot live in the
+        # per-segment loop below. Checked on the ORIGINAL command, before
+        # substitution expansion, because `cd` and its reader are siblings at
+        # the top level. Enforced in every mode, same as the rest of tier 1.
+        reason = cwd_laundered_read(command)
+        if reason:
+            emit(
+                "deny",
+                f"Blocked by .claude/hooks/guard_indirect_exec.py: {reason}",
+            )
+            return 0
 
         ask_reason: str | None = None
         ask_segment = ""

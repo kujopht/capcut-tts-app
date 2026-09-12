@@ -274,8 +274,60 @@ MUST_ALLOW_READ = [
 ]
 
 # Routine work: the guard stays out of the way entirely, in both modes.
+# ---------------------------------------------------------------------------
+# Tier 1c regression -- the cwd-laundered read, and stdin-fed inline source.
+#
+# Both shapes were emitted by working agents in this repo despite CLAUDE.md
+# saying not to. These cases are the executable version of that instruction:
+# if someone relaxes the guard, this fails instead of the operator discovering
+# it through a surprise prompt mid-run.
+#
+# Every one of these must ALSO carry a REMEDIATION line -- asserted separately
+# in `main()`. A deny without a next step just moves the stall.
+MUST_DENY_CWD_LAUNDERED = [
+    ("cd && grep", 'cd C:/FanficWorkers/router-control-center && grep -n "x" a.py'),
+    ("cd ; grep", 'cd /c/repo ; grep -rn TODO scripts/'),
+    ("cd && rg", "cd /c/repo && rg TrangThai scripts/"),
+    ("cd && find", 'cd /c/repo && find scripts -name "*.py"'),
+    ("cd && sed range", "cd /c/repo && sed -n '1,40p' scripts/x.py"),
+    ("cd && cat", "cd /c/repo && cat README.md"),
+    ("cd && head", "cd /c/repo && head -40 scripts/x.py"),
+    ("cd && tail", "cd /c/repo && tail -20 docs/HANDOFF.md"),
+    ("cd && ls", "cd /c/repo && ls scripts/control_center"),
+    ("cd && wc", "cd /c/repo && wc -l scripts/x.py"),
+    ("cd && awk", "cd /c/repo && awk '{print $1}' scripts/x.py"),
+    # The exact shape that triggered this rule: a long chain whose grep sits
+    # several `&&` after the cd, so no single settings.json glob matches it.
+    ("cd && chain ending in grep",
+     'cd /c/repo && python -m compileall -q scripts && echo OK && grep -n "sym" a.py'),
+    ("cd then pipe to grep", "cd /c/repo && cat a.py | grep sym"),
+    ("pushd && grep", "pushd /c/repo && grep -rn x scripts/"),
+]
+
+MUST_DENY_STDIN_SOURCE = [
+    ("python - heredoc", "python - <<'PYEOF'\nprint(1)\nPYEOF"),
+    ("python3 - heredoc", "python3 - <<EOF\nprint(1)\nEOF"),
+    ("python dash stdin", "echo 'print(1)' | python -"),
+    ("bash heredoc", "bash <<'EOF'\nrm -rf /tmp/x\nEOF"),
+    ("sh heredoc", "sh <<EOF\nls\nEOF"),
+    ("node dash", "echo 'console.log(1)' | node -"),
+    ("here-string", "python - <<< 'print(1)'"),
+]
+
 MUST_RUN = [
     ("git status", "git status --porcelain"),
+    # cd + a command that names no ambiguous read path stays untouched. These
+    # are in `scripts/kiem_quyen.py`'s own safe matrix and must not regress.
+    ("cd && git status", "cd /c/repo && git status --porcelain"),
+    ("cd && git log", "cd /c/repo && git log --oneline -5"),
+    ("cd && unittest", "cd /c/repo && python -m unittest scripts.tests.test_x"),
+    ("cd && compileall", "cd /c/repo && python -m compileall -q scripts"),
+    ("cd && npm test", "cd /c/repo/web && npm test"),
+    ("cd && git add+commit", 'cd /c/repo && git add -A && git commit -m "x"'),
+    # A reader BEFORE any cd still resolves statically -- unaffected.
+    ("grep then cd", "grep -rn TODO scripts/ && cd /c/repo"),
+    # Data on stdin to a NAMED module is not inline source.
+    ("module reading stdin", "python -m json.tool <<EOF\n{}\nEOF"),
     ("git diff", "git diff HEAD~1"),
     ("git log", "git log --oneline -10"),
     ("git branch -d", "git branch -d merged-branch"),
@@ -409,6 +461,41 @@ def main() -> int:
     run_half("MUST RUN (no interference)", MUST_RUN, AUTO, "silent", failures)
     run_half("MUST RUN (no interference)", MUST_RUN, BYPASS, "silent", failures)
     checks += len(MUST_RUN) * 2
+
+    # Tier 1c -- denied in every mode, same as the rest of tier 1.
+    for cases, title in ((MUST_DENY_CWD_LAUNDERED, "MUST DENY cwd-laundered read"),
+                         (MUST_DENY_STDIN_SOURCE, "MUST DENY stdin inline source")):
+        for mode in (AUTO, BYPASS, DEFAULT):
+            run_half(title, cases, mode, "deny", failures)
+        checks += len(cases) * 3
+
+    # A DENY WITHOUT A NEXT STEP JUST MOVES THE STALL.
+    #
+    # The whole point of denying instead of asking is that the agent can act on
+    # the message in the same turn. So the message is part of the contract, not
+    # decoration, and it is asserted like one.
+    print(f"\n{'=' * 78}\nREMEDIATION present in every tier-1c denial\n{'=' * 78}")
+    for cases in (MUST_DENY_CWD_LAUNDERED, MUST_DENY_STDIN_SOURCE):
+        for label, cmd in cases:
+            _, reason = decide(cmd, AUTO)
+            ok = "REMEDIATION:" in reason
+            print(f"  [{'PASS' if ok else 'FAIL'}] {label:<28} -> "
+                  f"{'has remediation' if ok else 'NO REMEDIATION'}")
+            checks += 1
+            if not ok:
+                failures.append(("REMEDIATION", AUTO, label, cmd,
+                                 "no remediation", "REMEDIATION:", reason[:200]))
+
+    # The remediation must NAME the sanctioned tool, not merely say "don't".
+    print(f"\n{'=' * 78}\nREMEDIATION names the canonical search path\n{'=' * 78}")
+    _, reason = decide('cd /c/repo && grep -n "x" a.py', AUTO)
+    for needle in ("scripts/tim.py", "git grep", "Read/Grep/Glob"):
+        ok = needle in reason
+        print(f"  [{'PASS' if ok else 'FAIL'}] names {needle}")
+        checks += 1
+        if not ok:
+            failures.append(("REMEDIATION", AUTO, f"names {needle}",
+                             "cd && grep", "missing", needle, reason[:200]))
 
     print(f"\n{'=' * 78}")
     if failures:

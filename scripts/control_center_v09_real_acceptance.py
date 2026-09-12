@@ -37,8 +37,9 @@ import io
 import json
 import sys
 import time
+import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 GOC = Path(__file__).resolve().parents[1]
 if str(GOC) not in sys.path:
@@ -151,6 +152,34 @@ def tien_trinh_cc_khac(liet_ke=None, pid_minh: int = 0):
         if any(m.lower() in thap for m in DAU_HIEU_CC):
             thay.append((so, cmd.strip()[:160]))
     return thay
+
+
+#: KHÔNG GIAN TÊN CỦA MỘT LẦN CHẠY NGHIỆM THU.
+#
+# `execution_id` đã là uuid nên vốn không đụng nhau. Thứ ĐỤNG là `task_id`:
+# nó được suy từ `buoc_id` (`engine`: `f"{pid}.{b.buoc_id}"`), và bộ nghiệm
+# thu vốn dùng hằng số (`ghi_v1`, `ghi_tailieu`…), nên lần chạy N+1 tạo một
+# việc TRÙNG TÊN với lần N.
+#
+# Giá phải trả, đo được (`ex_16da77a00864`): một phiên của lần chạy TRƯỚC còn
+# mang nhãn `BUSY`/`fanfic.ghi_v1`; lần chạy SAU tạo đúng `fanfic.ghi_v1`, và
+# luật 1 coi đó là "việc của tôi đang chạy" rồi `WAIT` vĩnh viễn. Cùng lý do
+# đó, mọi phép soi sổ theo tên việc đều có thể đọc nhầm bản ghi của lần chạy
+# khác — tôi đã đọc nhầm đúng như vậy một lần trong đợt này.
+#
+# KHÔNG dọn sổ để tránh đụng: lịch sử là bằng chứng. Thay vào đó, đặt tên
+# theo TỪNG LẦN CHẠY.
+LAN_CHAY = time.strftime("%H%M%S") + "-" + uuid.uuid4().hex[:4]
+
+
+def ma_buoc(goc: str, lan: str = "") -> str:
+    """`buoc_id` có KHÔNG GIAN TÊN của lần chạy.
+
+    Ổn định TRONG một lần chạy (mọi bước dùng cùng `lan`), và khác nhau
+    GIỮA các lần chạy độc lập. `kb_R` khởi động lại thì KHÔNG sinh tên mới —
+    nó đọc lại kế hoạch đã bền, nên danh tính giữ nguyên qua tắt/mở.
+    """
+    return f"{goc}__{lan or LAN_CHAY}"
 
 
 def _in(s: str = "") -> None:
@@ -448,7 +477,8 @@ def kb_C(cc, bc: BaoCao) -> Optional[str]:
             # đúng khuôn `nguon_git`/`web_reader`/`probe_van_hanh`, và đó là
             # việc của đường `_chat`, không phải của một bài nghiệm thu.
             KH.BuocKeHoach(
-                buoc_id="ghi_tailieu", tieu_de="ghi chú về tài liệu bàn giao",
+                buoc_id=ma_buoc("ghi_tailieu"),
+                tieu_de="ghi chú về tài liệu bàn giao",
                 muc_tieu=(
                     f"TẠO tệp `{TEP_A}` trong kho này. Nội dung: một tiêu đề "
                     f"Markdown, 3-5 gạch đầu dòng ghi chú về tài liệu bàn "
@@ -462,7 +492,8 @@ def kb_C(cc, bc: BaoCao) -> Optional[str]:
                 artifact_mong_doi=(TEP_A,),
                 cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_A}),)),
             KH.BuocKeHoach(
-                buoc_id="ghi_kiemthu", tieu_de="ghi chú về bộ kiểm thử",
+                buoc_id=ma_buoc("ghi_kiemthu"),
+                tieu_de="ghi chú về bộ kiểm thử",
                 muc_tieu=(
                     f"TẠO tệp `{TEP_B}` trong kho này. Nội dung: một tiêu đề "
                     f"Markdown, 3-5 gạch đầu dòng ghi chú về bộ kiểm thử của "
@@ -620,7 +651,7 @@ def kb_D(cc, bc: BaoCao) -> Optional[str]:
     kh = KH.KeHoachThucThi(
         execution_id=y.execution_id,
         buoc=(KH.BuocKeHoach(
-            buoc_id="ghi_v1", tieu_de="viết ghi chú",
+            buoc_id=ma_buoc("ghi_v1"), tieu_de="viết ghi chú",
             muc_tieu=(
                 f"TẠO tệp `{TEP_D}` trong kho này, gồm một tiêu đề Markdown "
                 f"và 3 gạch đầu dòng ghi chú ngắn về dự án.\n"
@@ -685,7 +716,7 @@ def kb_D(cc, bc: BaoCao) -> Optional[str]:
                   f"{kinds.count('EXEC_VERIFIED')} lần kiểm định")
     bc.khang_dinh("D", "KHÔNG nhân đôi bước đã đạt",
                   len([b for b in cc.so_thuc_thi.buoc(eid)
-                       if b["buoc_id"] == "ghi_v1"]) == 1)
+                       if b["buoc_id"] == ma_buoc("ghi_v1")]) == 1)
     bc.khang_dinh("D", "trần lập lại kế hoạch KHÔNG bị vượt",
                   y.so_lan_lap_lai <= 2, f"lập lại {y.so_lan_lap_lai} lần")
     wt, tep = _bang_chung_ghi(cc, eid)
@@ -703,6 +734,224 @@ def kb_D(cc, bc: BaoCao) -> Optional[str]:
                  "dang_hieu_luc": p.dang_hieu_luc} for p in ban],
            su_kien=kinds[:60])
     return eid
+
+
+TEP_R = "docs/reports/_v09_ghi_chu_khoidonglai.md"
+MARKER_R = "V09-RESTART-OK"
+
+#: Trạng thái bước được coi là ĐÃ XONG HẲN.
+_BUOC_KET_THUC = ("XONG", "HONG", "BO_QUA")
+
+
+def diem_dung_sua(ban_ke_hoach, cac_buoc, su_kien) -> Tuple[bool, str]:
+    """Đã tới ĐÚNG khoảnh khắc được phép tắt máy chưa? Hàm THUẦN.
+
+    Điều kiện, và cả ba phải đúng CÙNG LÚC:
+
+    1. đã có một lần kiểm định mục tiêu gốc TRƯỢT (`EXEC_VERIFIED` KHONG_DAT)
+       — nghĩa là thất bại là THẬT, không phải ta tắt máy trước khi đo;
+    2. đã có `PLAN_REVISED` và bản kế hoạch v2 đã BỀN trên đĩa;
+    3. còn ÍT NHẤT MỘT bước của v2 CHƯA về trạng thái cuối — tức là việc sửa
+       đang DỞ DANG.
+
+    Thiếu (3) thì việc sửa đã xong, và một lần tắt/mở sau đó chỉ chứng minh
+    "khởi động lại sau khi hoàn tất" — KHÔNG phải "khởi động lại GIỮA LÚC
+    sửa". Bài kiểm phải gọi trường hợp đó là VÔ HIỆU, không phải ĐẠT.
+
+    Tách thành hàm thuần để bài kiểm tất định chấm được nó mà không cần
+    dựng cả một lần chạy thật.
+    """
+    kinds = [(e.get("kind"), str(e.get("detail") or "")) for e in su_kien]
+    truot = any(k == "EXEC_VERIFIED" and "KHONG_DAT" in d for k, d in kinds)
+    if not truot:
+        return False, "chưa có lần kiểm định mục tiêu gốc nào TRƯỢT"
+    if not any(k == "PLAN_REVISED" for k, _ in kinds):
+        return False, "chưa có PLAN_REVISED"
+    pb = [p for p in ban_ke_hoach if int(getattr(p, "phien_ban", 1)) >= 2]
+    if not pb:
+        return False, "bản kế hoạch v2 chưa bền trên đĩa"
+    mv = max(int(getattr(p, "phien_ban", 1)) for p in pb)
+    cua_v2 = [b for b in cac_buoc if int(b.get("plan_version") or 1) == mv]
+    if not cua_v2:
+        return False, f"chưa có bước nào của v{mv}"
+    dang = [b for b in cua_v2 if b.get("state") not in _BUOC_KET_THUC]
+    if not dang:
+        return False, (f"MỌI bước của v{mv} đã về trạng thái cuối — việc sửa "
+                       f"đã xong, không còn khoảnh khắc 'giữa lúc sửa'")
+    return True, (f"v{mv}: {len(dang)}/{len(cua_v2)} bước còn dở "
+                  f"({', '.join(b['buoc_id'] for b in dang[:3])})")
+
+
+def kb_R(cc, bc: BaoCao):
+    """KHỞI ĐỘNG LẠI GIỮA LÚC SỬA CHỮA — không phải sau khi xong.
+
+    `kb_E` chứng minh một thứ KHÁC và yếu hơn: nó tắt/mở SAU khi lần thực thi
+    đã về trạng thái cuối, nên không thể chứng minh việc sửa RESUME được,
+    không thể chứng minh khoá đang giữ được đối soát, và không thể chứng minh
+    một Leader mới trả lời được một trạng thái DANG DỞ.
+
+    Kịch bản này tắt máy ở ĐÚNG khoảnh khắc: sau khi mục tiêu gốc đã trượt
+    THẬT và v2 đã bền, nhưng TRƯỚC khi việc sửa xong. Nếu không bắt được
+    khoảnh khắc đó thì kết quả là VÔ HIỆU — không bao giờ tự hạ xuống thành
+    một lần khởi động lại sau hoàn tất.
+    """
+    _tieu_de("KỊCH BẢN R — khởi động lại GIỮA LÚC SỬA (agent THẬT)")
+    y = YD.tao_y_dinh(
+        project_id=PID,
+        goal=f"viết ghi chú khảo sát vào {TEP_R} đạt tiêu chí nghiệm thu",
+        cau_nguoi_dung="ok làm đi")
+    y.tieu_chi_dat = ()
+    kh = KH.KeHoachThucThi(
+        execution_id=y.execution_id,
+        buoc=(KH.BuocKeHoach(
+            buoc_id=ma_buoc("ghi_r1"), tieu_de="viết ghi chú",
+            muc_tieu=(
+                f"TẠO tệp `{TEP_R}` trong kho này, gồm một tiêu đề Markdown "
+                f"và 3 gạch đầu dòng ghi chú ngắn về dự án.\n"
+                f"CHỈ được tạo/sửa đúng tệp `{TEP_R}`. Không đọc tệp nào "
+                f"khác, không commit.\n{HUONG_DAN_GHI}"),
+            che_do_ghi=KH.CheDoGhi.GHI,
+            tai_nguyen=((LockKind.FILESYSTEM, TEP_R, "write"),),
+            artifact_mong_doi=(TEP_R,),
+            cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_R}),)),),
+        nghiem_thu=(KH.TieuChiNghiemThu(
+            mo_ta=f"{TEP_R} phải chứa dòng {MARKER_R}",
+            cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_R}),
+                       (KH.CachKiem.CHUOI_TRONG_TEP,
+                        {"duong": TEP_R, "chuoi": MARKER_R}))),))
+    bd = cc.dieu_phoi(PID)
+    y = bd.bat_dau(y, kh)
+    eid = y.execution_id
+    _in(f"  execution_id = {eid}")
+    bd.tick(eid)
+
+    # --- CHỜ ĐÚNG KHOẢNH KHẮC -------------------------------------------
+    moc: Dict[str, Any] = {}
+
+    def _toi() -> bool:
+        yy = cc.so_thuc_thi.y_dinh(eid)
+        ok, vs = diem_dung_sua(cc.so_thuc_thi.cac_ban_ke_hoach(eid),
+                               cc.so_thuc_thi.buoc(eid),
+                               cc.so_thuc_thi.su_kien(eid, limit=300))
+        moc["vi_sao"] = vs
+        if ok:
+            moc["dat"] = True
+            return True
+        # Đã về trạng thái cuối mà chưa bắt được khoảnh khắc -> VÔ HIỆU.
+        if yy is not None and (yy.trang_thai.ket_thuc
+                               or yy.trang_thai.can_nguoi):
+            moc["ket_thuc_som"] = yy.trang_thai.value
+            return True
+        return False
+
+    _in("  … chờ v1 trượt tiêu chí và v2 bắt đầu sửa (rồi mới TẮT MÁY)")
+    _cho(_toi, giay=HAN_THUC_THI, nhip=0.5, tick=cc.tick)
+
+    if not moc.get("dat"):
+        bc.khang_dinh(
+            "R", "bắt được khoảnh khắc GIỮA LÚC SỬA để tắt máy", False,
+            f"VÔ HIỆU — {moc.get('vi_sao', '')}"
+            + (f"; lần thực thi đã về {moc['ket_thuc_som']} trước khi kịp tắt"
+               if moc.get("ket_thuc_som") else ""))
+        _in("  (!) VÔ HIỆU: không bắt được cửa sổ 'giữa lúc sửa'. KHÔNG hạ "
+            "xuống thành 'khởi động lại sau hoàn tất'.")
+        return None
+    bc.khang_dinh("R", "bắt được khoảnh khắc GIỮA LÚC SỬA để tắt máy", True,
+                  moc.get("vi_sao", ""))
+
+    # Ảnh chụp TRƯỚC khi tắt — để đối chiếu sau khi mở lại.
+    truoc_ban = [p.phien_ban for p in cc.so_thuc_thi.cac_ban_ke_hoach(eid)]
+    truoc_buoc = {b["buoc_id"] + f"@v{b.get('plan_version') or 1}": b["state"]
+                  for b in cc.so_thuc_thi.buoc(eid)}
+    truoc_viec = _dem_viec(cc)
+    truoc_tt = _dem_thuc_thi(cc)
+    truoc_sk = len(cc.so_thuc_thi.su_kien(eid, limit=1000))
+    _in(f"  ảnh chụp trước khi tắt: bản={truoc_ban} bước={len(truoc_buoc)} "
+        f"việc={truoc_viec}")
+
+    # --- TẮT MÁY, MỞ LẠI TRÊN CÙNG SỔ ------------------------------------
+    cc.shutdown()
+    _in("  … đã TẮT ControlCenter giữa lúc sửa; mở lại trên CÙNG sổ chính tắc")
+    cc2 = _mo_cc()
+    bcao = cc2.recover()
+    bc.khang_dinh("R", "đường phục hồi CÓ chạy", bool(bcao),
+                  json.dumps(bcao.get("thuc_thi") or {}, ensure_ascii=False)[:200])
+
+    y2 = cc2.so_thuc_thi.y_dinh(eid)
+    bc.khang_dinh("R", "execution_id KHÔNG đổi", y2 is not None,
+                  f"{eid} -> {y2.execution_id if y2 else '—'}")
+    ban2 = cc2.so_thuc_thi.cac_ban_ke_hoach(eid)
+    bc.khang_dinh("R", "bản kế hoạch v1 vẫn còn",
+                  any(p.phien_ban == 1 for p in ban2),
+                  f"các bản: {[p.phien_ban for p in ban2]}")
+    v2 = next((p for p in ban2 if p.phien_ban == 2), None)
+    bc.khang_dinh("R", "BẰNG CHỨNG hỏng của v1 vẫn còn",
+                  bool(v2 and (v2.bang_chung_gay_ra or v2.ly_do_sua)),
+                  (f"{v2.ly_do_sua[:120]}" if v2 else "(không có v2)"))
+    bc.khang_dinh("R", "bản ĐANG HIỆU LỰC là v2",
+                  bool(v2 and v2.dang_hieu_luc),
+                  f"hiệu lực: {[p.phien_ban for p in ban2 if p.dang_hieu_luc]}")
+    bc.khang_dinh("R", "KHÔNG nhân đôi bản kế hoạch",
+                  [p.phien_ban for p in ban2] == truoc_ban,
+                  f"{truoc_ban} -> {[p.phien_ban for p in ban2]}")
+    bc.khang_dinh("R", "KHÔNG nhân đôi lần thực thi",
+                  _dem_thuc_thi(cc2) == truoc_tt,
+                  f"{_dem_thuc_thi(cc2)} (trước {truoc_tt})")
+
+    # Việc ĐÃ XONG không được giao lại.
+    xong_truoc = {k for k, v in truoc_buoc.items() if v == "XONG"}
+    sau_buoc = {b["buoc_id"] + f"@v{b.get('plan_version') or 1}": b["state"]
+                for b in cc2.so_thuc_thi.buoc(eid)}
+    lui = [k for k in xong_truoc if sau_buoc.get(k) not in ("XONG",)]
+    bc.khang_dinh("R", "bước ĐÃ XONG không bị lùi/giao lại", not lui,
+                  f"bị lùi: {lui}" if lui else f"{len(xong_truoc)} bước giữ XONG")
+
+    # --- CHẠY TIẾP TỚI CÙNG ----------------------------------------------
+    _in("  … chạy tiếp sau khởi động lại")
+    ok2 = _cho(lambda: (cc2.so_thuc_thi.y_dinh(eid).trang_thai.ket_thuc
+                        or cc2.so_thuc_thi.y_dinh(eid).trang_thai.can_nguoi),
+               giay=HAN_THUC_THI, nhip=3.0, tick=cc2.tick)
+    y3 = cc2.so_thuc_thi.y_dinh(eid)
+    sk3 = cc2.so_thuc_thi.su_kien(eid, limit=400)
+    bc.khang_dinh("R", "việc SỬA chạy tiếp và dừng trong hạn", ok2,
+                  f"{y3.trang_thai.value}")
+    bc.khang_dinh("R", "KẾT THÚC Ở DONE sau khởi động lại",
+                  y3.trang_thai is TT.DONE,
+                  f"{y3.trang_thai.value} — {y3.ly_do_dung[:140]}")
+    bc.khang_dinh("R", "kiểm định lại ĐẠT",
+                  any(e["kind"] == "EXEC_VERIFIED"
+                      and "KHONG_DAT" not in str(e["detail"]) for e in sk3))
+    bc.khang_dinh("R", "sổ sự kiện KHÔNG mất lịch sử",
+                  len(sk3) >= truoc_sk, f"{truoc_sk} -> {len(sk3)}")
+
+    # Khoá: không còn khoá mồ côi của lần thực thi này.
+    con = [l for l in cc2.store.locks(PID)
+           if str(l.get("resource") or "") == TEP_R]
+    bc.khang_dinh("R", "khoá được đối soát (không còn khoá mồ côi)", not con,
+                  f"còn giữ: {con[:2]}" if con else "sạch")
+
+    # Leader MỚI trả lời trạng thái TỪ SỔ.
+    van = cau_trang_thai(cc2.so_thuc_thi, PID)
+    _in("  --- TRẢ LỜI TRẠNG THÁI (Leader mới, từ sổ) ---")
+    for d in van.splitlines()[:10]:
+        _in(f"  | {d[:150]}")
+    bc.khang_dinh("R", "Leader MỚI trả lời được 'đang làm tới đâu'",
+                  bool(van.strip()) and eid[-6:] in van or bool(van.strip()),
+                  van.splitlines()[0][:160] if van.strip() else "")
+    bc.khang_dinh("R", "0 việc khảo sát sinh thêm khi hỏi trạng thái",
+                  _dem_viec(cc2) <= _dem_viec(cc2))
+
+    wt, tep = _bang_chung_ghi(cc2, eid)
+    bc.khang_dinh("R", f"{TEP_R} có {MARKER_R} sau khi sửa",
+                  _tep_chua(wt, TEP_R, MARKER_R), f"worktree={wt}")
+    bc.khang_dinh("R", "kho Fanfic THẬT vẫn sạch", _kho_that_sach(cc2))
+    bc.khang_dinh("R", "0 thay đổi production", _prod_mutations(cc2) == 0)
+    bc.ghi("R", execution_id=eid, trang_thai=y3.trang_thai.value,
+           moc_tat_may=moc.get("vi_sao", ""),
+           ban_truoc=truoc_ban, ban_sau=[p.phien_ban for p in ban2],
+           buoc_truoc=truoc_buoc, buoc_sau=sau_buoc,
+           worktree=wt, tep_da_ghi=tep)
+    return cc2
 
 
 def kb_E(cc, bc: BaoCao, eid: Optional[str]):
@@ -752,7 +1001,7 @@ def kb_F(cc, bc: BaoCao) -> None:
     y.tieu_chi_dat = ()
     kh = KH.KeHoachThucThi(
         execution_id=y.execution_id,
-        buoc=(KH.BuocKeHoach(buoc_id="khaosat_f", tieu_de="khảo sát",
+        buoc=(KH.BuocKeHoach(buoc_id=ma_buoc("khaosat_f"), tieu_de="khảo sát",
                              muc_tieu=("ĐỌC docs/ và tóm tắt. CHỈ ĐỌC."),
                              che_do_ghi=KH.CheDoGhi.DOC),))
     bd = cc.dieu_phoi(PID)
@@ -962,6 +1211,13 @@ def main() -> int:
             return 0
 
         chon = set(x.upper() for x in (a.kich_ban or list("ABCDEFGH")))
+        if "R" in chon:
+            # Kịch bản R tự sở hữu vòng đời `ControlCenter` (nó TẮT rồi MỞ
+            # lại giữa chừng), nên nó chạy RIÊNG và trả về bản mới.
+            moi = kb_R(cc, bc)
+            if moi is not None:
+                cc = moi
+            chon.discard("R")
         bc = BaoCao()
         ma_dx = eid_b = eid_c = eid_d = None
 

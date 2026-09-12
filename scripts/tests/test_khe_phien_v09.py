@@ -212,6 +212,55 @@ class TestKhePhien(unittest.TestCase):
         self.assertIs(qd.action, SessionAction.WAIT)
         self.assertEqual(len(self._song()), 2)
 
+    def test_03f_phien_BAN_voi_nhan_viec_DA_CHET_thi_KHONG_chan(self):
+        """Luật 1 không được tin `current_task` một cách mù quáng.
+
+        Đo được (`ex_16da77a00864`): phiên `s-e06bf55e23` ở `BUSY` suốt 65
+        PHÚT mang nhãn `fanfic.ghi_v1`, trong khi chính việc đó đang
+        `WAITING`/`attempts=0`/`owner_session=""`. Mọi việc mới có phạm vi ghi
+        giẫm lên đều `WAIT` vĩnh viễn.
+        """
+        for ma, tt in (("t-xong", TaskState.DONE), ("t-hong", TaskState.FAILED),
+                       ("t-tam", TaskState.PAUSED),
+                       ("t-chan", TaskState.BLOCKED)):
+            with self.subTest(trang_thai=tt.value):
+                self.store.luu_task(Task(task_id=ma, project_id="demo",
+                                         title=ma, objective=ma, state=tt))
+                self._phien(f"s-{ma[-4:]}", state=SessionState.BUSY,
+                            scope=("docs/a.md",), viec=ma)
+                qd = self.sm.decide(self._viec(), _hop_dong(("docs/a.md",)))
+                self.assertIsNot(qd.action, SessionAction.WAIT,
+                                 f"nhãn BẬN cũ ({tt.value}) vẫn chặn: "
+                                 f"{qd.reason}")
+                self.store.ket_noi().execute(
+                    "DELETE FROM sessions WHERE session_id=?",
+                    (f"s-{ma[-4:]}",))
+
+    def test_03g_phien_BAN_voi_viec_CON_SONG_thi_VAN_chan(self):
+        """Vế đối xứng — không được nới: việc thật đang chạy thì phải chờ."""
+        self.store.luu_task(Task(task_id="t-dang", project_id="demo",
+                                 title="t", objective="t",
+                                 state=TaskState.RUNNING))
+        self._phien("s-01", state=SessionState.BUSY, scope=("docs/a.md",),
+                    viec="t-dang")
+        qd = self.sm.decide(self._viec(), _hop_dong(("docs/a.md",)))
+        self.assertIs(qd.action, SessionAction.WAIT)
+        self.assertIn("giẫm lên", qd.reason)
+
+    def test_03h_viec_khong_tra_cuu_duoc_thi_VAN_chan(self):
+        """FAIL CLOSED: thà chờ hơn để hai agent cùng ghi một chỗ."""
+        def _no(_ma):
+            raise RuntimeError("sổ nghẽn")
+        that = self.store
+        self.sm.store = type("S", (), {
+            "task": staticmethod(_no), "sessions": that.sessions,
+            "session": that.session, "luu_session": that.luu_session,
+            "ghi_su_kien": that.ghi_su_kien})()
+        self._phien("s-01", state=SessionState.BUSY, scope=("docs/a.md",),
+                    viec="t-?")
+        qd = self.sm.decide(self._viec(), _hop_dong(("docs/a.md",)))
+        self.assertIs(qd.action, SessionAction.WAIT)
+
     def test_04_nguoi_bi_thu_hoi_truoc_am(self):
         """Nguội = chắc chắn vô dụng. Ấm = chỉ không hợp việc NÀY. Bỏ nguội."""
         self._phien("s-01", scope=("docs/a.md",), nguoi=NGUONG_NGUOI + 60)

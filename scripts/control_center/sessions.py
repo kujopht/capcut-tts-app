@@ -261,10 +261,29 @@ class SessionManager:
         # Xet TRUOC luat dung lai: mot phien dang chay viec khac tren cung
         # pham vi thi khong duoc dung lai VA cung khong duoc de viec moi
         # dung phien khac chay song song vao do.
+        # `BUSY` MỘT MÌNH KHÔNG ĐỦ — phải là ĐANG GIỮ MỘT VIỆC SỐNG.
+        #
+        # Khuyết tật đo được (`ex_16da77a00864`, 2026-09-12): phiên
+        # `s-e06bf55e23` ở `BUSY` suốt 65 PHÚT với `current_task=fanfic.ghi_v1`
+        # trong khi chính việc đó đang `WAITING`, `attempts=0`,
+        # `owner_session=""` — tức là nó KHÔNG chạy trong phiên ấy. Mọi việc
+        # mới có phạm vi ghi giẫm lên đều nhận `WAIT` vĩnh viễn, và lần thực
+        # thi đứng im ở `RUNNING` mà không ai báo lỗi.
+        #
+        # Nguồn thẩm quyền đúng là TRẠNG THÁI VIỆC, không phải cái nhãn phiên
+        # còn nhớ — CÙNG một vị từ mà luật 2b đã dùng (`_dang_giu_viec`), chỉ
+        # là trước đây chưa được áp ở đây. Không tra cứu được thì FAIL CLOSED:
+        # thà chờ hơn để hai agent cùng ghi một chỗ.
         if not chi_doc:
             for s in phien:
                 if s.state is SessionState.BUSY and \
                         _giao_nhau_pham_vi(s.scope, pham_vi):
+                    if not self._dang_giu_viec(s):
+                        vet.append(
+                            f"bỏ qua {s.session_id}: mang nhãn BẬN với việc "
+                            f"{s.current_task or '(trống)'} nhưng việc đó "
+                            f"KHÔNG còn sống — nhãn cũ, không chặn")
+                        continue
                     vet.append(f"phiên {s.session_id} đang BẬN với phạm vi "
                                f"giẫm lên {list(pham_vi)}")
                     return SessionDecision(

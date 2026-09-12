@@ -1945,17 +1945,6 @@ $('#nut-cai-dat').onclick = () => {
              value="${blur}">
       <span class="cd-so" id="cd-blur-so">${blur}px</span>
     </div>
-    <div class="nhan" style="margin-top:14px">THƯ MỤC DỰ ÁN MẶC ĐỊNH</div>
-    <div class="cd-hang">
-      <label for="cd-goc">Thư mục</label>
-      <input id="cd-goc" type="text" style="flex:1"
-             value="${esc(caiDatUI.thu_muc_du_an_mac_dinh || '')}"
-             placeholder="C:\\RouterProjects">
-      <button id="cd-goc-luu">Lưu</button>
-    </div>
-    <p class="ghi-chu">Chỉ là nơi đặt dự án TẠO MỚI. Dự án đã nhận nuôi nằm
-      nguyên chỗ của nó và đổi ô này KHÔNG di chuyển gì cả. Trình duyệt không
-      cho chọn thư mục thật, nên đây là ô nhập đường dẫn.</p>
     <div class="cd-hang">
       <label for="cd-fit">Cách co giãn</label>
       <select id="cd-fit">
@@ -1968,6 +1957,24 @@ $('#nut-cai-dat').onclick = () => {
       (<code>.router/attachments/</code>) và đọc lại qua mã đính kèm — giao
       diện KHÔNG có đường đọc một tệp tuỳ ý trên đĩa, và đó là cố ý.
       Cài đặt này bền qua khởi động lại.</p>
+    <hr style="border:none;border-top:1px solid var(--vien);margin:12px 0">
+    <div class="nhan">THƯ MỤC DỰ ÁN MẶC ĐỊNH</div>
+    <div class="cd-hang">
+      <label for="cd-goc">Thư mục</label>
+      <input id="cd-goc" type="text" style="flex:1"
+             value="${esc(caiDatUI.thu_muc_du_an_mac_dinh || '')}"
+             placeholder="C:\\RouterProjects">
+      <button id="cd-goc-luu">Lưu</button>
+    </div>
+    <p class="ghi-chu">Chỉ là nơi đặt dự án TẠO MỚI. Dự án đã nhận nuôi nằm
+      nguyên chỗ của nó, và đổi ô này KHÔNG di chuyển gì cả. Thư mục chưa có
+      thì Router tự tạo lúc tạo dự án đầu tiên. Để trống = dùng mặc định
+      <code>C:\\RouterProjects</code>.</p>
+    <p class="ghi-chu">Không có nút «Chọn…» mở hộp thoại thư mục, và đó là cố
+      ý: trình duyệt KHÔNG cho trang web đọc đường dẫn thật của một thư mục
+      được chọn — nó chỉ đưa tên tệp bên trong. Một nút như vậy sẽ phải có
+      một endpoint duyệt đĩa tuỳ ý ở backend, tức là dựng lại đúng lỗ mà
+      <code>attachments.py</code> đã bịt.</p>
     <hr style="border:none;border-top:1px solid var(--vien);margin:12px 0">
     <pre class="ma">API      http://127.0.0.1 (chỉ localhost; mọi request đòi token phiên)
 Đính kèm nằm cục bộ dưới .router/attachments/ — không tệp nào được tải

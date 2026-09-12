@@ -73,6 +73,47 @@ thôi, chưa code"*:
 
 `execution: (không tạo)` · việc sinh thêm: **0** · thay đổi production: **0**.
 
+## Giao diện
+
+Backend xong rồi thì nút `+ Dự án mới` vẫn mở **một ô duy nhất** nhận đường
+dẫn tuyệt đối — tức là luồng tạo mới có tồn tại mà người dùng không bấm tới
+được. Phần này nối nốt:
+
+| | |
+|---|---|
+| `+ Dự án mới` | hộp thoại **hai tab**: `[Tạo mới]` (mặc định) / `[Nhập repo]` |
+| Cài đặt | ô **Thư mục dự án mặc định** + nút Lưu, nối vào `thu_muc_du_an_mac_dinh` |
+
+**Không có bản sao logic nào ở frontend.** Cả hai tab gọi API backend; ngay
+cả dòng xem trước đường dẫn cũng hỏi `/api/project/create/preview` thay vì
+tự suy. Bản cũ tự suy `project_id` bằng JS (`ten.toLowerCase().replace(…)`)
+— một bản sao thứ hai của `slug()`, đặt ở tầng không bao giờ được kiểm.
+
+Ô cài đặt phải khai báo tường minh vì `/api/ui` dùng danh sách CHO PHÉP, và
+phép kiểm giá trị sống ở `tao_du_an.kiem_thu_muc_goc()` — **một định nghĩa,
+dùng chung mọi người gọi**: tuyệt đối, không `..`, không gốc ổ đĩa, không
+trỏ vào một tệp; rỗng nghĩa là bỏ thiết lập. Thư mục chưa tồn tại thì CHẤP
+NHẬN — bắt người dùng đi `mkdir` trước là đúng cái phiền V0.9.2 xoá đi.
+
+### Bốn hỏng, cả bốn đều im lặng cho tới lúc bấm
+
+| Hỏng | Vì sao không ai thấy |
+|---|---|
+| `json({ten})` — `json` là `const` trong một hàm KHÁC | sai **phạm vi**, không phải sai cú pháp: `node --check` vẫn xanh |
+| `$('#o-chat')` trong khi ô soạn tên `#o-soan` | không lỗi, không cảnh báo — con trỏ chỉ không nhảy vào ô |
+| bản sao logic đặt tên ở JS | chạy đúng, cho tới ngày `slug()` đổi |
+| nút Lưu báo «đã lưu» cho giá trị backend vừa TỪ CHỐI | `luuCaiDatUI` **nuốt** lỗi (cố ý), nên `try/catch` quanh nó không bao giờ chạy |
+
+Cái thứ tư là khuyết tật sản phẩm thật, không phải lỗi của tôi lúc viết:
+nuốt lỗi là đúng (một lần lưu hỏng không được làm gãy tay kéo thanh trượt),
+nhưng nó biến `catch` thành một phép kiểm chết. Nay hàm TRẢ VỀ có/không và
+người gọi đọc giá trị đó.
+
+Cả bốn nay có bài kiểm CẤU TRÚC đọc thẳng `app.js`/`index.html`/`style.css`,
+và **cả bốn đã được thử bằng ĐỘT BIẾN** — đặt lại lỗi vào thì bài kiểm đó đỏ.
+Không có trình duyệt ở CI, nên chỗ duy nhất còn lại bắt được chúng là ngón
+tay người dùng.
+
 ## Kiểm
 
 23 bài `test_tao_du_an_v092.py` — phần lớn là những lần phải từ chối (trùng
@@ -80,6 +121,11 @@ thư mục, vượt gốc, tên cấm, đăng ký hỏng thì hoàn tác sạch,
 đụng thư mục có sẵn), cộng đường hạnh phúc (khung tối thiểu, `git init`,
 đăng ký, viên nang dùng được ngay, sổ sạch) và bất biến "dự án nhận nuôi
 không bị dời chỗ". 54 bài webapi vẫn xanh.
+
+26 bài `test_giao_dien_du_an_moi_v092.py` cho phần giao diện: giá trị ô cài
+đặt (9), đường API kèm **bền qua khởi động lại** và bất biến "đổi ô này
+không dời dự án đã nhận" (7), và đọc cấu trúc `app.js`/`index.html`/
+`style.css` cho bốn hỏng ở trên (10).
 
 **Một khẳng định của tôi đã SAI và đã sửa:** bài kiểm ban đầu đòi
 `"../thoat-ra"` bị TỪ CHỐI. Thực tế `slug()` nghiền nó thành `thoat-ra` NẰM

@@ -142,12 +142,60 @@ không bị đụng tới, nó dành cho lần thật. **31/31 ngay lần đầu
 Cái diễn tập này bắt được một khuyết tật thật **trước khi** có trình duyệt
 nào mở: nút Lưu báo «đã lưu» cho giá trị backend vừa từ chối (bảng trên).
 
-**Dogfood thật trên sổ chính tắc còn NỢ**, và nó nợ vì một lý do nêu thẳng
-ra: một tiến trình Control Center CŨ (có trước V0.9.2 —
-`/api/project/create/preview` trả 404) đang giữ sổ chính tắc, và chạy một
-người ghi THỨ HAI bên cạnh nó đúng là thứ đã làm hỏng năm lần chạy ở V0.9.
-Đóng cửa sổ đó rồi chạy lại là xong. **Không được** báo READY TO RELEASE
-trước khi lần đó chạy thật.
+### Dogfood THẬT — `RouterDogfood02`, sổ chính tắc, **43/43**
+
+Ảnh: `V092_ROUTERDOGFOOD02.png`. Không một lời gọi API nào để tạo dự án —
+mọi bước là một cú bấm thật hoặc một phím gõ thật.
+
+```
+[3] phải TỪ CHỐI   tên rỗng · 'CON' (tên cấm Windows) · '!!!' ·
+                   RouterDogfood01 (trùng thư mục → "Router KHÔNG ghi đè")
+                   — mỗi lần một câu tiếng Việt, KHÔNG stack trace, hộp
+                   thoại KHÔNG đóng
+    `../thoat-ra`  slug() nghiền thành C:\RouterProjects\thoat-ra — nằm
+                   TRONG gốc; bất biến là không thoát ra được
+[4] xem trước      "Sẽ tạo tại:  C:\RouterProjects\RouterDogfood02"
+[6] trên đĩa       .git · README.md · .gitignore · docs · là kho git thật ·
+                   .gitignore chặn .router/ · KHÔNG có .router/ trong kho
+[7] sau khi tạo    hiện ở thanh bên · được CHỌN sẵn · tên ở thanh trên ·
+                   con trỏ ở #o-soan · 0 việc · 0 tin (chat SẠCH)
+[8] ô Cài đặt      giá trị hỏng bị từ chối · giá trị đúng được nhận ·
+                   mở lại thì CÒN ĐÓ
+[9] Leader (18.1s) hiểu là dự án mới ("chưa có commit nào, đang có 2 tệp
+                   thay đổi ở working tree và chưa có task hay agent nào
+                   chạy trước đó") · kế hoạch 4 bước có giới hạn · hỏi lại
+                   trước khi làm · 0 việc · 0 chữ fanfic/capcut/tts/farmer/
+                   appwrite/cloudflare/piper
+```
+
+**Nhiễm bẩn: ĐO, không giả định.** Một Control Center CŨ (trước V0.9.2 —
+`/api/project/create/preview` trả 404) đang chạy và giữ CÙNG sổ chính tắc
+trong suốt lần chạy này, vì `taskkill` bị lớp quyền từ chối. Nên lần chạy
+chụp sổ TRƯỚC và SAU:
+
+```
+trước : du an=[fanfic, router, routerdogfood01] · viec={fanfic:76, router:0,
+        routerdogfood01:0} · Control Center khác đang chạy: 2
+sau   : dự án mọc thêm ĐÚNG một cái = [routerdogfood02]
+        KHÔNG dự án nào khác mọc thêm việc  ({})
+        dự án mới: 0 việc
+```
+
+Delta sạch, nên kết quả dùng được — nhưng điều kiện chạy phải nêu ra chứ
+không được im.
+
+### Khuyết tật đã tìm ra, KHÔNG sửa ở bản này
+
+`CLAUDE.md` nói `KhoaKho` cho **một người ghi** ("bản thứ hai nhận câu *Kho
+dữ liệu Router đang được dùng*"). Thực tế: khoá đó chỉ được lấy ở
+`desktop.py:202` — **vỏ Qt**. `webmain.py`, tức ĐƯỜNG CHÍNH từ V0.2, không
+lấy khoá nào cả. Vì vậy hai Control Center web chạy cạnh nhau trên cùng sổ
+chính tắc là chuyện bình thường, không ai chặn — đúng hình dạng đã làm hỏng
+năm lần chạy ở V0.9, và đúng lý do lần chạy trên phải tự đo nhiễm bẩn.
+
+Đây lại là **hai cái nhìn về một sự thật không khớp nhau, và tầng trên tin
+cái sai** — cùng hình dạng với bảy khuyết tật của V0.9. Ghi lại làm việc
+tiếp theo; V0.9.2 có phạm vi UI nên không sửa ở đây.
 
 ## Kiểm
 

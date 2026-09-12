@@ -1228,6 +1228,21 @@ def main() -> int:
         if a.kho:
             return 0
 
+        # ĐỐI SOÁT LÚC KHỞI ĐỘNG — giống hệt BA cửa vào THẬT.
+        #
+        # `__main__.py:38`, `desktop.py:216`, `webmain.py:136` đều gọi
+        # `recover()` ngay khi mở. Bộ nghiệm thu thì KHÔNG, và cái giá đo
+        # được (2026-09-12): một lần chạy R bị cắt giữa chừng để lại việc
+        # `RUNNING`, khoá FILESYSTEM còn giữ và phiên `BUSY`; lần chạy SAU
+        # xin đúng tài nguyên đó, nhận `WAITING`, rồi chờ **45 phút** cho
+        # tới khi cạn trần — một cái khoá không bao giờ có ai nhả.
+        #
+        # Đây là KHOẢNG TRỐNG CỦA BÀI KIỂM, không phải của sản phẩm: ứng dụng
+        # thật không bao giờ mở mà bỏ qua bước này. Và `recover()` ĐỐI SOÁT
+        # chứ không xoá — lịch sử vẫn còn nguyên làm bằng chứng.
+        dd = cc.recover()
+        _in(f"đối soát khi mở       : {json.dumps(dd, ensure_ascii=False)[:220]}")
+
         chon = set(x.upper() for x in (a.kich_ban or list("ABCDEFGH")))
         bc = BaoCao()
         ma_dx = eid_b = eid_c = eid_d = None

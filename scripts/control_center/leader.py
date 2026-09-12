@@ -439,6 +439,60 @@ _MAU_LICH_SU_KY_UC = (
 _LICH_SU_KY_UC = [re.compile(m, re.I) for m in _MAU_LICH_SU_KY_UC]
 
 
+#: Câu hỏi về MỘT THÀNH PHẦN của dự án, gọi bằng tên dân dã.
+#:
+#: Đo được (dogfood thật 2026-09-12): *"ê cái tool cạo audio t sao r"*. Leader
+#: tra Ký ức/Viên nang, trượt, rồi HỎI NGƯỢC người dùng tên script/thư mục —
+#: trong khi `server/scraper/` nằm ngay trong kho. Với một dự án đã nhận nuôi,
+#: bắt người dùng nhớ đường dẫn nội bộ là câu trả lời sai.
+#:
+#: Bộ mẫu này bật THANG TRA CỨU (`tim_thanh_phan`) trước khi Leader mở miệng.
+#: Nghiêng về phía NHẬN: tra thừa một lần rẻ hơn nhiều so với một câu hỏi
+#: ngược vô ích, và rẻ hơn HẲN so với dispatch một worker.
+_MAU_THANH_PHAN = (
+    # "cái/con/thằng <X> ... sao rồi / thế nào / đâu rồi"
+    r"\b(cái|con|thằng|phần|module|tool|bot|service|dịch vụ)\b.{0,40}\b"
+    r"(sao r(ồi)?|sao rồi|thế nào|ra sao|đâu rồi|còn (chạy|sống) không|"
+    r"ổn không|xong chưa|tới đâu)\b",
+    # Gọi tên dân dã một thành phần + hỏi trạng thái
+    r"\b(cạo|cào|crawl|scrape|harvest)\b.{0,20}\b(audio|truyện|dữ liệu|web)\b",
+    r"\b(tool|bot|script|con)\b.{0,20}\b(cạo|cào|crawl|scrape|dịch|duyệt)\b",
+    r"\b(farmer|appwrite|r2|drive|worker|pipeline|scraper)\b.{0,30}\b"
+    r"(sao|thế nào|ra sao|đâu|còn|ổn|chạy)\b",
+    r"\bweb (fanfic|site)\b", r"\bfanfic\.world\b",
+    r"\bwhat('?s| is) (up |going on )?with\b", r"\bstatus of\b",
+    r"\bhow('?s| is) (the|our) \w+ (doing|going)\b",
+)
+_THANH_PHAN = [re.compile(m, re.I) for m in _MAU_THANH_PHAN]
+
+
+def la_cau_hoi_thanh_phan(cau: str) -> Tuple[bool, List[str]]:
+    """`(có phải hỏi về một THÀNH PHẦN dự án, dấu hiệu khớp)`. Tất định."""
+    van = (cau or "").strip()
+    if not van:
+        return False, []
+    dau = [r.pattern for r in _THANH_PHAN if r.search(van)]
+    return bool(dau), dau
+
+
+#: Luật kèm khối TRA CỨU THÀNH PHẦN. Song song `LUAT_LICH_SU`, nhưng cho một
+#: chiều khác: câu này hỏi "X giờ sao rồi", và X là một THỨ TRONG KHO.
+LUAT_THANH_PHAN = """CÂU HỎI VỀ MỘT THÀNH PHẦN DỰ ÁN — đọc trước khi trả lời:
+
+Người dùng gọi thành phần bằng TÊN DÂN DÃ ("tool cạo audio", "con farmer",
+"cái web"). Router ĐÃ tra hộ và đính khối TRA CỨU THÀNH PHẦN bên dưới.
+
+1. **KHÔNG hỏi ngược người dùng đường dẫn/tên script** khi khối đó đã có ứng
+   viên. Người dùng không phải nhớ tên nội bộ — đó là việc của ta.
+2. Có ĐÚNG MỘT ứng viên nổi trội -> trả lời thẳng về nó, DẪN bằng chứng
+   (đường dẫn/commit/tài liệu) để người dùng đối chiếu được.
+3. Còn mơ hồ thật -> nêu 2–3 ứng viên CÓ BẰNG CHỨNG rồi hỏi lại MỘT câu gọn.
+4. **KHÔNG tạo việc worker** chỉ để trả lời điều mà khối này đã trả lời.
+5. Nói THẬT về vùng phủ: nếu phần quan trọng chỉ nằm trong lịch sử hội thoại
+   ngoài (ChatGPT Project), nói đó là KHOẢNG TRỐNG — đừng bịa.
+"""
+
+
 #: Câu hỏi VẬN HÀNH PRODUCTION — hỏi về hệ thống thật ĐANG chạy (service,
 #: artifact, archive, Drive/R2/Appwrite), không phải về kho mã và cũng không
 #: phải về quá khứ đã ghi. Đây là lớp mà `fanfic.t2efd-1` rơi vào và chết:

@@ -940,11 +940,19 @@ def kb_R(cc, bc: BaoCao):
                   len(sk3) >= truoc_sk, f"{truoc_sk} -> {len(sk3)}")
 
     # Khoá: không còn khoá mồ côi của lần thực thi này.
-    # `store.locks()` trả `ResourceLock`, KHÔNG phải dict — truy cập thuộc
-    # tính. Bản đầu dùng `.get()` và nổ ở đây SAU khi 13 khẳng định đã ĐẠT,
-    # nên báo cáo JSON không bao giờ được ghi và bộ chạy đọc phải bản CŨ.
+    # KHOÁ CỦA LẦN THỰC THI NÀY, không phải mọi khoá trên cùng ĐƯỜNG DẪN.
+    #
+    # `store.locks()` trả `ResourceLock` (truy cập thuộc tính, không `.get()`).
+    # Và phải lọc theo CHỦ KHOÁ: mọi lần chạy R dùng chung một tệp đích, còn
+    # một lần thực thi R CŨ chưa kết thúc vẫn được bộ máy chạy tiếp một cách
+    # hợp lệ — nên lọc theo đường dẫn sẽ quy khoá của lần chạy khác cho lần
+    # này. Đo được: lần chạy `142156` ĐẠT 27/28, khẳng định duy nhất hỏng là
+    # do khoá của lần `133246` (một lần chạy trước đã bị cắt).
+    cua_ta = {str(b.get("task_id") or "")
+              for b in cc2.so_thuc_thi.buoc(eid)} | {""}
     con = [l for l in cc2.store.locks(PID)
-           if str(getattr(l, "resource", "") or "") == TEP_R]
+           if str(getattr(l, "holder_task", "") or "") in cua_ta
+           and str(getattr(l, "holder_task", "") or "")]
     bc.khang_dinh("R", "khoá được đối soát (không còn khoá mồ côi)", not con,
                   f"còn giữ: {con[:2]}" if con else "sạch")
 

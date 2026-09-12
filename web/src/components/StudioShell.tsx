@@ -113,11 +113,70 @@ export function mucDangMo(pathname: string, href: string): boolean {
   return href === "/studio" ? pathname === "/studio" : pathname.startsWith(href);
 }
 
+/**
+ * Dau trang cua MOT cong cu: chi loi dan + nut, KHONG tieu de.
+ *
+ * Ly do ton tai: truoc ban nay moi cong cu tu ve mot `PageHeader` rieng, nen
+ * duoi khung Studio co HAI `<h1>` chong nhau — "Xưởng sáng tác" cua khung roi
+ * "Audio Studio" cua cong cu. Hai `<h1>` tren mot trang khong chi xau: trinh
+ * doc man hinh coi do la hai tieu de ngang cap, va nguoi dung thay ten san
+ * pham lap lai o cho le ra noi ho DANG LAM GI.
+ *
+ * Nay khung so huu `<h1>` duy nhat (ten module dang mo), con cong cu giu
+ * nhung thu KHONG the suy ra tu dieu huong: mot cau mo ta va cac nut thao
+ * tac cua rieng no.
+ */
+export function StudioToolHeader({
+  title,
+  lead,
+  action,
+}: {
+  /**
+   * CHI dat cho mot trang CON trong module (vd "Nhập chương hàng loạt" duoi
+   * Viết truyện). Ve thanh `<h2>`, khong phai `<h1>`: mot trang chi co MOT
+   * `<h1>`, va o day no thuoc ve khung.
+   *
+   * Trang GOC cua mot module thi bo trong — ten cua no da la `<h1>` cua khung
+   * roi, nhac lai chi ton mot dong.
+   */
+  title?: string;
+  lead?: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  if (!title && !lead && !action) return null;
+  return (
+    <div className="studio-tool-dau">
+      <div className="row row-spread studio-tool-hang">
+        {title ? <h2 className="section-title">{title}</h2> : <span />}
+        {action ? <div className="row page-head-actions">{action}</div> : null}
+      </div>
+      {lead ? <p className="lead lead-narrow">{lead}</p> : null}
+    </div>
+  );
+}
+
 export function StudioShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   // Duoi 900px thanh ben bi an; nut nay la duong duy nhat mo no ra. Tren
   // desktop nut bi CSS an di va thanh ben luon hien.
   const [moMobile, setMoMobile] = useState(false);
+
+  /*
+    `<h1>` cua ca khu Studio, va la cai DUY NHAT.
+
+    Lay TEN MODULE tu chinh `MUC_STUDIO` chu khong de tung trang tu khai: mot
+    chuoi go tay o trang cong cu se troi khoi nhan o thanh ben sau vai lan sua,
+    va luc do dieu huong va tieu de se noi hai chuyen khac nhau.
+
+    Rieng `/studio` dung ten cua CA XUONG chu khong phai "Tổng quan" — o goc
+    cua khu, ten khu la thu huu ich; "Tổng quan" thi chi lap lai muc dang sang
+    o thanh ben.
+  */
+  // Ten bien KHONG duoc la `module`: Next.js cam gan vao dinh danh do
+  // (`no-assign-module-variable`) vi no dung voi bien cua he module CommonJS.
+  const dangMo = MUC_STUDIO.find((m) => mucDangMo(pathname, m.href));
+  const tieuDe =
+    !dangMo || dangMo.href === "/studio" ? "Xưởng sáng tác" : dangMo.nhan;
 
   return (
     <div className="page studio-page">
@@ -126,7 +185,7 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
           <span className="eyebrow eyebrow-icon">
             <IconSparkles size={17} /> Fanfic Studio
           </span>
-          <h1 className="page-title studio-tieu-de">Xưởng sáng tác</h1>
+          <h1 className="page-title studio-tieu-de">{tieuDe}</h1>
         </div>
         <button
           type="button"

@@ -18,13 +18,12 @@ import {
   ErrorState,
   JobBadge,
   Loading,
-  PageHeader,
   SkeletonList,
   formatDate,
   formatNumber,
 } from "@/components/ui";
-import { IconLibrary , IconMic } from "@/components/Icons";
-import { MotifCelestialDial } from "@/components/Ornaments";
+import { IconMic } from "@/components/Icons";
+import { StudioToolHeader } from "@/components/StudioShell";
 
 type Source = "all" | "studio" | "fanfic";
 
@@ -122,7 +121,7 @@ export default function LibraryPage() {
 
   if (sessionLoading) {
     return (
-      <div className="page">
+      <div className="studio-tool">
         <Loading label="Đang kiểm tra phiên đăng nhập…" />
       </div>
     );
@@ -130,11 +129,10 @@ export default function LibraryPage() {
 
   if (!profile) {
     return (
-      // Themed Page Hero — "Arcane Archive": navy hoang gia + ngoc bich dam
-      // + vang co dien. Dung PageHeader (khong con <h1> tran) de nhat quan
-      // voi nhanh da dang nhap ben duoi — cung mot he thong.
-      <div className="page" data-hero-theme="library">
-        <PageHeader eyebrow="Thư viện" icon={<IconLibrary />} motif={<MotifCelestialDial />} title="Thư viện audio" />
+      // Theme "Arcane Archive" (navy hoang gia + ngoc bich + vang co dien) o
+      // lai tren the bao: no cap bien mau cho ca cay con, khong chi dau trang.
+      // Tieu de thi thuoc ve khung Studio — xem `StudioToolHeader`.
+      <div className="studio-tool" data-hero-theme="library">
         <EmptyState
           icon="🔐"
           title="Cần đăng nhập để xem thư viện của bạn"
@@ -150,12 +148,8 @@ export default function LibraryPage() {
   }
 
   return (
-    <div className="page" data-hero-theme="library">
-      <PageHeader
-        eyebrow="Thư viện"
-        icon={<IconLibrary />}
-        motif={<MotifCelestialDial />}
-        title="Audio của tôi"
+    <div className="studio-tool" data-hero-theme="library">
+      <StudioToolHeader
         lead="Tất cả audio đã tạo, gồm cả bản tạo nhanh ở Audio Studio và audio của các chương fanfic."
         action={
           <Link className="btn btn-primary" href="/studio/audio" prefetch={false}>

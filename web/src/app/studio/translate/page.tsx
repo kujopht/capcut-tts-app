@@ -38,10 +38,9 @@ import {
   EmptyState,
   ErrorState,
   Loading,
-  PageHeader,
 } from "@/components/ui";
 import { loginHref } from "@/lib/nav";
-import { IconFeather } from "@/components/Icons";
+import { StudioToolHeader } from "@/components/StudioShell";
 import ChapterEditor from "./ChapterEditor";
 import ProviderConnectDialog from "./ProviderConnectDialog";
 
@@ -85,7 +84,7 @@ export default function TranslatePage() {
 
   if (dangTaiPhien) {
     return (
-      <div className="page">
+      <div className="studio-tool">
         <Loading label="Đang tải…" />
       </div>
     );
@@ -93,11 +92,8 @@ export default function TranslatePage() {
 
   if (!profile) {
     return (
-      <div className="page">
-        <PageHeader
-          eyebrow="Công cụ"
-          icon={<IconFeather />}
-          title="Dịch tiểu thuyết"
+      <div className="studio-tool">
+        <StudioToolHeader
           lead="Dịch tiểu thuyết Trung văn sang tiếng Việt, có từ điển thuật ngữ
                riêng cho từng bộ truyện, rồi đưa thẳng vào bản nháp Fanfic World."
         />
@@ -115,11 +111,8 @@ export default function TranslatePage() {
   }
 
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow="Công cụ"
-        icon={<IconFeather />}
-        title="Dịch tiểu thuyết"
+    <div className="studio-tool">
+      <StudioToolHeader
         lead="Dán văn bản hoặc tải tệp .txt/.epub/.docx, chọn thể loại và cách
              gọi tên nhân vật, rồi để hệ thống dịch từng chương."
       />

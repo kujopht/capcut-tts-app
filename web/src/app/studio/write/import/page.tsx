@@ -51,10 +51,10 @@ import {
   EmptyState,
   ErrorState,
   Loading,
-  PageHeader,
   ProgressBar,
   formatNumber,
 } from "@/components/ui";
+import { StudioToolHeader } from "@/components/StudioShell";
 
 /** Mẫu một tệp TXT hợp lệ — hiện thẳng trên trang, không bắt đi đọc tài liệu. */
 const MAU_TXT = `=== Chương 1: Khởi đầu ===
@@ -382,7 +382,7 @@ export default function ChapterImportPage() {
   if (sessionLoading || loading) return <Loading />;
   if (error && novels.length === 0) {
     return (
-      <main className="page">
+      <main className="studio-tool">
         <ErrorState
           message={error}
           onRetry={() => {
@@ -400,9 +400,8 @@ export default function ChapterImportPage() {
   const quaDai = text.length > MAX_IMPORT_TOTAL_CHARS;
 
   return (
-    <main className="page stack-5">
-      <PageHeader
-        eyebrow="Tác giả"
+    <main className="studio-tool">
+      <StudioToolHeader
         title="Nhập chương hàng loạt"
         lead="Đưa nhiều chương từ một tệp TXT/JSON vào một truyện, rồi tạo audio dần."
         action={

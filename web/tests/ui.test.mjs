@@ -90,6 +90,52 @@ test("Studio la MOT san pham: khung chung + bay muc dung thu tu", () => {
     "mục Tổng quan sẽ sáng cùng lúc với công cụ đang mở");
 });
 
+test("MOT <h1> cho ca khu Studio, va no thuoc ve KHUNG", () => {
+  // Khung dat tieu de, va lay ten module tu chinh bang dieu huong.
+  const shell = read("../src/components/StudioShell.tsx");
+  assert.match(shell, /<h1 className="page-title studio-tieu-de">\{tieuDe\}<\/h1>/,
+    "khung Studio không còn tự đặt <h1>");
+  assert.match(shell, /MUC_STUDIO\.find\(\(m\) => mucDangMo\(pathname, m\.href\)\)/,
+    "tiêu đề khung không lấy từ bảng điều hướng — sẽ trôi khỏi nhãn sidebar");
+
+  // Va KHONG trang cong cu nao duoc ve mot cai thu hai. Truoc ban nay moi
+  // cong cu tu ve `PageHeader` (co `<h1>` ben trong), nen duoi khung co hai
+  // `<h1>` chong nhau — trinh doc man hinh coi do la hai tieu de ngang cap,
+  // con nguoi dung thi thay ten san pham lap lai o cho le ra noi ho DANG
+  // LAM GI.
+  for (const p of [
+    "../src/app/studio/page.tsx",
+    "../src/app/studio/audio/page.tsx",
+    "../src/app/studio/image/page.tsx",
+    "../src/app/studio/translate/page.tsx",
+    "../src/app/studio/subtitle/page.tsx",
+    "../src/app/studio/write/page.tsx",
+    "../src/app/studio/write/import/page.tsx",
+    "../src/app/studio/library/page.tsx",
+  ]) {
+    const src = read(p);
+    assert.ok(!src.includes("<PageHeader"), `${p} vẫn dựng PageHeader riêng`);
+    assert.ok(!/<h1[\s>]/.test(src), `${p} vẫn có <h1> riêng`);
+    // Va khong long them mot `.page` nua vao trong `.page` cua khung: lam vay
+    // la dem doi padding dau trang va chay hai hoat anh vao-trang long nhau.
+    assert.ok(!/className="page[ "]/.test(src),
+      `${p} còn lồng .page bên trong khung Studio`);
+  }
+});
+
+test("ten cong cu KHONG lap lai trong than trang Studio", () => {
+  // Ten san pham cu ("Audio Studio", "Image Studio", "Subtitle Studio") chi
+  // duoc phep xuat hien nhu VAN XUOI mo ta, khong phai lam tieu de trang.
+  for (const [p, ten] of [
+    ["../src/app/studio/image/page.tsx", "Image Studio"],
+    ["../src/app/studio/subtitle/page.tsx", "Subtitle Studio"],
+  ]) {
+    const src = read(p);
+    assert.ok(!new RegExp(`title="${ten}"`).test(src),
+      `${p} vẫn dùng "${ten}" làm tiêu đề trang`);
+  }
+});
+
 test("duong dan cong cu CU van chay — bookmark khong duoc hong", () => {
   const cfg = readFileSync(new URL("../next.config.mjs", import.meta.url), "utf8");
   for (const [cu, moi] of [

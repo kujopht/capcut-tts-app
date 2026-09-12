@@ -38,13 +38,12 @@ import {
   ErrorState,
   JobBadge,
   Loading,
-  PageHeader,
   SkeletonList,
   formatDate,
   formatNumber,
 } from "@/components/ui";
-import { IconMic , IconHistory, IconBulb } from "@/components/Icons";
-import { MotifResonanceRings } from "@/components/Ornaments";
+import { IconHistory, IconBulb } from "@/components/Icons";
+import { StudioToolHeader } from "@/components/StudioShell";
 
 /** Gioi han cua Studio — dat o day de tranh job chay qua lau. */
 const MAX_CHARS = 20_000;
@@ -299,7 +298,7 @@ export default function StudioPage() {
 
   if (sessionLoading) {
     return (
-      <div className="page">
+      <div className="studio-tool">
         <Loading label="Đang kiểm tra phiên đăng nhập…" />
       </div>
     );
@@ -307,8 +306,7 @@ export default function StudioPage() {
 
   if (!profile) {
     return (
-      <div className="page" data-hero-theme="audio">
-        <PageHeader eyebrow="Audio Studio" icon={<IconMic />} motif={<MotifResonanceRings />} title="Audio Studio" />
+      <div className="studio-tool" data-hero-theme="audio">
         <EmptyState
           icon="🔐"
           title="Cần đăng nhập để tạo audio"
@@ -324,12 +322,8 @@ export default function StudioPage() {
   }
 
   return (
-    <div className="page" data-hero-theme="audio">
-      <PageHeader
-        eyebrow="Audio Studio"
-        icon={<IconMic />}
-        motif={<MotifResonanceRings />}
-        title="Tạo audio từ văn bản"
+    <div className="studio-tool" data-hero-theme="audio">
+      <StudioToolHeader
         lead="Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là riêng tư và không trở thành chương fanfic."
         action={
           <Link className="btn" href="/studio/library" prefetch={false}>

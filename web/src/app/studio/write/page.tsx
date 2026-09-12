@@ -46,12 +46,11 @@ import {
   EmptyState,
   ErrorState,
   Loading,
-  PageHeader,
   SkeletonList,
   formatNumber,
 } from "@/components/ui";
-import { IconFeather , IconBook, IconLibrary } from "@/components/Icons";
-import { MotifInkFlourish } from "@/components/Ornaments";
+import { IconFeather, IconBook, IconLibrary } from "@/components/Icons";
+import { StudioToolHeader } from "@/components/StudioShell";
 
 /** Thao tac xoa dang cho xac nhan. */
 type PendingDelete =
@@ -586,7 +585,7 @@ export default function WritePage() {
 
   if (sessionLoading) {
     return (
-      <div className="page">
+      <div className="studio-tool">
         <Loading label="Đang kiểm tra phiên đăng nhập…" />
       </div>
     );
@@ -603,19 +602,15 @@ export default function WritePage() {
       chang moi toi noi thi no khong con giong mot khu vuc san pham.
     */
     return (
-      <div className="page">
+      <div className="studio-tool">
         <Loading label="Đang chuyển tới trang đăng nhập…" />
       </div>
     );
   }
 
   return (
-    <div className="page" data-hero-theme="write">
-      <PageHeader
-        eyebrow="Khu vực tác giả"
-        icon={<IconFeather />}
-        motif={<MotifInkFlourish />}
-        title="Viết và xuất bản"
+    <div className="studio-tool" data-hero-theme="write">
+      <StudioToolHeader
         lead="Tạo truyện, thêm chương, tạo audio cho từng chương. Truyện nằm ở bản nháp cho tới khi bạn tự xuất bản."
         action={
           <>

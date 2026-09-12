@@ -44,10 +44,27 @@ import {
  * tin nguoi truc ca can biet.
  */
 function CanBanXuLy({ data }: { data: AdminOverview }) {
-  // Truyen o trang thai nhap = tong - da xuat ban. Day la cho cac ban nhap do
-  // may gat (Story Harvester/farmer) tao ra hien ra: chung duoc tao o trang
-  // thai `draft` va cho mot nguoi xem lai truoc khi len song.
-  const nhap = Math.max(0, data.content.novels_total - data.published_novels);
+  /*
+    Truyen CHO XEM LAI — va khong phai cu "tong tru da xuat ban".
+
+    Ban dau the nay lay `novels_total - published_novels`. Do thuc te tren kho
+    production: con so do la 43, trong khi chi 2 truyen thuc su cho nguoi xem
+    lai. 43 kia gom **10 kho chua cua Audio Studio** (moi nguoi dung mot cai,
+    la kho chua chu khong phai truyen, va khong bao gio duoc xuat ban) cung
+    **22 ban ghi khong co chuong nao** (lan audio / ban ghi kiem thu).
+
+    Mot the luon khac 0 la mot the bi bo qua. Ca gia tri cua bang nay nam o
+    cho no VE RONG khi khong con viec — nen con so phai dem dung thu nguoi
+    quan tri se thuc su mo ra doc.
+
+    Loc o day chu khong them mot endpoint moi: `/api/admin/novels?state=draft`
+    DA tra ve `tags` va so `chapters` cho tung dong.
+  */
+  const napNhap = useCallback(() => adminApi.novels("", "draft", 100), []);
+  const { data: dsNhap } = useAsyncData(napNhap);
+  const nhap = (dsNhap?.novels ?? []).filter(
+    (n) => !n.tags.includes("audio-studio") && n.chapters > 0,
+  ).length;
 
   const viec = [
     {
@@ -64,7 +81,7 @@ function CanBanXuLy({ data }: { data: AdminOverview }) {
     },
     {
       so: nhap,
-      nhan: "truyện ở bản nháp, chưa xuất bản",
+      nhan: "truyện có nội dung, đang chờ xem lại",
       href: "/admin/stories?state=draft",
       icon: IconBook,
     },

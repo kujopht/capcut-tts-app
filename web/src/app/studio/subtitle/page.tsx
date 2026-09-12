@@ -53,7 +53,7 @@ import {
 } from "@/lib/subtitles/projectStore";
 import { SegmentRow } from "@/components/subtitles/SegmentRow";
 import { useToast } from "@/lib/toast";
-import { IconFilm } from "@/components/Icons";
+import { StudioToolHeader } from "@/components/StudioShell";
 
 /** Tran lich su undo/redo — du de nguoi dung lam-lai sai vai buoc, khong
     giu vo han (moi snapshot la ban sao mang phan doan). */
@@ -322,18 +322,16 @@ export default function SubtitleStudioPage() {
   );
 
   return (
-    <div className="page">
-      <header className="stack-2">
-        <span className="eyebrow eyebrow-icon">
-          <IconFilm size={17} /> Công cụ
-        </span>
-        <h1 className="page-title">Subtitle Studio</h1>
-        <p className="hint lead-narrow">
-          Soạn phụ đề cho video của bạn — video luôn ở trên máy bạn, không
-          bao giờ được tải lên Fanfic. Nhập phụ đề có sẵn (SRT/VTT) hoặc gõ
-          tay, chỉnh thời gian/lời thoại, rồi xuất lại SRT/VTT.
-        </p>
-      </header>
+    <div className="studio-tool">
+      <StudioToolHeader
+        lead={
+          <>
+            Soạn phụ đề cho video của bạn — video luôn ở trên máy bạn, không
+            bao giờ được tải lên Fanfic. Nhập phụ đề có sẵn (SRT/VTT) hoặc gõ
+            tay, chỉnh thời gian/lời thoại, rồi xuất lại SRT/VTT.
+          </>
+        }
+      />
 
       <section className="card stack-2">
         <h2 className="section-title">1. Chọn video/audio</h2>

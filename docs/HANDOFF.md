@@ -22,8 +22,8 @@ Cập nhật: 2026-08-08 · Branch `feature/web-mvp` · HEAD `14f4a31`
 > **ROUTER CONTROL CENTER là sản phẩm THỨ HAI của kho này và có dòng phát
 > hành RIÊNG — file này KHÔNG theo dõi nó.** Trạng thái phát hành canonical
 > nằm ở `docs/CONTROL_CENTER.md`: §14e (v0.6.1), §21 (v0.7.0), §23 (v0.8.0),
-> **§24 (v0.9.0 — ĐÃ PHÁT HÀNH 2026-09-12, thẻ
-> `router-control-center-v0.9.0`)**.
+> §24 (v0.9.0), **§25 (v0.9.1 + v0.9.2 — ĐÃ PHÁT HÀNH 2026-09-12, thẻ
+> `router-control-center-v0.9.2`)**.
 > v0.8 thêm kiến trúc suy luận nhiều vai (Leader / Strategist / Reviewer /
 > Executor) + bộ định tuyến model động; nghiệm thu MODEL THẬT ở
 > `docs/reports/REASONING_V08_REAL.md`.

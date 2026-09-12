@@ -68,6 +68,7 @@ def _chay_het(cc: ControlCenter, eid: str, *, giay: float = 40.0) -> bool:
     # đồng hồ tường có thể bị NTP kéo lùi trên máy ảo vừa khởi động.
     het = time.monotonic() + giay
     dau_cu = None
+    ngu = 0.0
     while time.monotonic() < het:
         y = cc.so_thuc_thi.y_dinh(eid)
         if y is not None and (y.trang_thai.ket_thuc or y.trang_thai.can_nguoi):
@@ -80,7 +81,17 @@ def _chay_het(cc: ControlCenter, eid: str, *, giay: float = 40.0) -> bool:
                getattr(y, "so_lan_lap_lai", None),
                len(cc.so_thuc_thi.su_kien(eid)))
         if dau == dau_cu:
-            time.sleep(0.02)
+            # LÙI DẦN khi không có tiến triển — và điều này làm bài kiểm
+            # NHANH HƠN chứ không chậm đi.
+            #
+            # `tick()` không chặn: việc thật (tạo worktree git, chạy bước)
+            # nằm ở luồng khác. Quay vòng `tick()` mỗi 20ms là lấy CPU của
+            # chính những luồng ta đang đợi — trên runner 2 nhân điều đó bỏ
+            # đói chúng. Ngủ lâu hơn khi rỗi thì nhường được chỗ.
+            ngu = min(0.25, ngu * 1.6 if ngu else 0.01)
+            time.sleep(ngu)
+        else:
+            ngu = 0.0
         dau_cu = dau
     # Một lần đọc cuối: nhịp cuối có thể vừa đưa nó tới đích.
     y = cc.so_thuc_thi.y_dinh(eid)
@@ -244,12 +255,22 @@ class Test03KhongFalseDone(_Nen):
         self.cc._dieu_phoi.clear()                      # noqa: SLF001
         _de_xuat(self.cc, "sửa web cho gọn")
         eid = self.cc.chat(PID, "ok làm đi")["execution"]["execution_id"]
-        # Hạn rộng có chủ đích: bài kiểm này chứng minh vòng lặp CÓ ĐÁY, nên
-        # nó phải chạy hết cái đáy đó — 2 bản kế hoạch × 2 lượt thử mỗi bước,
-        # mỗi lượt là một lần giao việc thật qua vòng lặp điều phối. Hạn chật
-        # sẽ biến một bài kiểm về TRẦN thành một bài kiểm về tốc độ máy.
-        self.assertTrue(_chay_het(self.cc, eid, giay=180.0),
-                        "vòng lặp phục hồi KHÔNG có đáy — vẫn chạy sau 180s")
+        # HẠN LÀ MỘT CÁI CHỐT CHỐNG TREO, không phải phép đo.
+        #
+        # Thứ chứng minh vòng lặp CÓ ĐÁY là hai khẳng định BÊN DƯỚI
+        # (`ket_thuc or can_nguoi`, và `so_lan_lap_lai <= 2`) — không phải
+        # con số này. Hạn chỉ tồn tại để một vòng lặp thật sự vô hạn thất bại
+        # thay vì treo mãi.
+        #
+        # Đo thật, vì 180s cũ không đủ và đã đỏ ở CI:
+        #     máy rảnh                       6–9s
+        #     4 luồng đốt CPU, 20 lượt       ~23s trung bình (18/20 đạt)
+        #     đuôi dài                       2/20 vượt 180s
+        # Bài này giao việc THẬT ~8 lần, mỗi lần tạo một worktree git
+        # (subprocess + I/O đĩa), nên nó phụ thuộc máy chứ không phụ thuộc
+        # logic. Runner GitHub 2 nhân còn chật hơn cái mô phỏng trên.
+        self.assertTrue(_chay_het(self.cc, eid, giay=600.0),
+                        "vòng lặp phục hồi KHÔNG có đáy — vẫn chạy sau 600s")
         y = self.cc.so_thuc_thi.y_dinh(eid)
         self.assertTrue(y.trang_thai.ket_thuc or y.trang_thai.can_nguoi,
                         f"kẹt ở {y.trang_thai.value}")

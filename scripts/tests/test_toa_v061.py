@@ -78,25 +78,33 @@ def _cho(dk, giay: float = 30.0, nhip: float = 0.05) -> bool:
     return dk()
 
 
-def _cho_con_chay(cc: ControlCenter, so: int, giay: float = 30.0) -> int:
-    """`tick()` tới khi ĐỦ `so` việc con ở RUNNING, trả về số đếm được.
+def _cho_con_duoc_giao(cc: ControlCenter, so: int, giay: float = 30.0) -> int:
+    """`tick()` tới khi `so` việc con ĐÃ ĐƯỢC GIAO, trả về số đếm được.
 
-    Điều phối xảy ra ở luồng khác, nên "một `tick()` rồi đọc ngay" đo tốc độ
-    của bộ lập lịch chứ không đo hành vi. Trên máy lập trình 4 con kịp vào
-    RUNNING; trên runner CI (chậm hơn, nhiều việc tranh CPU) chỉ 1 kịp — và
-    bài kiểm đỏ với `1 != 4` dù không có gì hỏng.
+    ĐẾM TÍCH LUỸ, không đếm tại một khoảnh khắc. `RUNNING` là trạng thái ĐI
+    QUA: với một executor nhanh, một con có thể vào rồi ra khỏi `RUNNING`
+    giữa hai nhịp, nên `len(tasks(RUNNING))` đo được bao nhiêu là chuyện của
+    lịch CPU chứ không phải của hành vi.
+
+    Đã vấp cả hai chiều, và đó là lý do hàm này đếm kiểu này:
+      * một `tick()` rồi đọc ngay  -> CI thấy 1/4 (chưa kịp vào)
+      * lặp `tick()` rồi đọc ngay  -> CI thấy 0/4 (đã kịp ra)
+
+    Điều bài kiểm thật sự cần chứng minh là "cả 4 con ĐỀU được giao" — tức
+    lệnh ghim provider không chặn con nào. Nên: gom ID của mọi con TỪNG rời
+    khỏi hàng chờ, và dừng khi đủ.
     """
-    dem = [0]
+    da_giao: set[str] = set()
 
     def _du():
         cc.tick()
-        dem[0] = len([t for t in cc.store.tasks("demo",
-                                                states=(TaskState.RUNNING,))
-                      if t.parent_id])
-        return dem[0] >= so
+        for t in cc.store.tasks("demo"):
+            if t.parent_id and t.state is not TaskState.WAITING:
+                da_giao.add(t.task_id)
+        return len(da_giao) >= so
 
-    _cho(_du, giay=giay, nhip=0.05)
-    return dem[0]
+    _cho(_du, giay=giay, nhip=0.02)
+    return len(da_giao)
 
 
 def _chay_toi_xong(cc: ControlCenter, cha_id: str, giay: float = 40.0) -> bool:
@@ -295,8 +303,8 @@ class TestToaEngine(_Nen):
         self.assertIn("không có trong fabric", kq["reply"])
         # Va van giao duoc: provider antigravity co 4 khe trong fabric gia.
         # Chi dem CON: tu V0.6.1 cha cung RUNNING khi con dau tien duoc nhan.
-        self.assertEqual(_cho_con_chay(self.cc, 4), 4,
-                         "4 khe antigravity nhưng không đủ 4 con vào RUNNING")
+        self.assertEqual(_cho_con_duoc_giao(self.cc, 4), 4,
+                         "4 khe antigravity nhưng không đủ 4 con được giao")
         self.assertTrue(_chay_toi_xong(self.cc, cha[0].task_id))
 
     def test_giao_nhieu_tai_khoan_va_tong_hop(self):

@@ -279,6 +279,38 @@ class Test03KhongFalseDone(_Nen):
         sk = [e["kind"] for e in self.cc.so_thuc_thi.su_kien(eid)]
         self.assertIn("STEP_FAILED", sk)
 
+    def test_bo_mot_luot_thi_NHA_LUON_KHOA_cua_no(self):
+        """Bỏ một việc mà không nhả khoá của nó = bế tắc vĩnh viễn.
+
+        LỖI THẬT, đo ở CI 2026-09-12. Đường LẬP LẠI KẾ HOẠCH gọi
+        `_bo_moi_viec_con_song` rồi đi thẳng sang `REPLANNING`; `nha_tai_nguyen`
+        chỉ chạy ở các đường KẾT THÚC, nên khoá của mấy việc vừa bỏ không ai
+        nhả. Bản kế hoạch mới xin lại đúng `WRITE:FILESYSTEM:web` và nằm ở
+        `WAITING` vĩnh viễn — `_nha_khoa_mo_coi` chỉ chạy ở `recover()` nên
+        trong một phiên đang chạy không gì thu hồi nó.
+
+        Trên máy lập trình `finally` của luồng cũ kịp nhả trước khi lượt mới
+        xin, nên nó xanh 20/20 và chỉ đỏ trên runner chậm. Bài này gọi thẳng
+        `bo_viec` nên nó KHÔNG phụ thuộc thời gian.
+        """
+        from scripts.control_center.execution import dieu_phoi as DP
+
+        goi: list = []
+        dung: list = []
+        bd = DP.BoDieuPhoi(
+            self.cc.so_thuc_thi,
+            tao_viec=lambda *a, **k: "",
+            trang_thai_viec=lambda tid: "FAILED",
+            dung_viec=lambda tid, ly_do: dung.append(tid),
+            nha_tai_nguyen=lambda pid, tid: (goi.append((pid, tid)) or 1),
+        )
+
+        bd.bo_viec("demo.tX-1", "thử", project_id="demo")
+        self.assertEqual(dung, ["demo.tX-1"], "không dừng việc")
+        self.assertEqual(goi, [("demo", "demo.tX-1")],
+                         "bỏ việc mà KHÔNG nhả khoá — bản kế hoạch sau sẽ "
+                         "nằm ở WAITING vĩnh viễn")
+
     def test_tran_thu_lai_CO_BIEN(self):
         """§9 — không lặp vô hạn, không provider-shop vô hạn."""
         self.ex.status = "failed"

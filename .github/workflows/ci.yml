@@ -14,13 +14,22 @@
 # san pham web (su co 2026-09-13). Khong bat buoc tren branch protection,
 # nhung van chay day du va van hien do neu Router hong.
 #
-# `include_router` (mac dinh true): push/PR/dispatch thuong LUON chay job
-# `router` — khong doi gi. CHI production-deploy.yml dat gia tri nay thanh
-# false khi goi qua workflow_call, vi cong test truoc-khi-deploy cua no
-# ("test_gate") coi CA workflow duoc goi la MOT ket qua duy nhat (AND cua
-# moi job ben trong) — khong co khai niem "required/non-required" nhu
-# branch protection cua PR. Mot loi Router co san (khong lien quan gi den
-# san pham web) tung chan CA lan deploy vi dieu nay (su co 2026-09-13).
+# `include_router` (chuoi 'true'/'false', mac dinh 'true'): push/PR/dispatch
+# thuong LUON chay job `router` — khong doi gi. CHI production-deploy.yml
+# dat gia tri nay thanh 'false' khi goi qua workflow_call, vi cong test
+# truoc-khi-deploy cua no ("test_gate") coi CA workflow duoc goi la MOT ket
+# qua duy nhat (AND cua moi job ben trong) — khong co khai niem
+# "required/non-required" nhu branch protection cua PR. Mot loi Router co
+# san (khong lien quan gi den san pham web) tung chan CA lan deploy vi dieu
+# nay (su co 2026-09-13).
+#
+# CHUOI, khong phai boolean: GitHub Actions ep kieu ve SO khi so sanh khac
+# kieu, va `false` (boolean) lan `null` CUNG ep ve 0 — nen `false == null`
+# tra ve TRUE (khong giong JavaScript). Dieu kien `if` dau tien dung kieu
+# boolean + so sanh voi null da SAI vi dung bay nay: no LUON tra ve true du
+# include_router la gi, nen job router van chay va van hong tren chinh lan
+# dispatch dung de kiem chung fix nay (run 34769940777, 2026-09-14). Dung
+# chuoi + so sanh != 'false' tranh hoan toan phep ep kieu so.
 
 name: CI
 
@@ -37,10 +46,10 @@ on:
         default: 'history'
         type: string
       include_router:
-        description: 'Co chay job Router/Control Center (scripts/tests) khong — mac dinh co'
+        description: "Co chay job Router/Control Center khong (chuoi 'true'/'false') — mac dinh co"
         required: false
-        default: true
-        type: boolean
+        default: 'true'
+        type: string
   # Cho phep production-deploy.yml tai su dung CHINH XAC cac job nay lam
   # cong required test gate truoc khi deploy that, thay vi chep lai logic
   # test — khong doi hanh vi cua ba trigger o tren, chi THEM mot duong goi
@@ -53,10 +62,10 @@ on:
         default: 'history'
         type: string
       include_router:
-        description: 'Co chay job Router/Control Center (scripts/tests) khong — mac dinh co'
+        description: "Co chay job Router/Control Center khong (chuoi 'true'/'false') — mac dinh co"
         required: false
-        default: true
-        type: boolean
+        default: 'true'
+        type: string
 
 permissions:
   contents: read
@@ -226,11 +235,14 @@ jobs:
     # khoi cong required cua backend web.
     #
     # `if` duoi day: push/PR/dispatch thuong khong co `inputs.include_router`
-    # (null) nen ve trai la true -> job LUON chay, khong doi gi. CHI khi
+    # (null, vi khong di qua workflow_dispatch/workflow_call) — `null !=
+    # 'false'` (chuoi) la true nen job LUON chay, khong doi gi. CHI khi
     # production-deploy.yml goi qua workflow_call va dat rieng
-    # `include_router: false` thi job nay moi bi bo qua — vi test_gate cua
+    # `include_router: 'false'` thi job nay moi bi bo qua — vi test_gate cua
     # deploy coi CA workflow duoc goi la MOT ket qua (xem ghi chu o dau tep).
-    if: inputs.include_router || inputs.include_router == null
+    # KHONG dung kieu boolean o day — xem ghi chu o dau tep ve vi sao
+    # `false == null` cua GitHub Actions tra ve true.
+    if: inputs.include_router != 'false'
     name: Router / Control Center tests (khong bat buoc, khong chan PR)
     runs-on: ubuntu-latest
     steps:

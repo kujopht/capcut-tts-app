@@ -100,7 +100,14 @@ jobs:
       # quan gi den san pham web, tung chan CA lan deploy production (su co
       # 2026-09-13). Cong test cua san pham web van du: backend + web +
       # gitleaks (quet server/ va web/ — hai thu THUC SU duoc deploy).
-      include_router: false
+      #
+      # CHUOI 'false', khong phai boolean false: input `include_router` cua
+      # ci.yml la kieu string chinh vi ly do nay — xem ghi chu dau tep cua
+      # ci.yml (GitHub Actions ep `false` boolean va `null` VE CUNG mot so
+      # khi so sanh khac kieu, nen dieu kien dua tren boolean+null da tung
+      # SAI va van chay job router tren chinh lan dispatch dung de kiem
+      # chung fix nay, run 34769940777, 2026-09-14).
+      include_router: 'false'
     # A reusable workflow can never hold MORE permission than its caller
     # grants. ci.yml's gitleaks job asks for `pull-requests: write` (it
     # annotates PRs), while this workflow's top-level grant is `contents:

@@ -67,6 +67,11 @@ export const HO_ENDPOINT = [
   "progress",
   "reports",
   "search",
+  // Studio Project — SOI DAY noi sau cong cu lai (`/studio/projects/...`),
+  // kem phien tai THANG len kho va hang doi render. Ho RIENG chu khong nam
+  // duoi `/api/video/...`: mot du an Studio tro toi CA SAU loai tai san, va
+  // video chi la mot trong so do. Xem `server/studio_project.py`.
+  "studio",
   // Subtitle Studio (overnight Phase 4, V6) — cong cu CUC BO, dich tung dong
   // qua registry chung nhung KHONG tao TranslationProject/job rieng, nen ho
   // rieng thay vi nam duoi `/api/translate/...`.

@@ -72,3 +72,35 @@ device.json.example
 app.py
 cli.py
 pyproject.toml
+
+# --- Dau ra dong goi desktop (2026-09-13) ---
+# `check-payload-size` bat mot REGRESSION that: payload 903.8 MB / 2118 tep,
+# ap dao boi `build/` + `dist/` — dau ra PyInstaller cua ung dung DESKTOP
+# Router Control Center (cac ban 2026-09-09..10). Dung ho hang voi su co
+# 2.64 GB o tren: mot thu muc lon CUA CHINH KHO nay chua duoc phu.
+#
+# An toan, kiem chung doc lap chu khong chi doc lai chu thich o tren:
+#   * `git ls-files` khop `build/` hoac `dist/` o MOI cap = 0 tep — khong
+#     mot tep nao duoc theo doi nam trong do;
+#   * `beam_apps/` khong mot lan nao nhac toi `build/` hay `dist/`;
+#   * moi import cua hai app duoc deploy deu la stdlib, goi cai trong Beam
+#     Image (beam/torch/diffusers/transformers/PIL), hoac anh em NGAY TRONG
+#     `beam_apps/` (`cover_illustrious_logic`) — khong import nao ra ngoai.
+#
+# Chung cung la dau ra dong goi cua mot SAN PHAM KHAC (desktop EXE, dung
+# Inno Setup), khong phai artifact runtime cua Beam, nen loai tru chung
+# khong the giau mat mot artifact phat hanh nao.
+#
+# TAP TOI THIEU = DUNG TAP MA KHO NAY DA COI LA DAU RA BUILD. `.gitignore`
+# muc "Build / dong goi" liet ke `build/`, `dist/`, `dist-v04/`, `dist-*/`,
+# `installer_output/`. Chi chep `build/` + `dist/` thi payload xuong 436.4 MB
+# — LOT nguong 500 MB nhung con ~430 MB dau ra desktop, va bay BAY con dir
+# `dist-v04..dist-v0613` van duoc tai len moi lan deploy (`dist/` kieu
+# gitignore KHONG khop `dist-v061`). Mot ban dung nua la do lai.
+#
+# Dung dang co gach cheo cuoi giong `.gitignore` (dong 48-55) — cung mot
+# phuong ngu pathspec, nen giu cung cach viet.
+build/
+dist/
+dist-*/
+installer_output/

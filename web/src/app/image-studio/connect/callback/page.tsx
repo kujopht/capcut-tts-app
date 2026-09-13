@@ -66,7 +66,7 @@ function ByopCallbackInner() {
 
     doi().then((ket_qua) => {
       if (ket_qua.kind === "ok") {
-        router.replace("/image-studio");
+        router.replace("/studio/image");
         return;
       }
       setError(
@@ -82,7 +82,7 @@ function ByopCallbackInner() {
       <div className="page">
         <Alert kind="error">{error}</Alert>
         <p className="hint">
-          <Link href="/image-studio" prefetch={false}>Quay lại Image Studio</Link>
+          <Link href="/studio/image" prefetch={false}>Quay lại Image Studio</Link>
         </p>
       </div>
     );

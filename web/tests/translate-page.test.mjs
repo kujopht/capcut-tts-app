@@ -12,17 +12,22 @@ function read(rel) {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 }
 
-const page = () => read("../src/app/translate/page.tsx");
+const page = () => read("../src/app/studio/translate/page.tsx");
 const api = () => read("../src/lib/api.ts");
 const navAuth = () => read("../src/components/NavAuth.tsx");
 
-test("menu Cong cu co loi vao Dich tieu thuyet", () => {
-  assert.match(navAuth(), /href="\/translate"/);
+test("Studio co loi vao Dich tieu thuyet", () => {
+  // Loi vao khong con o header (menu "Công cụ" da bo) ma o thanh ben Studio.
+  // Header chi con MOT lien ket `/studio`, va `StudioShell` dan tiep.
+  assert.match(navAuth(), /href="\/studio"/);
+  const shell = read("../src/components/StudioShell.tsx");
+  assert.match(shell, /href: "\/studio\/translate"/);
+  assert.match(shell, /nhan: "Dịch tiểu thuyết"/);
 });
 
-test("/translate doi dang nhap, dung loginHref chu khong tu ve mot form", () => {
+test("/studio/translate doi dang nhap, dung loginHref chu khong tu ve mot form", () => {
   const src = page();
-  assert.match(src, /loginHref\("\/translate"\)/);
+  assert.match(src, /loginHref\("\/studio\/translate"\)/);
 });
 
 test("/translate goi du bon thao tac chinh cua V5", () => {

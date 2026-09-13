@@ -195,7 +195,7 @@ export default function NovelDetailPage({
               </Link>
             ) : null}
             {isOwner ? (
-              <Link className="btn" href="/write" prefetch={false}>
+              <Link className="btn" href="/studio/write" prefetch={false}>
                 Quản lý truyện
               </Link>
             ) : null}
@@ -231,7 +231,7 @@ export default function NovelDetailPage({
             title="Truyện chưa có chương nào"
             action={
               isOwner ? (
-                <Link className="btn btn-primary" href="/write" prefetch={false}>
+                <Link className="btn btn-primary" href="/studio/write" prefetch={false}>
                   Thêm chương đầu tiên
                 </Link>
               ) : undefined

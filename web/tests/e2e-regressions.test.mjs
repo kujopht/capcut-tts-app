@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const studio = readFileSync(
-  new URL("../src/app/studio/page.tsx", import.meta.url), "utf8");
+  new URL("../src/app/studio/audio/page.tsx", import.meta.url), "utf8");
 // Vong theo doi da chuyen sang hook dung chung voi `/write` — cac rang buoc ve
 // nhip poll gio kiem o day. Hanh vi phai giu nguyen, chi doi cho o.
 const tracker = readFileSync(

@@ -102,7 +102,7 @@ test("de doc den tu MANG TOI CUC BO, khong tu lam mo", () => {
   // trang van sac nguyen; chi vung co chu la toi hon.
   const text = css();
   assert.match(text, /\.page-lam-viec::before/, "thiếu mảng tối sau khu làm việc");
-  for (const f of ["../src/app/studio/page.tsx", "../src/app/write/page.tsx"]) {
+  for (const f of ["../src/app/studio/audio/page.tsx", "../src/app/studio/write/page.tsx"]) {
     assert.match(read(f), /page-lam-viec/, `${f} không dùng mảng tối cục bộ`);
   }
 });
@@ -198,7 +198,7 @@ test("tab cuc bo KHONG doi nen toan trang", () => {
   assert.match(src, /location\.pathname/);
   assert.ok(!src.includes("searchParams"), "nền phản ứng theo query string");
 
-  const lib = read("../src/app/library/page.tsx");
+  const lib = read("../src/app/studio/library/page.tsx");
   assert.match(lib, /setSource\(value\)/);
   assert.ok(!lib.includes("router.push"),
     "đổi tab bằng điều hướng — nền sẽ nhấp nháy");

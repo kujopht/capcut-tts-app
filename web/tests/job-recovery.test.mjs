@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const write = () => read("../src/app/write/page.tsx");
+const write = () => read("../src/app/studio/write/page.tsx");
 const tracker = () => read("../src/lib/useJobTracker.ts");
 
 /**
@@ -172,7 +172,7 @@ test("failed thi bao loi cho nguoi dung", () => {
 /* ========================================== thu vien: mot dong moi chuong */
 
 test("/library chi hien ban HIEN HANH cua moi chuong", () => {
-  const src = read("../src/app/library/page.tsx");
+  const src = read("../src/app/studio/library/page.tsx");
   assert.match(src, /moi_nhat/, "vẫn vẽ một dòng cho mỗi job hoàn tất");
   assert.match(src, /job\.created_at > dang_co\.created_at/);
 });
@@ -180,6 +180,6 @@ test("/library chi hien ban HIEN HANH cua moi chuong", () => {
 test("/library van doc job hoan tat, khong doi sang nguon khac", () => {
   // Sua trung lap KHONG duoc lam mat audio: van la job `completed`, chi la
   // gom theo chuong.
-  const src = read("../src/app/library/page.tsx");
+  const src = read("../src/app/studio/library/page.tsx");
   assert.match(src, /job\.status !== "completed"/);
 });

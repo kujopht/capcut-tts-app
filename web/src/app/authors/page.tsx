@@ -37,7 +37,7 @@ export default function AuthorsPage() {
           <Link className="btn btn-primary" href="/import" prefetch={false}>
             Nhập fanfic của tôi
           </Link>
-          <Link className="btn" href="/write" prefetch={false}>
+          <Link className="btn" href="/studio/write" prefetch={false}>
             Viết một truyện mới
           </Link>
         </div>

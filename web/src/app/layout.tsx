@@ -130,17 +130,17 @@ export default function RootLayout({
                   <Link href="/fanfic" className="footer-link" prefetch={false}>
                     Khám phá
                   </Link>
-                  <Link href="/library" className="footer-link" prefetch={false}>
+                  <Link href="/studio/library" className="footer-link" prefetch={false}>
                     Thư viện của bạn
                   </Link>
                 </nav>
 
                 <nav className="footer-col" aria-label="Sáng tác">
                   <h2 className="footer-title">Sáng tác</h2>
-                  <Link href="/write" className="footer-link" prefetch={false}>
+                  <Link href="/studio/write" className="footer-link" prefetch={false}>
                     Khu vực tác giả
                   </Link>
-                  <Link href="/studio" className="footer-link" prefetch={false}>
+                  <Link href="/studio/audio" className="footer-link" prefetch={false}>
                     Audio Studio
                   </Link>
                   <Link href="/account" className="footer-link" prefetch={false}>

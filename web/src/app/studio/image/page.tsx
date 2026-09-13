@@ -41,12 +41,11 @@ import { useToast } from "@/lib/toast";
 import {
   Alert,
   EmptyState,
-  PageHeader,
   SkeletonList,
   formatDate,
 } from "@/components/ui";
-import { IconSparkles, IconHistory, IconKey } from "@/components/Icons";
-import { MotifInkBloom } from "@/components/Ornaments";
+import { IconHistory, IconKey } from "@/components/Icons";
+import { StudioToolHeader } from "@/components/StudioShell";
 
 type Mode = "quick_free" | "community_free" | "shared_premium" | "byop";
 
@@ -344,27 +343,15 @@ export default function ImageStudioPage() {
 
   if (sessionLoading) {
     return (
-      <div className="page" data-hero-theme="image-studio">
-        <PageHeader
-          eyebrow="Image Studio"
-          icon={<IconSparkles />}
-          motif={<MotifInkBloom />}
-          title="Tạo ảnh minh hoạ cho fanfic"
-          lead="Đang kiểm tra phiên đăng nhập…"
-        />
+      <div className="studio-tool" data-hero-theme="image-studio">
+        <StudioToolHeader lead="Đang kiểm tra phiên đăng nhập…" />
       </div>
     );
   }
 
   return (
-    <div className="page" data-hero-theme="image-studio">
-      <PageHeader
-        eyebrow="Image Studio"
-        icon={<IconSparkles />}
-        motif={<MotifInkBloom />}
-        title="Tạo ảnh minh hoạ cho fanfic"
-        lead="Quick Free miễn phí không cần đăng nhập. Fanfic Credits và My Pollinations cần đăng nhập."
-      />
+    <div className="studio-tool" data-hero-theme="image-studio">
+      <StudioToolHeader lead="Quick Free miễn phí không cần đăng nhập. Fanfic Credits và My Pollinations cần đăng nhập." />
 
       <div className="split page-lam-viec">
         <section className="stack-5">

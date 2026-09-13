@@ -5901,6 +5901,123 @@ body.co-mini { padding-bottom: 74px; }
 .admin-muc[aria-current="page"] svg { color: var(--brand-hover); }
 
 .admin-than { min-width: 0; }
+
+/* ------------------------------------------------------------ Fanfic Studio
+   Khung Studio dung LAI dung hinh hoc cua khung quan tri: cung be rong cot,
+   cung khoang cach, cung hanh vi sticky. Do la chu dich — hai be mat lam
+   viec cua cung mot san pham khong nen lech nhau vai pixel vi hai nguoi viet
+   chung o hai thoi diem.
+
+   Chung khac nhau o MAU, va chi o mau: khu quan tri phu mot lop toi de dim
+   hoa van trang chu xuong (`.admin-page::before`), con Studio thi khong —
+   day la cho nguoi dung sang tac, no duoc phep giu khong khi cua san pham. */
+.studio-page { max-width: 1240px; position: relative; }
+.studio-dau { margin-bottom: var(--s5); }
+.studio-tieu-de { font-size: var(--t-xl); }
+
+.studio-khung {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: start;
+}
+
+.studio-nav {
+  position: sticky;
+  top: 86px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s2);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  background: #080a14c4;
+}
+
+.studio-nut-mobile { display: none; }
+
+.studio-muc {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 9px 12px;
+  border-radius: var(--r2);
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: var(--t-sm);
+  font-weight: 550;
+  border-left: 2px solid transparent;
+}
+.studio-muc:hover { background: #ffffff0a; color: var(--text); }
+.studio-muc svg { color: var(--text-3); flex: 0 0 auto; }
+.studio-muc[aria-current="page"] {
+  background: var(--brand-soft);
+  border-left-color: var(--brand);
+  color: var(--text);
+}
+.studio-muc[aria-current="page"] svg { color: var(--brand-hover); }
+
+.studio-than { min-width: 0; }
+
+/* Vo NGOAI cua mot trang cong cu khi no nam trong khung Studio.
+   Thay cho `.page`: giu dung cach xep chong doc va khoang cach, nhung BO
+   `padding` dau trang va hoat anh vao-trang — khung da lam ca hai mot lan roi,
+   lam lan hai o be trong la dem doi khoang trang va chay hai hoat anh long
+   nhau. `data-hero-theme` VAN o lai the nay: no cap bien mau cho ca cay con
+   (`.filter-bar .input` la the ANH EM cua dau trang, khong phai con), nen bo
+   no di se lam nhat mau ca cong cu chu khong chi dau trang. */
+.studio-tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  min-width: 0;
+}
+
+/* Dau trang cua cong cu: mot cau mo ta + cac nut. KHONG tieu de — `<h1>` duy
+   nhat cua khu thuoc ve khung. */
+.studio-tool-dau {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.studio-tool-hang { align-items: flex-start; gap: var(--s3); }
+.studio-tool-dau .lead { margin: 0; }
+
+/* Vung sang trang tri cua `.page-lam-viec` tran ra -60px MOI BEN. O mot trang
+   rong het khung thi cho tran do co san; trong than Studio thi khong — thanh
+   ben da an mat 208px + khoang cach, nen 60px do day `scrollWidth` vuot
+   `clientWidth` dung 60px (do that o CA 1440 lan 390). Hau qua khong phai mot
+   thanh cuon ma la noi dung BI CAT, vi mot to tien co `overflow` an.
+
+   Giu nguyen tran DOC (khong ai bi cat theo chieu do), bo tran NGANG. */
+.studio-than .page-lam-viec::before { inset: -40px 0; }
+
+/* The cong cu o trang Tong quan. `minmax(0, 1fr)` chu khong `auto`: ten cong
+   cu dai (“Dịch tiểu thuyết”) se keo gian mot cot neu de noi dung quyet dinh
+   be rong, va luoi mat tinh deu. */
+.studio-the-luoi { grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); }
+.studio-the {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  text-decoration: none;
+}
+.studio-the-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: var(--r2);
+  background: var(--brand-soft);
+  color: var(--brand-hover);
+}
+.studio-the-nhan {
+  font-weight: 650;
+  font-size: var(--t-md);
+  color: var(--text);
+}
 .admin-luoi { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .admin-o-ghi { margin-top: 4px; }
 .admin-rong { text-align: center; color: var(--text-3); padding: var(--s6); }
@@ -5931,6 +6048,18 @@ body.co-mini { padding-bottom: 74px; }
 }
 .admin-nhac svg { color: var(--vang-sang); flex: 0 0 auto; }
 .admin-nhac .hint { margin-left: auto; }
+/* Hover dung lop trang trung tinh — CUNG mot lop `.admin-muc` dang dung — chu
+   khong them mot sac vang thu hai. Ngan sach vang cua he nhan dang la mot
+   rang buoc thiet ke co that, do bang so (xem `fantasy-identity.test.mjs`),
+   va mot hieu ung di chuot khong phai ly do de nang no. */
+.admin-nhac:hover { background: #ffffff0f; }
+/* Trang thai RONG cua bang "Cần bạn xử lý" — ve ro chu khong an di. Mot bang
+   bien mat khong phan biet duoc voi mot bang hong. */
+.admin-khong-viec {
+  padding: var(--s3) var(--s4);
+  border: 1px dashed var(--kinh-vien);
+  border-radius: var(--r2);
+}
 
 /* Ho so tac pham o trang kiem duyet: nhan | gia tri, hai cot.
    `max-content` cho cot nhan chu khong mot be rong co dinh — nhan tieng Viet
@@ -6117,6 +6246,20 @@ body.co-mini { padding-bottom: 74px; }
     overflow-y: auto;
   }
   .admin-nav.admin-nav-mo { display: flex; }
+
+  /* Studio: cung co che gap/mo voi khu quan tri. Bay muc la qua dai cho mot
+     hang cuon ngang tren dien thoai — nguoi dung se khong biet con muc o
+     ngoai khung nhin. */
+  .studio-khung { grid-template-columns: minmax(0, 1fr); }
+  .studio-nut-mobile { display: inline-flex; }
+  .studio-nav {
+    display: none;
+    position: static;
+    flex-direction: column;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .studio-nav.studio-nav-mo { display: flex; }
   /* Hang doi: danh sach tren, chi tiet duoi. */
   .admin-doi { grid-template-columns: minmax(0, 1fr); }
   .admin-su-kien { flex-wrap: wrap; }

@@ -25,6 +25,11 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from scripts.router_v4.capabilities import Priority, Reasoning, Requirements
+#: `chuan_hoa_scope` song o `router_v3.worktree` vi TANG: router_v4 import
+#: router_v3, khong bao gio nguoc lai. Mot dinh nghia duy nhat cho nghia cua
+#: `allowed_scope` quan trong hon chuyen no nam o goi nao — chinh viec co
+#: BA ban sao cua phep so nay la khuyet tat da phai sua.
+from scripts.router_v3.worktree import chuan_hoa_scope
 
 #: Duong CAM tuyet doi, khong hop dong nao mo duoc. Trung voi
 #: `router_v3/pool/validation.DUONG_CAM` co chu dich: hai tang cung chan,
@@ -204,6 +209,7 @@ class TaskContract:
         Đây là hàm THUẦN, kiểm được tất định. Việc lấy `changed` từ `git` là
         chuyện của tầng kiểm định.
         """
+        cho_phep = chuan_hoa_scope(self.allowed_scope)
         ra: List[str] = []
         for t in changed:
             n = _chuan_hoa(t)
@@ -215,7 +221,19 @@ class TaskContract:
             if not self.allowed_scope:
                 ra.append(n)
                 continue
-            if not any(n == a or n.startswith(a + "/") for a in self.allowed_scope):
+            # GOC CAY (`.`) nghia la CA cay lam viec — xem `chuan_hoa_scope`.
+            #
+            # Day la cho THU BA cung mot phep so nay bi sai vi cung mot ly do
+            # (2026-09-13): `n == "." or n.startswith("./")` khong bao gio
+            # khop mot tep o NGAY GOC cay, nen mot agent lam dung bi danh
+            # `gate_contract_scope`. Hai cho kia la
+            # `WorktreeManager.verify_scope` va `pool/validation.kiem_dinh`.
+            #
+            # Ba ban sao cua mot phep so la ba co hoi de lech nhau — nen ca
+            # ba nay dung CHUNG mot ham chuan hoa.
+            if cho_phep is None:
+                continue
+            if not any(n == a or n.startswith(a + "/") for a in cho_phep):
                 ra.append(n)
         return sorted(set(ra))
 

@@ -107,7 +107,7 @@ function NoiDung() {
   }
 
   const status = trangThai?.author_status ?? "none";
-  const quayVe = params.get("next") || "/write";
+  const quayVe = params.get("next") || "/studio/write";
 
   async function gui(e: React.FormEvent) {
     e.preventDefault();
@@ -160,7 +160,7 @@ function NoiDung() {
             <AuthorBadge /> Bạn xuất bản truyện được rồi.
           </p>
           <div className="row">
-            <Link className="btn btn-primary" href="/write" prefetch={false}>
+            <Link className="btn btn-primary" href="/studio/write" prefetch={false}>
               Về khu vực tác giả
             </Link>
           </div>
@@ -181,7 +181,7 @@ function NoiDung() {
             </dl>
           ) : null}
           <div className="row">
-            <Link className="btn" href="/write" prefetch={false}>
+            <Link className="btn" href="/studio/write" prefetch={false}>
               Tiếp tục viết bản nháp
             </Link>
           </div>

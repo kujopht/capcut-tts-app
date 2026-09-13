@@ -51,7 +51,7 @@ from scripts.router_v4.modes import hop_dong_review
 from scripts.router_v4.scheduler import Demand, Scheduler
 
 from scripts.control_center import leader
-from scripts.control_center.bootstrap import la_kho_git
+from scripts.control_center.bootstrap import co_moc_git, la_kho_git
 from scripts.control_center.execution import dieu_phoi as DP
 from scripts.control_center.execution import ghi_nho as EGN
 from scripts.control_center.execution import ke_hoach as EKH
@@ -68,7 +68,9 @@ from scripts.control_center.model import (LockKind, PermissionClass, Project,
                                           Session, SessionAction, SessionState,
                                           Task, TaskState, TransitionError,
                                           map_envelope_status)
-from scripts.control_center.permissions import PermissionEnvelope, envelope_for
+from scripts.control_center.permissions import (PermissionEnvelope,
+                                                ThamQuyenGhi, envelope_for,
+                                                tham_quyen_ghi_repo)
 from scripts.control_center.planner import PlannedTask, PlanResult, RulePlanner
 from scripts.control_center.sessions import SessionManager, dao_pid
 from scripts.control_center.store import ControlStore
@@ -896,14 +898,28 @@ class ControlCenter:
                             "assistant_message_id": getattr(t2, "message_id", 0)}
 
         goal = text
+        da_uy_thac = False
         if qd is not None:
             for a in qd.actions:
                 if a.loai == "delegate_work":
                     goal = str(a.tham_so.get("objective") or text)
+                    da_uy_thac = True
                     break
 
+        # V0.9.3 — THAM QUYEN GHI DI CUNG KE HOACH, khong bi vut o day.
+        #
+        # Doc `text` — CAU NGUOI DUNG GO — chu khong phai `goal`, vi `goal` la
+        # loi Leader dien dat lai. De Leader tu viet ra quyen cua chinh no la
+        # dung cai vong lap ma `envelope_for` da tu choi (no quet CA HAI vi ly
+        # do nguoc lai: Leader co the lam mot cau "deploy" nghe vo hai di).
+        #
+        # Truoc V0.9.3 dong duoi chi nhan `goal`, nen su that "nguoi dung vua
+        # cho phep ghi trong kho" chet o day va bo lap ke hoach phai tu doan
+        # lai tu regex. Do la khuyet tat da chan RouterDogfood02.
+        quyen_ghi = tham_quyen_ghi_repo(text, da_uy_thac=da_uy_thac)
         self._dat_buoc(project_id, "đang phân rã mục tiêu thành việc")
-        kh: PlanResult = ctx.planner.plan(goal, ctx.project)
+        kh: PlanResult = ctx.planner.plan(goal, ctx.project,
+                                          quyen_ghi=quyen_ghi)
         self._dat_buoc(project_id, "đang giao việc cho Router V4")
         tao: List[Task] = []
         # V0.6.1 — TOA: nguoi dung noi ro "goi N agent…"/"moi agent mot…" ->
@@ -1084,7 +1100,20 @@ class ControlCenter:
             project_id=project_id, goal=kn.muc_tieu, cau_nguoi_dung=text,
             message_id=tin.message_id, de_xuat=(dx.ma if dx else ""),
             rang_buoc=tuple(dx.cac_buoc[:0]) if dx else ())
-        kq: PlanResult = ctx.planner.plan(kn.muc_tieu, ctx.project)
+        # V0.9.3 — Ý ĐỊNH đã tính thẩm quyền ngay dòng trên; ĐỪNG để bộ lập
+        # kế hoạch tự suy lại. `y.tham_quyen is REPO_LOCAL` CHÍNH LÀ "người
+        # dùng đã cho phép sửa trong worktree của nó" (xem `LopThamQuyen`), và
+        # trước V0.9.3 sự thật đó nằm ngay cạnh lời gọi mà không đi vào.
+        #
+        # `NGOAI` thì KHÔNG cấp gì: ý định đó đang chờ người duyệt, và câu
+        # "ok làm đi" không bao giờ mở được lớp ngoài kho.
+        kq: PlanResult = ctx.planner.plan(
+            kn.muc_tieu, ctx.project,
+            quyen_ghi=(ThamQuyenGhi(cho_phep=True, nguon="y_dinh",
+                                    bang_chung=y.tham_quyen.value)
+                       if y.da_duyet_repo_local else
+                       ThamQuyenGhi(nguon="ngoai_kho",
+                                    bang_chung=y.tham_quyen.value)))
         if kn.tin_hieu.pham_vi_noi_ro:
             kq = ELK.cat_theo_pham_vi(kq, kn.tin_hieu.pham_vi_noi_ro)
         if not kq.tasks:
@@ -3227,6 +3256,22 @@ class ControlCenter:
         # `FILESYSTEM:web` doc thanh WRITE, khong bao gio noi long cho ghi.
         xin = [x for x in (doc_chuoi_tai_nguyen(r) for r in t.resources) if x]
         grant = lm.xin(t.project_id, xin, task_id=t.task_id) if xin else None
+        # BẾ TẮC TRONG PHIÊN: chủ khoá đã kết thúc mà khoá còn đó.
+        #
+        # `_nha_khoa_mo_coi` xử đúng ca này từ V0.9.1, nhưng nó chỉ chạy ở
+        # `recover()` — tức lúc KHỞI ĐỘNG LẠI. Trong một phiên đang chạy,
+        # việc kia bị giam hết `LOCK_TTL` (1 GIỜ) và bộ lập lịch chỉ lặng lẽ
+        # đẩy nó sang `WAITING` mỗi lượt. Đúng lớp lỗi mà
+        # `docs/reports/V091_DOGFOOD_HOTFIX.md` ghi là "cuộc đua ở tầng
+        # KHOÁ, phụ thuộc tải" và hoãn lại ở lần phát hành đó.
+        #
+        # Thu hồi rồi xin LẠI ĐÚNG MỘT LẦN. Không lặp: nếu lượt thứ hai vẫn
+        # bị từ chối thì chủ khoá còn sống thật, và `WAITING` là câu trả lời
+        # đúng. Mọi lưới an toàn vẫn nằm nguyên trong `_nha_khoa_mo_coi`.
+        if (grant is not None and not grant.granted
+                and self._chu_khoa_co_the_da_chet(grant.conflict_holder_task)
+                and self._nha_khoa_mo_coi(t.project_id)):
+            grant = lm.xin(t.project_id, xin, task_id=t.task_id)
         if grant is not None and not grant.granted:
             self._sang_waiting(t, grant.reason)
             return {"task_id": t.task_id, "dispatched": False,
@@ -3269,6 +3314,34 @@ class ControlCenter:
             self._sang_waiting(t, qd.reason)
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": qd.reason, "decision": qd.to_dict()}
+
+        # V0.9.3 — KHO CHUA CO COMMIT NAO thi noi thang ra dieu do.
+        #
+        # `la_kho_git` o cong vao tra `true` cho mot kho `git init` chua
+        # commit, nen truong hop nay lot toi tan tang worktree roi nо bang
+        # `fatal: ambiguous argument 'HEAD'` — mot cau khong noi cho ai biet
+        # phai lam gi. Do duoc tren RouterDogfood02 (2026-09-13).
+        #
+        # Router KHONG tu commit ho vao kho cua nguoi dung: mot kho da nhan
+        # nuoi la tai san cua ho, va tu tao commit trong do la mot dot bien
+        # khong ai xin. Du an do CHINH Router tao thi da co commit dau tien
+        # tu `tao_du_an` — xem ghi chu o do.
+        if (hd.execution.worktree_required
+                and not co_moc_git(ctx.project.repo_path)):
+            lm.tra(t.project_id, t.task_id)
+            cau = (f"kho {ctx.project.repo_path} chưa có commit nào, nên "
+                   f"Router không dựng được cây làm việc cô lập (không có "
+                   f"mốc để so). Hãy tạo commit đầu tiên trong kho đó rồi "
+                   f"gửi lại việc này.")
+            self.store.ghi_su_kien(
+                "PROJECT_REPO_NO_BASELINE",
+                project_id=ctx.project.project_id, task_id=t.task_id,
+                level="ERROR", detail=cau,
+                meta={"repo_path": str(ctx.project.repo_path)})
+            self.store.doi_trang_thai(t.task_id, TaskState.BLOCKED,
+                                      reason=cau[:400])
+            return {"task_id": t.task_id, "dispatched": False,
+                    "reason": cau[:200]}
 
         try:
             if qd.action is SessionAction.REUSE:
@@ -3388,7 +3461,29 @@ class ControlCenter:
         """
         try:
             from scripts.control_center import nang_luc as NL
-            can = NL.nang_luc_viec(hd if isinstance(hd, dict) else {})
+            # `hd` O DAY LA MOT `TaskContract`, KHONG PHAI dict.
+            #
+            # Ban cu viet `hd if isinstance(hd, dict) else {}`. Cho goi DUY
+            # NHAT cua ham nay (`_giao_khong_luoi`) binh `hd =
+            # TaskContract.from_dict(...)`, nen ve `else` LUON dung, va ca rao
+            # can nay im lang tra ve () — no chua bao gio chan mot lan xep cho
+            # nao.
+            #
+            # Do duoc 2026-09-13: mot viec GHI bi xep (roi DUNG LAI phien) o
+            # CODEX01 ba lan lien tiep du CODEX01 da khai `refuses:
+            # ["repo_write"]`. Vet quyet dinh khong he co dong "nang luc: CAM".
+            #
+            # Nang hon: rao nay cung la duong thi hanh `security_review` cua
+            # V0.7 — thu giu cho viec hinh dang bao mat khong roi vao Codex.
+            # No cung da chet cung mot cach, va im lang y het.
+            #
+            # Mot phep phong thu bien mot rao an toan thanh mot ham rong la
+            # kieu hong te nhat: moi thu trong nhu binh thuong.
+            d = hd if isinstance(hd, dict) else None
+            if d is None:
+                lay = getattr(hd, "to_dict", None)
+                d = lay() if callable(lay) else {}
+            can = NL.nang_luc_viec(d if isinstance(d, dict) else {})
             if not can:
                 return (), ""
             fab = getattr(getattr(ctx, "sessions", None), "fabric", None)
@@ -3939,6 +4034,23 @@ class ControlCenter:
                             f"{t.state.value if t else '(không còn)'}, "
                             f"không phải RUNNING"))
         return da_nha
+
+    def _chu_khoa_co_the_da_chet(self, holder_task: str) -> bool:
+        """Phép thử RẺ: chủ khoá đang chặn có dấu hiệu KHÔNG còn chạy không?
+
+        Chỉ là một cái cổng để khỏi quét toàn bộ khoá của dự án ở mọi lượt
+        bị từ chối — quyết định NHẢ vẫn hoàn toàn thuộc về
+        `_nha_khoa_mo_coi`, nơi giữ đủ ba lưới an toàn (miễn trừ
+        PRODUCTION, `_dang_chay`, lease còn sống). Sai ở đây chỉ tốn thêm
+        một lần quét, không bao giờ nhả nhầm.
+        """
+        if not holder_task:
+            return False
+        with self._khoa:
+            if holder_task in self._dang_chay:
+                return False
+        t = self.store.task(holder_task)
+        return t is None or t.state is not TaskState.RUNNING
 
     #: Lý do TỪ CHỐI vì CHÍNH SÁCH/NĂNG LỰC — an toàn để định tuyến lại.
     #:

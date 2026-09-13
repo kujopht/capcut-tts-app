@@ -163,8 +163,8 @@ test("duong ngan sau dau muc la CSS, khong phai ky tu ke", () => {
 
 test("dau muc dung DAU AN co that, khong emoji", () => {
   // Bo icon noi tuyen o `components/Icons.tsx` — khong goi phu thuoc nao.
-  const trang = ["../src/app/page.tsx", "../src/app/studio/page.tsx",
-                 "../src/app/write/page.tsx", "../src/app/account/page.tsx"];
+  const trang = ["../src/app/page.tsx", "../src/app/studio/audio/page.tsx",
+                 "../src/app/studio/write/page.tsx", "../src/app/account/page.tsx"];
   for (const f of trang) {
     const src = read(f);
     for (const m of src.matchAll(

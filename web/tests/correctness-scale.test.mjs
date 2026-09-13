@@ -6,8 +6,8 @@ import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 
-const library = () => read("../src/app/library/page.tsx");
-const studio = () => read("../src/app/studio/page.tsx");
+const library = () => read("../src/app/studio/library/page.tsx");
+const studio = () => read("../src/app/studio/audio/page.tsx");
 const api = () => read("../src/lib/api.ts");
 
 /** Khop `api.xxx(` ke ca khi viet `api` xuong dong roi `.xxx(`. */
@@ -134,7 +134,7 @@ test("khong pha M2/M3/M4", () => {
   // Overnight Phase 2 (Phan 2A): trinh phat NGAY TRONG HANG cua trang chi
   // tiet truyen da chuyen thanh lien ket sang `/listen/[id]` — kiem tra do
   // nam o `ui.test.mjs` ("trang chi tiet truyen KHONG con mo trinh phat...").
-  assert.match(read("../src/app/write/page.tsx"), /api\.reorderChapters\(/);
+  assert.match(read("../src/app/studio/write/page.tsx"), /api\.reorderChapters\(/);
   assert.match(read("../src/app/novels/[id]/page.tsx"), /chapter\.audio_outdated \?/);
   // Canh bao "audio co the khong con khop" chuyen sang trang Nghe rieng
   // cung voi trinh phat — trang doc (`/chapters/[id]`) khong con audio nua.

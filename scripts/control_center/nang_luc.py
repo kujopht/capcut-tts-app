@@ -38,7 +38,22 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Sequence, Tuple
 #: Năng lực ĐÓNG mà tầng này biết. Thêm một năng lực là một quyết định kiến
 #: trúc, không phải một lần sửa chuỗi.
 SECURITY_REVIEW = "security_review"
-NANG_LUC_BIET: FrozenSet[str] = frozenset({SECURITY_REVIEW})
+
+#: V0.9.3 — việc CẦN GHI VÀO KHO.
+#:
+#: Do được 2026-09-13: việc Todo (có phạm vi ghi) bị xếp sang `CODEX01`, và
+#: sau 226 giây Codex trả "Sandbox hệ thống chặn mọi thao tác ghi". Adapter
+#: gọi `codex exec` không cờ sandbox, tức sandbox CHỈ ĐỌC — nó không bao giờ
+#: ghi được. Lượt sau lại vào đúng chỗ đó, lần này vì phiên CODEX01 còn ấm
+#: và luật DÙNG LẠI chỉ xét phạm vi, không xét NĂNG LỰC.
+#:
+#: Khai ở đây để đi qua ĐÚNG rào cứng đã có (`_cam_runtime_theo_nang_luc` ->
+#: `cam` -> lọc cả ứng viên DÙNG LẠI ở `sessions.decide`), thay vì thêm một
+#: phép lọc thứ hai ở một tầng khác. Hai phép lọc song song cho cùng một sự
+#: thật chính là căn bệnh mà cả bản V0.9.3 này đang chữa.
+REPO_WRITE = "repo_write"
+
+NANG_LUC_BIET: FrozenSet[str] = frozenset({SECURITY_REVIEW, REPO_WRITE})
 
 #: Từ vựng "hình dạng bảo mật" nằm ở MỘT chỗ duy nhất: `router_v3.policy`.
 #: Hai danh sách song song là đúng cách để chúng lệch nhau trở lại — và lần
@@ -94,6 +109,18 @@ def nang_luc_viec(hd: Dict[str, Any]) -> FrozenSet[str]:
 
     if la_hinh_dang_bao_mat(van_ban_nguoi_viet(hd)):
         ra.add(SECURITY_REVIEW)
+
+    # V0.9.3 — VIEC CO PHAM VI GHI thi doi runtime GHI DUOC.
+    #
+    # Doc tu `allowed_scope`/`requirements.repo_write` — SU THAT trong hop
+    # dong, khong phai mot lan doan chu nghia. Mot viec chi doc khong sinh
+    # ra doi hoi nay, nen no khong thu hep gi ngoai dung cho can thiet.
+    if hd.get("allowed_scope"):
+        ra.add(REPO_WRITE)
+    else:
+        yc = hd.get("requirements")
+        if isinstance(yc, dict) and yc.get("repo_write"):
+            ra.add(REPO_WRITE)
     return frozenset(ra)
 
 

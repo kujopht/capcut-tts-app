@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 
-const write = () => read("../src/app/write/page.tsx");
+const write = () => read("../src/app/studio/write/page.tsx");
 const novel = () => read("../src/app/novels/[id]/page.tsx");
 const chapter = () => read("../src/app/chapters/[id]/page.tsx");
 /** Trang Nghe rieng (overnight Phase 2, Phan 2A) — day la noi trinh phat

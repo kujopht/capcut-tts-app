@@ -79,11 +79,11 @@ test("KHONG trang nao hardcode mau tim/lo moi", () => {
   // (quang, gradient) — nhung khong duoc lot vao tep JSX.
   for (const f of [
     "../src/app/page.tsx",
-    "../src/app/library/page.tsx",
+    "../src/app/studio/library/page.tsx",
     "../src/app/account/page.tsx",
     "../src/app/login/page.tsx",
-    "../src/app/studio/page.tsx",
-    "../src/app/write/page.tsx",
+    "../src/app/studio/audio/page.tsx",
+    "../src/app/studio/write/page.tsx",
     "../src/app/fanfic/page.tsx",
     "../src/components/JobProgress.tsx",
     "../src/components/SiteHeader.tsx",
@@ -123,7 +123,7 @@ test("'Viết truyện' noi bat hon muc dieu huong thuong", () => {
   const nav = read("../src/components/NavAuth.tsx");
   // Van la muc thu tu trong `LINKS` — thu tu san pham khong doi, va
   // `ui.test.mjs` cung `author-workspace-oauth.test.mjs` khoa lai dieu do.
-  assert.match(nav, /href: "\/write", label: "Viết truyện", cta: true/);
+  assert.match(nav, /href: "\/studio\/write", label: "Viết truyện", cta: true/);
   assert.match(nav, /link\.cta \? "nav-link nav-cta" : "nav-link"/);
   const cta = rule(".nav-cta");
   assert.match(cta, /var\(--brand-line\)/, "nút CTA không có viền tím");
@@ -180,7 +180,7 @@ test("cac lien ket TINH luon-trong-khung-nhin o trang chu KHONG tu prefetch", ()
   const home = read("../src/app/page.tsx");
   const heroCta = home.slice(home.indexOf("hero-v2-cta"), home.indexOf("hero-v2-guest-hint"));
   assert.match(heroCta, /href="\/fanfic" prefetch=\{false\}/);
-  assert.match(heroCta, /href="\/write" prefetch=\{false\}/);
+  assert.match(heroCta, /href="\/studio\/write" prefetch=\{false\}/);
   assert.match(home, /href="\/login" prefetch=\{false\}/);
   const viTriCongChinh = home.indexOf('className="portal-primary"');
   const congChinh = home.slice(viTriCongChinh, home.indexOf("portal-satellites", viTriCongChinh));
@@ -205,7 +205,7 @@ test("hero noi ve TRUYEN, khong phai ve cong cu", () => {
   const at = home.indexOf("function Hero(");
   const than = home.slice(at, home.indexOf("function DaiThanhVien"));
   assert.match(than, /href="\/fanfic"/, "thiếu lối vào khám phá truyện");
-  assert.match(than, /href="\/write"/, "thiếu lối vào viết truyện");
+  assert.match(than, /href="\/studio\/write"/, "thiếu lối vào viết truyện");
   // Va van khong dan bang logo khong lo — `ui.test.mjs` giu rang buoc do.
   assert.ok(!than.includes("LogoMark"));
 });
@@ -213,7 +213,7 @@ test("hero noi ve TRUYEN, khong phai ve cong cu", () => {
 test("da dang nhap thi co loi tat vao thu vien", () => {
   const home = read("../src/app/page.tsx");
   assert.match(home, /daDangNhap \? \(/);
-  assert.match(home, /href="\/library"/);
+  assert.match(home, /href="\/studio\/library"/);
 });
 
 test("trang chu VAN lay truyen that, khong thanh landing tinh", () => {
@@ -280,8 +280,8 @@ test("lop mau cua khung chi theo status, khong theo con so", () => {
 
 test("hai trang VAN dung hook va khung chung sau khi ve lai", () => {
   for (const [ten, f] of [
-    ["/write", "../src/app/write/page.tsx"],
-    ["/studio", "../src/app/studio/page.tsx"],
+    ["/write", "../src/app/studio/write/page.tsx"],
+    ["/studio", "../src/app/studio/audio/page.tsx"],
   ]) {
     const src = read(f);
     assert.match(src, /useJobTracker\(/, `${ten} mất hook chung`);
@@ -293,7 +293,7 @@ test("hai trang VAN dung hook va khung chung sau khi ve lai", () => {
 test("ve lai KHONG mang style inline tro lai hai trang cong cu", () => {
   // Ba dong mau lap lai bang `style` inline o `/write` da duoc doi thanh
   // `.novel-pick`. Media query khong voi toi style inline duoc.
-  const write = read("../src/app/write/page.tsx");
+  const write = read("../src/app/studio/write/page.tsx");
   assert.match(write, /className="novel-pick"/);
   assert.ok(!/borderColor:\s*\n?\s*novel\.novel_id === selectedId/.test(write));
   assert.match(read("../src/app/globals.css"),
@@ -513,9 +513,9 @@ test("KHONG lo thuat ngu backend ra giao dien", () => {
   // Nguoi dung khong biet "job" la gi, va ho cung khong sua duoc "cau hinh
   // backend" — noi vay la mot loi khuyen vo dung.
   for (const f of [
-    "../src/app/studio/page.tsx",
-    "../src/app/write/page.tsx",
-    "../src/app/library/page.tsx",
+    "../src/app/studio/audio/page.tsx",
+    "../src/app/studio/write/page.tsx",
+    "../src/app/studio/library/page.tsx",
     "../src/app/page.tsx",
   ]) {
     const ma = codeOnly(read(f));

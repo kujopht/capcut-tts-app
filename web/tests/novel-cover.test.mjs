@@ -15,7 +15,7 @@ function read(rel) {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 }
 
-const write = () => read("../src/app/write/page.tsx");
+const write = () => read("../src/app/studio/write/page.tsx");
 const api = () => read("../src/lib/api.ts");
 const limits = () => read("../src/lib/limits.ts");
 

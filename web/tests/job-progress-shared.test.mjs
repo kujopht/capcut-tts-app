@@ -30,8 +30,8 @@ import {
 } from "../src/lib/jobs.ts";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const write = () => read("../src/app/write/page.tsx");
-const studio = () => read("../src/app/studio/page.tsx");
+const write = () => read("../src/app/studio/write/page.tsx");
+const studio = () => read("../src/app/studio/audio/page.tsx");
 const tracker = () => read("../src/lib/useJobTracker.ts");
 const khung = () => read("../src/components/JobProgress.tsx");
 

@@ -121,6 +121,13 @@ def dao_pid(adapter) -> Optional[int]:
     return None
 
 
+#: Trần của `pid_t`. POSIX dùng int 32-bit CÓ DẤU; Windows dùng DWORD (không
+#: dấu) nên PID ở đó có thể vượt trần này — và một sổ chép từ máy Windows sang
+#: máy Linux mang theo con số đó. Lấy trần nhỏ hơn của hai bên là phép bảo thủ
+#: đúng: vượt trần ⇒ không thể là tiến trình đang sống Ở ĐÂY.
+_PID_TOI_DA = 2 ** 31 - 1
+
+
 def tien_trinh_con_song(pid: Optional[int]) -> bool:
     """Tiến trình còn tồn tại không. `False` khi không biết.
 
@@ -132,11 +139,29 @@ def tien_trinh_con_song(pid: Optional[int]) -> bool:
     """
     if not pid or pid <= 0:
         return False
+    # PID NGOÀI TẦM `pid_t` phải rơi về "đã chết", không được nổ.
+    #
+    # Trên POSIX `pid_t` là int 32-bit CÓ DẤU, nên `os.kill(2**32-2, 0)` ném
+    # `OverflowError` — một `ArithmeticError`, KHÔNG phải `OSError`, nên nó
+    # lọt qua mọi `except` ở dưới và thoát ra ngoài hàm này. Hàm tự hứa "trả
+    # `False` khi không biết" và "bảo thủ = coi như đã chết"; một PID rác
+    # trong sổ (hoặc một PID Windows lớn đọc trên máy Linux) làm nó vi phạm
+    # chính lời hứa đó và làm sập đường phục hồi thay vì dọn việc.
+    #
+    # Đo được ở CI Linux: `test_phien_co_PID_da_chet_thi_khong_tinh` gieo
+    # `pid=4294967294` và cả lượt kiểm nổ với `OverflowError`.
+    try:
+        if int(pid) > _PID_TOI_DA:
+            return False
+    except (TypeError, ValueError):
+        return False
     try:
         import psutil                                     # type: ignore
         return psutil.pid_exists(int(pid))
     except ImportError:
         pass
+    except (OverflowError, ValueError):
+        return False
     if os.name == "nt":
         import ctypes
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -155,7 +180,8 @@ def tien_trinh_con_song(pid: Optional[int]) -> bool:
     try:
         os.kill(int(pid), 0)
         return True
-    except (OSError, ProcessLookupError, PermissionError):
+    except (OSError, ProcessLookupError, PermissionError,
+            OverflowError, ValueError):
         return False
 
 

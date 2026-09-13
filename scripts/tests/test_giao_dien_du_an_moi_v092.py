@@ -22,6 +22,7 @@ tới lúc người dùng bấm nút:
 from __future__ import annotations
 
 import json as _json
+import os
 import re
 import shutil
 import subprocess
@@ -62,12 +63,24 @@ class TestKiemThuMucGoc(unittest.TestCase):
             with self.subTest(x=x):
                 self.assertEqual(kiem_thu_muc_goc(x), "")
 
+    #: Một đường TUYỆT ĐỐI của HỆ ĐANG CHẠY.
+    #:
+    #: `GOC_MAC_DINH_WIN` (`C:\RouterProjects`) chỉ tuyệt đối trên Windows;
+    #: trên Linux `Path("C:\\RouterProjects").is_absolute()` là `False`, nên
+    #: `kiem_thu_muc_goc` từ chối nó — ĐÚNG như nó phải làm — và hai bài dưới
+    #: đỏ ở runner CI dù không có gì hỏng. Hợp đồng cần kiểm là "đường tuyệt
+    #: đối thì nhận", và hợp đồng đó đúng ở mọi nền; chỉ cái LITERAL là riêng
+    #: của Windows.
+    GOC_TUYET_DOI = (GOC_MAC_DINH_WIN if os.name == "nt"
+                     else "/srv/RouterProjects")
+
     def test_02_nhan_duong_dan_tuyet_doi(self):
-        self.assertEqual(kiem_thu_muc_goc(GOC_MAC_DINH_WIN), GOC_MAC_DINH_WIN)
+        self.assertEqual(kiem_thu_muc_goc(self.GOC_TUYET_DOI),
+                         self.GOC_TUYET_DOI)
 
     def test_03_bo_dau_nhay_nguoi_dung_dan_tu_explorer(self):
-        self.assertEqual(kiem_thu_muc_goc(f'"{GOC_MAC_DINH_WIN}"'),
-                         GOC_MAC_DINH_WIN)
+        self.assertEqual(kiem_thu_muc_goc(f'"{self.GOC_TUYET_DOI}"'),
+                         self.GOC_TUYET_DOI)
 
     def test_04_TU_CHOI_duong_tuong_doi(self):
         for x in ("RouterProjects", r"..\kho", "./x"):

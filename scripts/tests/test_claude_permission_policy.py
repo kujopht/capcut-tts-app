@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import unittest
 from pathlib import Path
 
@@ -549,8 +550,58 @@ class TestTienToCdKhongConHoi(unittest.TestCase):
             "deny")
 
 
+def _co_tang_nguoi_dung() -> bool:
+    """Máy này CÓ tầng người dùng để mà kiểm hay không.
+
+    TỰ phân giải đường dẫn, CỐ Ý KHÔNG nhập `scripts/kiem_quyen.py`.
+
+    Bản đầu của hàm này có nhập, và nó làm hỏng 85 bài kiểm ở CI — không phải
+    ở tệp này mà rải khắp `scripts/tests/`, với
+    `ValueError: I/O operation on closed file` phát ra từ một `print()` bình
+    thường ở `chinese_media_pipeline.py`.
+
+    Cơ chế: `kiem_quyen` dựng `RA = io.TextIOWrapper(sys.stdout.buffer, ...)`
+    ngay lúc nhập. Hàm này chạy ở thời điểm ĐỊNH NGHĨA LỚP (bộ trang trí
+    `skipUnless` được tính khi nhập mô-đun), rồi bỏ tham chiếu tới mô-đun
+    vừa tạo. Bộ đếm tham chiếu dọn mô-đun → dọn `RA` → `TextIOWrapper` đóng
+    luôn buffer BÊN DƯỚI nó, tức `sys.stdout.buffer`. Mọi `print()` sau đó
+    trong CÙNG tiến trình đều nổ.
+
+    Lớp ở dưới vẫn nhập `kiem_quyen` trong `setUpClass` và điều đó AN TOÀN:
+    nó giữ mô-đun ở `cls.kq` suốt vòng đời lớp, nên `RA` không bị dọn.
+
+    Hai dòng dưới đây phải khớp `kiem_quyen.NGUOI_DUNG`/`CAU_HINH_NGUOI_DUNG`.
+    Nếu lệch, `TestTangNguoiDungTuDung` sẽ bị bỏ qua ở máy lập trình và điều
+    đó lộ ra ngay: `python -m unittest ...` sẽ báo `skipped=12` thay vì chạy
+    đủ 57 bài.
+    """
+    goc = os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")
+    return (Path(goc) / "settings.json").is_file()
+
+
+@unittest.skipUnless(
+    _co_tang_nguoi_dung(),
+    "không có tầng người dùng (~/.claude/settings.json) trên máy này — "
+    "lớp này kiểm CẤU HÌNH MÁY LÀM VIỆC, không kiểm sản phẩm",
+)
 class TestTangNguoiDungTuDung(unittest.TestCase):
     """Tầng NGƯỜI DÙNG phải tự đứng được — không dựa vào hồ sơ kho.
+
+    BỎ QUA Ở CI, CHẠY THẬT Ở MÁY LẬP TRÌNH — và sự khác biệt đó là CỐ Ý.
+
+    Thứ lớp này khẳng định (`~/.claude/settings.json` + hook người dùng) nằm
+    NGOÀI kho một cách có chủ đích: chỉ tầng đó mới có hiệu lực ở một thư mục
+    chưa được tin, nên nó không thể được commit vào đây. Một runner CI không
+    có tệp đó, nên MỌI luật rơi về `hoi` và cả lớp đỏ — đo được: 50 failures
+    + 1 error với `CLAUDE_CONFIG_DIR` trỏ vào một thư mục rỗng.
+
+    Đỏ như vậy không nói lên điều gì về sản phẩm, nhưng nó chặn mọi PR web
+    vì "Backend tests" là một check BẮT BUỘC. Nên: bỏ qua khi không có gì để
+    kiểm, và kiểm đầy đủ khi có.
+
+    Sáu lớp còn lại trong tệp này KHÔNG bị bỏ qua — chúng đọc hồ sơ kho, đã
+    nằm trong git, và phải xanh ở CI. Đã kiểm từng lớp một dưới điều kiện CI
+    mô phỏng: chỉ DUY NHẤT lớp này phụ thuộc môi trường.
 
     VÌ SAO ĐÂY LÀ BÀI KIỂM QUAN TRỌNG NHẤT TRONG TỆP NÀY.
 
@@ -704,9 +755,18 @@ class TestCuaTimAnToan(unittest.TestCase):
                 self.assertIn("RA.write", dong,
                               f"`cwd` không được quyết định phạm vi: {dong}")
 
+    #: Đường TUYỆT ĐỐI nằm ngoài kho — phải hợp với HỆ ĐANG CHẠY.
+    #:
+    #: Bản trước ghi cứng `C:/Windows` và `C:/Users/nguye/.ssh`. Trên Linux
+    #: (runner CI) hai chuỗi đó KHÔNG tuyệt đối, nên nhánh `else` biến chúng
+    #: thành `GOC / "C:/Windows"` — một đường NẰM TRONG kho — và `trong_kho`
+    #: đúng ra không được từ chối. Bài kiểm đỏ ở CI trong khi cửa an toàn vẫn
+    #: chạy đúng: một bài kiểm chỉ-đúng-trên-Windows, không phải một lỗ hổng.
+    NGOAI_KHO = (("C:/Windows", "C:/Users/nguye/.ssh") if os.name == "nt"
+                 else ("/etc", "/root/.ssh"))
+
     def test_khong_ra_ngoai_kho_duoc(self):
-        for d in ("../..", "C:/Windows", "C:/Users/nguye/.ssh",
-                  "scripts/../../..", "/"):
+        for d in ("../..", "scripts/../../..", "/") + self.NGOAI_KHO:
             with self.subTest(duong=d):
                 with self.assertRaises(self.tim.BiTuChoi):
                     self.tim.trong_kho(Path(d) if Path(d).is_absolute()

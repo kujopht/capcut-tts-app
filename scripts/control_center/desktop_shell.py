@@ -214,7 +214,11 @@ def tien_trinh_con_song(pid: int) -> bool:
         try:
             os.kill(pid, 0)
             return True
-        except (OSError, ProcessLookupError):
+        # `OverflowError` (một `ArithmeticError`, KHÔNG phải `OSError`) khi
+        # `pid` vượt `pid_t` 32-bit có dấu của POSIX — vd một PID Windows đọc
+        # lại trên Linux. Cùng lỗi với `sessions.tien_trinh_con_song`; ở đây
+        # nó sẽ làm hỏng lần nối vào backend thay vì chỉ báo "chưa chạy".
+        except (OSError, ProcessLookupError, OverflowError, ValueError):
             return False
     import ctypes
     from ctypes import wintypes

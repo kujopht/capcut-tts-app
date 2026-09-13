@@ -410,7 +410,8 @@ class BoDieuPhoi:
                    (TrangThaiBuoc.HONG.value, TrangThaiBuoc.BO_QUA.value)
                    for d in b.phu_thuoc)
 
-    def bo_viec(self, task_id: str, ly_do: str) -> None:
+    def bo_viec(self, task_id: str, ly_do: str, *,
+                project_id: str = "") -> None:
         """BỎ một việc con — và NHẢ thứ nó đang giữ. Không chỉ quên mã của nó.
 
         LỖI THẬT ĐÃ VẤP (đo 2026-09-11): bản đầu chỉ xoá `task_id` khỏi hàng
@@ -436,14 +437,43 @@ class BoDieuPhoi:
             self._dung_viec(task_id, ly_do)
         except Exception:                                   # noqa: BLE001
             pass
+        # VA NHA KHOA CUA NO — dung hen, khong doi `finally` cua luong kia.
+        #
+        # LOI THAT, do o CI 2026-09-12: duong LAP LAI KE HOACH goi
+        # `_bo_moi_viec_con_song` roi di thang sang `REPLANNING`. Ham
+        # `nha_tai_nguyen` CHI chay o cac duong KET THUC (`_ket_thuc`,
+        # `BLOCKED`), nen khoa cua nhung viec vua bo khong ai nha. Ban ke
+        # hoach moi xin lai dung `WRITE:FILESYSTEM:web` va nam o `WAITING`
+        # VINH VIEN — luc do `_nha_khoa_mo_coi` chi chay o `recover()` (khoi
+        # dong lai) nen trong mot phien dang chay khong gi thu hoi no.
+        #
+        # Tang lap lich nay DA co luoi thu hai (xem `_giao_khong_luoi`: gap
+        # xung dot voi mot chu khoa da chet thi thu hoi roi xin lai). Nhung
+        # nha DUNG HEN o day van la duong chinh: luoi kia chi cuu duoc khi
+        # da co mot viec khac den xin: cho no lam viec cua minh la doi mot
+        # luot lap lich thua va mot su kien `LOCK_ORPHANED` khong can thiet.
+        #
+        # Bang chung tu runner: `TASKS_ABANDONED` x2 -> 4 viec FAILED + 1 viec
+        # WAITING, `so_lan_lap_lai=2` (da het tran), lan thuc thi ket o
+        # `RUNNING` qua ca 600s. Tren may lap trinh `finally` cua luong cu
+        # kip nha truoc khi luot moi xin, nen khong bao gio thay.
+        #
+        # Day dung la nguyen tac da viet o docstring tren: tang buoc so huu
+        # vong phuc hoi, nen khi no bo mot luot thi luot do phai CHET HAN —
+        # va khoa cua no chet theo. `tra()` idempotent nen goi thua vo hai.
+        if self._nha_tai_nguyen is not None and project_id:
+            try:
+                self._nha_tai_nguyen(project_id, task_id)
+            except Exception:                               # noqa: BLE001
+                pass
 
     def _bo_moi_viec_con_song(self, eid: str, phien_ban: int,
-                              ly_do: str) -> List[str]:
+                              ly_do: str, *, project_id: str = "") -> List[str]:
         ra: List[str] = []
         for st in self.so.buoc(eid, phien_ban):
             tid = st.get("task_id") or ""
             if tid:
-                self.bo_viec(tid, ly_do)
+                self.bo_viec(tid, ly_do, project_id=project_id)
                 ra.append(tid)
         return ra
 
@@ -459,7 +489,8 @@ class BoDieuPhoi:
             # chứng KHÔNG mất: nó nằm trong `ket_qua_json` của hàng bước, và
             # việc cũ vẫn ở trong sổ việc với trạng thái cuối của nó.
             self.bo_viec(cu.get("task_id") or "",
-                         f"bước {buoc_id} được giao lại ({hd.value})")
+                         f"bước {buoc_id} được giao lại ({hd.value})",
+                         project_id=y.project_id)
             # Ve `CHUA_CHAY` de nhip sau giao lai. `task_id` bi XOA de
             # `_con_song` khong chan viec moi.
             self.so.luu_buoc(eid, pb, buoc_id, task_id="",
@@ -476,7 +507,8 @@ class BoDieuPhoi:
             # việc sót lại vẫn giữ khoá ghi của nó và bản mới sẽ nằm ở
             # `WAITING` mãi — xem `bo_viec`.
             bo = self._bo_moi_viec_con_song(
-                eid, pb, f"lập lại kế hoạch v{pb} -> v{pb + 1}")
+                eid, pb, f"lập lại kế hoạch v{pb} -> v{pb + 1}",
+                project_id=y.project_id)
             if bo:
                 self.so.ghi_su_kien(
                     eid, "TASKS_ABANDONED", project_id=y.project_id,
@@ -517,7 +549,8 @@ class BoDieuPhoi:
                                        f"GỐC đã đạt theo phép đo: {bc.ly_do}"),
                               bao_cao=bc.to_dict())
 
-        self._bo_moi_viec_con_song(eid, pb, "lần thực thi dừng chờ người")
+        self._bo_moi_viec_con_song(eid, pb, "lần thực thi dừng chờ người",
+                                   project_id=y.project_id)
         y2 = self.so.doi_trang_thai(
             eid, TT.BLOCKED,
             ly_do=(f"[{cd.loai.value}] {cd.ly_do}"

@@ -137,3 +137,45 @@ lần phát hành này.**
 mồ côi, `MoiGioiBaoTri.nha_khoa_mo_coi()` (v0.9.1) nhả được nó một cách an
 toàn — nó chỉ nhả khoá mà CHỦ đã kết thúc, và không bao giờ nhả khoá
 `PRODUCTION`.
+
+### ĐÃ SỬA — 2026-09-13 (bổ sung)
+
+Cuộc đua trên **đã đóng**, sau khi nó quay lại chặn CI của một nhánh khác
+(`fix/ci-permission-tests-env-guard`) với đúng chữ ký đã mô tả ở đây: hỏng
+1 lần trong hồi quy đầy đủ, không tái hiện khi chạy riêng.
+
+**Khuyết tật thật.** Không phải cuộc đua ở phép nhả khoá — `LockManager.tra()`
+vẫn đúng. Khuyết tật nằm ở chỗ **không ai thu hồi khoá mồ côi TRONG một phiên
+đang chạy**:
+
+* `_nha_khoa_mo_coi()` xử đúng ca này, và đã an toàn từ v0.9.1;
+* nhưng nó CHỈ được gọi từ `recover()` — tức lúc **khởi động lại**;
+* nên trong một phiên đang chạy, một việc kết thúc ở trạng thái cuối mà chưa
+  kịp nhả khoá sẽ giam mọi việc sau nó **hết `LOCK_TTL` = 1 giờ**, còn bộ lập
+  lịch chỉ lặng lẽ đẩy việc kia sang `WAITING` mỗi lượt.
+
+Vì phụ thuộc tải: trên máy lập trình, `finally` của luồng cũ hầu như luôn kịp
+nhả trước khi lượt mới xin, nên cửa sổ này gần như không bao giờ mở. Dưới tải
+CI thì có.
+
+**Bản sửa (nhỏ nhất có thể).** Ở `_giao_khong_luoi`, khi một lượt xin khoá bị
+từ chối *và* chủ khoá đang chặn có dấu hiệu đã chết, gọi đúng
+`_nha_khoa_mo_coi()` có sẵn rồi **xin lại một lần**. Không lặp: lượt thứ hai
+vẫn bị từ chối nghĩa là chủ khoá còn sống thật, và `WAITING` là câu trả lời
+đúng.
+
+Bản sửa KHÔNG nới một bất biến nào — mọi lưới an toàn vẫn nằm nguyên trong
+`_nha_khoa_mo_coi()`: miễn trừ `PRODUCTION`, guard `_dang_chay`, và lease còn
+sống. `_chu_khoa_co_the_da_chet()` chỉ là một cổng RẺ để khỏi quét toàn bộ
+khoá ở mọi lượt bị từ chối; đoán sai ở đó chỉ tốn thêm một lần quét.
+
+**Hai bài kiểm khoá bất biến lại**, cả hai TẤT ĐỊNH (không ngủ, không đua,
+không phụ thuộc tải) ở `test_control_center_slice.TestVerticalSlice`:
+
+| Bài | Khẳng định |
+|---|---|
+| `test_khoa_mo_coi_duoc_nha_TRONG_PHIEN_chu_khong_doi_recover` | một lượt `tick()` đủ để việc sau chạy — không phải đợi `recover()` |
+| `test_khoa_PRODUCTION_mo_coi_VAN_giam_viec_o_duong_lap_lich` | khoá `PRODUCTION` mồ côi VẪN giam việc; `WAITING` ở đây là đúng |
+
+Bài thứ nhất **hỏng trên mã trước khi sửa** và đạt sau — đó là điều khiến nó
+là một bài kiểm hồi quy chứ không phải một lời khẳng định suông.

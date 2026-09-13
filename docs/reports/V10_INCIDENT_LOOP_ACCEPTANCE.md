@@ -502,7 +502,13 @@ Hai chi tiết đáng ghi riêng:
 
 ### 10c. Và lượt ấy phơi ra một khoảng trống THẬT — cùng họ với §7a
 
-Lượt tiếp tục gặp **hết hạn mức Antigravity**. Vòng sự cố xử đúng:
+Lượt tiếp tục gặp **hết hạn mức trên TÀI KHOẢN đang chạy** (AG02). Đo lại bể
+ngay sau đó cho thấy bể vẫn khoẻ — Gemini còn **92%** hạn tuần và **92%** hạn
+5 giờ, `paid_overage_risk_zero: true`. Nói "hết hạn mức Antigravity" là biến
+một phép đo của MỘT khe thành một câu về cả tám; luật ấy có từ V0.8 và nó áp
+cho chính báo cáo này.
+
+Vòng sự cố xử đúng:
 
 ```
 loai=QUOTA_EXHAUSTED  chien_luoc=CHO_QUOTA  trang_thai=DANG_MO
@@ -576,6 +582,36 @@ hiện ra ở một mặt khác. Một thay đổi trạng thái nhỏ chạm t�
 coi `FAILED` là chỗ nghỉ cuối cùng — và chỉ hồi quy ĐẦY ĐỦ mới liệt kê hết
 được những chỗ ấy.
 
+### 12b. Và lượt hồi quy THỨ HAI bắt được thứ tôi đã tự cho qua
+
+Sau khi sửa bốn bài trên, hồi quy đầy đủ lần hai ra **1 bài đỏ** — chính
+`test_mot_con_hong_khong_huy_anh_em`, bài tôi vừa đo **15/15 tất định** khi
+chạy riêng. Lần này con hỏng đọc ra `QUEUED` sau khi cha đã chốt xong.
+
+Nguyên nhân là một khe hở tôi đã NHÌN THẤY lúc viết và tự đánh giá là *"hẹp,
+chấp nhận được"*:
+
+```
+_chay:  ghi FAILED  ─┐
+                     ├── khe hở: chưa có hồ sơ sự cố nào để đọc,
+                     │            nên "không tìm thấy hồ sơ" = "nghỉ rồi"
+        _dieu_phoi_su_co ─> mở hồ sơ ─> xếp lại hàng đợi
+```
+
+Đánh giá ấy **sai**. Khe hở tới được, và **chỉ hồi quy đầy đủ** — 2698 bài,
+đủ tải — mới làm nó hiện ra. Chạy riêng 15/15 không phải bằng chứng; đó đúng
+là bài học §7c lặp lại, lần này với chính tôi ở phía sai.
+
+Sửa bằng đúng phép kiểm mà `_can_luot` của bộ kiểm lát cắt đã dùng từ V0.9:
+**luồng của chính con ấy còn bay = CHƯA kết thúc.**
+
+**Và một lần vấp ngay sau đó, ghi lại vì nó đáng giá.** Bản sửa đầu tiên kiểm
+"còn bay" cho MỌI con, làm bộ kiểm `toa` đi từ 2s sang hết giờ ở cả 10 lượt:
+`_tong_hop_toa` chạy TRONG luồng của con vừa xong, nên con ấy LUÔN còn trong
+`_dang_chay` ở đúng lúc ấy — không trừ nó ra thì **không lần gộp nào xảy ra
+nữa**, và cha treo với MỌI lần toả, không riêng lần có con hỏng. Một bản sửa
+làm hỏng rộng hơn thứ nó sửa. Nay chỗ gọi truyền `con_goi` để con ấy tự miễn.
+
 **Không hạ chuẩn để cho xanh.** Điều các bài ấy canh vẫn nguyên vẹn:
 
 * `_can_luot` vẫn đòi `attempts >= MAX_ATTEMPTS`, nên một lần thử lại vô hạn
@@ -590,7 +626,7 @@ coi `FAILED` là chỗ nghỉ cuối cùng — và chỉ hồi quy ĐẦY ĐỦ 
 | Hạng mục | Trạng thái |
 |---|---|
 | Gemini **viết mã** trên đường thật | ✅ AG02/`gemini-3.1-pro-low` sửa tệp thật, `npm` thật |
-| Luật review B5 **chạy** trên đường thật | ❌ **CHƯA** — đã cắm (§9) và có bài HÀNH VI, nhưng hết hạn mức Antigravity trước khi có một lượt kiểm định nào đi qua nó. Chưa thấy một dòng `REVIEW_GATE` nào do luật B5 bật |
+| Luật review B5 **chạy** trên đường thật | ⏳ xem §14 |
 | nhánh `CHO_QUOTA` tới được trạng thái việc | ❌ hạng mục mở số 1 (§10c) |
 | `phien_leader.py`, `han_muc.py` | ❌ mã chết (§11) |
 | Claude Opus 5 làm runtime worker | ❌ **CHƯA XÁC MINH** — không đổi, và KHÔNG đụng vào trạng thái riêng của Claude Code để giả vờ ngược lại |

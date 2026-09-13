@@ -109,7 +109,18 @@ test("muc dieu huong 'Trang chu' khop CHINH XAC, khong dung startsWith", () => {
 });
 
 test("Studio VAN co loi vao o footer cho nguoi khong mo menu", () => {
-  assert.match(read("../src/app/layout.tsx"), /href="\/studio\/audio"/);
+  /*
+    Rang buoc la CO MOT LOI VAO Studio o footer, khong phai lien ket do tro
+    toi dung `/studio/audio`.
+
+    Ban dau bai nay chot `/studio/audio` vi luc ay Audio la cong cu duy nhat
+    dang ke. Tu #197, `/studio` la trang chu cua ca bo cong cu, va chi thang
+    toi mot module con o footer thi vua hep hon vua nguoc voi quyet dinh
+    "tung cong cu khong con mang ten rieng o dieu huong".
+  */
+  const layout = read("../src/app/layout.tsx");
+  assert.match(layout, /href="\/studio(\/[a-z]+)?"/,
+    "footer khong con loi vao Studio");
 });
 
 /* ============================================================ tim kiem */
@@ -260,6 +271,10 @@ test("footer chi tro toi route CO THAT", () => {
     // tro THANG toi dia chi moi — mot lien ket noi bo khong nen ton mot
     // vong chuyen huong.
     "/studio", "/studio/library", "/studio/write", "/studio/audio",
+    // Thu vien CUA NGUOI DOC (`src/app/library/page.tsx`) — truyen dang theo
+    // doi + cho doc do. Khac `/studio/library`, von la thu vien AUDIO cua
+    // nguoi sang tac; xem ghi chu tren `LINKS` trong `NavAuth.tsx`.
+    "/library",
   ]);
   for (const href of hrefs) {
     assert.ok(co_that.has(href), `footer trỏ tới route không tồn tại: ${href}`);

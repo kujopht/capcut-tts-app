@@ -2943,6 +2943,26 @@ export interface FollowState {
   follower_count: number;
 }
 
+/** Một truyện trong Thư viện — đủ để vẽ thẻ, không kéo cả nội dung chương. */
+export interface FollowedStory {
+  novel_id: string;
+  title: string;
+  description: string;
+  cover_key: string | null;
+  tags: string[];
+  status: string;
+  external_author_name: string;
+  updated_at: string;
+  follower_count: number;
+}
+
+export interface FollowedStoriesPage {
+  novels: FollowedStory[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface LikeState {
   liked: boolean;
   like_count: number;
@@ -3046,6 +3066,12 @@ export const social = {
     request<FollowState>(`/api/novels/${encodeURIComponent(novelId)}/follow`, {
       method: "DELETE",
     }),
+
+  /** Truyện người đang đăng nhập theo dõi — nguồn của trang Thư viện. */
+  followedStories: (limit = 50, offset = 0) =>
+    request<FollowedStoriesPage>(
+      `/api/me/following/stories?limit=${limit}&offset=${offset}`,
+    ),
 
   // -- bảng tin và bài đăng -------------------------------------------------
 

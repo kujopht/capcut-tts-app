@@ -164,6 +164,21 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   const vaiTro = profile?.admin_role;
 
+  /*
+    Muc dieu huong DAI NHAT khop voi duong dan hien tai.
+
+    Dai nhat chu khong phai khop dau tien: `/admin/animation/sources` khop ca
+    tien to `/admin` lan chinh no, va cai dung la cai cu the hon. `/admin`
+    phai khop TUYET DOI, neu khong no nuot moi trang con.
+
+    Khong tim thay thi lui ve ten san pham — mot trang quan tri moi chua kip
+    them vao bang van con mot `h1` co nghia, thay vi mot o trong.
+  */
+  const tenTrang =
+    NHOM_DIEU_HUONG.flatMap((n) => n.muc)
+      .filter((m) => (m.href === "/admin" ? pathname === "/admin" : pathname.startsWith(m.href)))
+      .sort((a, b) => b.href.length - a.href.length)[0]?.nhan ?? "Fanfic World";
+
   return (
     <div className="page admin-page">
       <header className="admin-dau row row-spread">
@@ -176,7 +191,17 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               </span>
             ) : null}
           </span>
-          <h1 className="page-title admin-tieu-de">Fanfic World</h1>
+          {/*
+            TIEU DE LA TEN TRANG, khong phai ten san pham.
+
+            Truoc day cho nay luon ve "Fanfic World", nen MOI trang quan tri
+            deu mang cung mot `h1`: `/admin`, `/admin/stories`, trang duyet
+            mot tac pham — tat ca nghe giong het nhau voi bo doc man hinh, va
+            trang thuc su dang mo thi chi con la mot `h2` o ben duoi. Cung
+            mot khuyet tat da sua cho Studio o #197; ten san pham lui ve dong
+            nhan nho phia tren, dung cho no.
+          */}
+          <h1 className="page-title admin-tieu-de">{tenTrang}</h1>
         </div>
         <button
           type="button"

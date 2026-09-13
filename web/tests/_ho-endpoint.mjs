@@ -51,6 +51,13 @@ export const HO_ENDPOINT = [
   // `server/social.py::mo_ta_gioi_han`.
   "limits",
   "listens",
+  // `/api/me/...` — thu RIENG cua chu token, khong nhan id nao ca. Cung ly do
+  // voi `account`: mot duong dan mang `user_id` la mot duong dan ai do se thu
+  // doi id nguoi khac vao, nen thu rieng tu thi khong mo canh cua do ngay tu
+  // dau. Hien co `/api/me/following/stories` — nguon cua trang Thư viện; truoc
+  // do `followed_story_ids` chi duoc dung de DEM, nen nguoi dung theo doi
+  // duoc va thay con so ma khong bao gio mo duoc danh sach ra.
+  "me",
   "notifications",
   "novels",
   "posts",

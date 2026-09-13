@@ -238,7 +238,7 @@ export default function NovelDetailPage({
             }
           />
         ) : (
-          <div className="list">
+          <div className="list list-gon">
             {chapters.map((chapter, index) => (
               // KHONG con boc ca hang trong <Link>: the <a> khong duoc chua
               // <button>/<a> khac, va nut Doc/Nghe phai nam ngay trong hang.
@@ -286,9 +286,15 @@ export default function NovelDetailPage({
                         <span aria-hidden="true">▶</span> Nghe
                       </Link>
                     </>
-                  ) : (
-                    <span className="badge">Chưa có audio</span>
-                  )}
+                  ) : null}
+                  {/*
+                    KHONG con nhan "Chưa có audio" tren tung hang.
+
+                    No dung mot lan thi la thong tin; lap lai 31 lan trong mot
+                    muc luc thi la nhieu — va no con trong nhu mot cai nut bi
+                    khoa, trong khi khong co gi de bam. Vang mat da noi dung
+                    dieu do roi, va hang nao CO audio thi van co nut "Nghe".
+                  */}
                 </span>
               </div>
             ))}

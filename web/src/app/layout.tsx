@@ -130,7 +130,10 @@ export default function RootLayout({
                   <Link href="/fanfic" className="footer-link" prefetch={false}>
                     Khám phá
                   </Link>
-                  <Link href="/studio/library" className="footer-link" prefetch={false}>
+                  {/* Thu vien CUA NGUOI DOC — cung dich voi muc "Thư viện" o
+                      thanh chinh. Truoc day tro sang `/studio/library`, tuc
+                      thu vien audio cua nguoi sang tac; xem `NavAuth`. */}
+                  <Link href="/library" className="footer-link" prefetch={false}>
                     Thư viện của bạn
                   </Link>
                 </nav>
@@ -140,8 +143,10 @@ export default function RootLayout({
                   <Link href="/studio/write" className="footer-link" prefetch={false}>
                     Khu vực tác giả
                   </Link>
-                  <Link href="/studio/audio" className="footer-link" prefetch={false}>
-                    Audio Studio
+                  {/* "Studio" la ten san pham cua ca bo cong cu tu #197; tung
+                      cong cu khong con mang ten rieng o dieu huong. */}
+                  <Link href="/studio" className="footer-link" prefetch={false}>
+                    Fanfic Studio
                   </Link>
                   <Link href="/account" className="footer-link" prefetch={false}>
                     Tài khoản

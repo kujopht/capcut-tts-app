@@ -12,7 +12,7 @@
  */
 
 import Link from "next/link";
-import { use, useCallback, useEffect, useMemo } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { api, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
@@ -20,6 +20,8 @@ import { ChapterComments } from "@/components/ChapterComments";
 import { AskAiPanel } from "@/components/AskAiPanel";
 import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
 import { IconBook, IconHeadphones } from "@/components/Icons";
+import { ReaderPrefs, ReaderProgress } from "@/components/ReaderPrefs";
+import { MAC_DINH, type TuyChonDoc } from "@/lib/readerPrefs";
 
 export default function ChapterPage({
   params,
@@ -28,6 +30,12 @@ export default function ChapterPage({
 }) {
   const { id } = use(params);
   const { profile } = useSession();
+  /*
+    Giu o TANG TRANG chu khong trong `ReaderPrefs`: hai thuoc tinh `data-*`
+    nam tren the boc ngoai cung, con thanh dieu khien thi o giua trang. De
+    trang thai trong thanh do thi no khong voi toi cho can dat.
+  */
+  const [tuyChon, datTuyChon] = useState<TuyChonDoc>(MAC_DINH);
 
   /*
     HAI request, khong phu thuoc so chuong: chuong hien tai (`getChapter`, da
@@ -122,7 +130,8 @@ export default function ChapterPage({
   const isOwner = profile?.user_id === chapter.owner_id;
 
   return (
-    <div className="page">
+    <div className="page" data-doc-co={tuyChon.coChu} data-doc-ngang={tuyChon.beNgang}>
+      <ReaderProgress />
       <nav aria-label="Đường dẫn" className="reader-crumb">
         <Link href={`/novels/${chapter.novel_id}`} className="hint crumb">
           ← {novel?.title ?? "Về truyện"}
@@ -157,9 +166,17 @@ export default function ChapterPage({
       </header>
 
       {/*
+        Tuy chon doc nam NGAY TREN cot chu, khong giau trong mot menu: nguoi
+        can chinh co chu la nguoi dang thay chu kho doc, va bat ho di tim la
+        bat sai nguoi.
+      */}
+      <ReaderPrefs onDoi={datTuyChon} />
+
+      {/*
         Cot chu hep hon phan con lai cua trang. Mot dong dai ~68 ky tu la nguong
         mat con lan duoc tu cuoi dong nay sang dau dong sau ma khong lac; ca be
-        rong 1180px thi doc mot chuong dai rat met.
+        rong 1180px thi doc mot chuong dai rat met. Nguoi doc tu noi/thu lai
+        duoc trong khoang 600–900px — xem `readerPrefs`.
       */}
       <section className="reader" aria-label="Nội dung chương">
         {chapter.content ? (

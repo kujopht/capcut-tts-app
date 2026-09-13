@@ -128,8 +128,13 @@ class _SoGia:
                         "meta": meta, "ts": len(self.su)})
 
     def su_kien(self, *, task_id="", limit=200, **kw):
+        """MỚI NHẤT TRƯỚC — y như `ControlStore.su_kien` (`ORDER BY id DESC`).
+
+        Một bản giả trả ngược thứ tự với bản thật là cách một khuyết tật thứ
+        tự sống sót qua mọi bài kiểm: đúng chuyện đã xảy ra ở đây.
+        """
         ra = [e for e in self.su if not task_id or e["task_id"] == task_id]
-        return ra[-limit:]
+        return list(reversed(ra[-limit:]))
 
 
 class TestBen(unittest.TestCase):
@@ -193,6 +198,44 @@ class TestBen(unittest.TestCase):
         self.assertEqual(SoSuCo(so).hien_tai("p.t1").muc_tieu,
                          "mục tiêu gốc của người dùng")
 
+    def test_12b_lay_ban_MOI_NHAT_chu_khong_phai_ban_CU_NHAT(self):
+        """Khuyết tật ĐO ĐƯỢC trên đường thật, và nó vô hiệu hoá bộ ngắt mạch.
+
+        `store.su_kien` trả `ORDER BY id DESC` — mới nhất TRƯỚC. Bản đầu của
+        `hien_tai()` gọi `reversed()` rồi lấy phần tử đầu, tức là lấy bản ghi
+        CŨ NHẤT. Hậu quả: sau hai lần hỏng liên tiếp `da_dung` vẫn là
+        `{'sua_tai_cho': 1}` — mỗi lần hỏng lại nạp ngân sách của lần ĐẦU.
+        Ngân sách không bao giờ cạn, và bộ ngắt mạch không bao giờ nổ.
+        """
+        so = _SoGia()
+        s = SoSuCo(so)
+        sc = s.mo_hoac_lay(project_id="p", task_id="p.t1", muc_tieu="g")
+        sc.da_dung = {"sua_tai_cho": 1}
+        s.ghi(sc)
+        sc.da_dung = {"sua_tai_cho": 2}
+        s.ghi(sc)
+        sc.da_dung = {"sua_tai_cho": 3}
+        s.ghi(sc)
+        self.assertEqual(SoSuCo(so).hien_tai("p.t1").da_dung,
+                         {"sua_tai_cho": 3},
+                         "phải lấy bản ghi MỚI NHẤT")
+
+    def test_12c_ngan_sach_TANG_DAN_qua_cac_lan_hong(self):
+        """Bài kiểm hành vi cho cùng khuyết tật — đếm phải tiến."""
+        so = _SoGia()
+        moc = []
+        for i in range(3):
+            s = SoSuCo(so)
+            sc = s.mo_hoac_lay(project_id="p", task_id="p.t1", muc_tieu="g")
+            v = s.vong(sc)
+            qd = v.xet("AssertionError: expected 3 got 2")
+            s.cap_nhat_tu_vong(sc, v, qd)
+            s.ghi(sc)
+            moc.append(dict(sc.dem_chu_ky))
+        dem = [sum(x.values()) for x in moc]
+        self.assertEqual(dem, [1, 2, 3],
+                         f"đếm chữ ký phải tiến qua các lần hỏng: {dem}")
+
     def test_13_su_co_mang_NGUON_GOC(self):
         so = _SoGia()
         s = SoSuCo(so)
@@ -214,6 +257,18 @@ class TestDayNoiThat(unittest.TestCase):
     def _van(self) -> str:
         return ENGINE.read_text(encoding="utf-8")
 
+    def _than(self, ten: str) -> str:
+        """Thân của MỘT phương thức, cắt tới `def` kế tiếp.
+
+        Cắt cứng `[i:i+5000]` là một cái bẫy: thêm vài dòng chú thích là
+        khẳng định rơi ra ngoài cửa sổ và bài kiểm đỏ vì lý do sai. Đã vấp
+        đúng như vậy khi viết tệp này.
+        """
+        van = self._van()
+        i = van.index(f"def {ten}")
+        j = van.find("\n    def ", i + 10)
+        return van[i:j if j > 0 else len(van)]
+
     def test_14_duong_hong_THAT_di_vao_bo_dieu_phoi_su_co(self):
         van = self._van()
         i = van.index("if moi in (TaskState.FAILED, TaskState.NEEDS_EVIDENCE)")
@@ -227,18 +282,14 @@ class TestDayNoiThat(unittest.TestCase):
         self.assertIn("NEEDS_EVIDENCE", van[i:i + 120])
 
     def test_16_bo_dieu_phoi_phat_SU_KIEN_co_kieu(self):
-        van = self._van()
-        i = van.index("def _dieu_phoi_su_co")
-        than = van[i:i + 5000]
+        than = self._than("_dieu_phoi_su_co")
         for x in ("LoaiSuKien.INCIDENT", "LoaiSuKien.REPAIR",
                   "LoaiSuKien.ESCALATION"):
             self.assertIn(x, than, f"thiếu sự kiện {x}")
 
     def test_17_chi_LEO_THANG_moi_goi_nguoi(self):
         """Hỏng repo-local thường KHÔNG được đánh thức chủ sở hữu."""
-        van = self._van()
-        i = van.index("def _dieu_phoi_su_co")
-        than = van[i:i + 5000]
+        than = self._than("_dieu_phoi_su_co")
         j = than.index("TaskState.BLOCKED")
         truoc = than[:j]
         self.assertIn("HanhDong.CHO_QUOTA", truoc)
@@ -246,9 +297,7 @@ class TestDayNoiThat(unittest.TestCase):
                       "các bậc rẻ phải được thử TRƯỚC khi chặn chờ người")
 
     def test_18_su_co_duoc_GHI_BEN_truoc_khi_hanh_dong(self):
-        van = self._van()
-        i = van.index("def _dieu_phoi_su_co")
-        than = van[i:i + 5000]
+        than = self._than("_dieu_phoi_su_co")
         ghi = than.index("so.ghi(sc")
         hanh = than.index("if hd in XEP_LAI")
         self.assertLess(ghi, hanh,
@@ -256,11 +305,32 @@ class TestDayNoiThat(unittest.TestCase):
                         "một lần tắt máy giữa chừng mất sạch ngân sách")
 
     def test_19_v10_hong_thi_LUI_ve_nguyen_lieu_cu(self):
-        van = self._van()
-        i = van.index("def _dieu_phoi_su_co")
-        than = van[i:i + 5000]
+        than = self._than("_dieu_phoi_su_co")
         j = than.index("except Exception")
         self.assertIn("_thu_lai_neu_dang", than[j:j + 400])
+
+    def test_19b_BANG_CHUNG_cong_kiem_dinh_di_VAO_su_co(self):
+        """Khuyết tật ĐO ĐƯỢC ở lượt cắm dây đầu tiên.
+
+        Khi việc hỏng vì CỔNG KIỂM ĐỊNH DỰ ÁN, câu giải thích nằm ở `ly_do`
+        của chỗ gọi chứ không nằm trong phong bì worker. Lượt đầu không
+        truyền nó vào, nên bộ phân loại mù và ghi `loai=UNKNOWN` cho một lần
+        hỏng mà ta biết chính xác nguyên nhân.
+        """
+        van = self._van()
+        i = van.index("self._dieu_phoi_su_co(")
+        self.assertIn("bang_chung_them=ly_do", van[i:i + 400])
+        than = self._than("_dieu_phoi_su_co")
+        j = than.index("manh = [")
+        self.assertIn("bang_chung_them", than[j:j + 200],
+                      "bằng chứng phải là MẢNH ĐẦU của văn bản đem phân loại")
+
+    def test_19c_ha_tang_kiem_hong_KHONG_bi_goi_la_san_pham_sai(self):
+        than = self._than("_kiem_du_an_sau_khi_ghi")
+        i = than.index("ha_tang_hong")
+        self.assertIn("NEEDS_EVIDENCE", than[i:i + 900],
+                      "lệnh kiểm hỏng = KHÔNG CÓ phép đo, không phải sản "
+                      "phẩm sai")
 
     def test_20_KHONG_con_duong_worker_success_thang_DONE(self):
         van = self._van()

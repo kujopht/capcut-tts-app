@@ -3519,7 +3519,17 @@ class ControlCenter:
 
         if bc.dat:
             return moi, ly_do
-        if bc.thieu_bang_chung:
+        if bc.thieu_bang_chung or bc.ha_tang_hong:
+            # HAI thứ khác nhau, cùng một kết luận đúng: ta KHÔNG CÓ phép đo.
+            #
+            # `thieu_bang_chung` = không có lệnh nào để chạy.
+            # `ha_tang_hong`     = có lệnh, nhưng CHÍNH LỆNH hỏng (không phân
+            #                      giải được, không thu được test nào).
+            #
+            # Cả hai đều KHÔNG phải "mã sản phẩm sai". Đánh `FAILED` ở đây là
+            # đổ lỗi cho worker về một thứ nó làm đúng — đã xảy ra thật
+            # (2026-09-13, `node --test tests/` chết MODULE_NOT_FOUND trong
+            # khi worker đã sửa đúng, chạy lại bằng lệnh đúng: 4/4 đạt).
             return TaskState.NEEDS_EVIDENCE, bc.ly_do[:400]
         return TaskState.FAILED, bc.ly_do[:400]
 
@@ -4170,7 +4180,8 @@ class ControlCenter:
 
     def _dieu_phoi_su_co(self, ctx: ProjectContext, task_id: str, pb,
                          session_id: str, *, placement_key: str = "",
-                         trang_thai=None) -> Optional[str]:
+                         trang_thai=None,
+                         bang_chung_them: str = "") -> Optional[str]:
         """CHỦ SỞ HỮU DUY NHẤT của chính sách phục hồi — V1.0.
 
         Một lần hỏng đi qua đây, không đi thẳng vào `_thu_lai_neu_dang` nữa:
@@ -4215,7 +4226,17 @@ class ControlCenter:
 
         # BẰNG CHỨNG trước, phân loại sau. Đuôi đầu ra của lệnh kiểm là thứ
         # phân biệt "mã sai" với "lệnh kiểm sai" — xem `kiem_du_an`.
-        manh = [pb.summary or "", pb.failure_reason or ""]
+        # `bang_chung_them` LÀ MẢNH QUAN TRỌNG NHẤT, và thiếu nó thì cả bộ
+        # phân loại mù.
+        #
+        # Đo được trên đường thật (2026-09-13): lượt đầu cắm dây chỉ đưa vào
+        # `pb.summary`/`failure_reason`/`risks`/`findings` — nhưng khi việc
+        # hỏng vì CỔNG KIỂM ĐỊNH DỰ ÁN, câu giải thích ("phép kiểm của dự án
+        # KHÔNG đạt: … rc=1", kèm đuôi đầu ra) nằm ở `ly_do` của chỗ gọi, chứ
+        # không nằm trong phong bì của worker. Kết quả: `loai=UNKNOWN` cho
+        # một lần hỏng mà ta biết chính xác nguyên nhân.
+        manh = [bang_chung_them or "", pb.summary or "",
+                pb.failure_reason or ""]
         manh += [str(x) for x in (pb.risks or [])[:3]]
         manh += [str(x) for x in (pb.findings or [])[:3]]
         if getattr(t, "blocked_reason", ""):
@@ -4640,7 +4661,8 @@ class ControlCenter:
                 # có hai chủ là cách hai chỗ đếm hai ngân sách khác nhau cho
                 # cùng một việc.
                 self._dieu_phoi_su_co(ctx, task_id, pb, session_id,
-                                      placement_key=p.key, trang_thai=moi)
+                                      placement_key=p.key, trang_thai=moi,
+                                      bang_chung_them=ly_do)
             # KET QUA PHAI VE TOI O CHAT. Day la yeu cau CHAN PHAT HANH.
             #
             # Mot huy hieu DONE ma khong co cau tra loi thi khong phai la

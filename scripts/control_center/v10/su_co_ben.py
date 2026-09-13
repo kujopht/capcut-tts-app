@@ -102,12 +102,23 @@ class SoSuCo:
         return m if isinstance(m, dict) else {}
 
     def hien_tai(self, task_id: str) -> Optional[SuCoBen]:
-        """Bản ghi MỚI NHẤT của việc này, nếu sự cố còn mở."""
+        """Bản ghi MỚI NHẤT của việc này, nếu sự cố còn mở.
+
+        `store.su_kien` trả về `ORDER BY id DESC` — **mới nhất TRƯỚC**. Bản
+        đầu của hàm này gọi `reversed()` rồi lấy bản đầu tiên, tức là lấy
+        đúng bản ghi CŨ NHẤT.
+
+        Hậu quả đo được trên đường thật (2026-09-13): sau hai lần hỏng liên
+        tiếp, `da_dung` vẫn là `{'sua_tai_cho': 1}` và `dem_chu_ky` vẫn là 1 —
+        mỗi lần hỏng lại nạp ngân sách của lần ĐẦU rồi ghi đè lên. Tức là
+        ngân sách không bao giờ cạn, và bộ ngắt mạch không bao giờ nổ: đúng
+        cái vòng lặp vô hạn mà cả tầng này sinh ra để chặn.
+        """
         try:
             ds = self.store.su_kien(task_id=task_id, limit=200)
         except Exception:                                     # noqa: BLE001
             return None
-        for e in reversed(list(ds)):
+        for e in ds:                       # đã là mới-nhất-trước
             if str(e.get("kind")) != KIND:
                 continue
             sc = SuCoBen.from_dict(self._doc_meta(e))

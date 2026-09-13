@@ -437,6 +437,35 @@ class TestChayThat(unittest.TestCase):
         self.assertIs(self.cc.store.task(t0.task_id).state,
                       TaskState.WAITING_RESOURCE)
 
+    def test_23b_DOI_CHO_di_qua_HANG_DOI_khong_ep_cho_chay(self):
+        """Định tuyến lại vì hạn mức KHÔNG được vượt mặt các cổng chính sách.
+
+        Đây là rủi ro MỚI mà `CHO_TAI_NGUYEN` tạo ra: nếu nó tự gán thẳng một
+        placement, thì `premium.GacAstra` (trần song song, cấm đệ quy, ECO)
+        và `chinh_sach` theo dự án (`qd_0001`: *"GPT-6 Astra chỉ dùng cho
+        task đặc biệt khó"*) đều bị đi vòng — một lần hết hạn mức sẽ lặng lẽ
+        mở đường tới model đắt nhất.
+
+        Nên `DOI_CHO` chỉ được đưa việc về `QUEUED` và để bộ lập lịch chọn
+        lại, đúng cơ chế `reassign` — không phải một đường định tuyến thứ hai.
+        """
+        than = (ENGINE.read_text(encoding="utf-8"))
+        i = than.index("def _cho_tai_nguyen(")
+        j = than.index("def _nhan_cho_tai_nguyen(")
+        than = than[i:j]
+        k = than.index("HanhDongTaiNguyen.DOI_CHO")
+        nhanh = than[k:k + 900]
+        self.assertIn("_danh_thuc_tai_nguyen", nhanh)
+        for cam in ("_giao(", "Placement(", "mark_started"):
+            self.assertNotIn(cam, nhanh,
+                             f"{cam} ở nhánh DOI_CHO là ép chỗ chạy, đi vòng "
+                             f"qua cổng chính sách")
+        than2 = (ENGINE.read_text(encoding="utf-8"))
+        a = than2.index("def _danh_thuc_tai_nguyen(")
+        b = than2.index("def _quet_cho_tai_nguyen(")
+        self.assertIn("TaskState.QUEUED", than2[a:b],
+                      "đánh thức phải trả việc về HÀNG ĐỢI")
+
     def test_24b_CHINH_tick_danh_thuc_chu_khong_phai_goi_tay(self):
         """Bài neo cấu trúc KHÔNG đủ, và đã đo được điều đó: một đột biến
         thay lời gọi bằng `pass  # _quet_cho_tai_nguyen` vẫn để bộ kiểm

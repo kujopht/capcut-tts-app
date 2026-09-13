@@ -11,6 +11,40 @@ V0.9. `VongSuCo` có 41 bài kiểm và **không một dặm đường thật n�
 
 ---
 
+## TÓM TẮT
+
+Vòng sự cố nay CHẠY trên đường thật, và bốn khuyết tật của chính dây nối ấy
+đã lộ ra — **cả bốn đều do một lượt chạy THẬT phát hiện, không phải bài
+kiểm.** Đó là kết quả đáng kể nhất của đêm nay, và nó nói đúng điều chủ sở
+hữu đã nói.
+
+| # | Khuyết tật | Hậu quả nếu không sửa | Mục |
+|---|---|---|---|
+| 1 | `hien_tai()` đọc bản ghi CŨ NHẤT | ngân sách không bao giờ cạn → **ngắt mạch không bao giờ nổ** | §4a |
+| 2 | bằng chứng cổng kiểm định không vào sự cố | `loai=UNKNOWN` cho lần hỏng đã biết rõ | §4b |
+| 3 | bộ phân loại khớp LỜI VĂN, lời văn đã đổi | vẫn `UNKNOWN`; phân loại không dẫn được tới hành động | §5a |
+| 4 | vân tay băm cả văn xuôi của model | 1 lần hỏng → 3 chữ ký → nhánh "lặp chữ ký" là **mã chết** | §5b |
+| 5 | leo thang không tới trạng thái việc | sổ ghi đã gọi người, bảng vẫn đọc "hỏng" | §7a |
+| 6 | leo thang làm việc CHA treo vĩnh viễn | treo tệ ngang lặp vô hạn với hệ chạy qua đêm | §7b |
+| 7 | `FAILED` không còn là trạng thái nghỉ | anh em chốt kết quả khi hệ vẫn đang sửa (4 xanh/11 đỏ) | §7c |
+
+Bằng chứng chính, từ sổ chứ không phải từ lời:
+
+* **ngắt mạch nổ đúng lẫy** — 1 chữ ký đếm 3 → `HOI_DONG`, không phải cạn
+  ngân sách (§6);
+* **khởi động lại giữa lúc phục hồi 8/8** — cùng `incident_id`, ngân sách
+  KHÔNG nạp lại, không sinh việc trùng (§10b);
+* **cùng một vân tay qua hai tiến trình** — `VERIFICATION_FAILURE:0c2d236598`
+  ở cả §6 lẫn §10b;
+* **ma trận đột biến 10/10** (§10), trong đó **hai** bài ban đầu xanh khi
+  tháo dây — bộ kiểm chưa đủ, và đã được thay bằng bài HÀNH VI.
+
+Hai hạng mục MỞ, ghi rõ chứ không giấu: nhánh `CHO_QUOTA` cũng chưa tới được
+trạng thái việc (§10c), và `phien_leader.py` + `han_muc.py` vẫn là **mã
+chết** (§11).
+
+---
+
 ## 1. MỘT CHỦ SỞ HỮU CHÍNH SÁCH PHỤC HỒI
 
 Trước:

@@ -258,7 +258,9 @@ Vì thế cổng ghi **nguyên văn đuôi đầu ra** của lệnh vào sự ki
 | rào năng lực có hồi quy bảo vệ | ✅ 7 bài đi qua đường thật + đột biến 9/19 đỏ |
 | hỏng/sửa tự chủ | ✅ đỏ → thử lại → xanh → DONE, không người can thiệp |
 | ít nhất một đường uỷ thác runtime THẬT | ✅ AG02 viết tệp thật, `npm` thật |
-| cổng review Gemini | ✅ 10/10 trên hợp đồng định tuyến |
+| cổng review Gemini | ⚠️→✅ 10/10 trên hợp đồng, **nhưng khi ấy là MÃ CHẾT** — đã cắm vào `nen_goi_reviewer` 2026-09-13, xem `V10_INCIDENT_LOOP_ACCEPTANCE.md` §9 |
+| vòng sự cố V1.0 chạy trên đường THẬT | ✅ ngắt mạch nổ đúng lẫy: 1 chữ ký × 3 → `HOI_DONG` (§6) |
+| khởi động lại GIỮA LÚC phục hồi | ✅ **8/8** — cùng `incident_id`, ngân sách KHÔNG nạp lại, 18→18 việc (§10b) |
 | khởi động lại / phục hồi vẫn xanh | ✅ nằm trong hồi quy đầy đủ |
 | thay đổi / khởi động lại production | ✅ **0 / 0** |
 | thao tác phá huỷ | ✅ **0** — không force push, không xoá nhánh |

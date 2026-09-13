@@ -612,6 +612,32 @@ Sửa bằng đúng phép kiểm mà `_can_luot` của bộ kiểm lát cắt đ
 nữa**, và cha treo với MỌI lần toả, không riêng lần có con hỏng. Một bản sửa
 làm hỏng rộng hơn thứ nó sửa. Nay chỗ gọi truyền `con_goi` để con ấy tự miễn.
 
+### 12c. Lượt hồi quy THỨ BA — bản sửa của tôi làm CÂM một lưới an toàn
+
+Lần ba ra một bài đỏ khác: `test_bon_con_CHI_DOC_chay_dong_thoi_tren_bon_tai_
+khoan` hết 40s rồi đỏ — **và nó đỏ cả khi chạy riêng**, nên không phải tại
+tải máy.
+
+Thủ phạm vẫn là bản sửa §12b. Bộ kiểm khoá đọc/ghi V0.6.1 **thay**
+`_tong_hop_toa` bằng một bản DO THÁM hai tham số, để canh đúng một điều:
+*"khoá của con đã nhả TRƯỚC khi gộp vào cha chưa"*. Tôi thêm một tham số
+`con_goi` vào chữ ký, nên chỗ gọi ném `TypeError`, `_chay` nuốt mất, và việc
+cha **không bao giờ được gộp**.
+
+Nói cho đúng tên: **bản sửa của tôi đã biến một lưới an toàn của bộ kiểm
+thành một lệnh rỗng** — đúng loại hỏng mà cả đêm nay đi sửa, lần này do chính
+tôi gây ra, và lại do một `except` nuốt ngoại lệ che đi.
+
+Sửa bằng cách bỏ hẳn tham số: nhận ra *"luồng của chính con đang gọi"* bằng
+**đối tượng luồng** — `_dang_chay` vốn đã giữ sẵn luồng của từng việc, nên so
+với `threading.current_thread()` là đủ. Cách này đúng ở MỌI chỗ gọi (kể cả
+lưới an toàn trong `tick()`) và **không chạm chữ ký**, nên không bản do thám
+nào gãy.
+
+Bài học, và nó đáng ghi: **đổi chữ ký một hàm mà bộ kiểm có quyền thay thế
+là một thay đổi giao diện công khai.** Ba lượt hồi quy đầy đủ, ba khuyết tật
+khác nhau, không lượt nào thừa.
+
 **Không hạ chuẩn để cho xanh.** Điều các bài ấy canh vẫn nguyên vẹn:
 
 * `_can_luot` vẫn đòi `attempts >= MAX_ATTEMPTS`, nên một lần thử lại vô hạn

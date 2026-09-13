@@ -4289,13 +4289,30 @@ class ControlCenter:
             execution_id=sc.execution_id,
             bang_chung=tuple(sc.bang_chung)[-4:]))
         so.dong(sc, ly_do=f"{hd.value}: {qd.ly_do}")
+        # LEO THANG KHÔNG ĐƯỢC PHÉP THẤT BẠI YÊN LẶNG.
+        #
+        # Bản đầu nuốt mọi ngoại lệ ở đây, và `FAILED -> BLOCKED` lúc đó chưa
+        # có trong bảng chuyển (xem `model.py`). Kết quả đo được trên đường
+        # thật (2026-09-13): sổ ghi đủ `ESCALATION HOI_DONG`, sự cố đóng đúng,
+        # mà việc vẫn đọc `FAILED` — leo thang không bao giờ tới nơi.
+        #
+        # Đây đúng hình dạng đã gặp nhiều lần trong bản này: một `except`
+        # phòng thủ biến một cơ chế an toàn thành một lệnh rỗng. Bảng chuyển
+        # nay có mũi tên ấy; và nếu nó lại bị từ chối vì lý do khác, lần này
+        # sổ sẽ NÓI RA thay vì im lặng.
         try:
             self.store.doi_trang_thai(
                 task_id, TaskState.BLOCKED,
                 reason=(f"phục hồi tự chủ đã cạn ({qd.loai.value}, "
                         f"chữ ký {qd.chu_ky}): {qd.ly_do}")[:400])
-        except Exception:                                     # noqa: BLE001
-            pass
+        except Exception as e:                                # noqa: BLE001
+            self.store.ghi_su_kien(
+                "ESCALATION_KHONG_DAT", project_id=t.project_id,
+                task_id=task_id, level="ERROR",
+                detail=(f"leo thang {hd.value} KHÔNG đặt được BLOCKED: "
+                        f"{type(e).__name__}: {e}")[:400],
+                meta={"hanh_dong": hd.value, "loai": qd.loai.value,
+                      "chu_ky": qd.chu_ky})
         return hd.value
 
     def _thu_lai_neu_dang(self, ctx: ProjectContext, task_id: str, pb,

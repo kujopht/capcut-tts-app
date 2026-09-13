@@ -122,7 +122,23 @@ _CHUYEN_HOP_LE.update({
                                  TaskState.FAILED, TaskState.DONE,
                                  TaskState.REVIEW, TaskState.BLOCKED}),
     TaskState.DONE: frozenset(),
-    TaskState.FAILED: frozenset({TaskState.QUEUED}),   # thu lai thu cong
+    # `FAILED` -> `QUEUED` là thử lại; `FAILED` -> `BLOCKED` là LEO THANG.
+    #
+    # Hai mũi tên này là hai nửa của CÙNG một quyết định, và chúng phải cùng
+    # tồn tại. Bộ điều phối sự cố (V1.0) chạy SAU khi lượt chạy đã bị chấm
+    # `FAILED`: chọn `SUA_TAI_CHO` thì nó xếp lại việc (`-> QUEUED`, hợp lệ từ
+    # lâu), chọn `HOI_DONG`/`LEO_THANG` thì nó phải dừng việc lại và gọi
+    # người (`-> BLOCKED`).
+    #
+    # Thiếu mũi tên thứ hai, `doi_trang_thai` bị từ chối và lời từ chối rơi
+    # vào một `except` — nên leo thang KHÔNG BAO GIỜ tới được trạng thái việc.
+    # Đo được trên đường thật (2026-09-13): sổ ghi đủ `ESCALATION HOI_DONG` và
+    # sự cố đã đóng, mà bảng điều khiển vẫn đọc `FAILED` — người vận hành thấy
+    # "hỏng", không thấy "đang chờ người". `NEEDS_EVIDENCE` vốn đã có mũi tên
+    # này; `FAILED` bị bỏ quên vì trước V1.0 không có gì leo thang cả.
+    #
+    # Nó KHÔNG mở đường nào tới `DONE`, và không nới một cổng an toàn nào.
+    TaskState.FAILED: frozenset({TaskState.QUEUED, TaskState.BLOCKED}),
 })
 
 

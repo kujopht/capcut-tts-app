@@ -437,5 +437,69 @@ class TestChuKyVaPhanLoaiTuDuongThat(unittest.TestCase):
                       "`pb.summary` do model viết")
 
 
+# ==========================================================================
+# 8. LEO THANG PHẢI TỚI ĐƯỢC TRẠNG THÁI VIỆC
+# ==========================================================================
+class TestLeoThangToiNoi(unittest.TestCase):
+    """Khuyết tật thứ BA của dây nối, cũng do lượt chạy thật phát hiện.
+
+    Sổ ghi đủ `ESCALATION HOI_DONG` và đóng sự cố đúng, mà việc vẫn đọc
+    `FAILED`: `FAILED -> BLOCKED` không có trong bảng chuyển, `doi_trang_thai`
+    bị từ chối, và lời từ chối rơi vào một `except ... pass`. Người vận hành
+    nhìn bảng thấy "hỏng", không thấy "đang chờ người".
+    """
+
+    def test_23_FAILED_di_duoc_toi_BLOCKED(self):
+        from scripts.control_center.model import _CHUYEN_HOP_LE
+        self.assertIn(TaskState.BLOCKED, _CHUYEN_HOP_LE[TaskState.FAILED],
+                      "leo thang là nửa còn lại của thử-lại; thiếu nó thì "
+                      "`HOI_DONG`/`LEO_THANG` không bao giờ tới trạng thái việc")
+
+    def test_23b_van_KHONG_co_duong_FAILED_thang_DONE(self):
+        """Nới một mũi tên không được phép nới cổng nghiệm thu."""
+        from scripts.control_center.model import _CHUYEN_HOP_LE
+        self.assertNotIn(TaskState.DONE,
+                         _CHUYEN_HOP_LE[TaskState.FAILED])
+        self.assertNotIn(TaskState.REVIEW,
+                         _CHUYEN_HOP_LE[TaskState.FAILED])
+        self.assertEqual(_CHUYEN_HOP_LE[TaskState.FAILED],
+                         frozenset({TaskState.QUEUED, TaskState.BLOCKED}),
+                         "chỉ THÊM đúng một mũi tên leo thang, không nới rộng")
+
+    def test_23c_KHO_THAT_nhan_FAILED_sang_BLOCKED(self):
+        """Bảng chuyển cho phép là một chuyện; SỔ có nhận hay không là chuyện
+        khác — chỗ lời từ chối thật sự sinh ra là `store.doi_trang_thai`."""
+        from scripts.control_center.model import Task
+        from scripts.control_center.store import ControlStore
+
+        goc = Path(tempfile.mkdtemp(prefix="cc-leo-thang-"))
+        try:
+            st = ControlStore(root=goc)
+            st.luu_project(Project(project_id="demo", name="Demo",
+                                   repo_path=str(goc)))
+            t = Task(task_id="demo.x-1", project_id="demo", title="Việc",
+                     objective="mục tiêu", state=TaskState.QUEUED)
+            st.luu_task(t)
+            st.doi_trang_thai(t.task_id, TaskState.RUNNING, force=True)
+            st.doi_trang_thai(t.task_id, TaskState.FAILED)
+            st.doi_trang_thai(t.task_id, TaskState.BLOCKED,
+                              reason="phục hồi tự chủ đã cạn")
+            self.assertIs(st.task(t.task_id).state, TaskState.BLOCKED,
+                          "leo thang phải TỚI NƠI, không chỉ được bảng cho "
+                          "phép trên giấy")
+        finally:
+            shutil.rmtree(goc, ignore_errors=True)
+
+    def test_24_leo_thang_hong_thi_SO_PHAI_NOI_RA(self):
+        van = ENGINE.read_text(encoding="utf-8")
+        i = van.index("TaskState.BLOCKED,\n                reason=(f\"phục hồi")
+        sau = van[i:i + 900]
+        self.assertNotIn("except Exception:                                     "
+                         "# noqa: BLE001\n            pass", sau)
+        self.assertIn("ESCALATION_KHONG_DAT", sau,
+                      "một `except ... pass` ở đây đã biến leo thang thành "
+                      "lệnh rỗng một lần rồi; lần sau sổ phải nói ra")
+
+
 if __name__ == "__main__":
     unittest.main()

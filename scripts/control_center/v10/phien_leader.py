@@ -1,6 +1,28 @@
 # -*- coding: utf-8 -*-
 """PROJECT LEADER: danh tính theo dự án + phiên nối lại được — V1.0 (B2, B3).
 
+╔══════════════════════════════════════════════════════════════════════════╗
+║  NỀN MÓNG — **CHƯA ĐƯỢC CẮM**. Không tính là năng lực V1.0 đang chạy.    ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Tệp này có bài kiểm và KHÔNG có một chỗ gọi nào trong mã sản phẩm. Nó được
+giữ lại một cách CÓ Ý THỨC làm nền cho cột mốc "Leader Opus 5 bền" về sau,
+và nó KHÔNG được kể là một tính năng của bản phát hành này.
+
+Vì sao ghi thẳng ra đây thay vì chỉ ghi trong báo cáo: đúng câu chủ sở hữu
+dùng cho vòng sự cố — *"tested but not wired"* — đã đúng HAI lần trong bản
+này (`su_co.py`, rồi `vai_tro.py`). Một mô-đun có 100% bài kiểm xanh trông y
+hệt một mô-đun đang chạy, nếu không ai nói ra sự khác biệt.
+
+Và có một cái bẫy cụ thể ở đây: `scripts/control_center/leader.py` có sẵn một
+lớp **CÙNG TÊN** `PhienLeader`, và lớp ấy THẬT SỰ được dùng
+(`engine.py`). Một phép tìm theo tên lớp sẽ trả về kết quả và cho cảm giác
+tệp này đã được cắm — nó chưa.
+
+**Muốn cắm thì phải có một dặm đường thật kèm theo**, không phải chỉ thêm
+một lời gọi: đó là bài học đắt nhất của V1.0.
+
+
 Mỗi dự án có MỘT danh tính Leader logic. Model/runtime chạy nó là một lựa
 chọn thay được — hôm nay Claude Opus 5, mai có thể khác — mà vai thì không
 đổi.

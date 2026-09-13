@@ -261,6 +261,10 @@ Vì thế cổng ghi **nguyên văn đuôi đầu ra** của lệnh vào sự ki
 | cổng review Gemini | ⚠️→✅ 10/10 trên hợp đồng, **nhưng khi ấy là MÃ CHẾT**. Đã cắm vào `nen_goi_reviewer` VÀ **đã chạy thật**: Gemini viết mã → dấu `(V1.0)` mở cổng → `codex/codex-default` phán `REVISE`, độc lập=True → `BLOCKED`. Xem `V10_INCIDENT_LOOP_ACCEPTANCE.md` §9 + §14 |
 | vòng sự cố V1.0 chạy trên đường THẬT | ✅ ngắt mạch nổ đúng lẫy: 1 chữ ký × 3 → `HOI_DONG` (§6) |
 | khởi động lại GIỮA LÚC phục hồi | ✅ **8/8** — cùng `incident_id`, ngân sách KHÔNG nạp lại, 18→18 việc (§10b) |
+| hết hạn mức ≠ hỏng / ≠ cần người | ✅ `WAITING_RESOURCE`; bản ghi THẬT đã hỏng chạy lại qua đường mới: `FAILED` → `WAITING_RESOURCE` → `QUEUED` (AG01). **7/7** |
+| định tuyến lại / hẹn giờ theo tài nguyên | ✅ ĐỔI CHỖ / CHỜ RESET / LEO THANG, có trần 3 lần + 6 giờ; **không bao giờ** mua credit |
+| khởi động lại GIỮA LÚC chờ tài nguyên | ✅ **10/10** — tiến trình MỚI, `dem_cho` và `da_dung` KHÔNG nạp lại, 19→19 việc |
+| payload đóng gói Beam | ✅ 903.8 MB → **0.3 MB**; `beam_apps/` 4/4 còn nguyên trong payload |
 | khởi động lại / phục hồi vẫn xanh | ✅ nằm trong hồi quy đầy đủ |
 | thay đổi / khởi động lại production | ✅ **0 / 0** |
 | thao tác phá huỷ | ✅ **0** — không force push, không xoá nhánh |

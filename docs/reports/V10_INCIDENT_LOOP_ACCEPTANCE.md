@@ -45,15 +45,14 @@ chạy thật: Gemini viết mã → `codex/codex-default` phản biện `REVISE
 
 ### BA HẠNG MỤC MỞ, ghi rõ chứ không giấu
 
-| # | Hạng mục | Mục |
-|---|---|---|
-| 1 | nhánh `CHO_QUOTA` chưa tới được trạng thái việc — bảng đọc "hỏng" trong khi sự thật là "đang chờ hạn mức" | §10c |
-| 2 | `phien_leader.py` + `han_muc.py` vẫn là **mã chết** — KHÔNG tính là năng lực V1.0 đang chạy | §11 |
-| 3 | `.beamignore` thiếu `build/`/`dist/` — có từ TRƯỚC đêm nay, không thuộc V1.0 | §12d |
+| # | Hạng mục | Mục | Trạng thái |
+|---|---|---|---|
+| 1 | nhánh `CHO_QUOTA` chưa tới được trạng thái việc | §10c | ✅ **ĐÃ ĐÓNG** — `WAITING_RESOURCE`, xem `V10_RESOURCE_WAIT_ACCEPTANCE.md` |
+| 2 | `phien_leader.py` + `han_muc.py` là **mã chết** | §11 | ◐ `han_muc` đã cắm; `phien_leader` CÒN LÀ nền móng, ghi rõ trong chính docstring |
+| 3 | `.beamignore` thiếu `build/`/`dist/` | §12d | ✅ **ĐÃ ĐÓNG** — payload 903.8 MB → 0.3 MB |
 
-Không hạng mục nào trong ba cái đó được "sửa cho xanh" lúc nửa đêm: cái thứ
-nhất cần một quyết định thiết kế của chủ sở hữu, hai cái sau nằm ngoài phạm
-vi được giao.
+Cả ba đều được chủ sở hữu quyết sau khi đọc báo cáo này, và không cái nào
+được "sửa cho xanh" lúc nửa đêm.
 
 ---
 
@@ -558,11 +557,18 @@ review), tôi quét nốt cả gói thay vì chờ nó đúng lần thứ ba:
 | `su_co_ben.py` | `engine._dieu_phoi_su_co`, `_con_da_ket_thuc` | **ĐÃ CẮM**, có dặm đường thật |
 | `su_kien.py` | `engine._dieu_phoi_su_co` | **ĐÃ CẮM**, sự kiện có kiểu hiện trong sổ |
 | `vai_tro.py` | `kiem_dinh.nen_goi_reviewer` | **ĐÃ CẮM** đêm nay (§9) |
+| `han_muc.py` | `engine._so_tai_nguyen`, `_cho_tai_nguyen` | **ĐÃ CẮM** — xem `V10_RESOURCE_WAIT_ACCEPTANCE.md` |
 | `phien_leader.py` | *(không có)* | **NỀN MÓNG — CHƯA CẮM** |
-| `han_muc.py` | *(không có)* | **NỀN MÓNG — CHƯA CẮM** |
 
-Hai dòng cuối là **mã chết**: có bài kiểm, không có một chỗ gọi nào trong mã
-sản phẩm. Chúng KHÔNG được tính là năng lực V1.0 đang chạy.
+`han_muc.py` được cắm vì `WAITING_RESOURCE` **cần** mô hình bể quota — nhu
+cầu có thật kéo theo, không phải cắm để cộng thêm một tính năng vào danh
+sách.
+
+`phien_leader.py` vẫn là **mã chết**: có bài kiểm, không một chỗ gọi nào
+trong mã sản phẩm. Nó KHÔNG được tính là năng lực V1.0 đang chạy, và nay
+chính docstring của tệp nói thẳng điều đó — vì một mô-đun 100% bài kiểm xanh
+trông y hệt một mô-đun đang chạy nếu không ai nói ra sự khác biệt. Leader
+Opus 5 bền là một cột mốc SAU.
 
 Và một cái bẫy đáng ghi riêng: `scripts/control_center/leader.py` có sẵn một
 lớp **cùng tên** `PhienLeader`, và lớp ấy THẬT SỰ được dùng

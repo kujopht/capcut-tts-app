@@ -626,13 +626,45 @@ làm hỏng rộng hơn thứ nó sửa. Nay chỗ gọi truyền `con_goi` đ�
 | Hạng mục | Trạng thái |
 |---|---|
 | Gemini **viết mã** trên đường thật | ✅ AG02/`gemini-3.1-pro-low` sửa tệp thật, `npm` thật |
-| Luật review B5 **chạy** trên đường thật | ⏳ xem §14 |
+| Luật review B5 **chạy** trên đường thật | ✅ xem §14 |
 | nhánh `CHO_QUOTA` tới được trạng thái việc | ❌ hạng mục mở số 1 (§10c) |
 | `phien_leader.py`, `han_muc.py` | ❌ mã chết (§11) |
 | Claude Opus 5 làm runtime worker | ❌ **CHƯA XÁC MINH** — không đổi, và KHÔNG đụng vào trạng thái riêng của Claude Code để giả vờ ngược lại |
 
-Dòng thứ hai là chỗ dễ đọc nhầm nhất, nên nói thẳng: **cổng review đã được
-cắm, nhưng chưa có một dặm đường thật nào** — đúng cái trạng thái mà vòng sự
-cố ở trong trước đêm nay. Nó hơn lúc trước ở chỗ không còn là mã chết và có
-bài kiểm hành vi, nhưng nó CHƯA đạt cùng một mức bằng chứng với §6/§10b, và
-tôi không tính nó là đã chứng minh.
+## 14. LUẬT B5 TRÊN ĐƯỜNG THẬT — Gemini viết mã, Codex phản biện
+
+Mục này ban đầu ghi *"chưa chứng minh được"*: lượt §10b hết hạn mức trên tài
+khoản đang chạy trước khi có một lượt kiểm định nào đi qua cổng. Đo lại bể
+thì bể vẫn khoẻ (92%), nên tôi chạy một lượt riêng cho đúng câu hỏi này.
+
+Kịch bản dựng để **chỉ còn MỘT lý do** có thể mở cổng:
+
+* tiêu chí nghiệm thu **tất định hết** — không câu nào đòi phán đoán ngữ
+  nghĩa (có thì mệnh đề `tieu_chi_can_ngu_nghia` mở cổng và bài mất nghĩa);
+* **không** chạm production, rủi ro **THẤP** — hai mệnh đề còn lại cũng im;
+* bước GHI chạy bằng một model họ **gemini**, và nó sửa mã nguồn.
+
+Sổ của `ex_b09e8afd2a6d`:
+
+```
+bước ghi_tienich  DONE  model=gemini-3.1-pro-low  files=[src/format_ngay.js]
+
+[REVIEW_GATE]    GỌI Reviewer: (V1.0) mã sản phẩm do họ gemini viết
+                 (gemini-3.1-pro-low) — phản biện phải KHÁC họ trước khi
+                 chấp nhận
+[REVIEW_VERDICT] REVISE · codex/codex-default · độc lập=True
+
+trạng thái cuối: BLOCKED
+```
+
+Đọc từng dòng:
+
+| Đòi hỏi | Bằng chứng |
+|---|---|
+| Gemini THẬT viết mã sản phẩm | `model=gemini-3.1-pro-low`, tệp thật trên đĩa |
+| **luật B5** mở cổng, không phải mệnh đề cũ | dấu `(V1.0)` — và ba mệnh đề kia đều bị kịch bản làm im |
+| phản biện **KHÁC HỌ** | `codex/codex-default`, `độc lập=True` |
+| không phải dấu cao su | phán xử **`REVISE`**, không phải `ACCEPT` |
+| `REVISE` dẫn tới hành động | `BLOCKED` — dừng lại, không tự nhận là xong |
+
+Đây là dặm đường thật mà §9 còn thiếu. Luật B5 nay **đã cắm VÀ đã chạy**.

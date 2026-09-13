@@ -5909,6 +5909,20 @@ def unfollow_story(novel_id: str,
     return _xa_hoi(social.unfollow_story, profile, novel_id)
 
 
+@app.get("/api/me/following/stories")
+def followed_stories(limit: int = 50, offset: int = 0,
+                     profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Truyen NGUOI DANG DANG NHAP theo doi — nguon cua trang Thư viện.
+
+    Duoi `/api/me/...` chu khong `/api/users/{id}/...`: day la thu RIENG cua
+    chu tai khoan. Mot duong dan mang `user_id` moi lai la mot duong dan ma
+    ai do se thu doi id nguoi khac vao; khong mo canh cua do ngay tu dau thi
+    khong phai canh no.
+    """
+    return _xa_hoi(social.followed_stories, profile,
+                   limit=max(1, min(100, limit)), offset=max(0, offset))
+
+
 # -- bai dang -----------------------------------------------------------------
 
 

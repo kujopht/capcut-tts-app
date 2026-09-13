@@ -44,7 +44,14 @@ const LINKS = [
   { href: "/fanfic", label: "Khám phá" },
   { href: "/animation", label: "Animation" },
   { href: "/community", label: "Cộng đồng" },
-  { href: "/studio/library", label: "Thư viện" },
+  /*
+    "Thư viện" la khu vuc cua NGUOI DOC (`/library`): truyen dang theo doi va
+    cho doc do. No TUNG tro toi `/studio/library` — nhung do la thu vien AUDIO
+    cua nguoi sang tac (danh sach job TTS), nen mot doc gia bam "Thư viện" lai
+    roi thang vao mot cong cu san xuat. Thu vien audio van con, o trong Studio,
+    dung cho nguoi lam ra no.
+  */
+  { href: "/library", label: "Thư viện" },
   { href: "/studio/write", label: "Viết truyện", cta: true },
 ];
 

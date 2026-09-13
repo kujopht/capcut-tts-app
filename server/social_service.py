@@ -184,6 +184,50 @@ class SocialService:
         self._store.unfollow_story(story_follow_key(actor.user_id, novel_id))
         return self._trang_thai_theo_doi_truyen(actor.user_id, novel_id)
 
+    def followed_stories(self, actor: Profile, *, limit: int = 50,
+                         offset: int = 0) -> Dict[str, Any]:
+        """Cac truyen NGUOI NAY dang theo doi — cho trang Thư viện.
+
+        `followed_story_ids` da co tu lau, nhung truoc day chi duoc dung de
+        DEM (`followed_stories` trong ho so). Nghia la nguoi dung theo doi
+        duoc, thay duoc con so, ma khong bao gio xem duoc danh sach — mot
+        vong tron khong khep.
+
+        Bo qua truyen da GO XUAT BAN hoac da xoa thay vi tra ve mot hang
+        chet: ban ghi theo doi van con, nhung thu nguoi ta bam vao thi khong
+        con doc duoc, va mot lien ket 404 trong thu vien cua chinh minh doc
+        nhu mot loi cua san pham.
+        """
+        ids = self._store.followed_story_ids(actor.user_id, limit=1000)
+        ra: List[Dict[str, Any]] = []
+        for nid in ids:
+            try:
+                n = self._truyen(nid)
+            except NotFoundError:
+                continue
+            if n.state is not PublishState.PUBLISHED:
+                continue
+            ra.append(n)
+        tong = len(ra)
+        cua_so = ra[offset:offset + limit]
+        dem = self._store.story_follower_counts([n.novel_id for n in cua_so])
+        return {
+            "novels": [{
+                "novel_id": n.novel_id,
+                "title": n.title,
+                "description": n.description,
+                "cover_key": n.cover_key,
+                "tags": list(n.tags),
+                "status": getattr(n.status, "value", str(n.status)),
+                "external_author_name": n.external_author_name,
+                "updated_at": n.updated_at,
+                "follower_count": dem.get(n.novel_id, 0),
+            } for n in cua_so],
+            "total": tong,
+            "limit": limit,
+            "offset": offset,
+        }
+
     def story_follow_state(self, novel_id: str,
                            viewer: Optional[Profile] = None) -> Dict[str, Any]:
         """

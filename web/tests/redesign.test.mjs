@@ -385,10 +385,27 @@ test("cot chu khi doc chuong co chan tren, va CA trang dat giua", () => {
     Phan quan trong hon la CA trang doc dat giua: truoc day moi khoi bam le
     trai cua khung 1180px va ben phai con mot mang trong rong bang ca cot chu.
   */
+  /*
+    Cot chu gio NGUOI DOC chinh duoc (`lib/readerPrefs.ts`), nen `.reader`
+    mang mot bien thay vi mot con so. Rang buoc cua chu du an khong doi, chi
+    doi cho do: no ap len gia tri MAC DINH — thu mot nguoi chua bao gio dong
+    vao tuy chon se thay.
+  */
   const doc = rule(".reader");
-  const px = Number(doc.match(/max-width: (\d+)px/)?.[1] ?? 0);
-  assert.ok(px >= 700 && px <= 800, `cột chữ ${px || "không đặt"}px, cần 700–800`);
-  assert.match(rule(".reader .prose"), /line-height: 1\.9/);
+  assert.match(doc, /max-width: var\(--doc-ngang, (\d+)px\)/,
+    "cột chữ không còn nhận tuỳ chọn của người đọc");
+  const mac_dinh = Number(doc.match(/max-width: var\(--doc-ngang, (\d+)px\)/)?.[1] ?? 0);
+  assert.ok(mac_dinh >= 700 && mac_dinh <= 800,
+    `cột chữ mặc định ${mac_dinh || "không đặt"}px, cần 700–800`);
+  // Bac "vua" phai TRUNG voi mac dinh — neu khong, mo trang va bam "Vừa" lai
+  // ra hai be ngang khac nhau.
+  const vua = Number(rule('[data-doc-ngang="vua"]').match(/--doc-ngang: (\d+)px/)?.[1] ?? 0);
+  assert.equal(vua, mac_dinh, "bậc “Vừa” lệch khỏi mặc định");
+  // Bac rong nhat van phai co CHAN TREN: qua ~90 ky tu mot dong thi mat lac
+  // dong, va man hinh rong bien do thanh mot cai bay.
+  const rong = Number(rule('[data-doc-ngang="rong"]').match(/--doc-ngang: (\d+)px/)?.[1] ?? 0);
+  assert.ok(rong > mac_dinh && rong <= 900, `bậc rộng nhất ${rong}px, cần ≤ 900`);
+  assert.match(rule(".reader .prose"), /line-height: var\(--doc-dong, 1\.9\)/);
   assert.match(css(), /\.reader-crumb \{ margin-inline: auto; \}|margin-inline: auto;/,
     "trang đọc không được căn giữa");
 });

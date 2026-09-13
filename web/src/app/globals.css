@@ -4126,6 +4126,49 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 .list-main { flex: 1; min-width: 0; }
 .list-title { font-weight: 600; font-size: var(--t-sm); }
 
+/*
+  MUC LUC DAI — bien mot chong the thanh mot danh sach doc luot duoc.
+
+  Mot truyen dai 31 chuong ve bang `.list-item` thuong cao gan 2.400px: moi
+  hang mot cai the co vien rieng, dem doc 12px, va mot hang nut. Cuon het no
+  de tim chuong 24 la mot viec, khong phai mot cai liec.
+
+  Ban gon: bo vien rieng cua tung hang, gop chung thanh MOT khoi co duong ke
+  mong ngan cach, ha dem doc, va cho so chuong + so ky tu ve cung mot dong.
+  Khong bo mot thong tin nao — chi thoi ve moi dong nhu mot cai the.
+*/
+.list-gon { gap: 0; border: 1px solid var(--line); border-radius: var(--r2);
+            overflow: hidden; background: var(--bg-1); }
+.list-gon .list-item {
+  gap: var(--s3);
+  padding: var(--s2) var(--s4);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.list-gon .list-item:first-child { border-top: 0; }
+.list-gon .list-item:hover { background: var(--bg-2); }
+.list-gon .list-index {
+  width: 26px; height: 26px;
+  background: transparent;
+  color: var(--text-3);
+}
+/* Tieu de + so ky tu ve MOT dong: hai dong cho mot muc luc la thua. */
+.list-gon .list-main {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--s3);
+}
+.list-gon .list-title { font-size: var(--t-md); }
+.list-gon .list-main .hint { flex: 0 0 auto; font-size: var(--t-xs); }
+/* Hanh vi mobile cua `.list-gon` nam trong KHOI MOBILE CHINH o duoi, khong
+   mo mot khoi truy van phuong tien thu hai o day: bo kiem tim khoi mobile
+   bang `indexOf` tren lan xuat hien DAU TIEN cua chuoi do, nen mot khoi moi
+   chen len truoc se cuop cho cua khoi that va lam hong ca mot ho bai kiem.
+   (Vi cung ly do, chu thich nay khong viet lai nguyen van chuoi truy van.) */
+
 /* ========================================================== khu vuc nghe */
 
 /*
@@ -4490,18 +4533,104 @@ body.co-mini { padding-bottom: 74px; }
 */
 .reader {
   position: relative;
-  max-width: 720px;
+  max-width: var(--doc-ngang, 720px);
   padding: var(--s6) var(--s5);
   border-radius: var(--r4);
   background: linear-gradient(180deg, #070912e0, #070912f2 12%, #070912f2 88%, #070912e0);
 }
 .reader .prose {
-  font-size: var(--t-md);
-  line-height: 1.9;
+  font-size: var(--doc-co, var(--t-md));
+  line-height: var(--doc-dong, 1.9);
   color: #dde3f0;
   /* Chu Viet co nhieu dau; `break-word` giu cac tu dai khong tran ra ngoai o
      man hinh hep. */
   overflow-wrap: break-word;
+}
+
+/*
+  BON BAC CO CHU, va dong gian ra theo co chu chu khong co dinh.
+
+  Mot dong 17px/1.9 va mot dong 22px/1.9 khong doc giong nhau: chu cang lon
+  thi mat cang de lan tu cuoi dong nay sang dau dong sau, nen dong thua co
+  the THU lai mot chut. Giu nguyen 1.9 o moi bac lam ban lon trong loang.
+*/
+[data-doc-co="nho"] { --doc-co: 15px; --doc-dong: 1.95; }
+[data-doc-co="vua"] { --doc-co: 17px; --doc-dong: 1.9; }
+[data-doc-co="lon"] { --doc-co: 20px; --doc-dong: 1.82; }
+[data-doc-co="rat-lon"] { --doc-co: 23px; --doc-dong: 1.75; }
+
+/*
+  Be ngang cot chu. "Vua" giu dung 720px cu — nguoi khong dong vao tuy chon
+  thi khong thay gi doi.
+
+  "Rong" dung lai o 900px chu khong keo het man hinh: qua ~90 ky tu mot dong
+  thi mat bat dau lac dong, va do la mot cai bay khi man hinh rong.
+*/
+[data-doc-ngang="hep"] { --doc-ngang: 600px; }
+[data-doc-ngang="vua"] { --doc-ngang: 720px; }
+[data-doc-ngang="rong"] { --doc-ngang: 900px; }
+
+/* Dau chuong/loi ra di theo cot chu de ca trang khong lech nhau. */
+[data-doc-ngang] .reader-col,
+[data-doc-ngang] .reader-foot { max-width: var(--doc-ngang, 720px); }
+
+/*
+  Thanh tuy chon NOI tren tranh, nen no can mot BE MAT rieng.
+
+  Khong lam toi ca trang de doc duoc hai cai nhan nay — huong my thuat cua
+  du an la de tranh tho, va do sang cua tung tam moi cho moi khac nhau (mat
+  trang o `03-reader-moonlit-shrine` roi dung vao dung vung nay). Mot mieng
+  kinh nho ngay duoi cum chu thi giai quyet dung cho do va khong dung gi
+  toi phan con lai cua buc tranh.
+*/
+.doc-tuychon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  align-items: center;
+  justify-content: flex-end;
+  margin: 0 auto var(--s3);
+  padding: var(--s2) var(--s3);
+  max-width: var(--doc-ngang, 720px);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  background: #0a0d18b8;
+  backdrop-filter: blur(6px);
+}
+.doc-tuychon-nhom {
+  display: flex;
+  gap: var(--s1);
+  align-items: center;
+}
+.doc-tuychon-nhan {
+  margin-right: var(--s1);
+  /* `--text-2` chu khong `--text-3`: day la nhan cua mot cum dieu khien, va
+     o cap ba thi no chim han duoi nen tranh. */
+  color: var(--text-2);
+  font-size: var(--t-xs);
+}
+
+/*
+  Vach tien do doc — o DINH man hinh, mong, va khong bao gio nhan chuot.
+
+  `transform: scaleX()` chu khong `width`: doi `width` moi khung hinh bat
+  trinh duyet tinh lai bo cuc, con `transform` thi chi ghep lop. Day la thu
+  chay trong luc nguoi ta dang cuon, nen no phai re.
+*/
+.doc-tiendo {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 40;
+  height: 2px;
+  pointer-events: none;
+  background: transparent;
+}
+.doc-tiendo-vach {
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, var(--brand), #6cc8ff);
+  will-change: transform;
 }
 /* Dau chuong, chu va loi ra dung chung mot be rong; khu nghe rong hon mot
    chut vi no la mot cai the, va mot cai the hep bang cot chu trong nhu bi ep. */
@@ -5099,6 +5228,11 @@ body.co-mini { padding-bottom: 74px; }
 /* ------------------------------------------------------------ mobile */
 
 @media (max-width: 640px) {
+  /* Muc luc gon: so ky tu xuong dong duoi tieu de thay vi ep tieu de chuong
+     con vai chu. Dat trong KHOI NAY chu khong mo mot khoi mobile rieng — xem
+     ghi chu o `.list-gon`. */
+  .list-gon .list-main { flex-direction: column; align-items: flex-start; gap: 2px; }
+
   /* Bento (Phan D, V4 visual completion): the doi 2 cot tro ve 1 cot khi
      man hinh qua hep de giu ca hai cot doc duoc. */
   .bento-span-2 { grid-column: span 1; }

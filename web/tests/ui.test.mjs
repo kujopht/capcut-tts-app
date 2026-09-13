@@ -39,12 +39,17 @@ test("thanh dieu huong chinh dung SAU muc, theo dung thu tu", () => {
   const order = [...nav.matchAll(/href: "([^"]+)", label: "([^"]+)"/g)].map(
     (m) => [m[1], m[2]],
   );
+  //
+  // "Thư viện" tro toi `/library` — khu vuc cua NGUOI DOC (truyen dang theo
+  // doi + cho doc do). No tung tro toi `/studio/library`, nhung do la thu
+  // vien AUDIO cua nguoi sang tac, nen mot doc gia bam "Thư viện" lai roi
+  // thang vao mot cong cu san xuat.
   assert.deepEqual(order, [
     ["/", "Trang chủ"],
     ["/fanfic", "Khám phá"],
     ["/animation", "Animation"],
     ["/community", "Cộng đồng"],
-    ["/studio/library", "Thư viện"],
+    ["/library", "Thư viện"],
     ["/studio/write", "Viết truyện"],
   ]);
 });
@@ -143,7 +148,17 @@ test("duong dan cong cu CU van chay — bookmark khong duoc hong", () => {
     ["/translate", "/studio/translate"],
     ["/tools/subtitles", "/studio/subtitle"],
     ["/write", "/studio/write"],
-    ["/library", "/studio/library"],
+    /*
+      `/library` KHONG con trong danh sach nay, va do la mot lan sua CO Y.
+
+      No tung tro sang `/studio/library` — nhung do la thu vien AUDIO cua
+      nguoi sang tac, con "Thư viện" ma mot nguoi DOC bam vao thi phai la
+      truyen ho theo doi. `/library` gio la mot trang THAT
+      (`src/app/library/page.tsx`), nen mot chuyen huong o day se che mat no.
+
+      Doi duoc vi chuyen huong kia chua bao gio len production (#197 dung lai
+      truoc buoc trien khai), nen khong trinh duyet nao da nho mot 308.
+    */
   ]) {
     const re = new RegExp(
       `source: "${cu}", destination: "${moi}", permanent: true`);

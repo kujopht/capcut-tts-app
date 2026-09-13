@@ -28,7 +28,21 @@ const nextConfig = {
       { source: "/tools/subtitles", destination: "/studio/subtitle", permanent: true },
       { source: "/write", destination: "/studio/write", permanent: true },
       { source: "/write/import", destination: "/studio/write/import", permanent: true },
-      { source: "/library", destination: "/studio/library", permanent: true },
+      /*
+        `/library` KHONG con o day, va day la mot lan sua co y.
+
+        No tung tro sang `/studio/library`. Nhung `/studio/library` la THU
+        VIEN AUDIO cua nguoi sang tac (danh sach job TTS), con "Thư viện" o
+        thanh dieu huong chinh thi mot nguoi DOC bam vao — va thu ho mong
+        doi la truyen ho theo doi, khong phai cac ban thu am cua ho.
+        Chuyen huong do bien mot khu vuc doc gia thanh mot cong cu sang tac.
+        `/library` nay la thu vien CUA NGUOI DOC; audio van o trong Studio.
+
+        Doi duoc vi chuyen huong kia CHUA BAO GIO len production (#197 dung
+        lai truoc buoc trien khai), nen khong trinh duyet nao tren doi da
+        nho mot 308 tro di. Sua truoc khi phat hanh thi khong phai go mot
+        chuyen huong vinh vien da nam trong bo nho dem cua nguoi dung.
+      */
     ];
   },
 };

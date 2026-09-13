@@ -143,6 +143,38 @@ class TheoDoiTruyenTest(Nen):
         with self.assertRaises(NotFoundError):
             self.social.follow_story(self.binh, "khong-co")
 
+    def test_liet_ke_truyen_dang_theo_doi(self):
+        """Theo doi duoc ma khong xem lai duoc thi la mot vong khong khep.
+
+        Truoc 2026-09-13, `followed_story_ids` chi duoc dung de DEM trong ho
+        so; khong route nao tra ve danh sach, nen nguoi dung thay con so ma
+        khong bao gio mo duoc no ra.
+        """
+        self.social.follow_story(self.binh, self.truyen.novel_id)
+        ra = self.social.followed_stories(self.binh)
+        self.assertEqual(ra["total"], 1)
+        self.assertEqual([n["novel_id"] for n in ra["novels"]],
+                         [self.truyen.novel_id])
+        self.assertEqual(ra["novels"][0]["title"], self.truyen.title)
+        self.assertEqual(ra["novels"][0]["follower_count"], 1)
+
+    def test_danh_sach_BO_QUA_truyen_da_go_xuat_ban(self):
+        """Ban ghi theo doi con, nhung thu bam vao thi khong con doc duoc.
+
+        Mot lien ket 404 trong thu vien cua chinh minh doc nhu loi san pham,
+        nen hang do bi bo qua thay vi tra ve mot xac.
+        """
+        self.social.follow_story(self.binh, self.truyen.novel_id)
+        self.store.admin_unpublish_novel(self.truyen.novel_id)
+        ra = self.social.followed_stories(self.binh)
+        self.assertEqual(ra["total"], 0)
+        self.assertEqual(ra["novels"], [])
+
+    def test_danh_sach_RONG_khi_chua_theo_doi_gi(self):
+        ra = self.social.followed_stories(self.binh)
+        self.assertEqual(ra["total"], 0)
+        self.assertEqual(ra["novels"], [])
+
     def test_thong_bao_chuong_moi_cho_nguoi_theo_doi(self):
         from server.domain import Chapter
 

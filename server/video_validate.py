@@ -122,7 +122,7 @@ def kiem_tieu_de(tieu_de: Any) -> str:
 #: vao `setattr` se cho phep doi `owner_id` hoac `render_state`.
 TRUONG_SUA_DUOC = frozenset({
     "title", "video_asset_id", "audio_track_id", "subtitle_asset_id",
-    "video_trim_start", "video_trim_end", "audio_offset",
+    "video_trim_start", "video_trim_end", "audio_offset", "audio_trim_end",
     "video_volume", "audio_volume", "mute_original_audio",
 })
 
@@ -156,6 +156,16 @@ def kiem_ban_va(ban_va: Dict[str, Any], *,
         ra["audio_volume"] = kiem_am_luong(ban_va["audio_volume"], "Âm lượng lời đọc")
     if "audio_offset" in ban_va:
         ra["audio_offset"] = kiem_lech(ban_va["audio_offset"])
+    if "audio_trim_end" in ban_va:
+        # Khong buoc theo `dai_nguon`: do dai o day la cua LOI DOC, con
+        # `dai_nguon` la cua VIDEO. Kiem cheo hai thu do se tu choi mot ban
+        # cat hop le chi vi video ngan hon loi doc.
+        v = ban_va["audio_trim_end"]
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise VideoValidationError("Điểm cắt lời đọc phải là số.")
+        if v < 0 or v > DAI_TOI_DA:
+            raise VideoValidationError("Điểm cắt lời đọc không hợp lệ.")
+        ra["audio_trim_end"] = float(v)
     if "mute_original_audio" in ban_va:
         if not isinstance(ban_va["mute_original_audio"], bool):
             raise VideoValidationError("mute_original_audio phải là true/false.")

@@ -3836,6 +3836,8 @@ export interface VideoProject {
   video_trim_start: number;
   video_trim_end: number;
   audio_offset: number;
+  /** Cắt bớt CUỐI lời đọc (giây từ đầu tệp). `0` = dùng hết. */
+  audio_trim_end: number;
   video_volume: number;
   audio_volume: number;
   mute_original_audio: boolean;
@@ -3893,6 +3895,7 @@ export type VideoProjectPatch = Partial<
     | "video_trim_start"
     | "video_trim_end"
     | "audio_offset"
+    | "audio_trim_end"
     | "video_volume"
     | "audio_volume"
     | "mute_original_audio"

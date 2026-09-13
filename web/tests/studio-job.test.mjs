@@ -1,15 +1,19 @@
 /*
- * `/studio` phai co CUNG hanh vi job voi `/write`.
+ * Media Studio phai co CUNG hanh vi job voi `/studio/content` (Viet truyen).
  *
- * TRANG NAY DA O LAI PHIA SAU. Ba PR lien tiep sua tien do va khoi phuc sau
- * reload cho `/write`; `/studio` khong duoc huong gi ca, vi khong co gi dung
- * chung de sua mot lan. Nguoi dung o `/studio` thay:
- *   - mot thanh chay vo dinh voi 6% hoac 8% bia ra;
- *   - "Đã xong 5/7 đoạn" nhung khong bao gio thay phan tram;
- *   - chi MOT job duoc theo doi, du backend cho chay nhieu job.
+ * Truoc doi kien truc (`feat/studio-media-workspace`), day la bai kiem cho
+ * `/studio/audio/page.tsx` — mot trang TTS rieng voi mo hinh "mot job hoat
+ * dong tren moi chuong". Trang do khong con: tao loi doc nay la MOT bang
+ * trong Media Studio (`/studio/media`), va no chi giu MOT o soan + MOT job
+ * dang cho — khong phai mot danh sach chuong nhu Viet truyen.
  *
- * Phan logic dung chung duoc kiem that o `job-progress-shared.test.mjs`. Cho
- * nay kiem viec DAU DAY: `/studio` co that su cam vao logic do khong.
+ * Nhung ba dieu ĐÃ TRẢ GIÁ THẬT o ban cu van la bat bien phai giu:
+ *   - theo doi job qua `useJobTracker` dung chung, khong tu dat `setTimeout`;
+ *   - khoi phuc sau F5 di qua `listJobs()` MOT lan, khong qua localStorage;
+ *   - tien do ve bang `<JobProgress>` dung chung, khong tu ve thanh rieng.
+ * Va mot dieu moi duoc bao ton tu Audio Studio: bam lai CUNG mot doan van
+ * thi dung lai chuong cu, de khoa van tay o backend (owner+chapter+hash)
+ * con tac dung — tao chuong moi moi lan bam se pha khoa do.
  */
 
 import { test } from "node:test";
@@ -17,7 +21,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const studio = () => read("../src/app/studio/audio/page.tsx");
+const trangMedia = () => read("../src/app/studio/media/page.tsx");
+const ttsPanel = () => read("../src/components/media/TtsPanel.tsx");
 
 /** Bo chu thich truoc khi quet — xem `job-recovery.test.mjs`. */
 const codeOnly = (src) =>
@@ -25,151 +30,112 @@ const codeOnly = (src) =>
 
 /* ============================================================ theo doi job */
 
-test("/studio theo doi job qua hook chung, khong tu poll", () => {
-  const src = studio();
+test("Media Studio theo doi job qua hook chung, khong tu poll", () => {
+  const src = trangMedia();
   assert.match(src, /useJobTracker\(\{/);
   assert.ok(
     !codeOnly(src).includes("window.setTimeout"),
-    "/studio vẫn tự đặt vòng poll",
+    "Media Studio vẫn tự đặt vòng poll",
   );
-});
-
-test("/studio theo doi MOI job dang chay, khong chi mot cai", () => {
-  /*
-    Ban cu giu dung mot `activeJob` trong state va poll dung `activeJob.job_id`.
-    Bay gio job nam trong ban do theo chuong cua hook, va hook poll TAT CA cai
-    nao chua xong.
-  */
-  const src = codeOnly(studio());
-  assert.ok(
-    !/const \[activeJob, setActiveJob\]/.test(src),
-    "/studio vẫn giữ một job toàn cục",
-  );
-  assert.match(src, /const activeJob = activeChapterId \? \(jobs\[activeChapterId\] \?\? null\) : null;/);
 });
 
 /* ===================================================== khoi phuc sau reload */
 
-test("F5 tren /studio: hoi KHO, khong doi nguoi dung bam lai", () => {
-  const src = studio();
+test("F5 tren Media Studio: hoi KHO, khong doi nguoi dung bam lai", () => {
+  const src = trangMedia();
   assert.match(src, /api\.listJobs\(\)/, "không hỏi kho về job đang chạy");
-  assert.match(src, /khoiPhucJob\(jobList\.jobs\)/, "không nạp job vào vòng theo dõi");
+  assert.match(src, /khoiPhuc\(js\.jobs\)/, "không nạp job vào vòng theo dõi");
 });
 
 test("khoi phuc dung MOT request, khong N+1", () => {
-  const src = studio();
+  const src = trangMedia();
   assert.ok(
     !src.includes("latestJobForChapter"),
-    "/studio gọi endpoint từng chương — N+1",
+    "Media Studio gọi endpoint từng chương — N+1",
   );
   const so_lan = (src.match(/api\.listJobs\(/g) ?? []).length;
   assert.equal(so_lan, 1, `gọi listJobs ${so_lan} lần, phải đúng 1`);
 });
 
-test("roi trang roi quay lai: van tim duoc job dang chay tu backend", () => {
-  // `load()` chay lai moi lan trang duoc gan, va no luon hoi `listJobs()`.
-  // Khong co nhanh nao doc lai state React cu hay `job_id` da luu san.
-  const src = codeOnly(studio());
-  assert.match(src, /setActiveChapterId\(\(current\) => current \|\| som_nhat\.chapter_id\)/);
+test("roi trang roi quay lai: khong dung localStorage/sessionStorage de nho job", () => {
+  const src = codeOnly(trangMedia());
   for (const cam of ["localStorage", "sessionStorage"]) {
-    assert.ok(!src.includes(cam), `/studio dùng ${cam} để nhớ job`);
+    assert.ok(!src.includes(cam), `Media Studio dùng ${cam} để nhớ job`);
   }
 });
 
 /* ==================================================== hien thi tien do that */
 
-test("/studio ve bang khung chung, khong tu ve thanh", () => {
-  const src = studio();
+test("tien do ve bang khung chung, khong tu ve thanh", () => {
+  const src = ttsPanel();
   assert.match(src, /<JobProgress\b/);
-  assert.ok(!codeOnly(src).includes("<ProgressBar"), "/studio vẫn tự vẽ thanh");
+  assert.ok(!codeOnly(src).includes("<ProgressBar"), "TtsPanel vẫn tự vẽ thanh");
 });
 
-test("/studio khong con con so 6% hay 8% bia ra", () => {
-  const src = codeOnly(studio());
+test("khong bia phan tram — JobProgress nhan NGUYEN job, khong tu tinh so", () => {
+  const src = codeOnly(ttsPanel());
   assert.ok(!/percent=\{6\}/.test(src), "vẫn bịa 6%");
   assert.ok(!/progress \|\| 8/.test(src), "vẫn bịa 8%");
-});
-
-test("/studio khong con dong 'Đã xong x/y đoạn' rieng", () => {
-  // Chu nam o `tienDoJob` va la "5 / 7 phần" — dung mot cach noi voi `/write`.
-  const src = codeOnly(studio());
-  assert.ok(!src.includes("Đã xong"), "/studio vẫn tự viết chữ tiến độ riêng");
-  assert.ok(
-    !/\{activeJob\.done_parts\}|done_parts\}\/\$\{|đoạn`/.test(src),
-    "/studio còn tự ghép chuỗi số phần — /write gọi là 'phần', không phải 'đoạn'",
-  );
+  // `job` di THANG vao `<JobProgress job={...}>` — khong co phep tinh phan
+  // tram nao rieng o day, tat ca nam trong `tienDoJob` dung chung.
+  assert.match(src, /<JobProgress job=\{job\}/);
 });
 
 /* ================================================ hoan tat: tu cap nhat ngay */
 
-test("lich su lay tu vong theo doi nen tu doi khi job xong", () => {
-  /*
-    Ban cu giu mot mang `jobs` rieng va phai tu dong bo o moi nhip poll. Bay
-    gio lich su duoc suy ra tu ban do cua hook, nen khung "Tiến trình" va the
-    trong "Lịch sử audio" khong the noi hai dieu khac nhau ve cung mot job.
-  */
-  const src = studio();
-  assert.match(src, /Object\.values\(jobs\)/, "lịch sử không lấy từ vòng theo dõi");
-  assert.ok(
-    !/const \[jobs, setJobs\] = useState<TtsJob\[\]>/.test(codeOnly(src)),
-    "/studio vẫn giữ mảng job riêng",
-  );
+test("job xong thi track moi len NGAY duong thoi gian, khong doi F5", () => {
+  const src = trangMedia();
+  const at = src.indexOf("onCompleted:");
+  assert.notEqual(at, -1, "không thấy callback onCompleted");
+  const khoi = src.slice(at, at + 400);
+  assert.match(khoi, /ganTrackMoi/);
+  // Ham do phai gan track vao du an VA len lane audio ngay, khong cho nguoi
+  // dung tu vao kho bam chon.
+  const ganAt = src.indexOf("const ganTrackMoi");
+  const thanGan = src.slice(ganAt, ganAt + 900);
+  assert.match(thanGan, /audio_track_id: moi\.id/);
+  assert.match(thanGan, /datChon\(\{ loai: "audio" \}\)/);
 });
 
-test("hoan tat thi phat trinh nghe ngay, khong doi F5", () => {
-  const src = studio();
-  const at = src.indexOf('activeJob.status === "completed"');
+test("that bai thi noi ro nguyen nhan, khong lam nguoi dung ket ket qua tao", () => {
+  const src = trangMedia();
+  const at = src.indexOf("onFailed:");
   assert.notEqual(at, -1);
-  assert.match(src.slice(at, at + 400), /<AudioPlayer/);
-});
-
-test("that bai thi noi ro nguyen nhan va cho thu lai", () => {
-  const src = studio();
-  const at = src.indexOf('activeJob.status === "failed"');
-  assert.notEqual(at, -1);
-  const khoi = src.slice(at, at + 1600);
-  assert.match(khoi, /activeJob\.error_message \|\| "Không rõ nguyên nhân\."/);
-  assert.match(khoi, /retry\(activeJob\)/);
-  // Va van giu loi hua: khong tu doi sang giong khac.
-  assert.match(khoi, /không tự đổi sang giọng khác/);
+  const khoi = src.slice(at, at + 300);
+  assert.match(khoi, /error_message \|\| "Tạo lời đọc thất bại\."/);
+  // Nut phai mo lai (`dangTaoTts(false)`) de nguoi dung bam lai duoc ngay —
+  // do la duong "thu lai" thuc su o day, khong phai mot nut Retry rieng.
+  assert.match(khoi, /datDangTaoTts\(false\)/);
 });
 
 /* ======================================================== chong tao trung */
 
-test("bam lai voi CUNG noi dung thi dung lai chuong cu", () => {
+test("bam lai voi CUNG tieu de + van ban thi dung lai chuong cu", () => {
   /*
-    Moi lan bam la Studio tao mot CHUONG moi, nen khoa van tay o backend
-    (`owner + chapter + content_hash`) khong the nhan ra hai lan bam la mot:
-    chuong khac nhau thi van tay khac nhau. Nho lai chuong da tao cho dung noi
-    dung nay la thu cho phep khoa do lam viec.
+    Moi lan tao chuong moi la lam khoa van tay o backend (owner + chapter +
+    content_hash) mat tac dung: chuong khac nhau thi van tay khac nhau. Nho
+    lai chuong da tao cho DUNG noi dung nay la thu cho phep khoa do lam viec.
   */
-  const src = studio();
-  assert.match(src, /let chapterId = khongDoi \? daGui\.chapterId : "";/);
+  const src = codeOnly(trangMedia());
+  assert.match(src, /const daGuiTts = useRef</);
+  assert.match(
+    src,
+    /const khongDoi =\s*truoc !== null && truoc\.tieuDe === y\.tieuDe && truoc\.vanBan === y\.vanBan;/,
+  );
+  assert.match(src, /let chapterId = khongDoi \? truoc\.chapterId : "";/);
   assert.match(src, /if \(!chapterId\) \{/, "vẫn tạo chương mới vô điều kiện");
+});
+
+test("gui xong thi nho lai LAN NAY de lan sau so sanh", () => {
+  const src = codeOnly(trangMedia());
   assert.match(
     src,
-    /const khongDoi =\s*daGui !== null && daGui\.title === title\.trim\(\) && daGui\.text === text;/,
+    /daGuiTts\.current = \{ tieuDe: y\.tieuDe, vanBan: y\.vanBan, chapterId \};/,
   );
 });
 
-test("doi noi dung thi VAN tao chuong moi", () => {
-  // Audio khac thi ban ghi khac — khong duoc de lan sua de len ban cu.
-  const src = studio();
-  assert.match(src, /setDaGui\(\{ title: ten, text, chapterId \}\)/);
-});
-
-test("nut bi khoa trong khi job cho CHINH noi dung nay dang chay", () => {
-  const src = studio();
-  assert.match(
-    src,
-    /const dangChoJobNay = Boolean\(activeJob && dangChayJob\(activeJob\) && khongDoi\)/,
-  );
-  assert.match(src, /!dangChoJobNay/, "nút không bị khoá khi job đang chạy");
-  assert.match(src, /dangChoJobNay \? "Đang tạo audio…" : "Tạo audio"/);
-});
-
-test("backend van la trong tai — frontend khong tu quyet dinh dung lai", () => {
+test("backend van la trong tai — frontend khong tu quyet dinh 'da dung'", () => {
   // `reused` den TU BACKEND. Frontend chi noi lai, khong tu suy ra.
-  const src = studio();
-  assert.match(src, /result\.reused \? "Dùng lại audio đã tạo\." : "Đã đưa vào hàng đợi\."/);
+  const src = trangMedia();
+  assert.match(src, /jr\.reused \? "Dùng lại audio đã tạo\." : "Đã đưa vào hàng đợi\."/);
 });

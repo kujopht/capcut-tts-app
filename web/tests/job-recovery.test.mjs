@@ -21,7 +21,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const write = () => read("../src/app/studio/write/page.tsx");
+// `/write` doi ten tep sau khi Studio gop lai thanh /studio/content (tab
+// "Nội dung") — cung mot component, chi doi cho o (xem CLAUDE_MEDIA_WORKSPACE).
+const write = () => read("../src/components/studio/VietTruyen.tsx");
 const tracker = () => read("../src/lib/useJobTracker.ts");
 
 /**

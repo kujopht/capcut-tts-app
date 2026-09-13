@@ -66,12 +66,12 @@ test("Ngoc Huyen KHONG duoc dat lam giong mac dinh", async () => {
 
 /* ------------------------------------------- noi ro dang cho worker, khong doan */
 
-test("trang studio noi ro job dang cho may tao giong", () => {
-  const src = read("../src/app/studio/audio/page.tsx");
+test("bang TTS cua Media Studio noi ro job dang cho may tao giong", () => {
+  const src = read("../src/components/media/TtsPanel.tsx");
 
-  const i = src.indexOf('activeJob.status === "pending"');
+  const i = src.indexOf('job.status === "pending"');
   assert.ok(i > 0, "khong tim thay nhanh hien thi trang thai pending");
-  const khoi = src.slice(i, i + 1200);
+  const khoi = src.slice(i, i + 700);
 
   assert.match(
     khoi,
@@ -90,7 +90,7 @@ test("giao dien KHONG con gia dinh worker chay tren may nguoi dung", () => {
   // "máy riêng" / "máy đang tắt" / "khi máy bật lại" deu la tan du cua thoi
   // worker chay tren laptop, va deu goi y sai rang nguoi dung phai co may cua
   // rieng ho. Quet CA HAI tep vi ca hai deu tung noi cau do.
-  for (const p of ["../src/app/studio/audio/page.tsx", "../src/app/layout.tsx"]) {
+  for (const p of ["../src/components/media/TtsPanel.tsx", "../src/app/layout.tsx"]) {
     const src = read(p);
     for (const cam of ["máy riêng", "máy đang tắt", "khi máy bật lại"]) {
       assert.ok(!src.includes(cam), `${p} còn câu "${cam}"`);
@@ -102,7 +102,7 @@ test("giao dien noi ro he thong KHONG tu doi sang giong khac", () => {
   // Quy tac cung cua ca he thong (CLAUDE.md): tong hop that bai hay worker tat
   // deu khong duoc am tham doi giong. Nguoi dung phai duoc noi dieu do — neu
   // khong, ho se tuong audio nhan duoc la giong ho da chon.
-  const src = read("../src/app/studio/audio/page.tsx");
+  const src = read("../src/components/media/TtsPanel.tsx");
 
   assert.match(
     src,
@@ -522,8 +522,8 @@ test("khong trang nao tu dung ten giong — tat ca di qua voiceOptionLabel", () 
   // se thoat khoi moi quy tac o `voices.ts` va khong bo test nao o tren bat
   // duoc. Quet toan bo `src/app` va `src/components`, khong chi hai trang.
   const files = [
-    "../src/app/studio/audio/page.tsx",
-    "../src/app/studio/write/page.tsx",
+    "../src/components/media/TtsPanel.tsx",
+    "../src/components/studio/VietTruyen.tsx",
     "../src/app/layout.tsx",
   ];
   for (const p of files) {
@@ -534,29 +534,51 @@ test("khong trang nao tu dung ten giong — tat ca di qua voiceOptionLabel", () 
   }
 });
 
-test("hai trang deu co dung HAI muc chon giong", () => {
-  for (const p of ["../src/app/studio/audio/page.tsx", "../src/app/studio/write/page.tsx"]) {
-    const src = read(p);
-    assert.match(src, /optgroup label={RECOMMENDED_LABEL}/, p);
-    assert.match(src, /optgroup label={ALL_VOICES_LABEL}/, p);
-    // Dem THE DONG, khong dem the mo: chuoi "<optgroup" con xuat hien trong
-    // chinh ghi chu giai thich viec bo muc thu ba.
-    assert.equal(
-      (src.match(/<\/optgroup>/g) || []).length,
-      2,
-      `${p} phải có đúng hai optgroup`,
-    );
-    assert.ok(
-      !src.includes("NGHITTS_LABEL"),
-      `${p} còn optgroup NghiTTS riêng`,
-    );
-    // MOT the `<select>` duy nhat -> chon o muc nay dong bo ngay voi muc kia,
-    // khong co trang thai thu hai nao de lech. Dem THE DONG: chuoi "<select"
-    // con xuat hien trong chinh ghi chu giai thich dieu nay.
-    assert.equal(
-      (src.match(/<\/select>/g) || []).length,
-      1,
-      `${p} phai chi co mot <select> chon giong`,
-    );
-  }
+test("Viet truyen dung HAI muc chon giong, viet thang thanh JSX", () => {
+  const src = read("../src/components/studio/VietTruyen.tsx");
+  assert.match(src, /optgroup label={RECOMMENDED_LABEL}/);
+  assert.match(src, /optgroup label={ALL_VOICES_LABEL}/);
+  // Dem THE DONG, khong dem the mo: chuoi "<optgroup" con xuat hien trong
+  // chinh ghi chu giai thich viec bo muc thu ba.
+  assert.equal(
+    (src.match(/<\/optgroup>/g) || []).length,
+    2,
+    "phải có đúng hai optgroup",
+  );
+  assert.ok(!src.includes("NGHITTS_LABEL"), "còn optgroup NghiTTS riêng");
+  // MOT the `<select>` duy nhat -> chon o muc nay dong bo ngay voi muc kia,
+  // khong co trang thai thu hai nao de lech.
+  assert.equal(
+    (src.match(/<\/select>/g) || []).length,
+    1,
+    "phai chi co mot <select> chon giong",
+  );
+});
+
+test("Media Studio dung HAI muc chon giong, xay tu mang thay vi chep JSX hai lan", () => {
+  /*
+    TtsPanel xay danh sach `muc` tu `voiceSections()` roi `map` thanh
+    `<optgroup>` — khac Viet truyen (viet thang hai khoi JSX), nhung dung MOT
+    ket cau: mang do CHI push hai nhan (`RECOMMENDED_LABEL`, `ALL_VOICES_LABEL`)
+    va khong co nhanh thu ba nao, nen JSX khong the ve qua hai optgroup du du
+    lieu la gi.
+  */
+  const src = read("../src/components/media/TtsPanel.tsx");
+  assert.match(src, /ra\.push\(\{ label: RECOMMENDED_LABEL/);
+  assert.match(src, /ra\.push\(\{ label: ALL_VOICES_LABEL/);
+  assert.ok(!src.includes("NGHITTS_LABEL"), "còn optgroup NghiTTS riêng");
+  // Dung MOT diem `.map` sinh optgroup — khong co khoi JSX thu hai nao khac
+  // tu ve mot bo chon giong roi.
+  assert.equal(
+    (src.match(/<optgroup key=\{m\.label\}/g) || []).length,
+    1,
+    "phải chỉ có một điểm .map sinh optgroup",
+  );
+  // Chon giong la MOT dieu khien duy nhat (`value={giong}`), khong tach
+  // thanh hai select rieng theo provider.
+  assert.equal(
+    (src.match(/value=\{giong\}/g) || []).length,
+    1,
+    "phải chỉ có một <select> gắn với giọng",
+  );
 });

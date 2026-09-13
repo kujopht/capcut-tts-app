@@ -33,12 +33,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  IconBook,
   IconClapper,
   IconCompass,
   IconFeather,
-  IconFilm,
-  IconMic,
   IconSparkles,
 } from "@/components/Icons";
 
@@ -51,37 +48,45 @@ export interface MucStudio {
 }
 
 /**
- * Bay muc cua Studio.
+ * BON diem den cua Studio — khong phai tam.
  *
- * Nhan giu nguyen TIENG VIET da dung trong san pham thay vi dich lai tu ban
- * ke hoach tieng Anh: "Dịch" chu khong phai "Translate", "Phụ đề" chu khong
- * phai "Subtitle". Nguoi dung da quen cac chu nay o menu "Công cụ" cu, va
- * doi chu o dung luc doi duong dan se lam ho tuong day la mot cong cu khac.
+ * Ban truoc co tam muc: Tổng quan · Viết truyện · Dịch tiểu thuyết · Audio ·
+ * Hình ảnh · Phụ đề · Video · Tác phẩm của tôi. Do la ban do cua NGUOI CAI
+ * DAT, khong phai cua nguoi dung: no liet ke tung cong cu da duoc viet ra,
+ * theo dung thu tu chung duoc viet.
+ *
+ * Nguoi dung khong nghi "hom nay toi mo Subtitle Studio". Ho nghi "toi lam
+ * cai video cho chuong 3". Ba trong tam muc do — Audio, Phụ đề, Video — la
+ * BA BUOC cua MOT viec, va tach chung ra thanh ba diem den bat nguoi dung
+ * phai tu ghep lai, ke ca phai tai xuong roi tai len giua cac buoc.
+ *
+ * Nay:
+ *   Dự án    — nha, va la cho duy nhat co danh sach du an
+ *   Nội dung — Viết + Dịch, hai the trong MOT khong gian
+ *   Media    — Audio + Phụ đề + Video, mot trinh soan duong thoi gian
+ *   Hình ảnh — giu rieng, vi sinh anh that su la mot quy trinh khac han
+ *
+ * "Tác phẩm của tôi" bien mat khoi dieu huong co y: Dự án da so huu trach
+ * nhiem do. Hai cho cung liet ke tac pham la hai cho co the lech.
  */
 export const MUC_STUDIO: MucStudio[] = [
   {
     href: "/studio",
-    nhan: "Tổng quan",
-    mo_ta: "Bắt đầu từ đây — mọi công cụ và việc đang chạy.",
+    nhan: "Dự án",
+    mo_ta: "Mọi dự án của bạn — mở lại cái đang làm dở.",
     icon: IconCompass,
   },
   {
-    href: "/studio/write",
-    nhan: "Viết truyện",
-    mo_ta: "Soạn truyện, thêm chương, nhập từ nguồn ngoài.",
+    href: "/studio/content",
+    nhan: "Nội dung",
+    mo_ta: "Viết truyện và dịch — cùng một chỗ.",
     icon: IconFeather,
   },
   {
-    href: "/studio/translate",
-    nhan: "Dịch tiểu thuyết",
-    mo_ta: "Dịch tác phẩm dài sang tiếng Việt, giữ thuật ngữ nhất quán.",
-    icon: IconBook,
-  },
-  {
-    href: "/studio/audio",
-    nhan: "Audio",
-    mo_ta: "Dán văn bản, chọn giọng, tạo MP3.",
-    icon: IconMic,
+    href: "/studio/media",
+    nhan: "Media",
+    mo_ta: "Lời đọc, phụ đề và video trên một dòng thời gian.",
+    icon: IconClapper,
   },
   {
     href: "/studio/image",
@@ -89,30 +94,24 @@ export const MUC_STUDIO: MucStudio[] = [
     mo_ta: "Tạo bìa và ảnh minh hoạ cho tác phẩm.",
     icon: IconSparkles,
   },
-  {
-    href: "/studio/subtitle",
-    nhan: "Phụ đề",
-    mo_ta: "Căn chỉnh và xuất phụ đề cho video.",
-    icon: IconFilm,
-  },
-  {
-    /*
-      Video dung SAU Phụ đề, va do la thu tu cua QUY TRINH chu khong phai
-      thu tu them vao: Nội dung -> Dịch -> Hình ảnh -> Audio -> Phụ đề ->
-      Video. Video la cho moi thu phia truoc gop lai, nen no dung cuoi.
-    */
-    href: "/studio/video",
-    nhan: "Video",
-    mo_ta: "Ghép lời đọc vào video, xem trước rồi xuất MP4.",
-    icon: IconClapper,
-  },
-  {
-    href: "/studio/library",
-    nhan: "Tác phẩm của tôi",
-    mo_ta: "Mọi truyện, bản dịch và audio bạn đã tạo.",
-    icon: IconBook,
-  },
 ];
+
+/**
+ * Duong dan CU -> diem den moi.
+ *
+ * Giu lai vi hai ly do, va ly do thu hai moi la ly do that: (1) nguoi dung
+ * co the da luu dau trang; (2) trong kho van con lien ket noi bo tro toi
+ * `/studio/audio` — mot trang chuyen huong thi sua duoc dan, con mot lien
+ * ket 404 thi phai tim ra truoc da.
+ */
+export const DUONG_CU: Record<string, string> = {
+  "/studio/audio": "/studio/media?mode=audio",
+  "/studio/subtitle": "/studio/media?panel=subtitle",
+  "/studio/video": "/studio/media",
+  "/studio/write": "/studio/content?tab=write",
+  "/studio/translate": "/studio/content?tab=translate",
+  "/studio/library": "/studio",
+};
 
 /**
  * Muc nao dang mo.
@@ -190,13 +189,36 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
   const tieuDe =
     !dangMo || dangMo.href === "/studio" ? "Xưởng sáng tác" : dangMo.nhan;
 
+  /*
+    Trinh soan Media chay o che do RANH: thanh ben co lai con hang icon, va
+    dau trang bien mat.
+
+    Ly do do duoc chieu ngang, khong phai tham my. Mot duong thoi gian can
+    moi pixel ngang no lay duoc; nhet no vao cot noi dung hep cua trang cong
+    cu cu se lam moi clip ngan toi muc khong bam trung. Dau trang cung di
+    theo vi trong mot trinh soan, cai to nhat tren man hinh phai la thu dang
+    sua chu khong phai ten cua san pham.
+  */
+  const cheDoRanh = pathname.startsWith("/studio/media");
+
   return (
-    <div className="page studio-page">
-      <header className="studio-dau row row-spread">
+    <div className={`page studio-page${cheDoRanh ? " studio-ranh" : ""}`}>
+      {/*
+        `<h1>` VA nut mo menu mobile LUON co mat, ke ca o che do ranh — trang
+        thieu mot tieu de la mot trang mat luoc do tai lieu cho trinh doc man
+        hinh, va duoi 900px `.studio-nav` chi hien khi `.studio-nav-mo` duoc
+        bat (xem CSS): bo nut nay se khoa nguoi dung mobile khoi MOI dieu
+        huong Studio khac, khong loi ra duoc khoi Media Studio. Cai bi bo o
+        che do ranh CHI la dong eyebrow "Fanfic Studio" — trang tri, khong
+        chuc nang.
+      */}
+      <header className={`studio-dau row row-spread${cheDoRanh ? " studio-dau-ranh" : ""}`}>
         <div className="stack-2">
-          <span className="eyebrow eyebrow-icon">
-            <IconSparkles size={17} /> Fanfic Studio
-          </span>
+          {cheDoRanh ? null : (
+            <span className="eyebrow eyebrow-icon">
+              <IconSparkles size={17} /> Fanfic Studio
+            </span>
+          )}
           <h1 className="page-title studio-tieu-de">{tieuDe}</h1>
         </div>
         <button
@@ -226,9 +248,15 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
                 aria-current={dang ? "page" : undefined}
                 onClick={() => setMoMobile(false)}
                 prefetch={false}
+                /*
+                  O che do ranh chi con icon, nen `title` la thu DUY NHAT con
+                  noi duoc muc nay la gi khi ro chuot. Nhan chu van o lai
+                  trong DOM cho trinh doc man hinh — an bang CSS, khong bo di.
+                */
+                title={cheDoRanh ? nhan : undefined}
               >
                 <Icon size={17} />
-                <span>{nhan}</span>
+                <span className="studio-muc-nhan">{nhan}</span>
               </Link>
             );
           })}

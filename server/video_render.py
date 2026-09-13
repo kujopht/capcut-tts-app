@@ -61,16 +61,30 @@ def _loc_am(du_an: VideoProject, co_loi_doc: bool) -> str:
     if co_loi_doc:
         # Lech AM = loi doc bat dau truoc video -> cat bot dau loi doc thay vi
         # day video di, vi day video se lam lech ca hinh.
-        if du_an.audio_offset >= 0:
+        #
+        # `audio_trim_end` cat bot CUOI, va phai cat TRUOC khi tre: `atrim`
+        # tinh theo moc cua chinh tep nguon, con `adelay` day ca ket qua sang
+        # phai. Lam nguoc thu tu se cat mat phan vua duoc day toi.
+        cat: List[str] = []
+        if du_an.audio_offset < 0:
+            cat.append(f"atrim=start={abs(du_an.audio_offset):.4f}")
+        if du_an.audio_trim_end > 0:
+            cat.append(f"atrim=end={du_an.audio_trim_end:.4f}")
+        chuoi = f"[1:a]volume={du_an.audio_volume:.4f}"
+        if cat:
+            # Gop hai `atrim` lam mot khi ca hai cung co: `atrim=start=..:end=..`
+            # tinh CUNG mot truc thoi gian nguon, nen noi chuoi hai lan se lam
+            # lan hai tinh tren truc da bi dich.
+            if len(cat) == 2:
+                chuoi += (f",atrim=start={abs(du_an.audio_offset):.4f}"
+                          f":end={du_an.audio_trim_end:.4f}")
+            else:
+                chuoi += f",{cat[0]}"
+            chuoi += ",asetpts=PTS-STARTPTS"
+        if du_an.audio_offset > 0:
             ms = int(round(du_an.audio_offset * 1000))
-            phan.append(
-                f"[1:a]volume={du_an.audio_volume:.4f},"
-                f"adelay={ms}|{ms}[na]")
-        else:
-            phan.append(
-                f"[1:a]volume={du_an.audio_volume:.4f},"
-                f"atrim=start={abs(du_an.audio_offset):.4f},"
-                f"asetpts=PTS-STARTPTS[na]")
+            chuoi += f",adelay={ms}|{ms}"
+        phan.append(f"{chuoi}[na]")
 
     if tieng_goc and co_loi_doc:
         # `dropout_transition=0` + `normalize=0`: mac dinh cua `amix` HA am

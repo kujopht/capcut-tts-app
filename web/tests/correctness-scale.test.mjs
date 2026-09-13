@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 const library = () => read("../src/app/studio/library/page.tsx");
-const studio = () => read("../src/app/studio/audio/page.tsx");
+const media = () => read("../src/app/studio/media/page.tsx");
 const api = () => read("../src/lib/api.ts");
 
 /** Khop `api.xxx(` ke ca khi viet `api` xuong dong roi `.xxx(`. */
@@ -82,10 +82,16 @@ test("bang tra duoc dung tu chuong, khong tu tung truyen", () => {
   assert.match(src, /if \(novel\) index\.set/);
 });
 
-test("Audio Studio von da la hang so — khong duoc lam no thanh N+1", () => {
-  const src = studio();
-  // Chi MOT getNovel, cho dung kho chua cua Studio
-  assert.equal((src.match(/api\.getNovel\(/g) ?? []).length, 1);
+test("kho chua TTS cua Media Studio van la hang so — khong duoc lam no thanh N+1", () => {
+  /*
+    Media Studio khong con hien mot danh sach lich su chuong nhu Audio Studio
+    cu (lich su nam o Media Bin, doc tu `studio.assets()`), nen no khong con
+    can `api.getNovel()` de tai chi tiet chuong — chi can MOT kho chua on
+    dinh cho moi lan tao TTS o che do khong gan du an. `ensureStudioNovel()`
+    van la duong do, va van CHI mot lan goi moi lan tao, khong phai mot vong
+    lap qua danh sach truyen.
+  */
+  const src = media();
   assert.match(src, /ensureStudioNovel\(\)/);
   assert.ok(
     !/novels\.map\(\s*\(novel\)\s*=>[\s\S]{0,60}api\./.test(src),
@@ -134,7 +140,7 @@ test("khong pha M2/M3/M4", () => {
   // Overnight Phase 2 (Phan 2A): trinh phat NGAY TRONG HANG cua trang chi
   // tiet truyen da chuyen thanh lien ket sang `/listen/[id]` — kiem tra do
   // nam o `ui.test.mjs` ("trang chi tiet truyen KHONG con mo trinh phat...").
-  assert.match(read("../src/app/studio/write/page.tsx"), /api\.reorderChapters\(/);
+  assert.match(read("../src/components/studio/VietTruyen.tsx"), /api\.reorderChapters\(/);
   assert.match(read("../src/app/novels/[id]/page.tsx"), /chapter\.audio_outdated \?/);
   // Canh bao "audio co the khong con khop" chuyen sang trang Nghe rieng
   // cung voi trinh phat — trang doc (`/chapters/[id]`) khong con audio nua.

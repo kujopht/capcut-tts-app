@@ -8391,6 +8391,7 @@ class VideoProjectPatchIn(BaseModel):
     video_trim_start: Optional[float] = None
     video_trim_end: Optional[float] = None
     audio_offset: Optional[float] = None
+    audio_trim_end: Optional[float] = None
     video_volume: Optional[float] = None
     audio_volume: Optional[float] = None
     mute_original_audio: Optional[bool] = None

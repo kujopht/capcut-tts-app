@@ -12,9 +12,9 @@ const has = (p) => existsSync(new URL(p, import.meta.url));
 test("du cac route cua hai khu vuc san pham", () => {
   for (const route of [
     "../src/app/page.tsx",           // trang chu
-    "../src/app/studio/audio/page.tsx",    // Audio Studio
+    "../src/app/studio/media/page.tsx",     // Media Studio (Audio/Phu de/Video gop lai)
     "../src/app/fanfic/page.tsx",    // kham pha fanfic
-    "../src/app/studio/write/page.tsx",     // khu vuc tac gia
+    "../src/app/studio/content/page.tsx",   // khu vuc tac gia (Viet + Dich)
     "../src/app/studio/library/page.tsx",   // thu vien audio chung
     "../src/app/account/page.tsx",   // tai khoan
     "../src/app/login/page.tsx",
@@ -75,21 +75,21 @@ test("Studio la MOT san pham: khung chung + cac muc dung thu tu", () => {
   const order = [...shell.matchAll(/href: "([^"]+)",\s*\n\s*nhan: "([^"]+)"/g)]
     .map((m) => [m[1], m[2]]);
   /*
-    Thu tu la QUY TRINH, khong phai thu tu them vao:
-    Nội dung -> Dịch -> Hình ảnh -> Audio -> Phụ đề -> Video.
+    Ban truoc co TAM muc — Tổng quan, Viết truyện, Dịch tiểu thuyết, Audio,
+    Hình ảnh, Phụ đề, Video, Tác phẩm của tôi — la ban do cua NGUOI CAI DAT
+    (liet ke tung cong cu theo dung thu tu chung duoc viet), khong phai cua
+    nguoi dung.
 
-    "Video" (V1) dung CUOI vi no la cho moi thu phia truoc gop lai; "Tác
-    phẩm của tôi" van o sau cung — do la kho ket qua, khong phai mot buoc.
+    Sau khi gop lai (feat/studio-media-workspace): Dự án la nha (danh sach
+    du an, thay "Tổng quan" LAN "Tác phẩm của tôi"); Nội dung gop Viet+Dich;
+    Media gop Audio+Phu de+Video thanh mot trinh soan duong thoi gian; Hình
+    ảnh giu rieng vi la mot quy trinh khac han.
   */
   assert.deepEqual(order, [
-    ["/studio", "Tổng quan"],
-    ["/studio/write", "Viết truyện"],
-    ["/studio/translate", "Dịch tiểu thuyết"],
-    ["/studio/audio", "Audio"],
+    ["/studio", "Dự án"],
+    ["/studio/content", "Nội dung"],
+    ["/studio/media", "Media"],
     ["/studio/image", "Hình ảnh"],
-    ["/studio/subtitle", "Phụ đề"],
-    ["/studio/video", "Video"],
-    ["/studio/library", "Tác phẩm của tôi"],
   ]);
 
   // Thanh ben phai o LAYOUT, khong o tung trang: mot cong cu them vao
@@ -118,11 +118,11 @@ test("MOT <h1> cho ca khu Studio, va no thuoc ve KHUNG", () => {
   // LAM GI.
   for (const p of [
     "../src/app/studio/page.tsx",
-    "../src/app/studio/audio/page.tsx",
+    "../src/app/studio/media/page.tsx",
+    "../src/app/studio/content/page.tsx",
     "../src/app/studio/image/page.tsx",
-    "../src/app/studio/translate/page.tsx",
-    "../src/app/studio/subtitle/page.tsx",
-    "../src/app/studio/write/page.tsx",
+    "../src/components/studio/VietTruyen.tsx",
+    "../src/components/studio/DichTieuThuyet.tsx",
     "../src/app/studio/write/import/page.tsx",
     "../src/app/studio/library/page.tsx",
   ]) {
@@ -141,7 +141,9 @@ test("ten cong cu KHONG lap lai trong than trang Studio", () => {
   // duoc phep xuat hien nhu VAN XUOI mo ta, khong phai lam tieu de trang.
   for (const [p, ten] of [
     ["../src/app/studio/image/page.tsx", "Image Studio"],
-    ["../src/app/studio/subtitle/page.tsx", "Subtitle Studio"],
+    ["../src/app/studio/media/page.tsx", "Subtitle Studio"],
+    ["../src/app/studio/media/page.tsx", "Audio Studio"],
+    ["../src/app/studio/media/page.tsx", "Video Composer"],
   ]) {
     const src = read(p);
     assert.ok(!new RegExp(`title="${ten}"`).test(src),
@@ -210,13 +212,13 @@ test("trang chu la trang KHAM PHA TRUYEN, khong phai landing gioi thieu cong cu"
 /* -------------------------------------------- LOI 1: khong co nut xuat ban */
 
 test("khu vuc tac gia goi publishNovel", () => {
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   assert.match(write, /api\.publishNovel\(/, "phai goi api.publishNovel");
   assert.match(write, /Xuất bản/, "phai co nut Xuat ban");
 });
 
 test("xuat ban co hop thoai xac nhan", () => {
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   assert.match(write, /ConfirmDialog/);
   assert.match(write, /confirmPublish/);
 });
@@ -260,7 +262,7 @@ test("audio tu Studio khong tro thanh chuong fanfic", () => {
   assert.match(workspace, /export function fanficOnly/);
 
   // Ca hai noi liet ke truyen fanfic deu phai loc kho chua cua Studio
-  for (const page of ["../src/app/fanfic/page.tsx", "../src/app/studio/write/page.tsx"]) {
+  for (const page of ["../src/app/fanfic/page.tsx", "../src/components/studio/VietTruyen.tsx"]) {
     assert.match(read(page), /fanficOnly\(/, `${page} phai loc kho Studio`);
   }
 });
@@ -271,21 +273,31 @@ test("thu vien chung phan biet nguon audio", () => {
   assert.match(library, /fromStudio/);
 });
 
-/* --------------------------------------------------- Audio Studio day du */
+/* ------------------------------------------------------- TTS trong Media */
 
-test("Audio Studio co du cac dieu khien bat buoc", () => {
-  const studio = read("../src/app/studio/audio/page.tsx");
-  assert.match(studio, /textarea/, "phai co o dan van ban tu do");
-  assert.match(studio, /MAX_CHARS/, "phai hien gioi han ky tu");
-  assert.match(studio, /ký tự/, "phai hien so ky tu");
-  assert.match(studio, /RATES/, "phai chon duoc toc do");
+test("bang tao loi doc co du cac dieu khien bat buoc", () => {
+  /*
+    Audio Studio cu la mot TRANG rieng voi lich su chuong day du. TtsPanel
+    la mot BANG ngay trong Media Studio (§7 cua nhiem vu): lich su chuyen
+    sang Media Bin (kho tai san dung chung, xem test "sinh xong thi hien
+    NGAY trong media bin" ben duoi) nen khong con lap lai o day; cac dieu
+    khien BAT BUOC con lai (van ban tu do, gioi han ky tu, chon giong, chon
+    toc do, gui rate len backend, noi ro khi that bai) van phai co du.
+  */
+  const panel = read("../src/components/media/TtsPanel.tsx");
+  assert.match(panel, /textarea/, "phai co o dan van ban tu do");
+  assert.match(panel, /MAX_CHARS/, "phai hien gioi han ky tu");
+  assert.match(panel, /ký tự/, "phai hien so ky tu");
+  assert.match(panel, /TOC_DO/, "phai chon duoc toc do");
+  assert.match(panel, /job\?\.status === "failed" \? "Thử lại"/,
+    "job thất bại phải đổi nút thành lời mời thử lại");
+
+  const trang = read("../src/app/studio/media/page.tsx");
   // `chapterId` chu khong phai `created.chapter.chapter_id`: bam lai voi cung
   // noi dung thi dung lai chuong cu, de khoa van tay o backend nhan ra hai lan
-  // bam la mot. Rate van phai di kem.
-  assert.match(studio, /api\.createJob\(chapterId, voiceId, rate\)/,
-    "phai gui rate len backend");
-  assert.match(studio, /Thử lại/, "job that bai phai co nut thu lai");
-  assert.match(studio, /Lịch sử audio/, "phai co lich su");
+  // bam la mot. Toc do van phai di kem.
+  assert.match(trang, /api\.createJob\(chapterId, y\.giong, y\.tocDo\)/,
+    "phai gui toc do len backend");
 });
 
 test("bon trang thai job deu duoc xu ly", () => {
@@ -392,8 +404,11 @@ test("khong dung eslint-disable de lam ngo canh bao", () => {
   for (const file of [
     "../src/components/AudioPlayer.tsx",
     "../src/components/ui.tsx",
-    "../src/app/studio/audio/page.tsx",
-    "../src/app/studio/write/page.tsx",
+    "../src/app/studio/media/page.tsx",
+    "../src/components/media/TtsPanel.tsx",
+    "../src/components/media/Timeline.tsx",
+    "../src/components/media/Preview.tsx",
+    "../src/components/studio/VietTruyen.tsx",
     "../src/app/studio/library/page.tsx",
     "../src/lib/useAsyncData.ts",
   ]) {
@@ -429,7 +444,9 @@ test("giong mac dinh khop TOAN BO id, khong phai chuoi con", async () => {
 });
 
 test("hai trang dung chung bo chon giong", () => {
-  for (const page of ["../src/app/studio/audio/page.tsx", "../src/app/studio/write/page.tsx"]) {
+  // `defaultVoiceId(` duoc goi o TRANG (nap giong roi truyen `giong`/`onGiong`
+  // xuong `TtsPanel` qua props), khong phai trong chinh TtsPanel.
+  for (const page of ["../src/app/studio/media/page.tsx", "../src/components/studio/VietTruyen.tsx"]) {
     const src = read(page);
     assert.match(src, /defaultVoiceId\(/, `${page} phai dung defaultVoiceId`);
     assert.ok(
@@ -454,7 +471,7 @@ test("lop api co du CRUD truyen va chuong", () => {
 });
 
 test("khu vuc tac gia noi day du CRUD", () => {
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   for (const call of [
     "api.updateNovel(", "api.deleteNovel(", "api.publishNovel(",
     "api.unpublishNovel(", "api.updateChapter(", "api.deleteChapter(",
@@ -464,7 +481,7 @@ test("khu vuc tac gia noi day du CRUD", () => {
 });
 
 test("moi thao tac xoa deu phai qua modal xac nhan", () => {
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   // Khong duoc goi thang api.delete* tu onClick
   assert.ok(
     !/onClick=\{\(\)\s*=>\s*api\.delete/.test(write),
@@ -477,14 +494,14 @@ test("moi thao tac xoa deu phai qua modal xac nhan", () => {
 });
 
 test("xac nhan xoa noi ro se mat nhung gi", () => {
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   assert.match(write, /toàn bộ \{chapters\.length\} chương/);
   assert.match(write, /không hoàn tác được/);
   assert.match(write, /file audio/);
 });
 
 test("nut xuat ban va go xuat ban deu co xac nhan rieng", () => {
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   assert.match(write, /setConfirmPublish\("publish"\)/);
   assert.match(write, /setConfirmPublish\("unpublish"\)/);
   assert.match(write, /Gỡ xuất bản truyện này\?/);
@@ -492,7 +509,7 @@ test("nut xuat ban va go xuat ban deu co xac nhan rieng", () => {
 });
 
 test("moi thao tac ghi deu co trang thai dang chay va toast", () => {
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   for (const busy of [
     "creatingNovel", "savingNovel", "creatingChapter", "savingChapter",
     "togglingPublish", "deleting",
@@ -504,7 +521,7 @@ test("moi thao tac ghi deu co trang thai dang chay va toast", () => {
 });
 
 test("giao dien cap nhat ngay sau khi xoa, khong doi tai lai trang", () => {
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   // Xoa truyen: bo khoi danh sach va chon lai truyen khac ngay trong bo nho
   assert.match(write, /novels\.filter\(\(n\) => n\.novel_id !== target\.id\)/);
   assert.match(write, /setSelectedId\(left\[0\]\?\.novel_id \?\? ""\)/);
@@ -525,7 +542,7 @@ test("sua truyen khong gui truong do server quyet dinh", () => {
 test("khong goi setState long trong ham cap nhat cua setState", () => {
   // Bay da tung sap: setSelectedId nam trong updater cua setNovels khien React
   // chan lai, backend xoa xong ma giao dien khong doi va khong co toast.
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   const nested = /set[A-Z]\w*\(\((?:current|prev)\)\s*=>\s*\{[^}]*\bset[A-Z]\w*\(/s;
   assert.ok(!nested.test(write), "hàm cập nhật của setState phải thuần khiết");
 });
@@ -750,8 +767,11 @@ test("khong con kich thuoc cung gay tran ngang", () => {
   // Bay da tung sap: <select> co minWidth 200 noi tuyen day /write rong 578px
   // trong khung 375px tren dien thoai.
   for (const f of [
-    "../src/app/studio/write/page.tsx",
-    "../src/app/studio/audio/page.tsx",
+    "../src/components/studio/VietTruyen.tsx",
+    "../src/app/studio/media/page.tsx",
+    "../src/components/media/TtsPanel.tsx",
+    "../src/components/media/MediaBin.tsx",
+    "../src/components/media/Inspector.tsx",
     "../src/app/studio/library/page.tsx",
     "../src/app/fanfic/page.tsx",
     "../src/app/novels/[id]/page.tsx",
@@ -773,7 +793,7 @@ test("select trong hang co lop rieng, co lai duoc tren mobile", () => {
     /@media \(max-width: 640px\)[\s\S]*\.select-inline \{ min-width: 0; width: 100%; \}/,
     "mobile phai cho select chiem tron hang",
   );
-  assert.match(read("../src/app/studio/write/page.tsx"), /className="select select-inline"/);
+  assert.match(read("../src/components/studio/VietTruyen.tsx"), /className="select select-inline"/);
 });
 
 /* ------------------------------------------------------------ anh bia */
@@ -892,7 +912,7 @@ test("trang chi tiet truyen khong con goi API cho tung chuong", () => {
 });
 
 test("khong con vong lap goi API tren danh sach chuong", () => {
-  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/app/studio/write/page.tsx"]) {
+  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/components/studio/VietTruyen.tsx"]) {
     const src = read(f);
     // `chapters.map(... api.` la dau hieu cua N+1: mot request moi chuong
     assert.ok(
@@ -909,7 +929,7 @@ test("co bao nhieu chuong cung chi mot lan goi getNovel", () => {
 });
 
 test("trang soan bai lay has_audio tu danh sach chuong", () => {
-  const src = read("../src/app/studio/write/page.tsx");
+  const src = read("../src/components/studio/VietTruyen.tsx");
   assert.match(src, /c\.has_audio/);
   assert.ok(
     !/getChapter\([^)]*\)\s*\n?\s*\.then\(\(r\) => \[chapter\.chapter_id/.test(src),
@@ -1010,7 +1030,7 @@ test("nhom nut cuoi hang xuong dong rieng o mobile", () => {
 });
 
 test("hang chuong dung .list-actions o ca hai trang", () => {
-  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/app/studio/write/page.tsx"]) {
+  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/components/studio/VietTruyen.tsx"]) {
     assert.match(read(f), /className="list-actions"/, `${f} thieu .list-actions`);
   }
 });
@@ -1073,7 +1093,7 @@ test("vung bam cua hang khong bi thu nho lai", () => {
   assert.match(css, /\.list-title::after\s*\{[^}]*position:\s*absolute/);
   assert.match(css, /\.list-title::after\s*\{[^}]*inset:\s*0/);
   assert.match(css, /\.list-item\s*\{[^}]*position:\s*relative/);
-  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/app/studio/write/page.tsx"]) {
+  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/components/studio/VietTruyen.tsx"]) {
     assert.match(read(f), /list-title/, `${f} thieu lop list-title`);
   }
 });

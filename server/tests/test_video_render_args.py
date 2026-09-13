@@ -94,6 +94,50 @@ class DongLenhTest(unittest.TestCase):
         self.assertIn("atrim=start=3.0000", loc)
         self.assertNotIn("adelay", loc)
 
+    def test_audio_trim_end_cat_bot_CUOI_loi_doc(self):
+        """`audio_trim_end` la mep PHAI cua clip tren trinh soan Media Studio."""
+        argv = dung_dong_lenh(
+            _du_an(audio_track_id="t", audio_trim_end=12.5),
+            NguonRender(video_path="/v.mp4", audio_path="/a.mp3"),
+            dich="/ra.mp4")
+        loc = argv[argv.index("-filter_complex") + 1]
+        self.assertIn("atrim=end=12.5000", loc)
+        self.assertNotIn("adelay", loc)
+
+    def test_audio_trim_end_KHONG_ap_dung_khi_bang_0(self):
+        """`0` nghia la "dung het" — khong phai "dai 0 giay"."""
+        argv = dung_dong_lenh(
+            _du_an(audio_track_id="t", audio_trim_end=0.0),
+            NguonRender(video_path="/v.mp4", audio_path="/a.mp3"),
+            dich="/ra.mp4")
+        loc = argv[argv.index("-filter_complex") + 1]
+        self.assertNotIn("atrim", loc)
+
+    def test_cat_dau_VA_cat_cuoi_gop_thanh_MOT_atrim(self):
+        """Ca hai deu tinh tren truc thoi gian cua TEP NGUON — noi chuoi hai
+        lan se lam lan hai tinh tren truc da bi dich boi lan dau."""
+        argv = dung_dong_lenh(
+            _du_an(audio_track_id="t", audio_offset=-3.0, audio_trim_end=20.0),
+            NguonRender(video_path="/v.mp4", audio_path="/a.mp3"),
+            dich="/ra.mp4")
+        loc = argv[argv.index("-filter_complex") + 1]
+        self.assertIn("atrim=start=3.0000:end=20.0000", loc)
+        # Khong duoc co HAI khoi `atrim` rieng cho cung mot clip.
+        self.assertEqual(loc.count("atrim"), 1)
+        self.assertNotIn("adelay", loc)
+
+    def test_cat_cuoi_VA_tre_dau_cung_co_thi_cat_TRUOC_roi_moi_tre(self):
+        """`atrim` phai dung TRUOC `adelay` trong chuoi bo loc — tre truoc se
+        day ca doan bi cat sang phai, lam diem cat sai vi tri."""
+        argv = dung_dong_lenh(
+            _du_an(audio_track_id="t", audio_offset=2.0, audio_trim_end=15.0),
+            NguonRender(video_path="/v.mp4", audio_path="/a.mp3"),
+            dich="/ra.mp4")
+        loc = argv[argv.index("-filter_complex") + 1]
+        self.assertIn("atrim=end=15.0000", loc)
+        self.assertIn("adelay=2000|2000", loc)
+        self.assertLess(loc.index("atrim"), loc.index("adelay"))
+
     def test_tat_tieng_goc_thi_chi_con_loi_doc(self):
         argv = dung_dong_lenh(_du_an(audio_track_id="t", mute_original_audio=True),
                               NguonRender(video_path="/v.mp4", audio_path="/a.mp3"),

@@ -279,11 +279,19 @@ test("lop mau cua khung chi theo status, khong theo con so", () => {
 });
 
 test("hai trang VAN dung hook va khung chung sau khi ve lai", () => {
+  /*
+    `/studio/audio` gop vao Media Studio (feat/studio-media-workspace): logic
+    theo doi job nam o `media/page.tsx` (`useJobTracker`, khoi phuc qua
+    `listJobs()`), con khung `<JobProgress>` duoc VE o `TtsPanel.tsx` — noi
+    hai tep lai de phep quet cu van dung nguyen, giong `job-progress-shared`.
+  */
   for (const [ten, f] of [
-    ["/write", "../src/app/studio/write/page.tsx"],
-    ["/studio", "../src/app/studio/audio/page.tsx"],
+    ["/write", "../src/components/studio/VietTruyen.tsx"],
+    ["/studio/media", "../src/app/studio/media/page.tsx" ],
   ]) {
-    const src = read(f);
+    const src = ten === "/studio/media"
+      ? read(f) + "\n" + read("../src/components/media/TtsPanel.tsx")
+      : read(f);
     assert.match(src, /useJobTracker\(/, `${ten} mất hook chung`);
     assert.match(src, /<JobProgress\b/, `${ten} mất khung chung`);
     assert.match(src, /api\.listJobs\(\)/, `${ten} mất đường khôi phục sau F5`);
@@ -293,7 +301,7 @@ test("hai trang VAN dung hook va khung chung sau khi ve lai", () => {
 test("ve lai KHONG mang style inline tro lai hai trang cong cu", () => {
   // Ba dong mau lap lai bang `style` inline o `/write` da duoc doi thanh
   // `.novel-pick`. Media query khong voi toi style inline duoc.
-  const write = read("../src/app/studio/write/page.tsx");
+  const write = read("../src/components/studio/VietTruyen.tsx");
   assert.match(write, /className="novel-pick"/);
   assert.ok(!/borderColor:\s*\n?\s*novel\.novel_id === selectedId/.test(write));
   assert.match(read("../src/app/globals.css"),

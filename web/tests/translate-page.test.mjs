@@ -12,22 +12,32 @@ function read(rel) {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 }
 
-const page = () => read("../src/app/studio/translate/page.tsx");
+// "Dịch tiểu thuyết" doi ten tep khi Studio gop lai thanh bon diem den
+// (feat/studio-media-workspace): logic KHONG doi, chi doi vi tri tu
+// `src/app/studio/translate/page.tsx` sang the "Dịch" duoi `/studio/content`.
+const page = () => read("../src/components/studio/DichTieuThuyet.tsx");
 const api = () => read("../src/lib/api.ts");
 const navAuth = () => read("../src/components/NavAuth.tsx");
 
-test("Studio co loi vao Dich tieu thuyet", () => {
+test("Studio co loi vao Noi dung, noi Dich tieu thuyet la mot the", () => {
   // Loi vao khong con o header (menu "Công cụ" da bo) ma o thanh ben Studio.
-  // Header chi con MOT lien ket `/studio`, va `StudioShell` dan tiep.
+  // Header chi con MOT lien ket `/studio`, va `StudioShell` dan tiep toi
+  // Nội dung — noi Dịch la MOT trong hai the (xem `studio-job.test.mjs`
+  // moi `feat/studio-media-workspace` cho chi tiet gop the).
   assert.match(navAuth(), /href="\/studio"/);
   const shell = read("../src/components/StudioShell.tsx");
-  assert.match(shell, /href: "\/studio\/translate"/);
-  assert.match(shell, /nhan: "Dịch tiểu thuyết"/);
+  assert.match(shell, /href: "\/studio\/content"/);
+  assert.match(shell, /nhan: "Nội dung"/);
+  const noiDung = read("../src/app/studio/content/page.tsx");
+  assert.match(noiDung, /DichTieuThuyet/);
 });
 
-test("/studio/translate doi dang nhap, dung loginHref chu khong tu ve mot form", () => {
+test("chua dang nhap thi doi sang loginHref, dung tro ve the Dich ngay", () => {
   const src = page();
-  assert.match(src, /loginHref\("\/studio\/translate"\)/);
+  // Tro ve `/studio/content?tab=translate` — vi tri THAT cua the nay sau khi
+  // gop, khong phai `/studio/translate` cu (di qua do se bat mot vong chuyen
+  // huong phia client thu hai qua `ChuyenHuong`).
+  assert.match(src, /loginHref\("\/studio\/content\?tab=translate"\)/);
 });
 
 test("/translate goi du bon thao tac chinh cua V5", () => {

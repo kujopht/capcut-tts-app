@@ -102,9 +102,23 @@ test("de doc den tu MANG TOI CUC BO, khong tu lam mo", () => {
   // trang van sac nguyen; chi vung co chu la toi hon.
   const text = css();
   assert.match(text, /\.page-lam-viec::before/, "thiếu mảng tối sau khu làm việc");
-  for (const f of ["../src/app/studio/audio/page.tsx", "../src/app/studio/write/page.tsx"]) {
-    assert.match(read(f), /page-lam-viec/, `${f} không dùng mảng tối cục bộ`);
-  }
+  assert.match(read("../src/components/studio/VietTruyen.tsx"), /page-lam-viec/,
+    "Viết truyện không dùng mảng tối cục bộ");
+  /*
+    Media Studio KHONG dung co che nay: §15 cua nhiem vu doi "Reduce
+    background-art dominance substantially inside the editor" — trinh soan
+    tu dat mot BE MAT DAC RIENG cua no (`.ms`, xem khoi CSS "Media Studio"),
+    nen no khong con lo tranh nen phia sau de can toi mot mang toi cuc bo
+    nua. Kiem dung dieu do thay vi doi lai co che cu: nen phai DAC (khong
+    dua vao `blur`), va lop nen do phai la MOT nguon nen chu khong phai the
+    long tren tranh (`background: linear-gradient` chu khong phai
+    `backdrop-filter`).
+  */
+  const sach = text.slice(text.indexOf("Media Studio ======"));
+  assert.ok(!/backdrop-filter:\s*blur/.test(sach),
+    "Media Studio dựa vào blur thay vì một nền đặc riêng");
+  assert.match(sach, /^\.ms \{[\s\S]*?background: linear-gradient/m,
+    "khu Media Studio phải tự có nền đặc, không mượn mảng tối/blur");
 });
 
 test("chu nam TRUC TIEP tren tranh deu co mot cach chong nhoe", () => {

@@ -341,9 +341,12 @@ export default function LibraryPage() {
  */
 function DungTrongVideo({ chapterId }: { chapterId: string }) {
   return (
+    // Toi thang `/studio/media`, khong phai `/studio/video` cu: duong do gio
+    // chi la mot ChuyenHuong, va mot lien ket NOI BO di vong qua no la mot
+    // buoc chuyen huong khong can thiet — dung the ngay tu dau.
     <Link
       className="btn btn-sm"
-      href={`/studio/video?chapter=${encodeURIComponent(chapterId)}`}
+      href={`/studio/media?chapter=${encodeURIComponent(chapterId)}`}
       prefetch={false}
     >
       <span aria-hidden="true">🎬</span> Dùng trong Video

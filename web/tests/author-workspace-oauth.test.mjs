@@ -56,23 +56,31 @@ test("route cu khong doi: /write va /studio deu con", () => {
   }
 });
 
-test("Audio Studio nam trong Studio, KHONG trong thanh chinh", () => {
+test("tao loi doc nam trong Studio, KHONG trong thanh chinh", () => {
+  /*
+    Sau khi gop Audio/Phu de/Video thanh Media Studio (`feat/studio-media-
+    workspace`), khong con muc dieu huong rieng nao ten "Audio" — chuc nang
+    tao loi doc nam trong `/studio/media` (bang TTS ngay trong trinh soan).
+    Bai nay giu lai dung MOT dieu tu ban truoc: loi vao Studio van la MOT
+    lien ket `/studio`, va Studio van co mot muc dan toi noi tao loi doc.
+  */
   const nav = read("../src/components/NavAuth.tsx");
   const links = nav.slice(
     nav.indexOf("const LINKS"),
     nav.indexOf("export function NavLinks"),
   );
   assert.ok(!links.includes('"/studio/audio"'));
+  assert.ok(!links.includes('"/studio/media"'), "Media lọt lên thanh chính");
 
   // Loi vao la MOT lien ket `/studio`, khong con la menu "Công cụ" liet ke
-  // tung ung dung. Chinh trang `/studio` dan tiep toi Audio.
+  // tung ung dung. Chinh trang `/studio` dan tiep toi cac cong cu.
   const studio = nav.slice(
     nav.indexOf("function StudioLink"),
     nav.indexOf("function AccountMenu"),
   );
   assert.match(studio, /href="\/studio"/);
   const shell = read("../src/components/StudioShell.tsx");
-  assert.match(shell, /href: "\/studio\/audio"/, "Studio mất mục Audio");
+  assert.match(shell, /href: "\/studio\/media"/, "Studio mất mục Media (nơi tạo lời đọc)");
 });
 
 test("loi vao Studio va menu tai khoan la HAI thu tach biet", () => {
@@ -84,23 +92,26 @@ test("loi vao Studio va menu tai khoan la HAI thu tach biet", () => {
   assert.ok(!account.includes("/studio"), "Studio lọt vào menu tài khoản");
 });
 
-test("Audio Studio KHONG bi gop vao /write", () => {
-  // Hai trang phuc vu hai viec: `/studio` la dan van ban bat ky roi tai MP3,
-  // `/write` la quan ly truyen va chuong. Nhan ban form cua Studio sang
-  // `/write` la tao ra hai cho lam cung mot viec, roi chung lech nhau.
-  const write = read("../src/app/studio/write/page.tsx");
-  assert.ok(!write.includes("ensureStudioNovel"), "/write dùng kho chứa Studio");
-  assert.ok(!write.includes("MAX_CHARS"), "/write có giới hạn của Studio");
+test("tao loi doc trong Media Studio KHONG bi gop vao Viet truyen", () => {
+  // Hai the phuc vu hai viec: Media la dan van ban bat ky roi tai MP3, Viet
+  // truyen la quan ly truyen va chuong. Nhan ban form tao loi doc sang the
+  // Viet truyen la tao ra hai cho lam cung mot viec, roi chung lech nhau.
+  const write = read("../src/components/studio/VietTruyen.tsx");
+  assert.ok(!write.includes("ensureStudioNovel"), "Viết truyện dùng kho chứa Studio");
+  assert.ok(!write.includes("MAX_CHARS"), "Viết truyện có giới hạn của Studio");
 
   // Nhung chuc nang audio THEO CHUONG thi phai con nguyen.
   for (const con of ["api.createJob", "AudioPlayer", "audio_outdated"]) {
-    assert.ok(write.includes(con), `/write mất chức năng audio theo chương: ${con}`);
+    assert.ok(write.includes(con), `Viết truyện mất chức năng audio theo chương: ${con}`);
   }
 });
 
-test("chua dang nhap vao /studio/write thi sang /login?next=/studio/write", () => {
-  const write = read("../src/app/studio/write/page.tsx");
-  assert.match(write, /router\.replace\(loginHref\("\/studio\/write"\)\)/);
+test("chua dang nhap vao the Viet truyen thi sang /login?next=/studio/content", () => {
+  // The nay nam duoi `/studio/content` sau khi gop vao Nội dung — noi quay
+  // lai sau dang nhap phai la duong THAT, khong phai `/studio/write` cu (di
+  // qua do se bat mot vong chuyen huong phia client thu hai).
+  const write = read("../src/components/studio/VietTruyen.tsx");
+  assert.match(write, /router\.replace\(loginHref\("\/studio\/content"\)\)/);
   // `replace` chu khong phai `push`: nut Back phai ve trang truoc do, khong
   // phai ve mot trang se lai day ho sang dang nhap.
   assert.ok(!/router\.push\(loginHref/.test(write));

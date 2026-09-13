@@ -168,6 +168,45 @@ Chứng minh trên HỢP ĐỒNG ĐỊNH TUYẾN, tất định, không gọi mo
 tình trạng nhà cung cấp là hai chuyện, và trộn chúng là cách một bản báo cáo
 nói rằng có Sonnet trong khi không có.
 
+## 5–6. UỶ THÁC THẬT + SỬA CHỮA TỰ CHỦ — chứng minh trên một lần chạy
+
+Điều kiện hỏng CÓ KIỂM SOÁT: `tests/app.test.js` đòi nút `#clear-completed`
+chưa tồn tại, nên `npm test` đỏ với một khẳng định THẬT
+(`expected: /id=["']clear-completed["']/`).
+
+Một câu của chủ sở hữu, rồi không can thiệp gì nữa:
+
+```
+luot Leader   -> uy thac 1 viec: t5e7c-1  type=testing  scope=['.']
+                 (pham vi ghi cap tu cum "Lam luon" trong chinh cau nguoi dung)
+
+luot 1  worker status=ok        -> npm run test rc=1  -> DONE BI TU CHOI, thu lai
+luot 2  worker sua              -> npm run test rc=0  -> DONE
+        changes=['index.html', 'script.js']
+        2 su kien PROJECT_VERIFIED
+```
+
+**Đây là bằng chứng trung tâm của cả bản này:** worker nói `ok`, Router chạy
+bộ kiểm THẬT của dự án, bộ kiểm đỏ, và `DONE` **không** được cấp. Vòng lặp
+tự thử lại, worker sửa, bộ kiểm xanh, và chỉ khi đó mới `DONE`. Chủ sở hữu
+không phải xem một dòng log nào.
+
+Runtime THẬT đã tham gia: worker chạy trên `AG02` (Antigravity), viết tệp
+thật trong worktree cô lập, và cổng kiểm định chạy `npm` thật.
+
+**Vai Leader dùng đường sẵn có, KHÔNG phải Opus 5 runtime.** `claude` CLI có
+`--session-id`/`-r` (đo được, §1 audit) nhưng chưa lượt Leader nào chạy qua
+nó dưới quyền Router. Đánh dấu **UNVERIFIED**, không giả vờ.
+
+### Giới hạn còn lại của vòng này
+
+Vòng thử lại ở đây là **`_thu_lai_neu_dang` của V0.9** (thử lại có trần, đổi
+chỗ chạy), KHÔNG phải `su_co.VongSuCo` của V1.0 — module đó vẫn là thư viện
+thuần, chưa cắm vào engine (`test_35` khoá lại điều đó có chủ đích). Nên:
+phân loại sự cố, đếm chữ ký, ngắt mạch khi không tiến triển đã có **bài kiểm
+tất định** (41 bài) nhưng **chưa chạy trên đường thật**. Nói rõ ra thay vì
+gộp chung vào "vòng tự chữa đã hoạt động".
+
 ## 8. `codex-chatgpt-web` — KHÔNG CÀI, adapter ở lại UNVERIFIED
 
 Dò trực tiếp trên máy này: không có lệnh nào trên `PATH`, không có thư mục
@@ -203,3 +242,36 @@ kế. Nhưng đây là một giới hạn thật, đáng nêu thay vì giấu:
 Vì thế cổng ghi **nguyên văn đuôi đầu ra** của lệnh vào sự kiện
 `PROJECT_VERIFIED` (`duoi`, 800 ký tự cuối) — đúng chỗ tôi đã đọc ra
 `MODULE_NOT_FOUND`. Không có nó thì sai sót này còn lâu mới lộ.
+
+## 10. CỔNG PHÁT HÀNH — ĐO, không khẳng định suông
+
+| Cổng | Kết quả |
+|---|---|
+| không có đường worker-success → DONE | ✅ `VERIFYING → DONE` đã bỏ; chỉ `VERIFIED` vào được |
+| kiểm định dự án THỰC SỰ chạy khi có | ✅ 2 sự kiện `PROJECT_VERIFIED`, rc=1 rồi rc=0 |
+| thiếu bằng chứng KHÔNG ra được DONE | ✅ `NEEDS_EVIDENCE` không có mũi tên tới DONE (cả hai tầng) |
+| bộ kiểm Todo cô lập/lặp lại được | ✅ 6/6 trong bốn điều kiện, gồm kho bẩn thật |
+| rào năng lực có hồi quy bảo vệ | ✅ 7 bài đi qua đường thật + đột biến 9/19 đỏ |
+| hỏng/sửa tự chủ | ✅ đỏ → thử lại → xanh → DONE, không người can thiệp |
+| ít nhất một đường uỷ thác runtime THẬT | ✅ AG02 viết tệp thật, `npm` thật |
+| cổng review Gemini | ✅ 10/10 trên hợp đồng định tuyến |
+| khởi động lại / phục hồi vẫn xanh | ✅ nằm trong hồi quy đầy đủ |
+| thay đổi / khởi động lại production | ✅ **0 / 0** |
+| thao tác phá huỷ | ✅ **0** — không force push, không xoá nhánh |
+| việc GATED hỏi thừa cho việc repo-local | ✅ **0** |
+| fanfic bị đụng | ✅ **76 → 76**, 0 việc mới |
+
+```
+hồi quy đầy đủ   2659 đạt · 4 bỏ qua · 0 hỏng (5 khối, CẢ 5 chạy lại trên
+                 cây cuối)
+targeted         147 bài (kiểm định 20 · review 10 · năng lực 19 ·
+                 nền móng 41 · mốc git 11 · phạm vi ghi 46)
+```
+
+**Một bài kiểm phụ thuộc tải, không phải hồi quy:**
+`test_toa_v061.test_neu_nguoi_dung_neu_model_thi_ghim_provider` đỏ MỘT lần
+trong khối 4 (đếm được 2 việc `RUNNING` thay vì 4) rồi xanh ở lần chạy lại,
+và xanh 22/22 hai lần khi chạy riêng. Nó khẳng định số việc chạy ĐỒNG THỜI —
+một đại lượng phụ thuộc tải máy. Cùng họ với ghi chú "một cuộc đua tầng
+khoá" đã ghi ở V0.9.1. **Ghi lại làm vấn đề đã biết, không sửa trong bản
+này.**

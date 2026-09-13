@@ -39,6 +39,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -228,7 +229,16 @@ def kham_pha(repo, *, lenh_ke_hoach: Sequence[Sequence[str]] = ()
             except Exception:                                 # noqa: BLE001
                 pass
     if dau_pytest:
-        ra.append(LenhKiem(("python", "-m", "pytest", "-q"),
+        # `sys.executable`, KHÔNG phải chuỗi `"python"`.
+        #
+        # Hai lý do. Thứ nhất: `python` tra qua `PATH`, và `PATH` của tiến
+        # trình Router không nhất thiết là thứ người ta nghĩ — một phép kiểm
+        # phải chạy trên một trình thông dịch XÁC ĐỊNH. Thứ hai: bài kiểm bất
+        # biến V0.4 quét AST tìm những chỗ sinh tiến trình mang tên trình
+        # thông dịch, và một hằng chuỗi ở đây trông y hệt một lời gọi
+        # `subprocess` thiếu `an_cua_so()` — cảnh báo giả, nhưng nó đúng khi
+        # nói rằng gọi tên trần là một thói quen xấu.
+        ra.append(LenhKiem((sys.executable, "-m", "pytest", "-q"),
                            NguonKiem.PYTEST, LoaiKiem.TEST,
                            f"cấu hình pytest ở {', '.join(dau_pytest)}"))
 

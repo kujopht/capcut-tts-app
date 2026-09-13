@@ -3899,6 +3899,205 @@ export type VideoProjectPatch = Partial<
   >
 >;
 
+/* ======================================================= Studio Project === */
+
+/** Sáu chặng của quy trình Studio, ĐÚNG thứ tự. */
+export type StudioStage =
+  | "noi_dung"
+  | "dich"
+  | "hinh_anh"
+  | "audio"
+  | "phu_de"
+  | "video";
+
+export const STUDIO_STAGES: StudioStage[] = [
+  "noi_dung", "dich", "hinh_anh", "audio", "phu_de", "video",
+];
+
+export interface StudioProject {
+  project_id: string;
+  owner_id: string;
+  title: string;
+  description: string;
+  novel_id: string;
+  translation_project_ids: string[];
+  image_ids: string[];
+  audio_track_ids: string[];
+  subtitle_asset_ids: string[];
+  video_project_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Tiến độ MỘT chặng.
+ *
+ * `total` là `null` khi KHÔNG có mẫu số thật — giao diện phải phân biệt được
+ * "không có mẫu số" với "mẫu số bằng không", và không được bịa một tỷ lệ.
+ */
+export interface StudioProgress {
+  stage: StudioStage;
+  label: string;
+  count: number;
+  total: number | null;
+  done: boolean;
+}
+
+/**
+ * Nhãn đọc được của MỘT tham chiếu dự án đang giữ.
+ *
+ * `missing` là tài sản không tra ra được nữa (đã xoá ở công cụ khác). Nó vẫn
+ * hiện ra: một mục người dùng không thấy là một mục người dùng không gỡ được.
+ */
+export interface StudioRef {
+  id: string;
+  label: string;
+  detail: string;
+  missing: boolean;
+}
+
+export interface StudioProjectView {
+  project: StudioProject;
+  progress: StudioProgress[];
+  /**
+   * Chỉ có ở các đường mở MỘT dự án — danh sách dự án cố tình bỏ qua, vì
+   * nhãn phải quét cả sáu kho. Xem `_studio_ra` ở backend.
+   */
+  refs?: Record<StudioStage, StudioRef[]>;
+}
+
+export interface StudioAsset {
+  id: string;
+  label: string;
+  detail: string;
+  created_at: string;
+  in_project: boolean;
+}
+
+export interface UploadTicket {
+  session_id: string;
+  media_type: string;
+  mime: string;
+  expires_at: number;
+  state: string;
+  object_key: string;
+  /** URL ký để PUT thẳng lên kho (R2). Rỗng khi kho cục bộ. */
+  put_url: string;
+  /** Đường PUT qua backend — dùng khi `put_url` rỗng. */
+  put_via_api: string;
+}
+
+export const studio = {
+  listProjects: () =>
+    request<{ projects: StudioProjectView[] }>("/api/studio/projects"),
+
+  getProject: (id: string) =>
+    request<StudioProjectView>(`/api/studio/projects/${encodeURIComponent(id)}`),
+
+  createProject: (title: string, description = "", novelId = "") =>
+    request<StudioProjectView>("/api/studio/projects", {
+      method: "POST",
+      body: JSON.stringify({ title, description, novel_id: novelId }),
+    }),
+
+  patchProject: (
+    id: string,
+    patch: Partial<Pick<StudioProject, "title" | "description" | "novel_id">>,
+  ) =>
+    request<StudioProjectView>(`/api/studio/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteProject: (id: string) =>
+    request<{ deleted: boolean }>(
+      `/api/studio/projects/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    ),
+
+  attach: (id: string, stage: StudioStage, refId: string) =>
+    request<StudioProjectView>(
+      `/api/studio/projects/${encodeURIComponent(id)}/refs`,
+      { method: "POST", body: JSON.stringify({ stage, ref_id: refId }) },
+    ),
+
+  detach: (id: string, stage: StudioStage, refId: string) =>
+    request<StudioProjectView>(
+      `/api/studio/projects/${encodeURIComponent(id)}/refs/${stage}/` +
+        encodeURIComponent(refId),
+      { method: "DELETE" },
+    ),
+
+  /** Nguồn của bộ chọn tài sản — luôn CHỈ tài sản của chính người gọi. */
+  assets: (stage: StudioStage, projectId = "") =>
+    request<{ assets: StudioAsset[] }>(
+      `/api/studio/assets/${stage}` +
+        (projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""),
+    ),
+
+  /**
+   * Tải một tệp lên, KHÔNG qua base64.
+   *
+   * Ba bước: xin phiên → PUT thẳng lên kho (hoặc qua backend khi kho cục bộ
+   * không ký được URL) → chốt để backend kiểm thật rồi ghi metadata.
+   *
+   * `filename` chỉ để hiển thị — khoá đối tượng do MÁY CHỦ sinh.
+   */
+  upload: async (
+    file: File,
+    mediaType: "video" | "audio" | "image" | "subtitles",
+    durationSeconds = 0,
+  ) => {
+    const ticket = await request<UploadTicket>("/api/studio/uploads", {
+      method: "POST",
+      body: JSON.stringify({
+        media_type: mediaType,
+        mime: file.type || "application/octet-stream",
+        size_bytes: file.size,
+        filename: file.name,
+      }),
+    });
+
+    if (ticket.put_url) {
+      // Kho R2: trình duyệt PUT thẳng lên, KHÔNG đi qua API.
+      const r = await fetch(ticket.put_url, {
+        method: "PUT",
+        headers: { "Content-Type": ticket.mime },
+        body: file,
+      });
+      if (!r.ok) throw new Error("Tải tệp lên kho thất bại.");
+    } else {
+      const token = getToken();
+      const r = await fetch(`${API_BASE}${ticket.put_via_api}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": ticket.mime,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: file,
+      });
+      if (!r.ok) throw new Error("Tải tệp lên thất bại.");
+    }
+
+    return request<{ asset: VideoAsset }>(
+      `/api/studio/uploads/${encodeURIComponent(ticket.session_id)}/finalize` +
+        `?duration_seconds=${encodeURIComponent(String(durationSeconds))}`,
+      { method: "POST" },
+    );
+  },
+
+  enqueueRender: (videoProjectId: string) =>
+    request<{ job: { job_id: string; state: string }; project: VideoProject }>(
+      `/api/studio/render-jobs?video_project_id=${encodeURIComponent(videoProjectId)}`,
+      { method: "POST" },
+    ),
+
+  renderJob: (jobId: string) =>
+    request<{ job: { job_id: string; state: string; progress: number | null; error: string } }>(
+      `/api/studio/render-jobs/${encodeURIComponent(jobId)}`,
+    ),
+};
+
 export const videoStudio = {
   createProject: (title: string, audioTrackId = "") =>
     request<{ project: VideoProject }>("/api/video/projects", {

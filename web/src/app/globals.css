@@ -903,8 +903,24 @@ main { overflow-x: clip; }
   to   { opacity: 1; transform: none; }
 }
 
+/*
+  Thang `stack-*` — MOI bac cua thang phai TON TAI.
+
+  `.stack-1` va `.stack-3` duoc dung o muoi hai cho trong ung dung (trang
+  chu, khu admin, Animation, Studio) nhung chua bao gio duoc dinh nghia, nen
+  chung im lang khong lam gi ca. Mot lop khong ton tai khong bao loi — no chi
+  de nguyen bo cuc mac dinh, va tren mot `<div>` thi ket qua gan giong du
+  dinh den muc khong ai nhan ra. Tren mot `<span>` thi khong: cac con nam
+  ngang va dinh vao nhau, va do la cach khuyet tat nay lo ra.
+
+  Dinh nghia du thang thay vi bo `.stack-1`/`.stack-3` khoi cac cho goi:
+  chung deu dang yeu cau dung thu thang nay co, va bo di thi muoi hai cho se
+  tu sang mot lop rieng khac.
+*/
 .stack   { display: flex; flex-direction: column; gap: var(--s4); }
+.stack-1 { display: flex; flex-direction: column; gap: var(--s1); }
 .stack-2 { display: flex; flex-direction: column; gap: var(--s2); }
+.stack-3 { display: flex; flex-direction: column; gap: var(--s3); }
 .stack-5 { display: flex; flex-direction: column; gap: var(--s5); }
 .row     { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
 /* Hang chat hon — nhom nut nho hoac nhan di kem nhau. Truoc day moi cho tu
@@ -5280,6 +5296,15 @@ body.co-mini { padding-bottom: 74px; }
   .vc-dau-nut { width: 100%; }
   .vc-dau-nut .btn { flex: 1; }
 
+  /*
+    STUDIO PROJECT tren dien thoai: hang dau cua mot chang xuong nhieu dong
+    thay vi bop bon thu (so thu tu, ten, tien do, nut) vao mot hang 390px.
+  */
+  .sp-chang-do { margin-left: 0; }
+  .sp-chang-nut { width: 100%; }
+  .sp-chang-nut .btn { flex: 1; }
+  .sp-the-luoi { grid-template-columns: minmax(0, 1fr); }
+
   /* Bento (Phan D, V4 visual completion): the doi 2 cot tro ve 1 cot khi
      man hinh qua hep de giu ca hai cot doc duoc. */
   .bento-span-2 { grid-column: span 1; }
@@ -8252,3 +8277,155 @@ button.cq-the:hover { background: #ffffff0a; }
   /* Inspector xuong duoi phan xem truoc thay vi bop ca hai. */
   .vc-khung { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ==================================================== Studio Project ======
+ *
+ * "Fantasy = khong khi, Modern = thao tac" — cung luat da dat o Video
+ * Composer. Khu lam viec giu yen; chat ban sac nam o LOP NEN cua ca khu
+ * Studio (da co san) va o vai chi tiet rat nho.
+ *
+ * KHONG dung `--vang` o day, cung ly do da ghi o khoi Video Composer: ngan
+ * sach vang la mot rao cung co bai kiem, va mot module moi khong phai ly do
+ * de nang no.
+ */
+
+.sp { display: flex; flex-direction: column; gap: var(--s4); }
+
+.sp-tao { gap: var(--s2); }
+.sp-tao .input { flex: 1; min-width: 0; }
+
+/* -- the du an o trang Tong quan --------------------------------------- */
+
+.sp-the-luoi {
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: var(--s3);
+}
+.sp-the {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  align-items: stretch;
+}
+.sp-the-ten { font-weight: 650; font-size: var(--t-md); }
+.sp-the-do { display: flex; flex-direction: column; gap: 2px; }
+.sp-the-hang {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  font-size: var(--t-xs);
+}
+.sp-the-chang { color: var(--text-3); }
+.sp-the-so { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.sp-xong { color: #4ade80; }
+.sp-the-tiep { align-self: flex-start; }
+
+/* -- sau chang trong khong gian lam viec -------------------------------- */
+
+.sp-chang-ds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.sp-chang {
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  background: var(--bg-1);
+}
+/* Chang da xong chi doi VIEN, khong doi nen: mot the sang ruc giua danh
+   sach keo mat ve phia thu DA LAM XONG, trong khi thu can chu y la thu
+   CHUA xong. */
+.sp-chang-xong { border-color: #4ade8055; }
+.sp-chang-dau {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+.sp-chang-so {
+  flex: 0 0 auto;
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--bg-3);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 650;
+}
+.sp-chang-ten {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-weight: 600;
+}
+.sp-chang-do { margin-left: auto; font-size: var(--t-xs); }
+.sp-chang-nut { display: flex; gap: var(--s2); }
+
+.sp-gan-ds {
+  list-style: none;
+  margin: var(--s3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+.sp-gan {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--r1);
+  background: #ffffff06;
+}
+.sp-gan-nhan { flex: 1; min-width: 0; font-size: var(--t-sm); }
+.sp-gan-ma { min-width: 0; font-size: 11px; color: var(--text-3); }
+
+/* -- bo chon tai san dung chung ----------------------------------------- */
+
+.sp-chon {
+  margin-top: var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r2);
+  background: var(--bg-2);
+}
+.sp-chon-dau {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s2);
+}
+.sp-chon-ten { margin: 0; font-size: var(--t-sm); font-weight: 650; }
+.sp-chon-ds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.sp-chon-muc {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  border: 1px solid transparent;
+  border-radius: var(--r1);
+  background: var(--bg-1);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sp-chon-muc:hover:not(:disabled) { border-color: var(--brand); }
+.sp-chon-muc:disabled { cursor: default; opacity: 0.55; }
+.sp-chon-nhan { min-width: 0; }
+.sp-chon-phu { flex: 0 0 auto; font-size: var(--t-xs); }

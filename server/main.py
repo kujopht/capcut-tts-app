@@ -220,6 +220,14 @@ from server.image_byop_service import (
 from server.image_spending_guard import SharedPremiumDisabled, SharedPremiumSpendingGuard
 from server.image_payment import CheckoutStatus, MockPaymentProvider
 from server.image_library_store import MockImageLibraryStore
+from server.render_queue import MockRenderQueue, RenderJobState
+from server.studio_project import (NHAN_CHANG, StudioStage)
+from server.studio_project_store import MockStudioProjectStore
+from server.studio_service import StudioProjectError, StudioService
+from server.upload_session import (LocalUploadProvider, MockUploadSessionStore,
+                                   R2UploadProvider, UploadError, UploadState,
+                                   UploadSession, HAN_PHIEN_GIAY, TRAN_BYTE,
+                                   khoa_moi, kiem_xin_phien)
 from server.video_project_store import MockVideoProjectStore
 from server.video_renderer import provider_mac_dinh
 from server.video_runner import VideoRenderRunner
@@ -448,6 +456,23 @@ video_svc = VideoService(store, project_store=video_project_store,
 #: `FileNotFoundError` noi len thanh loi 500 khong giai thich duoc.
 video_render_runner = VideoRenderRunner(
     video_svc, store, media_asset_store, storage, provider_mac_dinh())
+
+#: Studio Project — SOI DAY noi cac cong cu lai. Chi giu THAM CHIEU; xem
+#: docstring dau `server/studio_project.py` cho ly do.
+studio_project_store = MockStudioProjectStore()
+studio_svc = StudioService(
+    store, project_store=studio_project_store,
+    translation_store=translation_store, image_store=image_library_store,
+    media_store=media_asset_store, video_project_store=video_project_store)
+
+#: Hang doi render + phien tai len. Ban trong bo nho/cuc bo; hop dong duoc
+#: dinh nghia va kiem o day de mot worker/R2 that chi phai thay nguoi tieu
+#: thu, khong phai sua tang dich vu.
+render_queue = MockRenderQueue()
+upload_session_store = MockUploadSessionStore()
+upload_provider = (R2UploadProvider(storage)
+                   if isinstance(storage, R2StorageAdapter)
+                   else LocalUploadProvider())
 image_quick_free_provider = QuickFreeImageProvider()
 #: `None` khi CHUA cau hinh POLLINATIONS_API_KEY (Shared Premium bi khoa ro
 #: rang o tang service — KHONG am tham lui ve mot khoa rong).
@@ -8616,3 +8641,276 @@ def video_project_output(
         "stream_url": "" if url else
         f"/api/video/projects/{project_id}/media/output",
     }
+
+
+# ======================================================= Studio Project ======
+#
+# Soi day noi sau cong cu Studio. CHI tham chieu — xem
+# `server/studio_project.py`.
+
+
+def _studio(fn, *args, **kwargs):
+    """Doi loi tang dich vu thanh ma HTTP. MOT cho, cung ly do voi `_video`."""
+    try:
+        return fn(*args, **kwargs)
+    except (StudioProjectError, UploadError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+
+def _chang(raw: str) -> StudioStage:
+    try:
+        return StudioStage(raw)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Chặng không hợp lệ: {raw!r}.") from exc
+
+
+def _studio_ra(profile: Profile, du_an, *, kem_nhan: bool = False) -> Dict[str, Any]:
+    """Mot du an kem tien do, va — chi khi duoc hoi — nhan cua tung tham chieu.
+
+    `kem_nhan` MAC DINH tat vi danh sach du an goi ham nay mot lan moi du an:
+    nhan doi hoi quet ca sau kho, nen bat no o day se lam trang Tổng quan tra
+    gia theo SO DU AN nhan SAU. Trang chi tiet mo dung mot du an, nen no tra
+    dung mot lan — va do la cho duy nhat nhan thuc su duoc doc.
+    """
+    ra = {
+        "project": du_an.to_dict(),
+        "progress": [t.to_dict() for t in studio_svc.tien_do(profile, du_an)],
+    }
+    if kem_nhan:
+        ra["refs"] = studio_svc.nhan_tham_chieu(profile, du_an)
+    return ra
+
+
+class StudioProjectIn(BaseModel):
+    title: Annotated[str, StringConstraints(min_length=1, max_length=120)]
+    description: Annotated[str, StringConstraints(max_length=2000)] = ""
+    novel_id: Annotated[str, StringConstraints(max_length=64)] = ""
+
+
+class StudioProjectPatchIn(BaseModel):
+    title: Optional[Annotated[str, StringConstraints(max_length=120)]] = None
+    description: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
+    novel_id: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
+
+
+class StudioRefIn(BaseModel):
+    stage: Annotated[str, StringConstraints(max_length=20)]
+    ref_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+
+
+@app.post("/api/studio/projects", status_code=status.HTTP_201_CREATED)
+def studio_project_create(
+    payload: StudioProjectIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    du_an = _studio(studio_svc.tao, profile, title=payload.title,
+                    description=payload.description, novel_id=payload.novel_id)
+    return _studio_ra(profile, du_an, kem_nhan=True)
+
+
+@app.get("/api/studio/projects")
+def studio_project_list(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    ds = studio_svc.danh_sach(profile)
+    return {"projects": [_studio_ra(profile, d) for d in ds]}
+
+
+@app.get("/api/studio/projects/{project_id}")
+def studio_project_get(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    return _studio_ra(profile, _studio(studio_svc.lay, profile, project_id),
+                      kem_nhan=True)
+
+
+@app.patch("/api/studio/projects/{project_id}")
+def studio_project_patch(
+    project_id: str, payload: StudioProjectPatchIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    d = payload.model_dump(exclude_unset=True)
+    du_an = _studio(studio_svc.sua, profile, project_id, **d)
+    return _studio_ra(profile, du_an, kem_nhan=True)
+
+
+@app.delete("/api/studio/projects/{project_id}")
+def studio_project_delete(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Xoa BAN GHI du an. KHONG dung toi tai san no tro toi."""
+    return {"deleted": _studio(studio_svc.xoa, profile, project_id)}
+
+
+@app.post("/api/studio/projects/{project_id}/refs")
+def studio_project_attach(
+    project_id: str, payload: StudioRefIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    du_an = _studio(studio_svc.gan, profile, project_id,
+                    _chang(payload.stage), payload.ref_id)
+    return _studio_ra(profile, du_an, kem_nhan=True)
+
+
+@app.delete("/api/studio/projects/{project_id}/refs/{stage}/{ref_id}")
+def studio_project_detach(
+    project_id: str, stage: str, ref_id: str,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    du_an = _studio(studio_svc.go, profile, project_id, _chang(stage), ref_id)
+    return _studio_ra(profile, du_an, kem_nhan=True)
+
+
+@app.get("/api/studio/assets/{stage}")
+def studio_assets(
+    stage: str, project_id: str = "",
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Nguon cua BO CHON TAI SAN dung chung — luon CHI tai san cua nguoi goi."""
+    return {"assets": _studio(studio_svc.tai_san_cua_toi, profile,
+                              _chang(stage), project_id=project_id)}
+
+
+# ---------------------------------------------------------- tai thang len ---
+
+
+class UploadStartIn(BaseModel):
+    media_type: Annotated[str, StringConstraints(max_length=20)]
+    mime: Annotated[str, StringConstraints(min_length=1, max_length=100)]
+    size_bytes: int
+    filename: Annotated[str, StringConstraints(max_length=200)] = ""
+
+
+@app.post("/api/studio/uploads", status_code=status.HTTP_201_CREATED)
+def studio_upload_start(
+    payload: UploadStartIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Xin MOT phien tai len.
+
+    KHOA DO MAY CHU SINH — `filename` cua nguoi dung chi de hien thi, khong
+    bao gio cham vao khoa doi tuong. Xem `server/upload_session.py`.
+    """
+    try:
+        loai = MediaType(payload.media_type)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Loại tệp không hợp lệ.") from exc
+    if loai not in TRAN_BYTE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Loại tệp không tải lên được.")
+    _studio(kiem_xin_phien, loai, payload.mime, payload.size_bytes)
+
+    khoa = khoa_moi(profile.user_id, loai)
+    phien = upload_session_store.luu(UploadSession(
+        owner_id=profile.user_id, media_type=loai,
+        mime=payload.mime.split(";")[0].strip(),
+        declared_bytes=int(payload.size_bytes), object_key=khoa,
+        expires_at=time.time() + HAN_PHIEN_GIAY))
+    ky = upload_provider.presign_put(khoa, phien.mime, HAN_PHIEN_GIAY)
+    return {
+        **phien.to_dict(),
+        # Kho R2: PUT THANG len day. Kho cuc bo: khong ky duoc, nen giao dien
+        # PUT qua backend — cung hinh dang voi `signed_url`/`stream_url`.
+        "put_url": ky,
+        "put_via_api": "" if ky else f"/api/studio/uploads/{phien.session_id}/data",
+    }
+
+
+@app.put("/api/studio/uploads/{session_id}/data")
+async def studio_upload_put(
+    session_id: str, request: Request,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Nhan byte — duong CUA KHO CUC BO.
+
+    Voi R2 thi trinh duyet PUT thang len kho va khong bao gio goi toi day.
+    Duong nay van giu nguyen moi phep kiem de hai duong khong the lech nhau.
+    """
+    phien = _studio(upload_session_store.lay, profile.user_id, session_id)
+    if phien.state is not UploadState.PENDING:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Phiên đã đóng.")
+    if not phien.con_han():
+        raise HTTPException(status.HTTP_410_GONE, "Phiên tải lên đã hết hạn.")
+    du_lieu = await request.body()
+    if len(du_lieu) > TRAN_BYTE[phien.media_type]:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            "Tệp vượt quá giới hạn.")
+    storage.put(phien.object_key, du_lieu, content_type=phien.mime)
+    return {"received_bytes": len(du_lieu)}
+
+
+@app.post("/api/studio/uploads/{session_id}/finalize")
+def studio_upload_finalize(
+    session_id: str, duration_seconds: float = 0.0,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Chot mot phien: kiem THAT roi ghi metadata.
+
+    Kich thuoc duoc doc LAI TU KHO chu khong tin con so client khai — neu
+    khong, khai 1 byte roi day len 2 GB la xong.
+    """
+    phien = _studio(upload_session_store.lay, profile.user_id, session_id)
+    if phien.state is UploadState.FINALIZED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Phiên đã chốt rồi.")
+    if not phien.con_han():
+        raise HTTPException(status.HTTP_410_GONE, "Phiên tải lên đã hết hạn.")
+
+    try:
+        that = storage.size(phien.object_key)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chưa thấy tệp nào được tải lên.") from exc
+    if that <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tệp rỗng.")
+    if that > TRAN_BYTE[phien.media_type]:
+        # Da len toi kho roi moi biet — don ngay thay vi de lai mot doi tuong
+        # qua co ma khong ban ghi nao tro toi.
+        storage.delete(phien.object_key)
+        phien.state = UploadState.ABANDONED
+        upload_session_store.luu(phien)
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            "Tệp vượt quá giới hạn.")
+
+    asset = media_asset_store.create_asset(MediaAsset(
+        owner_id=profile.user_id, media_type=phien.media_type,
+        storage_tier=StorageTier.HOT, object_key=phien.object_key,
+        content_hash="", size_bytes=that,
+        duration_seconds=max(0.0, float(duration_seconds or 0.0)),
+        processing_state=MediaProcessingState.READY))
+    phien.state = UploadState.FINALIZED
+    upload_session_store.luu(phien)
+    return {"asset": asset.to_dict()}
+
+
+# ------------------------------------------------------------ render job ----
+
+
+@app.post("/api/studio/render-jobs", status_code=status.HTTP_202_ACCEPTED)
+def studio_render_enqueue(
+    video_project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Xep mot lan render vao HANG DOI.
+
+    Khac `/api/video/projects/{id}/render` cua #202 o dung mot diem, va do
+    la diem quan trong: duong nay KHONG chay gi ca. No tra ve mot `job_id`
+    de mot worker — o day, hoac tren mot may khac — nhan lay.
+    """
+    du_an = _video(video_svc.xin_render, profile, video_project_id)
+    # Khoa chong trung bam theo NOI DUNG du an: bam Render hai lan khi khong
+    # sua gi thi van la mot job.
+    khoa = f"{du_an.project_id}:{du_an.updated_at}"
+    job = render_queue.xep_hang(profile.user_id, du_an.project_id, khoa)
+    video_render_runner.chay_nen(profile.user_id, du_an.project_id)
+    return {"job": job.to_dict(), "project": du_an.to_dict()}
+
+
+@app.get("/api/studio/render-jobs/{job_id}")
+def studio_render_status(
+    job_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    job = render_queue.lay(profile.user_id, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy job.")
+    return {"job": job.to_dict()}

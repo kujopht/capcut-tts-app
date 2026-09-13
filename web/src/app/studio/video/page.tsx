@@ -17,6 +17,7 @@ import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
+  studio,
   videoStudio,
   type VideoAsset,
   type VideoAudioChoice,
@@ -197,11 +198,45 @@ function VideoComposer() {
           (tuChuong
             ? t.tracks.find((x) => x.chapter_id === tuChuong)?.track_id || ""
             : "");
+        /*
+          `?studio=<id>` — den tu KHONG GIAN LAM VIEC cua mot du an Studio.
+
+          Video tao ra o day duoc GAN NGUOC lai du an do, nen vong lam viec
+          khep kin: du an -> Video Composer -> quay ve du an van thay ban
+          video vua dung. Khong co no thi nguoi dung phai tu vao du an bam
+          "Thêm" lan nua de tim lai chinh thu ho vua tao.
+        */
+        const studioId = params.get("studio") || "";
         const moId = params.get("project");
         if (huy) return;
-        if (tuAudio) {
+        if (tuAudio || studioId) {
           const r = await videoStudio.createProject("Dự án video mới", tuAudio);
           if (huy) return;
+          if (studioId) {
+            // Gan nguoc that bai thi KHONG chan viec dung Composer — ban
+            // video van ton tai va van sua duoc.
+            await studio
+              .attach(studioId, "video", r.project.project_id)
+              .catch(() => undefined);
+          }
+          /*
+            DUNG MOT LAN: doi URL sang `?project=<id>` ngay sau khi da tieu
+            thu tham so.
+
+            `?audio=`/`?studio=` la mot MENH LENH ("tao mot ban video moi"),
+            con URL thi o lai tren thanh dia chi. Khong xoa di thi mot lan
+            bam F5 la them mot du an video rong nua — va tu `?studio=` thi
+            moi lan nhu the con gan them mot muc vao du an Studio. Nguoi dung
+            khong lam gi sai ca; ho chi tai lai trang.
+
+            `replaceState` chu khong phai `router.replace`: doi day khong
+            phai mot buoc dieu huong, va khong duoc them mot muc vao lich su
+            de nut Back quay nguoc ve dung cai lenh vua chay.
+          */
+          window.history.replaceState(
+            null, "",
+            `${window.location.pathname}?project=${encodeURIComponent(r.project.project_id)}`,
+          );
           await moDuAn(r.project.project_id);
           await napDanhSach();
         } else if (moId) {

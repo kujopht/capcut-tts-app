@@ -658,6 +658,10 @@ khác nhau, không lượt nào thừa.
 
 ### 12e. Số cuối
 
+> **CẬP NHẬT (bản RC chốt).** Cả ba hạng mục mở đã được chủ sở hữu quyết và
+> xử lý xong; hồi quy đầy đủ trên cây cuối là **2728 chạy · 2728 đạt · 0
+> hỏng**. Số dưới đây là của lượt TRƯỚC đó, giữ lại làm dấu vết.
+
 ```
 hồi quy đầy đủ   2698 bài · 2697 đạt · 1 đỏ
                  (bài đỏ = §12d, KHÔNG thuộc V1.0, có từ trước đêm nay)

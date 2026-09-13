@@ -173,6 +173,12 @@ bộ kiểm chờ tài nguyên   30 bài  (3 kịch bản A/B/C · 8 ranh giới
 dogfood hạn mức thật      7/7
 dogfood khởi động lại    10/10
 chính sách Astra         `test_reasoning_v08` xanh, không đụng tới
+targeted (14 bộ)         590 / 590
+HỒI QUY ĐẦY ĐỦ           2728 chạy · 2728 đạt · 1 bỏ qua · **0 HỎNG**
 ```
 
 **0 lượt model bị đốt để dựng lại cảnh cạn hạn mức.**
+**0 thay đổi production, 0 khởi động lại production, 0 thao tác phá huỷ.**
+
+`web/`, `server/`, `beam_apps/`, `desktop_app/`, `capcut_tts_api/` — không
+tệp nào bị chạm trong toàn bộ đợt này.

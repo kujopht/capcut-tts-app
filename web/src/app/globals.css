@@ -6061,6 +6061,35 @@ body.co-mini { padding-bottom: 74px; }
   border-radius: var(--r2);
 }
 
+/* Ho so tac pham o trang kiem duyet: nhan | gia tri, hai cot.
+   `max-content` cho cot nhan chu khong mot be rong co dinh — nhan tieng Viet
+   dai ngan khac nhau ("Thẻ" va "Tác giả nguồn"), va mot con so cung se cat
+   mot trong hai. */
+.admin-ho-so {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px var(--s4);
+  margin: 0;
+}
+.admin-ho-so dt { color: var(--text-3); }
+.admin-ho-so dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* Doan van ban xem truoc: giu xuong dong that cua tac pham. */
+.admin-xem-truoc { white-space: pre-wrap; margin: 0; }
+
+/* Nhan loai ban ghi canh ten truyen trong bang. */
+.admin-loai { font-size: var(--t-xs); }
+
+/* Tach hang nut ra khoi dau muc ngay duoi no — `stack-3` mot minh chua du
+   khi nut cao hon mot dong chu. */
+.admin-noi-dung { margin-top: var(--s3); }
+
+@media (max-width: 560px) {
+  /* Duoi day, hai cot lam cot gia tri qua hep de doc. */
+  .admin-ho-so { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .admin-ho-so dd { margin-bottom: var(--s2); }
+}
+
 /* -- nhan TRANG THAI KIEM DUYET -------------------------------------------
    Mau co nghia co dinh, va KHONG bao gio dung lai cho hang tac gia: hang la uy
    tin, trang thai la quyen. Ve chung giong nhau la moi nguoi doc bang nham hai

@@ -149,6 +149,7 @@ function ScraperPageContent() {
   const [dangDrive, setDangDrive] = useState(false);
   const [tuDongChay, setTuDongChay] = useState(false);
   const [dangRetryRun, setDangRetryRun] = useState(false);
+  const [dangTaoBanNhap, setDangTaoBanNhap] = useState(false);
   const [dangHuyRun, setDangHuyRun] = useState(false);
   const [hoiHuyRun, setHoiHuyRun] = useState(false);
 
@@ -378,6 +379,32 @@ function ScraperPageContent() {
       toast.error(loiApi(cause, "Không thể huỷ tác vụ."));
     } finally {
       setDangHuyRun(false);
+    }
+  }
+
+  /**
+   * Biến mục đã duyệt thành BẢN NHÁP thật — không đưa gì ra công khai.
+   *
+   * Đây là mắt xích từng thiếu hẳn ở giao diện: endpoint đã có từ lâu nhưng
+   * không có client nào gọi, nên hàng đợi duyệt không có đường nào dẫn tới
+   * Novel/Chapter thật. Bước công khai vẫn là một hành động RIÊNG của con
+   * người ở `/admin/stories/{id}`.
+   */
+  async function handleTaoBanNhap() {
+    if (!activeRunId) return;
+    setDangTaoBanNhap(true);
+    try {
+      const res = await adminApi.publishScrapeRun(activeRunId);
+      setChiTietData((prev) =>
+        prev ? { ...prev, run: res.run, progress: res.progress } : prev,
+      );
+      toast.ok("Đã tạo bản nháp. Sang khu Truyện để đọc và duyệt.");
+      taiLaiChiTiet();
+      taiLaiDanhSachRuns();
+    } catch (cause) {
+      toast.error(loiApi(cause, "Không thể tạo bản nháp từ mục đã duyệt."));
+    } finally {
+      setDangTaoBanNhap(false);
     }
   }
 
@@ -729,6 +756,25 @@ function ScraperPageContent() {
                     title="Quét tiếp 1 chu kỳ các chương trong hàng đợi"
                   >
                     {dangDrive ? "Đang quét…" : "Tiếp tục quét (1 chu kỳ)"}
+                  </button>
+
+                  {/*
+                    Mắt xích từng thiếu hẳn ở giao diện: endpoint đã có nhưng
+                    không client nào gọi, nên hàng đợi duyệt không có đường
+                    nào dẫn tới Novel/Chapter thật.
+
+                    Nhãn nói ĐÚNG thứ nó làm. Nút này KHÔNG đưa gì ra công
+                    khai — nó tạo BẢN NHÁP; bước công khai là một hành động
+                    riêng của con người ở khu Truyện.
+                  */}
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={dangTaoBanNhap}
+                    onClick={handleTaoBanNhap}
+                    title="Biến mục đã duyệt thành bản nháp thật, chờ người đọc và xuất bản ở khu Truyện"
+                  >
+                    {dangTaoBanNhap ? "Đang tạo…" : "Tạo bản nháp từ mục đã duyệt"}
                   </button>
 
                   {activeRun.status === "running" ? (

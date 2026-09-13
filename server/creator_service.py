@@ -24,6 +24,7 @@ from server.creator import (
     ALREADY_CREDITED,
     AuthorStateError,
     CREDITED,
+    NovelKhongTheXuatBan,
     UsernameTaken,
     can_publish,
     can_resubmit,
@@ -47,6 +48,7 @@ from server.domain import (
     now_iso,
 )
 from server.social import SocialError, kiem_anh, object_key
+from server import novel_kind
 
 #: Gioi han do dai. Cat o backend chu khong tin vao `maxLength` cua o nhap: mot
 #: request curl khong di qua o nhap nao.
@@ -834,8 +836,32 @@ class CreatorService:
         ))
         return so_luong
 
+    #: Tran quet khi phai loc HA TANG ra khoi danh sach.
+    #:
+    #: Loai ha tang chi nhan ra duoc qua `tags`, va Appwrite khong co truy van
+    #: "mang KHONG chua X". Nen `kind="story"` phai doc roi loc o day. Tran
+    #: nay giu no thanh mot phep quet CO BIEN: production dang co 56 ban ghi,
+    #: nen 2000 la thua thai rong rai, va khi nao cham tran thi ta noi ra
+    #: (`capped`) thay vi tra ve mot con so sai trong im lang.
+    TRAN_QUET_TAC_PHAM = 2000
+
+    def _trang_tac_pham(self, query: str, state: str, limit: int,
+                        offset: int) -> Tuple[List[Novel], int]:
+        """Chi TAC PHAM that, phan trang tren tap DA LOC.
+
+        Loc RA TRUOC roi moi cat trang — nguoc lai voi ban cu. Nho vay
+        `total` la tong cua dung nhung dong nguoi quan tri se thay, va khong
+        trang nao ngan di vi ha tang bi lan vao roi bi loai.
+        """
+        tat_ca, _ = self._store.find_novels(
+            state=state, query=query, limit=self.TRAN_QUET_TAC_PHAM, offset=0,
+        )
+        loc = novel_kind.loc_tac_pham(tat_ca)
+        dau = max(0, offset)
+        return loc[dau:dau + max(1, limit)], len(loc)
+
     def admin_novels(self, query: str = "", state: str = "", limit: int = 25,
-                     offset: int = 0) -> Dict[str, Any]:
+                     offset: int = 0, kind: str = "") -> Dict[str, Any]:
         """
         Duyet truyen cho quan tri — CHI DOC, va phan trang o phia KHO.
 
@@ -843,16 +869,20 @@ class CreatorService:
         ke chuong VA mot lan doc ho so cho TUNG truyen. Gio: mot truy van co
         phan trang, roi hai truy van theo lo.
 
+        `kind="story"` bo HA TANG ra khoi danh sach (kho chua Audio Studio,
+        ban ghi kiem thu) — xem `server/novel_kind.py`. Do that tren kho san
+        xuat: 43 "ban nhap" thuc ra la 11 tac pham cong 32 ban ghi ha tang.
+        Mac dinh `kind=""` giu nguyen hanh vi cu cho moi cho dang goi.
+
         KHONG co thao tac go xuong hay xoa — xem `docs/ADMIN.md`.
         """
-        rows, total = self._store.find_novels(
-            published_only=(state == "published"),
-            query=query, limit=limit, offset=offset,
-        )
-        if state == "draft":
-            # Kho chi loc duoc "chi da xuat ban"; ban nhap phai loc o day. Ghi
-            # nhan la mot han che, khong giau no di.
-            rows = [n for n in rows if n.state is PublishState.DRAFT]
+        if kind == "story":
+            rows, total = self._trang_tac_pham(query, state, limit, offset)
+        else:
+            # `state` xuong toi kho — khong con loc sau khi da phan trang.
+            rows, total = self._store.find_novels(
+                state=state, query=query, limit=limit, offset=offset,
+            )
 
         ids = [n.novel_id for n in rows]
         so_chuong = self._store.chapter_counts(ids)
@@ -871,8 +901,123 @@ class CreatorService:
             chu = ho_so.get(n.owner_id)
             d["owner"] = ({"display_name": chu.display_name,
                            "username": chu.username} if chu else None)
+            # Loai ban ghi — de giao dien khong phai doan lai tu `tags`, va de
+            # mot ban ghi ha tang lot vao danh sach van NHIN RA duoc.
+            d["kind"] = novel_kind.loai_ban_ghi(n)
             ra.append(d)
         return {"novels": ra, "total": total, "limit": limit, "offset": offset}
+
+    # ------------------------------------------------- kiem duyet TRUYEN --
+    #
+    # Vi sao ba ham nay ton tai, va vi sao chung KHONG dung `publish_novel`:
+    #
+    # Ban nhap do may gat tao ra thuoc `svc_harvester` — mot danh tinh DICH VU
+    # khong ai dang nhap duoc. `publish_novel` doi dung chu so huu, nen khong
+    # mot con nguoi nao xuat ban duoc chung. Do la cho lam DUT luong
+    # SCRAPED -> DUYET -> XUAT BAN, va la ly do 0 tac pham van ban nao dang
+    # song tren trang.
+
+    def admin_novel_detail(self, novel_id: str) -> Dict[str, Any]:
+        """Toan bo thu can de QUYET DINH xuat ban hay khong.
+
+        Kem noi dung chuong: nguoi kiem duyet phai DOC duoc tac pham truoc khi
+        bam, chu khong chi thay so chuong. Day la ly do route nay ton tai thay
+        vi tai dung `GET /api/novels/{id}` — duong do 404 voi ban nhap cua
+        nguoi khac, va no PHAI tiep tuc 404 nhu vay.
+        """
+        n = self._store.get_novel(novel_id)
+        chuong = sorted(self._store.list_chapters(novel_id),
+                        key=lambda c: c.order_index)
+        ho_so = self._identity.profiles_by_ids([n.owner_id])
+        chu = ho_so.get(n.owner_id)
+        d = n.to_dict()
+        d["kind"] = novel_kind.loai_ban_ghi(n)
+        d["owner"] = ({"display_name": chu.display_name,
+                       "username": chu.username} if chu else None)
+        return {
+            "novel": d,
+            "chapters": [{
+                "chapter_id": c.chapter_id,
+                "title": c.title,
+                "order_index": c.order_index,
+                "char_count": c.char_count,
+                "content": c.content,
+            } for c in chuong],
+            "total_chars": sum(c.char_count for c in chuong),
+        }
+
+    def _dem_chuong_co_chu(self, novel_id: str) -> int:
+        """So chuong THAT SU co van ban.
+
+        `len(chapters)` chua du: 13 truyen dang song tren trang deu co dung
+        mot chuong VA `char_count == 0` (nhap tu audio dai tap). Mot ban nhap
+        van ban ma moi chuong deu rong thi xuat ban ra se la mot trang trong.
+        """
+        return sum(1 for c in self._store.list_chapters(novel_id)
+                   if (c.content or "").strip())
+
+    def admin_publish_novel(self, novel_id: str, *, actor_id: str = "",
+                            actor_role: str = "", note: str = "") -> Dict[str, Any]:
+        """Xuat ban mot ban nhap sau khi NGUOI da xem. Idempotent.
+
+        Cong CHONG RONG o day, khong o kho: kho khong biet "mot chuong rong co
+        phai loi khong" — voi lan audio thi khong. Ngu canh do song o day.
+        """
+        n = self._store.get_novel(novel_id)          # 404 neu khong co
+        if n.state is not PublishState.PUBLISHED:
+            if self._dem_chuong_co_chu(novel_id) == 0:
+                raise NovelKhongTheXuatBan(
+                    "Truyện chưa có chương nào đọc được — không xuất bản một "
+                    "trang trống. Thêm nội dung chương rồi thử lại.")
+        published = self._store.admin_publish_novel(novel_id)
+        self._ghi_kiem_duyet_truyen("content_publish", published,
+                                    actor_id, actor_role, note)
+        return published.to_dict()
+
+    def admin_unpublish_novel(self, novel_id: str, *, actor_id: str = "",
+                              actor_role: str = "", note: str = "") -> Dict[str, Any]:
+        """Gỡ xuống. Idempotent — gọi lại trên bản nháp không lỗi."""
+        reverted = self._store.admin_unpublish_novel(novel_id)
+        self._ghi_kiem_duyet_truyen("content_unpublish", reverted,
+                                    actor_id, actor_role, note)
+        return reverted.to_dict()
+
+    def admin_update_novel(self, novel_id: str, fields: Dict[str, Any], *,
+                           actor_id: str = "", actor_role: str = "",
+                           note: str = "") -> Dict[str, Any]:
+        """Sua SIEU DU LIEU AN TOAN cua truyen, khong qua cong so huu.
+
+        Dung lai `NOVEL_EDITABLE` cua kho — cung danh sach truong ma chu so
+        huu duoc sua. Quan tri KHONG duoc nhieu quyen hon chu so huu o day:
+        `state`, `owner_id`, `cover_key` van nam ngoai, va viec doi trang thai
+        chi di qua hai ham publish/unpublish o tren.
+        """
+        n = self._store.get_novel(novel_id)
+        updated = self._store.update_novel(novel_id, n.owner_id, fields)
+        self._ghi_kiem_duyet_truyen("content_restore", updated,
+                                    actor_id, actor_role,
+                                    note or "sửa siêu dữ liệu")
+        return updated.to_dict()
+
+    def _ghi_kiem_duyet_truyen(self, action: str, n: Novel, actor_id: str,
+                               actor_role: str, note: str) -> None:
+        """Ghi nhat ky — va KHONG BAO GIO lam hong thao tac vua thanh cong.
+
+        `action` la mot enum ben Appwrite (`scripts/setup_appwrite.py`).
+        `content_publish` la gia tri MOI, nen tren mot kho chua chay lai
+        script tao luoc do, ban ghi nay se bi tu choi. Khi do lua chon dung la
+        MAT MOT DONG NHAT KY chu khong phai lam that bai mot lan xuat ban da
+        ghi xong — nguoc lai se de truyen o trang thai da doi ma nguoi bam
+        nhan duoc mot loi.
+        """
+        try:
+            self._store.record_event(ModerationEvent(
+                action=action, target_user_id="", actor_id=actor_id,
+                actor_role=actor_role, target_type="novel",
+                target_id=n.novel_id, note=(note or "").strip(),
+            ))
+        except Exception:                                       # noqa: BLE001
+            pass
 
     def admin_events(self, limit: int = 50, offset: int = 0,
                      target_user_id: str = "", target_type: str = "",

@@ -292,7 +292,20 @@ class TestToaEngine(_Nen):
             self.assertIsNone(((c.contract or {}).get("requirements") or {}).get("pin_provider"))
 
     def test_neu_nguoi_dung_neu_model_thi_ghim_provider(self):
-        self.cc = _cc(self.repo, ex=ExecTuyBien(), max_parallel=4)
+        # `cham=0.4` KHÔNG phải để "cho chắc" — nó là CỬA SỔ QUAN SÁT.
+        #
+        # Khẳng định ở dưới đếm số con ĐANG ở `RUNNING` tại một thời điểm.
+        # `claim_task` đặt `RUNNING` đồng bộ ngay trong `tick()` trước khi
+        # dựng luồng, nên chiều "chưa kịp RUNNING" là bất khả — đếm thiếu chỉ
+        # có thể vì con đã RỜI `RUNNING`. Với executor giả chạy xong NGAY,
+        # cửa sổ ấy đo được là ~40ms: trễ 50ms còn 3/4, trễ 200ms còn 2/4 —
+        # đúng con số mà một lần hồi quy đã bắt được (2 thay vì 4), và đúng
+        # lý do bài này đỏ trên máy bận rồi xanh khi chạy riêng.
+        #
+        # Hai bài anh em khẳng định y hệt (`test_giao_nhieu_tai_khoan…`,
+        # `test_leader_chiem_mot_khe…`) vốn đã có `cham`; chỉ bài này quên.
+        # Đây là khuyết tật CỦA BÀI KIỂM, không phải đua ở tầng khoá.
+        self.cc = _cc(self.repo, ex=ExecTuyBien(cham=0.4), max_parallel=4)
         kq = self.cc.chat("demo", "gọi 4 agent gemini 3.8, mỗi đứa lục một bộ fanfic audio trong web")
         cha, con = self._cha_con()
         self.assertEqual(len(con), 4)
@@ -382,10 +395,22 @@ class TestToaEngine(_Nen):
         th = cha_x.result["toa"]
         self.assertEqual(cha_x.state, TaskState.DONE)
         self.assertEqual((th["xong"], th["hong"]), (3, 1))
-        hong = [c for c in th["con"] if c["state"] == "FAILED"]
+        # Tu V1.0, con hong TAT DINH khong nam yen o `FAILED`: vong su co thu
+        # bac thang roi LEO THANG len nguoi, nen cho nghi cua no la `BLOCKED`
+        # kem mot ho so su co da dong. Dieu KHONG duoc doi: no van duoc KE la
+        # hong (`hong == 1`), van neu duoc ly do, va khong keo anh em theo.
+        hong = [c for c in th["con"] if c["state"] in ("FAILED", "BLOCKED")]
         self.assertEqual(len(hong), 1)
         self.assertTrue(hong[0]["task_id"].endswith("-2"))
         self.assertIn("gia_lap_hong", hong[0]["failure_reason"])
+        x = self.cc.store.task(hong[0]["task_id"])
+        self.assertIn(x.state, (TaskState.FAILED, TaskState.BLOCKED))
+        if x.state is TaskState.BLOCKED:
+            from scripts.control_center.v10.su_co_ben import SoSuCo
+            sc = SoSuCo(self.cc.store).hien_tai(x.task_id)
+            self.assertIsNotNone(sc, "BLOCKED phai kem ho so su co")
+            self.assertEqual(sc.trang_thai, "DA_DONG")
+            self.assertEqual(th["leo_thang"], 1)
         # Anh em cua con hong deu DONE, khong ai bi BLOCKED/FAILED theo.
         for c in con:
             if not c.task_id.endswith("-2"):

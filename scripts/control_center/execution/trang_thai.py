@@ -35,6 +35,16 @@ class TrangThaiThucThi(str, Enum):
     READY = "READY"
     RUNNING = "RUNNING"
     VERIFYING = "VERIFYING"
+    # V1.0 — BA TRẠNG THÁI TÁCH PHÉP KIỂM RA KHỎI KẾT LUẬN.
+    #
+    # Trước đây `VERIFYING -> DONE` đi thẳng, nên đọc sổ không phân biệt được
+    # ba tình huống rất khác nhau: đã xác minh ĐẠT, đã chạy mà KHÔNG đạt, và
+    # KHÔNG CÓ GÌ ĐỂ CHẠY. Cái thứ ba là cái nguy hiểm — nó từng trông y hệt
+    # cái thứ nhất (RouterDogfood02, 2026-09-13: việc `DONE` mà bộ kiểm của
+    # dự án chưa từng chạy).
+    VERIFIED = "VERIFIED"
+    FAILED_VERIFICATION = "FAILED_VERIFICATION"
+    NEEDS_EVIDENCE = "NEEDS_EVIDENCE"
     REPLANNING = "REPLANNING"
     BLOCKED = "BLOCKED"
     PAUSED = "PAUSED"
@@ -73,6 +83,9 @@ _NHAN: Dict[TrangThaiThucThi, str] = {
     TrangThaiThucThi.READY: "sẵn sàng chạy",
     TrangThaiThucThi.RUNNING: "đang chạy",
     TrangThaiThucThi.VERIFYING: "đang kiểm định",
+    TrangThaiThucThi.VERIFIED: "đã xác minh ĐẠT",
+    TrangThaiThucThi.FAILED_VERIFICATION: "kiểm định KHÔNG đạt",
+    TrangThaiThucThi.NEEDS_EVIDENCE: "thiếu bằng chứng — chưa kết luận được",
     TrangThaiThucThi.REPLANNING: "đang lập lại kế hoạch",
     TrangThaiThucThi.BLOCKED: "bị chặn — cần người",
     TrangThaiThucThi.PAUSED: "tạm dừng",
@@ -108,8 +121,28 @@ _CHUYEN: Dict[TrangThaiThucThi, FrozenSet[TrangThaiThucThi]] = {
     # chay xong. Nhung buoc con dang bay duoc doi soat o nhip sau.
     T.RUNNING: frozenset({T.VERIFYING, T.REPLANNING, T.WAITING_AUTHORITY,
                           T.PAUSED, T.BLOCKED, T.CANCELLED, T.FAILED}),
-    T.VERIFYING: frozenset({T.DONE, T.REPLANNING, T.BLOCKED,
+    # KHONG CON `VERIFYING -> DONE`. V1.0: moi ket luan phai di qua mot
+    # trang thai NOI RO phep kiem da cho ra gi.
+    #
+    #   VERIFIED             da chay va DAT       -> duoc di DONE
+    #   FAILED_VERIFICATION  da chay va KHONG dat -> sua/lap lai
+    #   NEEDS_EVIDENCE       KHONG CO gi de chay  -> khong bao gio thanh DONE
+    #
+    # Gop ba thu do vao mot mui ten `VERIFYING -> DONE` la cach mot viec
+    # chua tung duoc kiem trong y het mot viec da kiem xong.
+    T.VERIFYING: frozenset({T.VERIFIED, T.FAILED_VERIFICATION,
+                            T.NEEDS_EVIDENCE, T.REPLANNING, T.BLOCKED,
                             T.WAITING_AUTHORITY, T.CANCELLED, T.FAILED}),
+    # CHI `VERIFIED` di duoc toi `DONE`. Day la cua duy nhat.
+    T.VERIFIED: frozenset({T.DONE, T.BLOCKED, T.CANCELLED, T.FAILED}),
+    T.FAILED_VERIFICATION: frozenset({T.REPLANNING, T.VERIFYING, T.BLOCKED,
+                                      T.WAITING_AUTHORITY, T.CANCELLED,
+                                      T.FAILED}),
+    # `NEEDS_EVIDENCE` KHONG co mui ten toi `DONE`, va do la toan bo y nghia
+    # cua no: thieu bang chung thi phai DI KIEM (VERIFYING) hoac lap lai ke
+    # hoach de sinh ra bang chung — khong duoc ket luan.
+    T.NEEDS_EVIDENCE: frozenset({T.VERIFYING, T.REPLANNING, T.BLOCKED,
+                                 T.WAITING_AUTHORITY, T.CANCELLED, T.FAILED}),
     T.REPLANNING: frozenset({T.PLANNED, T.READY, T.WAITING_AUTHORITY,
                              T.BLOCKED, T.CANCELLED, T.FAILED}),
     T.BLOCKED: frozenset({T.READY, T.WAITING_AUTHORITY, T.REPLANNING,

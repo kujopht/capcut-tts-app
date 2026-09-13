@@ -88,6 +88,54 @@ def van_ban_nguoi_viet(hd: Dict[str, Any]) -> str:
     return "\n".join(phan)
 
 
+class NangLucLoi(TypeError):
+    """Không xác định được năng lực việc đòi hỏi — HÌNH DẠNG hợp đồng lạ.
+
+    Ném ra thay vì trả rỗng, và đó là toàn bộ bài học của V0.9.3: bản cũ viết
+    `hd if isinstance(hd, dict) else {}`, nên khi chỗ gọi thật truyền một
+    `TaskContract` (đối tượng), vế `else` luôn đúng và cả rào an toàn thành
+    một hàm rỗng — **im lặng**, từ V0.7 tới 2026-09-13.
+
+    Một rào an toàn không xác định được đầu vào phải KÊU LÊN, không được đoán
+    "chắc là không cần gì".
+    """
+
+
+#: HỢP ĐỒNG KIỂU CHÍNH TẮC cho `nang_luc_tu_hop_dong` / `nang_luc_viec`.
+#:
+#: Chấp nhận ĐÚNG hai hình dạng, và không hình dạng nào khác:
+#:
+#:   1. `dict` — hợp đồng đã tuần tự hoá (thứ nằm trong sổ);
+#:   2. đối tượng có `.to_dict()` trả về `dict` — `TaskContract` của
+#:      `router_v4.contract`, tức thứ CHỖ GỌI THẬT (`_giao_khong_luoi`)
+#:      truyền vào.
+#:
+#: Bất kỳ thứ gì khác là `NangLucLoi`. Đừng nới danh sách này cho tiện: mỗi
+#: hình dạng thêm vào là một chỗ nữa để một phép `isinstance` đoán sai.
+HINH_DANG_HOP_LE = "dict | đối tượng có .to_dict() -> dict"
+
+
+def nang_luc_tu_hop_dong(hd: Any) -> FrozenSet[str]:
+    """Năng lực một việc đòi hỏi, từ hợp đồng ở BẤT KỲ hình dạng hợp lệ nào.
+
+    Đây là cửa DUY NHẤT chỗ gọi nên dùng. `nang_luc_viec` ở dưới chỉ nhận
+    `dict` và được giữ lại cho mã cũ/bài kiểm.
+    """
+    if isinstance(hd, dict):
+        return nang_luc_viec(hd)
+    lay = getattr(hd, "to_dict", None)
+    if callable(lay):
+        d = lay()
+        if isinstance(d, dict):
+            return nang_luc_viec(d)
+        raise NangLucLoi(
+            f"`to_dict()` của {type(hd).__name__} trả {type(d).__name__}, "
+            f"không phải dict. Hình dạng hợp lệ: {HINH_DANG_HOP_LE}")
+    raise NangLucLoi(
+        f"không đọc được năng lực từ {type(hd).__name__}. "
+        f"Hình dạng hợp lệ: {HINH_DANG_HOP_LE}")
+
+
 def nang_luc_viec(hd: Dict[str, Any]) -> FrozenSet[str]:
     """Năng lực mà MỘT việc đòi hỏi. Tất định, không LLM.
 

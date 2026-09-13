@@ -62,7 +62,11 @@ class TestLocKhungNhin(unittest.TestCase):
         # Đi theo ĐƯỜNG HỢP LỆ của máy trạng thái — `force` không mở được
         # bảng chuyển, và đó là bảng đang làm đúng việc của nó.
         duong = {
-            TT.DONE: (TT.PLANNED, TT.READY, TT.RUNNING, TT.VERIFYING, TT.DONE),
+            # V1.0 thêm `VERIFIED` giữa `VERIFYING` và `DONE`: cửa duy nhất
+            # vào `DONE` nay là "đã kiểm định và ĐẠT", không còn là "đang
+            # kiểm định". Giàn giáo đi theo đúng đường hợp lệ, không `force`.
+            TT.DONE: (TT.PLANNED, TT.READY, TT.RUNNING, TT.VERIFYING,
+                      TT.VERIFIED, TT.DONE),
             TT.RUNNING: (TT.PLANNED, TT.READY, TT.RUNNING),
             TT.BLOCKED: (TT.PLANNED, TT.READY, TT.BLOCKED),
             TT.WAITING_AUTHORITY: (TT.PLANNED, TT.READY,

@@ -196,18 +196,28 @@ def _can_luot(cc: ControlCenter, task_id: str, *,
     chứ chưa phải trạng thái cuối. Bài kiểm nào muốn thấy trạng thái cuối
     phải chạy tới khi hết lượt.
 
-    PHẢI kiểm cả ba điều CÙNG LÚC, không phải lần lượt: `FAILED` **và** đã
-    rời `in_flight` **và** đã cạn lượt. Giữa lúc `_chay` ghi `FAILED` và lúc
-    nó requeue có một khe hở mà việc TRÔNG như đã hỏng hẳn; bản đầu tiên của
-    hàm này rơi đúng vào đó rồi bỏ cuộc.
+    PHẢI kiểm cả ba điều CÙNG LÚC, không phải lần lượt: trạng thái NGHỈ
+    **và** đã rời `in_flight` **và** đã cạn lượt. Giữa lúc `_chay` ghi
+    `FAILED` và lúc nó requeue có một khe hở mà việc TRÔNG như đã hỏng hẳn;
+    bản đầu tiên của hàm này rơi đúng vào đó rồi bỏ cuộc.
+
+    TỪ V1.0, "HỎNG HẲN" CÓ HAI HÌNH DẠNG. Vòng sự cố sở hữu chính sách phục
+    hồi, và khi nó cạn bậc thang thì nó LEO THANG — việc nghỉ ở `BLOCKED`
+    ("cần người"), không phải `FAILED`. Chỉ chờ `FAILED` là chờ một trạng
+    thái không bao giờ tới nữa: bốn bài trong tệp này hết 60s rồi báo đỏ.
+
+    Điều bài kiểm THẬT SỰ cần vẫn y nguyên — *không còn gì tự chạy nữa* — và
+    nó được giữ nguyên vẹn: vẫn đòi `attempts >= MAX_ATTEMPTS`, nên một lần
+    thử lại vô hạn vẫn làm hàm này treo tới hết giờ đúng như trước.
     """
     het = time.time() + giay
     while time.time() < het:
         t = cc.store.task(task_id)
         with cc._khoa:
             bay = task_id in cc._dang_chay
-        if (t is not None and t.state is TaskState.FAILED and not bay
-                and t.attempts >= MAX_ATTEMPTS):
+        nghi = t is not None and t.state in (TaskState.FAILED,
+                                             TaskState.BLOCKED)
+        if nghi and not bay and t.attempts >= MAX_ATTEMPTS:
             return True
         cc.tick()
         time.sleep(0.1)
@@ -529,7 +539,8 @@ class TestVerticalSlice(unittest.TestCase):
             # Chay toi khi CAN LUOT THU: viec hong duoc thu lai co tran, nen
             # mot `tick()` chi cho ra `QUEUED` chu chua phai `FAILED`.
             self.assertTrue(_can_luot(cc, tid))
-            self.assertIs(cc.store.task(tid).state, TaskState.FAILED)
+            self.assertIn(cc.store.task(tid).state,
+                          (TaskState.FAILED, TaskState.BLOCKED))
             self.assertEqual(cc.store.locks("demo"), [],
                              "khoá phải được nhả sau MỌI lượt, kể cả lượt hỏng")
         finally:
@@ -670,15 +681,27 @@ class TestVerticalSlice(unittest.TestCase):
         try:
             cc.chat("demo", "fix web/admin")
             tid = cc.store.tasks("demo")[0].task_id
+            # Từ V1.0 chỗ nghỉ có thể là `BLOCKED` (vòng sự cố đã leo thang)
+            # chứ không chỉ `FAILED`. Thứ bài này canh — CÓ TRẦN, không bão
+            # thử lại — không đổi một ly: `attempts <= 3` vẫn là khẳng định
+            # chính, và nó vẫn đỏ nếu ai đó bỏ trần đi.
+            NGHI = (TaskState.FAILED, TaskState.BLOCKED)
             for _ in range(8):
                 cc.tick()
                 _xong(cc, tid, giay=10)
-                if cc.store.task(tid).state is TaskState.FAILED:
+                if cc.store.task(tid).state in NGHI:
                     break
             t = cc.store.task(tid)
-            self.assertIs(t.state, TaskState.FAILED)
+            self.assertIn(t.state, NGHI)
             self.assertLessEqual(t.attempts, 3,
                                  f"chạy {t.attempts} lượt — vượt trần")
+            if t.state is TaskState.BLOCKED:
+                # `BLOCKED` ở đây PHẢI là leo thang có hồ sơ, không phải một
+                # việc bị chặn vì lý do khác lẫn vào.
+                from scripts.control_center.v10.su_co_ben import SoSuCo
+                sc = SoSuCo(cc.store).hien_tai(tid)
+                self.assertIsNotNone(sc, "BLOCKED phải kèm hồ sơ sự cố")
+                self.assertEqual(sc.trang_thai, "DA_DONG")
         finally:
             cc.shutdown()
 

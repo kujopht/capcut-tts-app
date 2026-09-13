@@ -659,7 +659,23 @@ class BoDieuPhoi:
         # để nghe lại điều đã biết vừa tốn hạn mức vừa mở đường cho một
         # `ACCEPT` che mất một phép đo đã đỏ.
         if phan_bien is None and self._goi_phan_bien is not None:
-            nen, vi_sao = nen_goi_reviewer(kh, y, bc)
+            # AI VIẾT MÃ SẢN PHẨM — luật B5 của V1.0 cần biết. Lấy model của
+            # bước THỰC SỰ có `files_changed`: một bước chỉ-đọc chạy bằng
+            # Gemini không kích hoạt luật, còn một bước GHI thì có, dù nó
+            # nằm ở đâu trong kế hoạch.
+            model_ma, loai_ma = "", ""
+            for _k in kqb.values():
+                if _k is None or not getattr(_k, "files_changed", ()):
+                    continue
+                if _k.model:
+                    # "implementation", KHÔNG phải "implement": chuỗi này
+                    # phải nằm trong `vai_tro.VIEC_SUA_MA`, và lệch một chữ
+                    # là cả luật B5 thành lệnh rỗng mà không ai báo. Có bài
+                    # kiểm neo đúng điều đó.
+                    model_ma, loai_ma = _k.model, "implementation"
+                    break
+            nen, vi_sao = nen_goi_reviewer(kh, y, bc, model_da_lam=model_ma,
+                                           loai_viec=loai_ma)
             self.so.ghi_su_kien(
                 execution_id, "REVIEW_GATE", project_id=y.project_id,
                 detail=f"{'GỌI' if nen else 'BỎ QUA'} Reviewer: {vi_sao}"[:300],
@@ -708,9 +724,31 @@ class BoDieuPhoi:
             level=("INFO" if bc.dat else "WARNING"),
             detail=f"{bc.trang_thai.value}: {bc.ly_do}"[:400],
             meta=bc.to_dict())
+        # Chấm lại một lần thực thi ĐÃ KẾT THÚC là chuyện bình thường (báo
+        # cáo, nghiệm thu, đọc lại sổ). Nó KHÔNG được sinh ra một lượt chuyển
+        # trạng thái nào — `DONE` là ngõ cụt, và đúng như vậy.
+        da_xong = y.trang_thai.ket_thuc
         if bc.dat:
-            self._ket_thuc(y, TT.DONE, bc.ly_do)
+            # V1.0 — ĐI QUA `VERIFIED`, không nhảy thẳng `DONE`.
+            #
+            # Một bước nữa trông như thủ tục, nhưng nó là chỗ DUY NHẤT sổ ghi
+            # lại rằng phép kiểm đã CHẠY và đã ĐẠT. Không có nó, `DONE` không
+            # phân biệt được với `DONE` của một việc chưa từng được kiểm —
+            # đúng cái đã xảy ra ở RouterDogfood02.
+            if not da_xong:
+                self.so.doi_trang_thai(execution_id, TT.VERIFIED,
+                                       ly_do=bc.ly_do, pha="đã xác minh")
+                self._ket_thuc(y, TT.DONE, bc.ly_do)
             return bc
+        if da_xong:
+            return bc
+        if bc.trang_thai is TrangThaiXacMinh.THIEU_BANG_CHUNG:
+            # THIẾU BẰNG CHỨNG ≠ HỎNG. Nói đúng tên nó ra trước khi quyết.
+            self.so.doi_trang_thai(execution_id, TT.NEEDS_EVIDENCE,
+                                   ly_do=bc.ly_do, pha="thiếu bằng chứng")
+        else:
+            self.so.doi_trang_thai(execution_id, TT.FAILED_VERIFICATION,
+                                   ly_do=bc.ly_do, pha="kiểm định không đạt")
         ns = self._ngan_sach(execution_id, kh)
         cd = ap_tran(ChanDoan(
             LoaiHong.LOI_HIEN_THUC

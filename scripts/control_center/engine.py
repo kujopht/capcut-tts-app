@@ -52,6 +52,7 @@ from scripts.router_v4.scheduler import Demand, Scheduler
 
 from scripts.control_center import leader
 from scripts.control_center.bootstrap import co_moc_git, la_kho_git
+from scripts.control_center.nang_luc import NangLucLoi
 from scripts.control_center.execution import dieu_phoi as DP
 from scripts.control_center.execution import ghi_nho as EGN
 from scripts.control_center.execution import ke_hoach as EKH
@@ -3045,6 +3046,21 @@ class ControlCenter:
         except Exception as exc:                            # noqa: BLE001
             self.store.ghi_su_kien("EXEC_SCAN_ERROR", level="WARNING",
                                    detail=f"{type(exc).__name__}: {exc}"[:300])
+        # V1.0 — ĐÁNH THỨC việc CHỜ TÀI NGUYÊN đã tới mốc reset. Chạy TRƯỚC
+        # phép kiểm trần song song: một việc đang chờ hạn mức không chiếm khe
+        # nào, và nó phải kịp vào danh sách sẵn sàng của CHÍNH nhịp này —
+        # không thì mỗi lần đánh thức lại trễ thêm một nhịp.
+        #
+        # Thiếu vòng quét này thì `CHO_RESET` chỉ là một dòng chữ trong sổ và
+        # việc nằm đó vĩnh viễn: vẫn là treo, chỉ khác tên.
+        for p in self.projects():
+            try:
+                self._quet_cho_tai_nguyen(self.ctx(p.project_id))
+            except Exception as exc:                        # noqa: BLE001
+                self.store.ghi_su_kien(
+                    "TAI_NGUYEN_SCAN_ERROR", project_id=p.project_id,
+                    level="WARNING",
+                    detail=f"{type(exc).__name__}: {exc}"[:300])
         with self._khoa:
             đang = len([t for t in self._dang_chay.values() if t.is_alive()])
             self._dang_chay = {k: v for k, v in self._dang_chay.items()
@@ -3293,7 +3309,26 @@ class ControlCenter:
         # khong doi: chi nhan them `exclude`, va `decide()` tu roi ve khong
         # tranh khi khong con ai.
         tranh = tuple(self._runtime_anh_em_dang_chay(t))
-        cam, ly_do_cam = self._cam_runtime_theo_nang_luc(ctx, hd)
+        try:
+            cam, ly_do_cam = self._cam_runtime_theo_nang_luc(ctx, hd)
+        except NangLucLoi as exc:
+            # FAIL CLOSED. Không xác định được việc này đòi năng lực gì thì
+            # KHÔNG gửi nó đi — gửi đi là chạy với một rào an toàn đã tắt, và
+            # ta biết chính xác cái giá của điều đó (V0.9.3, rào chết im lặng
+            # từ V0.7).
+            self.store.ghi_su_kien(
+                "CAPABILITY_RESOLUTION_FAILED", project_id=t.project_id,
+                task_id=t.task_id, level="ERROR",
+                detail=f"{type(exc).__name__}: {exc}"[:300],
+                meta={"hinh_dang": type(hd).__name__})
+            lm.tra(t.project_id, t.task_id)
+            self.store.doi_trang_thai(
+                t.task_id, TaskState.BLOCKED,
+                reason=(f"không xác định được năng lực việc đòi hỏi "
+                        f"({exc}) — KHÔNG giao khi rào năng lực không chấm "
+                        f"được")[:400])
+            return {"task_id": t.task_id, "dispatched": False,
+                    "reason": "capability_resolution_failed"}
         da_tu_choi = self._cam_runtime_da_tu_choi(t.contract)
         if da_tu_choi:
             cam = tuple(sorted(set(cam) | set(da_tu_choi)))
@@ -3447,6 +3482,88 @@ class ControlCenter:
         self._fabric_cfg_cache = cfg if isinstance(cfg, dict) else {}
         return self._fabric_cfg_cache
 
+    def _kiem_du_an_sau_khi_ghi(self, ctx, task_id: str, hd, kq,
+                                moi: TaskState, ly_do: str
+                                ) -> Tuple[TaskState, str]:
+        """Chạy phép kiểm CỦA CHÍNH DỰ ÁN trước khi cho một việc GHI `DONE`.
+
+        Ba kết cục, và chúng phải phân biệt được trong sổ:
+
+            đạt            -> giữ `DONE`
+            không đạt      -> `FAILED` (có bằng chứng, sửa được)
+            không có gì chạy -> `NEEDS_EVIDENCE` — KHÔNG phải `DONE`
+
+        Việc CHỈ ĐỌC không đi qua đây: nó không sinh ra mã để kiểm, và bắt nó
+        chạy bộ test của dự án là tốn thời gian cho một câu trả lời không nói
+        gì về việc đó.
+
+        Router chạy các lệnh này, KHÔNG phải agent — cùng mô hình với
+        `probe_van_hanh`: Router làm phép đo rồi đính bằng chứng. Không quyền
+        nào của agent được nới.
+        """
+        try:
+            from scripts.control_center import kiem_du_an as KDA
+        except Exception:                                     # noqa: BLE001
+            return moi, ly_do
+
+        # Chỉ việc GHI, chỉ khi worker thật sự đổi tệp, và chỉ khi trong đó
+        # có MÃ NGUỒN/SẢN PHẨM.
+        #
+        # Một việc chỉ sửa `docs/*.md` cũng là việc GHI, nhưng bắt nó chạy cả
+        # bộ test của dự án là đòi một bằng chứng không nói gì về nó — và
+        # biến mọi việc tài liệu trên một kho không có test thành
+        # `NEEDS_EVIDENCE`. Chủ sở hữu nói rõ: cổng này dành cho *thay đổi mã
+        # nguồn/sản phẩm*.
+        pham_vi = tuple(getattr(hd, "allowed_scope", ()) or ())
+        doi = tuple((kq.envelope.changes if kq and kq.envelope else ()) or ())
+        if not pham_vi or not doi or not KDA.co_ma_nguon(doi):
+            return moi, ly_do
+
+        cay = getattr(kq, "worktree", "") or ""
+        if not cay or not Path(cay).is_dir():
+            return moi, ly_do
+
+        lenh_kh = []
+        try:
+            for c in (getattr(hd.verification, "commands", ()) or ()):
+                if isinstance(c, (list, tuple)):
+                    lenh_kh.append(tuple(str(x) for x in c))
+        except Exception:                                     # noqa: BLE001
+            pass
+
+        try:
+            bc = KDA.xac_minh(cay, lenh_ke_hoach=lenh_kh)
+        except Exception as exc:                              # noqa: BLE001
+            # Một lỗi Ở CHÍNH cổng kiểm không được âm thầm thành `DONE`.
+            self.store.ghi_su_kien(
+                "PROJECT_VERIFY_ERROR", project_id=ctx.project.project_id,
+                task_id=task_id, level="ERROR",
+                detail=f"{type(exc).__name__}: {exc}"[:300])
+            return TaskState.NEEDS_EVIDENCE, (
+                f"không chạy được phép kiểm của dự án: {exc}"[:400])
+
+        self.store.ghi_su_kien(
+            "PROJECT_VERIFIED", project_id=ctx.project.project_id,
+            task_id=task_id,
+            level=("INFO" if bc.dat else "WARNING"),
+            detail=bc.ly_do[:400], meta=bc.to_dict())
+
+        if bc.dat:
+            return moi, ly_do
+        if bc.thieu_bang_chung or bc.ha_tang_hong:
+            # HAI thứ khác nhau, cùng một kết luận đúng: ta KHÔNG CÓ phép đo.
+            #
+            # `thieu_bang_chung` = không có lệnh nào để chạy.
+            # `ha_tang_hong`     = có lệnh, nhưng CHÍNH LỆNH hỏng (không phân
+            #                      giải được, không thu được test nào).
+            #
+            # Cả hai đều KHÔNG phải "mã sản phẩm sai". Đánh `FAILED` ở đây là
+            # đổ lỗi cho worker về một thứ nó làm đúng — đã xảy ra thật
+            # (2026-09-13, `node --test tests/` chết MODULE_NOT_FOUND trong
+            # khi worker đã sửa đúng, chạy lại bằng lệnh đúng: 4/4 đạt).
+            return TaskState.NEEDS_EVIDENCE, bc.ly_do[:400]
+        return TaskState.FAILED, bc.ly_do[:400]
+
     def _cam_runtime_theo_nang_luc(self, ctx, hd) -> Tuple[Tuple[str, ...], str]:
         """`(runtime bị CẤM, lý do)` theo NĂNG LỰC việc đòi hỏi.
 
@@ -3479,11 +3596,13 @@ class ControlCenter:
             #
             # Mot phep phong thu bien mot rao an toan thanh mot ham rong la
             # kieu hong te nhat: moi thu trong nhu binh thuong.
-            d = hd if isinstance(hd, dict) else None
-            if d is None:
-                lay = getattr(hd, "to_dict", None)
-                d = lay() if callable(lay) else {}
-            can = NL.nang_luc_viec(d if isinstance(d, dict) else {})
+            # V1.0 — MỘT CỬA DUY NHẤT, và nó KÊU LÊN khi không đọc được.
+            #
+            # `nang_luc_tu_hop_dong` nhận đúng hai hình dạng (`dict`, hoặc đối
+            # tượng có `.to_dict()`) và ném `NangLucLoi` cho mọi thứ khác.
+            # Bản V0.9.3 ở đây tự xoay xở rồi rơi về `{}` — tức là vẫn còn
+            # một đường trả rỗng âm thầm, đúng cái vừa phải sửa.
+            can = NL.nang_luc_tu_hop_dong(hd)
             if not can:
                 return (), ""
             fab = getattr(getattr(ctx, "sessions", None), "fabric", None)
@@ -3493,7 +3612,13 @@ class ControlCenter:
             if not cam:
                 return (), ""
             return cam, NL.ly_do_khong_hop(", ".join(cam), can)
-        except (ImportError, AttributeError, TypeError):
+        except NangLucLoi:
+            # KHÔNG nuốt. `NangLucLoi` là `TypeError`, nên khối `except` rộng
+            # ở dưới sẽ bắt được nó và trả `()` — tức là dựng lại đúng cái
+            # hỏng im lặng mà V0.9.3 vừa sửa. Ném lên để chỗ giao việc CHẶN
+            # việc lại thay vì gửi đi với một rào đã tắt.
+            raise
+        except (ImportError, AttributeError):
             return (), ""
 
     def _cam_runtime_da_tu_choi(self, hd) -> Tuple[str, ...]:
@@ -3564,12 +3689,98 @@ class ControlCenter:
             return ()
         return tuple(sorted(ra))
 
+    def _con_da_ket_thuc(self, c) -> bool:
+        """Con này còn gì tự chạy nữa không? (xem `_tong_hop_toa`)
+
+        `BLOCKED` chỉ tính là KẾT THÚC khi hồ sơ sự cố bền nói rằng vòng phục
+        hồi đã leo thang và ĐÓNG. `BLOCKED` vì chờ thẩm quyền/tài nguyên thì
+        KHÔNG — việc ấy còn chạy tiếp sau khi người mở rào, và gộp sớm là vứt
+        đi một kết quả sắp có.
+        """
+        if c.state is TaskState.DONE:
+            return True
+        if c.state not in (TaskState.FAILED, TaskState.BLOCKED):
+            return False
+        # LUỒNG CỦA CHÍNH CON ẤY CÒN BAY = CHƯA kết thúc, dù sổ đã ghi
+        # `FAILED`.
+        #
+        # `_chay` ghi `FAILED` rồi MỚI gọi `_dieu_phoi_su_co`, và bộ điều phối
+        # mới là nơi mở hồ sơ sự cố. Giữa hai việc đó có một khe hở mà việc
+        # TRÔNG như đã hỏng hẳn: chưa có hồ sơ nào để đọc, nên nhánh
+        # `sc is None` ở dưới kết luận "nghỉ rồi".
+        #
+        # Khe hở ấy đo được THẬT trong hồi quy đầy đủ (không phải khi chạy
+        # riêng — 15/15 tất định lúc chạy một mình): anh em gộp trúng khe,
+        # rồi bộ điều phối xếp con hỏng lại hàng đợi, và bài kiểm đọc ra
+        # `QUEUED` sau khi cha đã chốt xong. `_can_luot` trong bộ kiểm lát
+        # cắt đã canh đúng khe này từ V0.9 bằng cùng một phép kiểm.
+        #
+        # TRỪ CHÍNH CON ĐANG GỌI. `_tong_hop_toa` chạy TRONG luồng của con
+        # vừa xong, nên con ấy LUÔN còn trong `_dang_chay` ở đúng lúc này —
+        # không trừ nó ra thì không lần gộp nào xảy ra nữa và cha treo với
+        # MỌI lần toả, không riêng lần có con hỏng. (Đã vấp: bộ kiểm `toa`
+        # đi từ 2s sang hết giờ ở cả 10 lượt.)
+        #
+        # Nhận ra "chính nó" bằng ĐỐI TƯỢNG LUỒNG, không bằng một tham số
+        # truyền tay: `_dang_chay` vốn đã giữ sẵn luồng của từng việc, nên
+        # phép so sánh này đúng ở MỌI chỗ gọi — kể cả lưới an toàn trong
+        # `tick()` — và không phải sửa chữ ký.
+        #
+        # Chữ ký LÀ thứ phải giữ: bộ kiểm khoá đọc/ghi V0.6.1 thay
+        # `_tong_hop_toa` bằng một bản do thám hai tham số để canh "khoá con
+        # đã nhả trước khi gộp chưa". Thêm một tham số vào đây làm chỗ gọi
+        # ném `TypeError`, `_chay` nuốt mất, và việc cha KHÔNG BAO GIỜ được
+        # gộp — bài ấy hết 40s rồi đỏ. Một lưới an toàn của bộ kiểm bị chính
+        # bản sửa này làm câm.
+        with self._khoa:
+            luong = self._dang_chay.get(c.task_id)
+        if luong is not None and luong is not threading.current_thread():
+            return False
+        try:
+            from scripts.control_center.v10.su_co import HanhDong
+            from scripts.control_center.v10.su_co_ben import SoSuCo
+        except Exception:                                     # noqa: BLE001
+            return c.state is TaskState.FAILED
+        sc = SoSuCo(self.store).hien_tai(c.task_id)
+        if sc is None:
+            # Khong co su co nao: `FAILED` la cho nghi that su.
+            return c.state is TaskState.FAILED
+        if sc.trang_thai != "DA_DONG":
+            # SU CO CON MO -> vong phuc hoi VAN dang so huu viec nay.
+            #
+            # `FAILED` khong con la trang thai nghi tu khi vong su co duoc cam
+            # vao: no la mot nhip TRUNG GIAN tren duong toi "xep lai" hoac
+            # "leo thang". Anh em gop ngay luc do se chot mot ket qua ma
+            # chinh he van dang sua — do that: cung mot bai kiem cho ra
+            # (3 xong, 1 hong) hoac (3 xong, 0 hong) tuy nhip may.
+            return False
+        return (c.state is TaskState.FAILED or
+                sc.chien_luoc in (HanhDong.HOI_DONG.value,
+                                  HanhDong.LEO_THANG_CHU_SO_HUU.value))
+
     def _tong_hop_toa(self, ctx: ProjectContext, cha_id: str) -> Optional[Dict]:
         """Mọi con đã kết thúc -> gộp vào cha, khử trùng, giữ nguồn gốc.
 
-        Con BLOCKED (cần người) hay còn chạy/chờ thì cha CHỜ — không gộp nửa
-        chừng. Hai con xong cùng lúc gọi vào đây cùng lúc: khoá + kiểm lại
-        trạng thái cha, chỉ một lượt gộp.
+        Con còn chạy/chờ thì cha CHỜ — không gộp nửa chừng. Hai con xong cùng
+        lúc gọi vào đây cùng lúc: khoá + kiểm lại trạng thái cha, chỉ một
+        lượt gộp.
+
+        `BLOCKED` MANG HAI NGHĨA, và chỉ một nghĩa là kết thúc:
+
+        * *chờ thẩm quyền / chờ tài nguyên* — việc CHƯA chạy xong, người mở
+          rào là nó chạy tiếp. Cha phải CHỜ, đúng như thiết kế ban đầu.
+        * *phục hồi tự chủ đã cạn* (V1.0) — vòng sự cố đã thử hết bậc thang
+          và leo thang. Với riêng con ấy thì KHÔNG còn gì tự chạy nữa.
+
+        Nghĩa thứ hai trước V1.0 không tồn tại: một con hỏng thì nằm ở
+        `FAILED`. Từ khi leo thang tới được trạng thái việc, nó đi tiếp sang
+        `BLOCKED` — và nếu vẫn coi đó là "chờ", cha treo VĨNH VIỄN. Đo được
+        thật: `test_mot_con_hong_khong_huy_anh_em` từ 2.7s thành 61s rồi đỏ.
+        Với một hệ chạy qua đêm không người trực, treo cũng tệ ngang lặp vô
+        hạn — mà cả tầng này sinh ra để chặn lặp vô hạn.
+
+        Phân biệt hai nghĩa bằng HỒ SƠ SỰ CỐ BỀN (một sự thật có cấu trúc),
+        KHÔNG bằng cách dò chữ trong `blocked_reason`.
         """
         from scripts.control_center import toa as TOA
         with self._khoa_toa:
@@ -3581,7 +3792,7 @@ class ControlCenter:
                 return None
             con = [self.store.task(cid) for cid in (toa.get("con") or [])]
             con = [c for c in con if c is not None]
-            if not con or any(c.state not in (TaskState.DONE, TaskState.FAILED) for c in con):
+            if not con or any(not self._con_da_ket_thuc(c) for c in con):
                 return None
             ds = []
             for c in con:
@@ -4101,6 +4312,357 @@ class ControlCenter:
                   "cam": hd["_cam_runtime"]})
         return True
 
+    def _so_tai_nguyen(self, ctx: ProjectContext):
+        """Sổ bể hạn mức, dựng TỪ fabric thật — không bịa hình dạng bể.
+
+        Mỗi runtime trong fabric là một khe chạy được; ta khai đúng những gì
+        fabric nói và để `suc_khoe=UNKNOWN` cho phần không đo được. Đây là
+        luật V0.6.1/V0.8 chép nguyên: đo một tài khoản rồi áp cho cả tám là
+        biến một phép đo thành bảy con số bịa.
+        """
+        from scripts.control_center.v10.han_muc import (BeQuota, SoTaiNguyen,
+                                                        SucKhoe)
+        so = SoTaiNguyen()
+        # `Fabric.runtimes` là DICT (`runtime_id -> WorkerRuntime`) — gọi nó
+        # như hàm ném `TypeError`, và một `except` quanh đây sẽ nuốt mất rồi
+        # cho ra một bể RỖNG, tức "hết đường" cho mọi lần. Bản đầu của hàm
+        # này viết đúng như vậy.
+        rts = list(getattr(ctx.fabric, "runtimes", {}).values())
+        for r in rts:
+            if not getattr(r, "dispatchable", True):
+                # `CLAUDE_LEAD` có mặt trong fabric để `explain()` nói được vì
+                # sao nó không được chọn — nó KHÔNG phải một khe chạy được.
+                continue
+            # HỌ MODEL suy từ `supported_models`, KHÔNG từ `provider`:
+            # Antigravity phục vụ cả gemini lẫn claude lẫn gpt, nên lấy
+            # provider làm họ là áp một cấu trúc tưởng tượng lên bể — đúng
+            # thứ `han_muc` cấm ở luật số hai.
+            ho = []
+            for m in (getattr(r, "supported_models", ()) or ()):
+                s = str(m).lower()
+                for ten in ("gemini", "claude", "gpt", "codex"):
+                    if ten in s and ten not in ho:
+                        ho.append(ten)
+            sk = SucKhoe.UNKNOWN
+            if getattr(r, "drained", False):
+                sk = SucKhoe.UNAVAILABLE
+            elif str(getattr(r, "needs_provisioning", "") or ""):
+                sk = SucKhoe.AUTH_REQUIRED
+            elif float(getattr(r, "cooldown_until", 0.0) or 0.0) > time.time():
+                sk = SucKhoe.DEGRADED
+            so.khai(BeQuota(
+                ten=str(getattr(r, "runtime_id", "") or ""),
+                account_id=str(getattr(r, "account_id", "") or ""),
+                provider=str(getattr(r, "provider", "") or ""),
+                ho_model=tuple(ho),
+                hong_gan_day=int(getattr(r, "consecutive_failures", 0) or 0),
+                suc_khoe=sk))
+        return so
+
+    def _cho_tai_nguyen(self, ctx: ProjectContext, t, sc, so, bus, qd, *,
+                        bang_chung_them: str = "") -> str:
+        """CHỜ TÀI NGUYÊN — đổi chỗ, hẹn giờ, hay gọi người.
+
+        Ba kết cục, và ranh giới giữa chúng là ranh giới THẨM QUYỀN:
+
+            DOI_CHO    còn đường hợp lệ  -> xếp lại NGAY, không hỏi ai
+            CHO_RESET  hết đường, có mốc -> giữ việc, hẹn giờ
+            LEO_THANG  hết đường, không mốc / phải mua / phải hạ chuẩn
+                       -> `BLOCKED` kèm bằng chứng
+
+        Không lần nào trong ba lần ấy được mua credit hay bật overage.
+        """
+        from scripts.control_center.v10.han_muc import (SucKhoe,
+                                                        doc_tin_hieu_quota)
+        from scripts.control_center.v10.su_kien import LoaiSuKien, SuKienDoi
+        from scripts.control_center.v10.tai_nguyen import (HanhDongTaiNguyen,
+                                                           YeuCauVai,
+                                                           quyet_dinh)
+
+        van = f"{bang_chung_them}\n{qd.ly_do}"
+        be_ten = sc.cho_chay_truoc.split("/")[0] if sc.cho_chay_truoc else ""
+        stn = self._so_tai_nguyen(ctx)
+        be_hong = stn.lay(be_ten)
+        # Ghi tín hiệu CHỈ cho bể đã nêu tên. `doc_tin_hieu_quota` chỉ đọc
+        # thứ CÓ trong văn bản — không đo được mốc reset thì nó để `None`, và
+        # `None` phải đi tới cuối ở nguyên `None`.
+        if be_hong is not None:
+            stn.ghi_nhan_tin_hieu(be_ten, van)
+        else:
+            sk, khi = doc_tin_hieu_quota(van)
+            del sk, khi
+
+        qdt = quyet_dinh(be_hong, stn.tat_ca(),
+                         yeu_cau=YeuCauVai(mo_ta=t.title or ""),
+                         da_cho=sc.dem_cho_tai_nguyen)
+
+        sc.be_tai_nguyen = be_ten
+        sc.provider = (be_hong.provider if be_hong is not None else "")
+        sc.account_id = (be_hong.account_id if be_hong is not None else "")
+        sc.ly_do_tai_nguyen = (van or "").strip()[:300]
+        sc.reset_luc = (be_hong.reset_luc if be_hong is not None else None)
+        sc.ung_vien_da_xet = qdt.da_xet
+        sc.thu_lai_luc = qdt.cho_toi
+
+        self.store.ghi_su_kien(
+            "INCIDENT_WAIT_QUOTA", project_id=t.project_id,
+            task_id=t.task_id, level="WARNING",
+            detail=f"{qdt.hanh_dong.value}: {qdt.ly_do}"[:300],
+            meta={**qd.to_dict(), "tai_nguyen": qdt.to_dict()})
+
+        if qdt.hanh_dong is HanhDongTaiNguyen.DOI_CHO:
+            # Còn đường: KHÔNG đánh thức ai. Xếp lại để bộ lập lịch chọn chỗ
+            # khác — cùng cơ chế `reassign`, không phải một đường thứ hai.
+            bus.phat(SuKienDoi(
+                LoaiSuKien.REPAIR, t.project_id, "router",
+                f"DOI_CHO[{qdt.be_chon}]: {qdt.ly_do}", task_id=t.task_id,
+                execution_id=sc.execution_id))
+            so.ghi(sc, chi_tiet=f"CHO_TAI_NGUYEN -> DOI_CHO: {qdt.ly_do}")
+            self._nhan_cho_tai_nguyen(t, f"đổi chỗ: {qdt.ly_do}")
+            self._danh_thuc_tai_nguyen(t.task_id, ly_do=qdt.ly_do)
+            return "DOI_CHO"
+
+        if qdt.hanh_dong is HanhDongTaiNguyen.CHO_RESET:
+            sc.dem_cho_tai_nguyen += 1
+            sc.thu_lai_luc = qdt.cho_toi
+            bus.phat(SuKienDoi(
+                LoaiSuKien.INCIDENT, t.project_id, "router",
+                f"CHO_RESET: {qdt.ly_do}", task_id=t.task_id,
+                execution_id=sc.execution_id))
+            so.ghi(sc, chi_tiet=f"CHO_TAI_NGUYEN -> CHO_RESET: {qdt.ly_do}")
+            self._nhan_cho_tai_nguyen(t, qdt.ly_do)
+            return "CHO_RESET"
+
+        # LEO_THANG — hết đường VÀ không mốc, hoặc phải mua/hạ chuẩn.
+        bus.phat(SuKienDoi(
+            LoaiSuKien.ESCALATION, t.project_id, "router",
+            f"TAI_NGUYEN: {qdt.ly_do}", task_id=t.task_id,
+            execution_id=sc.execution_id,
+            bang_chung=tuple(sc.bang_chung)[-4:]))
+        so.dong(sc, ly_do=f"TAI_NGUYEN LEO_THANG: {qdt.ly_do}")
+        try:
+            self.store.doi_trang_thai(
+                t.task_id, TaskState.BLOCKED,
+                reason=f"chờ tài nguyên đã cạn đường: {qdt.ly_do}"[:400])
+        except Exception as e:                                # noqa: BLE001
+            self.store.ghi_su_kien(
+                "ESCALATION_KHONG_DAT", project_id=t.project_id,
+                task_id=t.task_id, level="ERROR",
+                detail=f"leo thang TAI_NGUYEN không đặt được BLOCKED: "
+                       f"{type(e).__name__}: {e}"[:400],
+                meta={"hanh_dong": "TAI_NGUYEN_LEO_THANG"})
+        return "LEO_THANG"
+
+    def _nhan_cho_tai_nguyen(self, t, ly_do: str) -> None:
+        """Đưa việc sang `WAITING_RESOURCE` — KHÔNG yên lặng nếu hỏng."""
+        try:
+            self.store.doi_trang_thai(
+                t.task_id, TaskState.WAITING_RESOURCE,
+                reason=f"chờ tài nguyên: {ly_do}"[:400])
+        except Exception as e:                                # noqa: BLE001
+            self.store.ghi_su_kien(
+                "CHO_TAI_NGUYEN_KHONG_DAT", project_id=t.project_id,
+                task_id=t.task_id, level="ERROR",
+                detail=f"{type(e).__name__}: {e}"[:300])
+
+    def _danh_thuc_tai_nguyen(self, task_id: str, *, ly_do: str = "") -> bool:
+        """`WAITING_RESOURCE` -> `QUEUED`: CHÍNH việc này chạy tiếp.
+
+        Không đẻ việc mới. Mục tiêu gốc, ý định thực thi, hợp đồng — tất cả
+        vẫn thuộc về việc này; hạn mức đổi không phải lý do để tạo một việc
+        khác cho người dùng.
+        """
+        t = self.store.task(task_id)
+        if t is None or t.state is not TaskState.WAITING_RESOURCE:
+            return False
+        try:
+            self.store.doi_trang_thai(
+                task_id, TaskState.QUEUED,
+                reason=f"tài nguyên đã sẵn sàng: {ly_do}"[:400])
+        except Exception:                                     # noqa: BLE001
+            return False
+        self.store.ghi_su_kien(
+            "TAI_NGUYEN_SAN_SANG", project_id=t.project_id, task_id=task_id,
+            level="INFO", detail=(ly_do or "tài nguyên đã sẵn sàng")[:300])
+        return True
+
+    def _quet_cho_tai_nguyen(self, ctx: ProjectContext) -> int:
+        """Mỗi nhịp: việc nào tới giờ thì đánh thức. Trả số việc đã đánh thức.
+
+        Đây là nửa còn lại của `CHO_RESET` — thiếu nó thì "hẹn giờ" chỉ là
+        một dòng chữ trong sổ và việc nằm đó vĩnh viễn, tức vẫn là treo, chỉ
+        khác tên.
+        """
+        try:
+            from scripts.control_center.v10.su_co_ben import SoSuCo
+        except Exception:                                     # noqa: BLE001
+            return 0
+        n = 0
+        bay_gio = time.time()
+        for t in self.store.tasks(ctx.project.project_id,
+                                  states=(TaskState.WAITING_RESOURCE,)):
+            sc = SoSuCo(self.store).hien_tai(t.task_id)
+            if sc is None:
+                continue
+            khi = sc.thu_lai_luc
+            if khi is None or khi > bay_gio:
+                # `None` = chưa hẹn được; KHÔNG coi là "tới giờ". Đánh thức
+                # một việc không có mốc là thử lại mù có lịch.
+                continue
+            if self._danh_thuc_tai_nguyen(
+                    t.task_id, ly_do=f"tới mốc reset của {sc.be_tai_nguyen}"):
+                n += 1
+        return n
+
+    def _dieu_phoi_su_co(self, ctx: ProjectContext, task_id: str, pb,
+                         session_id: str, *, placement_key: str = "",
+                         trang_thai=None,
+                         bang_chung_them: str = "") -> Optional[str]:
+        """CHỦ SỞ HỮU DUY NHẤT của chính sách phục hồi — V1.0.
+
+        Một lần hỏng đi qua đây, không đi thẳng vào `_thu_lai_neu_dang` nữa:
+
+            hỏng -> SỰ CỐ (bền) -> phân loại -> chọn chiến lược -> nguyên liệu
+
+        Nguyên liệu hiện có, và mỗi cái là một thứ Router VỐN đã làm được:
+
+            SUA_TAI_CHO / DOI_CHO_CHAY / LAP_LAI_KE_HOACH
+                -> `_thu_lai_neu_dang` (xếp lại, đổi chỗ chạy, có trần)
+            SUA_MOI_TRUONG / SUA_HA_TANG_KIEM
+                -> cũng xếp lại, NHƯNG ghi rõ chỗ cần sửa là môi trường /
+                   lệnh kiểm, không phải mã sản phẩm
+            CHO_QUOTA
+                -> KHÔNG xếp lại ngay; hết hạn mức thì chờ, không mua thêm
+            HOI_DONG / LEO_THANG_CHU_SO_HUU
+                -> `BLOCKED` kèm bằng chứng, và CHỈ ở đây người mới bị gọi
+
+        Trả về tên hành động đã chọn (để bài kiểm đọc được), hoặc `None` khi
+        tầng sự cố không dùng được — lúc đó rơi về nguyên liệu cũ thay vì
+        làm chết một lượt chạy.
+        """
+        try:
+            from scripts.control_center.v10.su_co import HanhDong
+            from scripts.control_center.v10.su_co_ben import SoSuCo
+            from scripts.control_center.v10.su_kien import (BusSuKien,
+                                                            LoaiSuKien,
+                                                            SuKienDoi)
+        except Exception:                                     # noqa: BLE001
+            self._thu_lai_neu_dang(ctx, task_id, pb, session_id,
+                                   placement_key=placement_key)
+            return None
+
+        t = self.store.task(task_id)
+        if t is None:
+            return None
+        so = SoSuCo(self.store)
+        bus = BusSuKien(self.store)
+        sc = so.mo_hoac_lay(project_id=t.project_id, task_id=task_id,
+                            muc_tieu=t.objective or t.title)
+        sc.cho_chay_truoc = placement_key or (pb.worker or "")
+
+        # BẰNG CHỨNG trước, phân loại sau. Đuôi đầu ra của lệnh kiểm là thứ
+        # phân biệt "mã sai" với "lệnh kiểm sai" — xem `kiem_du_an`.
+        # `bang_chung_them` LÀ MẢNH QUAN TRỌNG NHẤT, và thiếu nó thì cả bộ
+        # phân loại mù.
+        #
+        # Đo được trên đường thật (2026-09-13): lượt đầu cắm dây chỉ đưa vào
+        # `pb.summary`/`failure_reason`/`risks`/`findings` — nhưng khi việc
+        # hỏng vì CỔNG KIỂM ĐỊNH DỰ ÁN, câu giải thích ("phép kiểm của dự án
+        # KHÔNG đạt: … rc=1", kèm đuôi đầu ra) nằm ở `ly_do` của chỗ gọi, chứ
+        # không nằm trong phong bì của worker. Kết quả: `loai=UNKNOWN` cho
+        # một lần hỏng mà ta biết chính xác nguyên nhân.
+        manh = [bang_chung_them or "", pb.summary or "",
+                pb.failure_reason or ""]
+        manh += [str(x) for x in (pb.risks or [])[:3]]
+        manh += [str(x) for x in (pb.findings or [])[:3]]
+        if getattr(t, "blocked_reason", ""):
+            manh.append(str(t.blocked_reason))
+        van = "\n".join(x for x in manh if x)
+
+        v = so.vong(sc)
+        # VÂN TAY lấy từ bằng chứng ROUTER TỰ TÍNH, không từ văn xuôi của
+        # model. `van` (đủ dài để phân loại khớp được mẫu) chứa `pb.summary` —
+        # model viết mỗi lượt một khác, nên cùng một lần hỏng ra ba chữ ký và
+        # phép đếm lặp thành mã chết. Xem `VongSuCo.xet`.
+        qd = v.xet(van, failure_reason=pb.failure_reason or "",
+                   van_ban_chu_ky=bang_chung_them or "")
+        so.cap_nhat_tu_vong(sc, v, qd)
+        if pb.raw_log_ref:
+            sc.bang_chung = tuple(list(sc.bang_chung)[-8:]
+                                  + [f"log:{pb.raw_log_ref}"])
+        # TRẠNG THÁI VÀO là BẰNG CHỨNG, không phải một bộ phân loại thứ hai.
+        #
+        # `FAILED` = có phép đo và phép đo nói sai. `NEEDS_EVIDENCE` = KHÔNG
+        # có phép đo. Người đọc sổ cần phân biệt được hai thứ đó, nên nó được
+        # GHI. Nhưng nó KHÔNG được phép suy ra `loai`: nguồn của `loai` là văn
+        # bản hỏng, và dựng một đường suy luận thứ hai cho cùng một sự thật
+        # đúng là chế độ hỏng đã phải sửa ba lần trong bản này (hai nơi giữ
+        # một sự thật rồi bất đồng). Muốn `loai` đúng thì sửa ở NGUỒN — đó là
+        # việc mã máy `KIEM_DU_AN_*` làm.
+        tt_vao = getattr(trang_thai, "value", None) or str(trang_thai or "")
+        so.ghi(sc, chi_tiet=f"[{tt_vao}] {qd.loai.value} -> "
+                            f"{qd.hanh_dong.value}: {qd.ly_do}")
+        bus.phat(SuKienDoi(
+            LoaiSuKien.INCIDENT, t.project_id, sc.cho_chay_truoc or "router",
+            f"{qd.loai.value}: {qd.ly_do}", task_id=task_id,
+            execution_id=sc.execution_id,
+            bang_chung=tuple(sc.bang_chung)[-4:]))
+
+        hd = qd.hanh_dong
+        XEP_LAI = (HanhDong.SUA_TAI_CHO, HanhDong.DOI_CHO_CHAY,
+                   HanhDong.LAP_LAI_KE_HOACH, HanhDong.SUA_MOI_TRUONG,
+                   HanhDong.SUA_HA_TANG_KIEM)
+        if hd in XEP_LAI:
+            bus.phat(SuKienDoi(
+                LoaiSuKien.REPAIR, t.project_id, "router",
+                f"{hd.value}: {qd.ly_do}", task_id=task_id,
+                execution_id=sc.execution_id))
+            self._thu_lai_neu_dang(ctx, task_id, pb, session_id,
+                                   placement_key=placement_key)
+            return hd.value
+
+        if hd is HanhDong.CHO_QUOTA:
+            # HẾT HẠN MỨC KHÔNG PHẢI MỘT LẦN HỎNG, và cũng không phải một lần
+            # cần người. Bản đầu chỉ ghi một dòng sự kiện rồi bỏ mặc việc nằm
+            # ở `FAILED` — đo được trên đường thật (2026-09-13): sổ ghi đúng
+            # "CHO_QUOTA, không mua thêm credit", mà bảng điều khiển đọc
+            # "hỏng" trong khi sự thật là "đang chờ hạn mức".
+            return self._cho_tai_nguyen(ctx, t, sc, so, bus, qd,
+                                        bang_chung_them=bang_chung_them)
+
+        # HOI_DONG / LEO_THANG — CHỈ ở đây người dùng mới bị gọi.
+        bus.phat(SuKienDoi(
+            LoaiSuKien.ESCALATION, t.project_id, "router",
+            f"{hd.value}: {qd.ly_do}", task_id=task_id,
+            execution_id=sc.execution_id,
+            bang_chung=tuple(sc.bang_chung)[-4:]))
+        so.dong(sc, ly_do=f"{hd.value}: {qd.ly_do}")
+        # LEO THANG KHÔNG ĐƯỢC PHÉP THẤT BẠI YÊN LẶNG.
+        #
+        # Bản đầu nuốt mọi ngoại lệ ở đây, và `FAILED -> BLOCKED` lúc đó chưa
+        # có trong bảng chuyển (xem `model.py`). Kết quả đo được trên đường
+        # thật (2026-09-13): sổ ghi đủ `ESCALATION HOI_DONG`, sự cố đóng đúng,
+        # mà việc vẫn đọc `FAILED` — leo thang không bao giờ tới nơi.
+        #
+        # Đây đúng hình dạng đã gặp nhiều lần trong bản này: một `except`
+        # phòng thủ biến một cơ chế an toàn thành một lệnh rỗng. Bảng chuyển
+        # nay có mũi tên ấy; và nếu nó lại bị từ chối vì lý do khác, lần này
+        # sổ sẽ NÓI RA thay vì im lặng.
+        try:
+            self.store.doi_trang_thai(
+                task_id, TaskState.BLOCKED,
+                reason=(f"phục hồi tự chủ đã cạn ({qd.loai.value}, "
+                        f"chữ ký {qd.chu_ky}): {qd.ly_do}")[:400])
+        except Exception as e:                                # noqa: BLE001
+            self.store.ghi_su_kien(
+                "ESCALATION_KHONG_DAT", project_id=t.project_id,
+                task_id=task_id, level="ERROR",
+                detail=(f"leo thang {hd.value} KHÔNG đặt được BLOCKED: "
+                        f"{type(e).__name__}: {e}")[:400],
+                meta={"hanh_dong": hd.value, "loai": qd.loai.value,
+                      "chu_ky": qd.chu_ky})
+        return hd.value
+
     def _thu_lai_neu_dang(self, ctx: ProjectContext, task_id: str, pb,
                           session_id: str, placement_key: str = "") -> None:
         """Thử lại một việc hỏng — CÓ TRẦN, và đổi chỗ chạy.
@@ -4408,6 +4970,22 @@ class ControlCenter:
             if pb.requires_decision:
                 ly_do = (pb.decision_request or ly_do or
                          "agent yêu cầu một quyết định")
+
+            # V1.0 — CỔNG KIỂM ĐỊNH CỦA CHÍNH DỰ ÁN.
+            #
+            # `DONE` phải nghĩa là mục tiêu gốc CÓ BẰNG CHỨNG KHÁCH QUAN. Tới
+            # đây `moi` mới chỉ dựa trên lời khai của worker cộng các cổng
+            # HÌNH DẠNG của V4 (shape/diff/scope/security) — không cổng nào
+            # trong đó chạy một dòng mã nào của dự án.
+            #
+            # Đo được (RouterDogfood02, 2026-09-13): một việc có tiêu chí
+            # "viết test và verify" đạt `DONE`, mà bộ kiểm của chính dự án
+            # chưa từng chạy; khi chạy thì nó đỏ 3/5. Cổng `tests` của V4
+            # xanh với "0 lệnh test xanh" vì không ai đưa cho nó lệnh nào.
+            if moi is TaskState.DONE:
+                moi, ly_do = self._kiem_du_an_sau_khi_ghi(
+                    ctx, task_id, hd, kq, moi, ly_do)
+
             self.store.doi_trang_thai(task_id, moi, reason=ly_do[:600],
                                       session_id=session_id)
             if moi is TaskState.REVIEW:
@@ -4444,9 +5022,17 @@ class ControlCenter:
             # `tra()` idempotent; `finally` chi nha lai neu chua nha o day.
             lm.tra(ctx.project.project_id, task_id)
             da_nha_khoa = True
-            if moi is TaskState.FAILED:
-                self._thu_lai_neu_dang(ctx, task_id, pb, session_id,
-                                       placement_key=p.key)
+            if moi in (TaskState.FAILED, TaskState.NEEDS_EVIDENCE):
+                # V1.0 — `VongSuCo` LÀ CHỦ SỞ HỮU CHÍNH SÁCH PHỤC HỒI.
+                #
+                # `_thu_lai_neu_dang` KHÔNG còn tự quyết nữa; nó tụt xuống
+                # thành một NGUYÊN LIỆU ("thử lại ở chỗ khác") mà bộ điều
+                # phối sự cố gọi khi nó chọn như vậy. Một chính sách phục hồi
+                # có hai chủ là cách hai chỗ đếm hai ngân sách khác nhau cho
+                # cùng một việc.
+                self._dieu_phoi_su_co(ctx, task_id, pb, session_id,
+                                      placement_key=p.key, trang_thai=moi,
+                                      bang_chung_them=ly_do)
             # KET QUA PHAI VE TOI O CHAT. Day la yeu cau CHAN PHAT HANH.
             #
             # Mot huy hieu DONE ma khong co cau tra loi thi khong phai la

@@ -440,6 +440,61 @@ Cây gốc xanh trước và sau mỗi lần.
 Hai trong số đó (`H`, và `A` ở lần đầu) ban đầu **XANH** — bộ kiểm chưa đủ,
 không phải mã đã đúng. Cả hai nay có bài HÀNH VI.
 
+## 10b. KHỞI ĐỘNG LẠI GIỮA LÚC ĐANG PHỤC HỒI — **8/8**
+
+Kịch bản thật, không giả lập sổ: chạy một lần thực thi sẽ hỏng, **giết tiến
+trình Router** ngay khi hồ sơ sự cố vừa được ghi, rồi bật một tiến trình MỚI
+đọc lại mọi thứ từ sổ chính tắc.
+
+| Khẳng định | Kết quả |
+|---|---|
+| hồ sơ sự cố đọc lại được sau khởi động lại | OK |
+| CÙNG `incident_id` | `sc_567e7bc1b2f8` |
+| mục tiêu GỐC còn nguyên | OK |
+| **ngân sách KHÔNG bị nạp lại** | `{'sua_tai_cho': 1}` → `{'sua_tai_cho': 1}` |
+| đếm chữ ký KHÔNG bị nạp lại | `{VERIFICATION_FAILURE:0c2d236598: 1}` → y nguyên |
+| `vong()` dựng lại TỪ hồ sơ | `{'sua_tai_cho': 1}` |
+| KHÔNG sinh việc trùng | 18 → 18 |
+| vẫn CÙNG một hồ sơ sự cố | `sc_567e7bc1b2f8` |
+
+Hai chi tiết đáng ghi riêng:
+
+* Chữ ký `VERIFICATION_FAILURE:0c2d236598` **trùng khít** với lượt §6 — hai
+  tiến trình khác nhau, hai lần chạy khác nhau, cùng một vân tay. Đó là xác
+  nhận ĐỘC LẬP rằng bản sửa §5b có hiệu lực, không chỉ trong một tiến trình.
+* Sổ ghi `RUNNING -> QUEUED (phiên chủ không còn sau khởi động lại)` —
+  `recover()` nhận việc mồ côi và trả nó về hàng đợi, không đánh `FAILED`
+  oan.
+
+### 10c. Và lượt ấy phơi ra một khoảng trống THẬT — cùng họ với §7a
+
+Lượt tiếp tục gặp **hết hạn mức Antigravity**. Vòng sự cố xử đúng:
+
+```
+loai=QUOTA_EXHAUSTED  chien_luoc=CHO_QUOTA  trang_thai=DANG_MO
+"hết hạn mức nhà cung cấp — CHỜ hoặc dùng bể khác.
+ KHÔNG mua thêm credit, không bật overage"
+```
+
+Đúng luật: không thử lại mù, **không mua thêm credit**, giữ sự cố MỞ để còn
+tiếp tục.
+
+Nhưng trạng thái việc là **`FAILED`**, và `blocked_reason` RỖNG.
+
+Người vận hành mở bảng điều khiển đọc được **"hỏng"**, trong khi sự thật là
+**"đang chờ hạn mức"**. Đó đúng là khuyết tật §7a — *quyết định của vòng sự
+cố không tới được trạng thái việc* — chỉ khác nhánh: §7a là nhánh leo thang
+(đã sửa), đây là nhánh `CHO_QUOTA` (CHƯA sửa).
+
+**Tôi KHÔNG sửa nó đêm nay, và lý do là kỹ thuật chứ không phải hết giờ.**
+`BLOCKED` nghĩa là *cần người*; hạn mức thì tự hồi theo thời gian. Đánh
+`BLOCKED` mà không có đường tự mở lại là biến một lần CHỜ hồi được thành một
+lần DỪNG vĩnh viễn — tệ hơn hiện trạng. Việc này cần một trạng thái "chờ tài
+nguyên, tự xét lại" cùng với người đánh thức nó, và đó là một quyết định
+thiết kế thuộc về chủ sở hữu, không phải một bản vá lúc nửa đêm.
+
+Ghi lại làm **hạng mục mở số 1**.
+
 ## 11. CÒN GÌ CHƯA ĐƯỢC CẮM — quét cả gói `v10/`
 
 Vì câu *"tested but not wired"* đã đúng HAI lần (vòng sự cố, rồi chính sách

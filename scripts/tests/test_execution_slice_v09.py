@@ -22,6 +22,9 @@ import time
 import unittest
 from pathlib import Path
 from typing import Dict, List, Optional
+from unittest import mock
+
+from scripts.router_v4 import runtime as RTM
 
 from scripts.control_center.execution import tiep_noi as ETN
 from scripts.control_center.execution import y_dinh as EYD
@@ -46,7 +49,27 @@ def _de_xuat(cc: ControlCenter, tom_tat: str, *, buoc=(), prod=False,
     return d
 
 
-def _chay_het(cc: ControlCenter, eid: str, *, giay: float = 40.0) -> bool:
+#: Cooldown CỠ MILI-GIÂY, chỉ dùng trong bài kiểm.
+#:
+#: `runtime.BACKOFF_COOLDOWN` THẬT là (60, 300, 900, 1800) giây — đúng và cố
+#: ý (mission #15: "bounded retries and cooldown. Do not hammer a degraded
+#: provider"). Nhưng `test_tran_thu_lai_CO_BIEN` cho MỌI worker hỏng, nên nó
+#: đẩy đúng bậc thang đó tới nơi rồi đo bằng đồng hồ tường: 4 lần hỏng liên
+#: tiếp = 300s, 5 lần = 900s. Đó là lý do THẬT khiến nó đỏ ở CI sau 600s.
+#:
+#: Rút NGẮN chứ KHÔNG tắt: ngưỡng `NGUONG_COOLDOWN` giữ nguyên, nên cầu dao
+#: vẫn đóng đúng chỗ, runtime vẫn thành không-đủ-điều-kiện, bộ lập lịch vẫn
+#: fail-closed. Chỉ thời gian chờ là mili-giây thay vì phút.
+COOLDOWN_BAI_KIEM: tuple = (0.05, 0.10, 0.15, 0.20)
+
+
+def _fabric(cc: ControlCenter):
+    """Fabric Router V4 mà bộ lập lịch của dự án đang dùng."""
+    return getattr(cc.ctx(PID).sessions.scheduler, "fabric", None)
+
+
+def _chay_het(cc: ControlCenter, eid: str, *, giay: float = 40.0,
+              quan_sat=None) -> bool:
     """Đạp nhịp tới khi lần thực thi ĐỨNG LẠI HẲN.
 
     "Đứng lại hẳn" gồm CẢ `BLOCKED`/`WAITING_AUTHORITY`, không chỉ
@@ -72,8 +95,13 @@ def _chay_het(cc: ControlCenter, eid: str, *, giay: float = 40.0) -> bool:
     while time.monotonic() < het:
         y = cc.so_thuc_thi.y_dinh(eid)
         if y is not None and (y.trang_thai.ket_thuc or y.trang_thai.can_nguoi):
+            if quan_sat is not None:
+                quan_sat()
             return True
         cc.tick()
+        # Lấy mẫu NGAY sau nhịp: cầu dao có thể đóng rồi mở lại giữa hai nhịp.
+        if quan_sat is not None:
+            quan_sat()
         # Dấu tiến triển: trạng thái + số sự kiện đã ghi. Đổi ⇒ còn việc để
         # làm ngay, không có lý do gì để ngủ.
         y = cc.so_thuc_thi.y_dinh(eid)
@@ -312,46 +340,170 @@ class Test03KhongFalseDone(_Nen):
                          "nằm ở WAITING vĩnh viễn")
 
     def test_tran_thu_lai_CO_BIEN(self):
-        """§9 — không lặp vô hạn, không provider-shop vô hạn."""
+        """§9 — không lặp vô hạn, không provider-shop vô hạn.
+
+        VÌ SAO PHẢI VÁ `BACKOFF_COOLDOWN` Ở ĐÂY (đo 2026-09-13):
+
+        Bài này cho MỌI worker hỏng (`ex.status = "failed"`), nên mỗi lượt
+        giao đều gọi `mark_finished(ok=False)`. Sau `NGUONG_COOLDOWN = 3`
+        lần hỏng LIÊN TIẾP, runtime vào cooldown theo bậc thang THẬT
+        `(60, 300, 900, 1800)` giây: lần thứ 4 = 300s, lần thứ 5 = 900s.
+        Khi MỌI runtime đều nguội, `scheduler.decide()` trả `selected=None`
+        ("runtime đang COOLDOWN/drained x4") và việc nằm `WAITING` cho hết
+        cooldown. Đó là toàn bộ lý do bài này đỏ ở CI sau 600s, và là lý do
+        đuôi dài 311–372s đo được trên máy (= đúng bậc 300s).
+
+        Hành vi production ĐÚNG và cố ý — mission #15: "bounded retries and
+        cooldown. Do not hammer a degraded provider". Hỏng là ở BÀI KIỂM:
+        nó lùa thật cầu dao rồi đo bằng đồng hồ tường.
+
+        Nên chỉ RÚT NGẮN thời gian chờ, KHÔNG tắt cầu dao: `NGUONG_COOLDOWN`
+        giữ nguyên nên cầu dao vẫn đóng đúng chỗ, runtime vẫn thành
+        không-đủ-điều-kiện, bộ lập lịch vẫn fail-closed, cooldown vẫn hết
+        hạn rồi runtime sống lại. Hai khẳng định bên dưới CHỨNG MINH cầu dao
+        đã thật sự đóng, để bản vá không biến đây thành một bài kiểm "nhanh"
+        mà đi vòng qua đúng thứ nó sinh ra để kiểm. Vòng đầy đủ
+        nguội → fail-closed → hết hạn → sống lại được khoá TẤT ĐỊNH ở
+        `Test03bCauDaoCooldown` bên dưới.
+        """
         self.ex.status = "failed"
         self.cc._dieu_phoi.clear()                      # noqa: SLF001
         _de_xuat(self.cc, "sửa web cho gọn")
         eid = self.cc.chat(PID, "ok làm đi")["execution"]["execution_id"]
-        # HẠN LÀ MỘT CÁI CHỐT CHỐNG TREO, không phải phép đo.
-        #
-        # Thứ chứng minh vòng lặp CÓ ĐÁY là hai khẳng định BÊN DƯỚI
-        # (`ket_thuc or can_nguoi`, và `so_lan_lap_lai <= 2`) — không phải
-        # con số này. Hạn chỉ tồn tại để một vòng lặp thật sự vô hạn thất bại
-        # thay vì treo mãi.
-        #
-        # Đo thật, vì 180s cũ không đủ và đã đỏ ở CI:
-        #     máy rảnh                       4–9s
-        #     4 tiến trình đốt CPU, 30 lượt  ~10s trung vị (30/30 đạt)
-        #     đuôi dài                       4/30 trong khoảng 311–372s
-        #
-        # LỜI GIẢI THÍCH CŨ Ở ĐÂY LÀ SAI, và ghi lại cho đúng: nó nói đuôi
-        # dài "phụ thuộc máy chứ không phụ thuộc logic". Không phải. Đo
-        # 2026-09-13 bằng mốc thời gian sự kiện cho thấy đuôi dài là một
-        # vòng quay ĐÓI CHỖ XẾP, không phải máy chậm:
-        #
-        #     mỗi lượt hỏng -> `SESSION_STOPPED ... thử lại ở chỗ khác`
-        #     -> tập runtime bị loại DỒN lại
-        #     -> `WAIT: KHÔNG placement nào đủ điều kiện`
-        #     -> xin khoá / quyết WAIT / nhả khoá, lặp ~0,26s một vòng
-        #
-        # Đếm được 222 vòng như vậy trong MỘT lượt chạy 65s. Khoá được cấp
-        # ở MỌI vòng — đây không phải chuyện khoá (0 sự kiện `LOCK_ORPHANED`
-        # trong cả lượt). Vì thế hạn này CHƯA hạ xuống được: hạ về 180s là
-        # bắt bài kiểm đỏ vì một khuyết tật KHÁC, chưa sửa, ở tầng xếp chỗ.
-        # Runner GitHub 2 nhân còn chật hơn cái mô phỏng trên.
+
+        fb = _fabric(self.cc)
+        self.assertIsNotNone(fb, "không lấy được fabric — bài kiểm mất bằng chứng")
+        mau = {"hong_toi_da": 0, "da_nguoi": False, "nguoi_het": False}
+
+        def ghi_nhan():
+            for r in fb.runtimes.values():
+                mau["hong_toi_da"] = max(mau["hong_toi_da"],
+                                         r.consecutive_failures)
+                if r.cooldown_until > 0:
+                    mau["da_nguoi"] = True
+                    if not r.dang_cooldown():
+                        mau["nguoi_het"] = True
+
+        # HẠN LÀ MỘT CÁI CHỐT CHỐNG TREO, không phải phép đo. Thứ chứng minh
+        # vòng lặp CÓ ĐÁY là các khẳng định BÊN DƯỚI. Với cooldown cỡ
+        # mili-giây, bài này chạy vài giây; 120s là chốt rộng rãi cho runner
+        # 2 nhân mà vẫn phát hiện được treo thật.
+        with mock.patch.object(RTM, "BACKOFF_COOLDOWN", COOLDOWN_BAI_KIEM):
+            xong = _chay_het(self.cc, eid, giay=120.0, quan_sat=ghi_nhan)
         self.assertTrue(
-            _chay_het(self.cc, eid, giay=600.0),
-            "vòng lặp phục hồi KHÔNG có đáy — vẫn chạy sau 600s"
+            xong,
+            "vòng lặp phục hồi KHÔNG có đáy — vẫn chạy sau 120s"
             + _chan_doan(self.cc, eid))
+
+        # (1) Cầu dao THẬT SỰ đóng — nếu không, bản vá đã vô hiệu hoá đúng
+        #     thứ bài này cần đi qua.
+        self.assertGreaterEqual(
+            mau["hong_toi_da"], RTM.NGUONG_COOLDOWN,
+            f"chưa runtime nào chạm ngưỡng cầu dao "
+            f"({mau['hong_toi_da']}/{RTM.NGUONG_COOLDOWN}) — bài kiểm không "
+            f"còn đi qua đường cooldown nữa")
+        self.assertTrue(mau["da_nguoi"],
+                        "không runtime nào vào cooldown — cầu dao chưa đóng")
+
+        # (2) Hợp đồng gốc, không đổi.
         y = self.cc.so_thuc_thi.y_dinh(eid)
         self.assertTrue(y.trang_thai.ket_thuc or y.trang_thai.can_nguoi,
                         f"kẹt ở {y.trang_thai.value}")
         self.assertLessEqual(y.so_lan_lap_lai, 2)
+
+
+class Test03bCauDaoCooldown(_Nen):
+    """Cầu dao cooldown: nguội -> fail-closed -> hết hạn -> sống lại.
+
+    TẤT ĐỊNH hoàn toàn — không ngủ, không đua, không phụ thuộc tải: mọi mốc
+    thời gian truyền vào tường minh bằng `now`.
+
+    Bài này tồn tại vì `test_tran_thu_lai_CO_BIEN` phải vá
+    `BACKOFF_COOLDOWN` xuống cỡ mili-giây để khỏi đo một cái chờ 300s bằng
+    đồng hồ tường. Vá xong thì cửa sổ "mọi runtime cùng nguội" hẹp lại,
+    nên KHÔNG được lấy bài đó làm bằng chứng cho vòng đầy đủ. Chỗ này khoá
+    vòng đó lại, ở đúng giá trị THẬT của production.
+    """
+
+    def test_moi_runtime_nguoi_thi_bo_lap_lich_FAIL_CLOSED_roi_song_lai(self):
+        from scripts.router_v4.contract import TaskContract
+
+        self.cc._dieu_phoi.clear()                      # noqa: SLF001
+        _de_xuat(self.cc, "sửa web cho gọn")
+        self.cc.chat(PID, "ok làm đi")
+        t = self.cc.store.tasks(PID)[0]
+        hd = TaskContract.from_dict(t.contract)
+
+        sch = self.cc.ctx(PID).sessions.scheduler
+        fb = sch.fabric
+        rids = sorted(fb.runtimes)
+        self.assertTrue(rids, "fabric không có runtime nào")
+
+        goc = 1_000_000.0                               # mốc cố định
+
+        # Dưới ngưỡng: vẫn chọn được. Chứng minh cầu dao chưa đóng sớm.
+        for lan in range(RTM.NGUONG_COOLDOWN - 1):
+            for rid in rids:
+                fb.mark_finished(rid, f"v{lan}", ok=False, seconds=0.1,
+                                 model_id="m-manh", now=goc)
+        self.assertIsNotNone(
+            sch.decide(hd, now=goc).selected,
+            f"mới {RTM.NGUONG_COOLDOWN - 1} lần hỏng mà đã không xếp được — "
+            f"cầu dao đóng quá sớm")
+
+        # Chạm ngưỡng: MỌI runtime nguội -> KHÔNG placement nào đủ điều kiện.
+        for rid in rids:
+            fb.mark_finished(rid, "v-nguong", ok=False, seconds=0.1,
+                             model_id="m-manh", now=goc)
+        for rid in rids:
+            r = fb.runtimes[rid]
+            self.assertGreaterEqual(r.consecutive_failures, RTM.NGUONG_COOLDOWN)
+            self.assertTrue(r.dang_cooldown(now=goc),
+                            f"{rid} chưa vào cooldown")
+            self.assertFalse(
+                r.trang_thai_hien_tai(now=goc).nhan_viec_duoc,
+                f"{rid} đang nguội mà vẫn nhận việc")
+
+        qd = sch.decide(hd, now=goc)
+        self.assertIsNone(qd.selected,
+                          "đang nguội mà vẫn xếp được chỗ — KHÔNG fail-closed")
+        self.assertIn("COOLDOWN", qd.reason,
+                      f"lý do loại không nói tới cooldown: {qd.reason}")
+        self.assertTrue(
+            all(not c.eligible for c in qd.candidates),
+            "còn ứng viên đủ điều kiện trong khi mọi runtime đang nguội")
+
+        # Hết hạn: sống lại. Không ngủ — chỉ đẩy `now` qua mốc.
+        sau = goc + max(RTM.BACKOFF_COOLDOWN) + 1.0
+        for rid in rids:
+            self.assertFalse(fb.runtimes[rid].dang_cooldown(now=sau),
+                             f"{rid} vẫn nguội sau khi hết hạn")
+        self.assertIsNotNone(
+            sch.decide(hd, now=sau).selected,
+            "cooldown đã hết mà bộ lập lịch vẫn không xếp được chỗ")
+
+    def test_bac_thang_cooldown_LEO_theo_so_lan_hong(self):
+        """4 lần hỏng = bậc 2, 5 lần = bậc 3 — đúng thứ làm CI đỏ ở 600s."""
+        fb = _fabric(self.cc)
+        rid = sorted(fb.runtimes)[0]
+        goc = 2_000_000.0
+        mong = {}
+        for lan in range(1, RTM.NGUONG_COOLDOWN + len(RTM.BACKOFF_COOLDOWN)):
+            fb.mark_finished(rid, f"v{lan}", ok=False, seconds=0.1,
+                             model_id="m-manh", now=goc)
+            r = fb.runtimes[rid]
+            if r.consecutive_failures >= RTM.NGUONG_COOLDOWN:
+                bac = min(r.consecutive_failures - RTM.NGUONG_COOLDOWN,
+                          len(RTM.BACKOFF_COOLDOWN) - 1)
+                mong[r.consecutive_failures] = RTM.BACKOFF_COOLDOWN[bac]
+                self.assertAlmostEqual(
+                    r.cooldown_until - goc, RTM.BACKOFF_COOLDOWN[bac], places=3,
+                    msg=f"{r.consecutive_failures} lần hỏng -> cooldown sai")
+        self.assertEqual(mong[RTM.NGUONG_COOLDOWN], RTM.BACKOFF_COOLDOWN[0])
+        self.assertGreaterEqual(
+            max(mong.values()), 300.0,
+            "bậc thang không còn leo tới mức phút — nếu production đổi thật "
+            "thì sửa cả ghi chú ở `test_tran_thu_lai_CO_BIEN`")
 
 
 # ---------------------------------------------------------------------------

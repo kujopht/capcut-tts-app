@@ -5261,6 +5261,25 @@ body.co-mini { padding-bottom: 74px; }
      ghi chu o `.list-gon`. */
   .list-gon .list-main { flex-direction: column; align-items: flex-start; gap: 2px; }
 
+  /*
+    VIDEO COMPOSER tren dien thoai: KHONG bop ca khung soan thao xuong 390px.
+
+    Thu tu uu tien o day la xem truoc -> chon nguon -> chinh -> xuat, dung
+    thu tu nguoi ta lam viec. Duong thoi gian VAN con (no la cach duy nhat
+    thay lech giua hinh va tieng), chi la no tu cuon ngang BEN TRONG khoi
+    cua minh — ca trang thi khong bao gio duoc tran ngang.
+  */
+  .vc-cap { grid-template-columns: 1fr; }
+  .vc-lan-ten { flex-basis: 48px; font-size: 11px; }
+  .vc-thuoc { margin-left: 60px; }
+  .vc-dau-phat { margin-left: 60px; }
+  .vc-lan-ray { min-width: 260px; }
+  .vc-dieu-khien { flex-wrap: wrap; }
+  .vc-tua { flex-basis: 100%; order: 3; }
+  /* Nut xuat di het be ngang: no la hanh dong ket thuc ca man hinh. */
+  .vc-dau-nut { width: 100%; }
+  .vc-dau-nut .btn { flex: 1; }
+
   /* Bento (Phan D, V4 visual completion): the doi 2 cot tro ve 1 cot khi
      man hinh qua hep de giu ca hai cot doc duoc. */
   .bento-span-2 { grid-column: span 1; }
@@ -8038,3 +8057,198 @@ button.cq-the:hover { background: #ffffff0a; }
    dat diem nhan ban sac. */
 .cq-the-chon { border-color: var(--brand); background: #8b6cff14; }
 .cq-the-so { font-size: 20px; font-weight: 650; line-height: 1.1; }
+
+/* ===================================================== Video Composer V1 ===
+ *
+ * "Fantasy = khong khi, Modern = thao tac."
+ *
+ * Nghia la: khung soan thao GIU YEN. Khong quang, khong gradient, khong kinh
+ * mo — mot nguoi dang can loi doc cho khop hinh can thay ranh gioi clip sac
+ * net, khong can mot canh nen dep. Chat "fantasy" duoc giu o LOP NEN cua ca
+ * trang Studio (da co san) va o vai chi tiet rat nho: vien tim/lam mong cua
+ * clip, va DUY NHAT dau phat la co quang.
+ *
+ * KHONG dung `--vang` o day, va do la mot quyet dinh chu khong phai mot lan
+ * quen: ban dac ta yeu cau "champagne-gold primary actions", nhung kho nay
+ * co mot NGAN SACH VANG duoc chot bang bai kiem
+ * (`tests/fantasy-identity.test.mjs`) — vang la mau CHI TIET 10-15%, khong
+ * bao gio la nen cua mot nut. Nang tran do cho mot module moi la doi mot
+ * rang buoc my thuat cua ca san pham de lay mot mau nut; nut chinh o day
+ * dung `--brand` nhu moi nut chinh khac.
+ */
+
+.vc { display: flex; flex-direction: column; gap: var(--s4); }
+.vc-dau-nut { gap: var(--s2); align-items: center; }
+
+.vc-khung {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--s4);
+  align-items: start;
+}
+
+/* -- xem truoc -------------------------------------------------------- */
+
+.vc-xem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-width: 0;
+}
+.vc-khung-video {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  overflow: hidden;
+  /* Den THAT, khong phai `--bg-1`: day la mot khung hinh, va mot nen hoi
+     xam se lam moi khung toi trong nhu bi bac mau. */
+  background: #000;
+}
+.vc-video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vc-trong {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  color: var(--text-3);
+}
+
+.vc-dieu-khien { display: flex; align-items: center; gap: var(--s3); }
+.vc-phat { min-width: 52px; }
+.vc-dong-ho { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vc-tua { flex: 1; min-width: 0; }
+
+/* -- inspector -------------------------------------------------------- */
+
+.vc-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s4);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  background: var(--bg-1);
+}
+.vc-nhom { display: flex; flex-direction: column; gap: var(--s3); }
+.vc-nhom-ten {
+  margin: 0;
+  font-size: var(--t-xs);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.vc-truot input[type="range"] { width: 100%; }
+.vc-cap { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); }
+.vc-so input { width: 100%; }
+.vc-o-chon { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); }
+.vc-tai-len { display: inline-flex; justify-content: center; cursor: pointer; }
+.vc-loi-render {
+  margin: 0;
+  padding: var(--s3);
+  border: 1px solid #f8717155;
+  border-radius: var(--r2);
+  background: #f871711a;
+  font-size: var(--t-sm);
+}
+
+/* -- duong thoi gian --------------------------------------------------- */
+
+.vc-timeline {
+  padding: var(--s3) var(--s4) var(--s4);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  background: var(--bg-1);
+  /* Cuon ngang NGAY TRONG khoi nay khi man hinh hep — de ca trang cuon
+     ngang thi moi thu khac cung lech theo. */
+  overflow-x: auto;
+}
+.vc-thuoc {
+  position: relative;
+  height: 18px;
+  margin-left: 74px;
+  min-width: 260px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.vc-moc { position: absolute; transform: translateX(-50%); }
+.vc-ray { position: relative; display: flex; flex-direction: column; gap: var(--s2); }
+.vc-lan { display: flex; align-items: center; gap: var(--s3); }
+.vc-lan-ten {
+  flex: 0 0 62px;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+  text-align: right;
+}
+.vc-lan-ray {
+  position: relative;
+  flex: 1;
+  height: 34px;
+  min-width: 200px;
+  border-radius: var(--r2);
+  background: #ffffff08;
+}
+.vc-clip {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+}
+/* Ba lan, ba sac — de liec mot cai la biet dang nhin lan nao. */
+.vc-clip-video { background: #8b6cff33; border-color: #8b6cff88; }
+.vc-clip-audio {
+  background: #2dd4bf2e;
+  border-color: #2dd4bf99;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.vc-clip-audio:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.vc-clip-sub { background: #ffffff10; border-color: var(--kinh-vien); }
+
+/*
+  Dau phat la CHI TIET DUY NHAT co quang trong ca khung soan thao.
+  Quang o day co viec that: mat phai tim lai no ngay sau khi roi di cho khac.
+*/
+.vc-dau-phat {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  margin-left: 74px;
+  background: #e9edf5;
+  box-shadow: 0 0 6px #e9edf5aa;
+  pointer-events: none;
+}
+
+/* -- danh sach du an --------------------------------------------------- */
+
+.vc-danh-sach { gap: var(--s4); }
+.vc-tao { gap: var(--s2); }
+.vc-tao .input { flex: 1; min-width: 0; }
+.vc-mo {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vc-mo:hover { color: var(--brand-hover); }
+.vc-tt { font-size: var(--t-xs); }
+.vc-tt-ready { color: #4ade80; }
+.vc-tt-failed { color: #f87171; }
+.vc-tt-rendering,
+.vc-tt-queued { color: var(--brand-hover); }
+
+@media (max-width: 1100px) {
+  /* Inspector xuong duoi phan xem truoc thay vi bop ca hai. */
+  .vc-khung { grid-template-columns: minmax(0, 1fr); }
+}

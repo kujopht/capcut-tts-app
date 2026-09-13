@@ -70,10 +70,17 @@ test("header co MOT loi vao Studio, khong phai mot menu cong cu roi rac", () => 
   assert.match(nav, /\/account/, "header thiếu khu vực tài khoản");
 });
 
-test("Studio la MOT san pham: khung chung + bay muc dung thu tu", () => {
+test("Studio la MOT san pham: khung chung + cac muc dung thu tu", () => {
   const shell = read("../src/components/StudioShell.tsx");
   const order = [...shell.matchAll(/href: "([^"]+)",\s*\n\s*nhan: "([^"]+)"/g)]
     .map((m) => [m[1], m[2]]);
+  /*
+    Thu tu la QUY TRINH, khong phai thu tu them vao:
+    Nội dung -> Dịch -> Hình ảnh -> Audio -> Phụ đề -> Video.
+
+    "Video" (V1) dung CUOI vi no la cho moi thu phia truoc gop lai; "Tác
+    phẩm của tôi" van o sau cung — do la kho ket qua, khong phai mot buoc.
+  */
   assert.deepEqual(order, [
     ["/studio", "Tổng quan"],
     ["/studio/write", "Viết truyện"],
@@ -81,6 +88,7 @@ test("Studio la MOT san pham: khung chung + bay muc dung thu tu", () => {
     ["/studio/audio", "Audio"],
     ["/studio/image", "Hình ảnh"],
     ["/studio/subtitle", "Phụ đề"],
+    ["/studio/video", "Video"],
     ["/studio/library", "Tác phẩm của tôi"],
   ]);
 

@@ -75,6 +75,11 @@ export const HO_ENDPOINT = [
   // voi tts_jobs/novels, xem `server/translation_service.py`.
   "translate",
   "users",
+  // Video Composer V1 — du an ghep loi doc vao video (`/studio/video`). Ho
+  // RIENG chu khong nam duoi `/api/audio/...`: mot du an video THAM CHIEU
+  // toi mot ban audio nhung khong thuoc ve no, va no con mang video + phu de
+  // + mot vong doi render rieng. Xem `server/video_domain.py`.
+  "video",
   "voices",
 ];
 

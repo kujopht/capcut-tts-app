@@ -1349,6 +1349,11 @@ class MediaType(str, Enum):
     AUDIO = "audio"
     IMAGE = "image"
     SUBTITLES = "subtitles"
+    #: Video nguon cua Video Composer (V1). Them vao day chu khong dung mot
+    #: bang rieng: `MediaAsset` da mang dung nhung truong can (`object_key`,
+    #: `duration_seconds`, `size_bytes`, `owner_id`), va mot kho thu hai cho
+    #: media se phai lap lai ca vong doi xu ly lan duong don rac.
+    VIDEO = "video"
     UNKNOWN = "unknown"
 
 

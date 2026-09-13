@@ -86,6 +86,22 @@ export function IconFilm(p: Props) {
   );
 }
 
+/**
+ * Bang danh clapper — Video Composer (`/studio/video`).
+ *
+ * Rieng voi `IconFilm` ("Phụ đề"): hai module dung canh nhau trong thanh ben
+ * Studio, va dung chung mot hinh thi cai dang mo khong con nhan ra duoc.
+ */
+export function IconClapper(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M3 10 h18 v9 a1.5 1.5 0 0 1 -1.5 1.5 H4.5 A1.5 1.5 0 0 1 3 19 Z" />
+      <path d="M3 10 L4.6 5.4 a1.2 1.2 0 0 1 1.4 -0.8 l13.4 2.2 a1.2 1.2 0 0 1 1 1.4 L21 10 Z" />
+      <path d="M8.4 5.1 L7 9.7 M13.4 5.9 L12 10.5 M18 6.7 L16.7 11" />
+    </Svg>
+  );
+}
+
 /** Tam giac Play — nut phat cua trinh phat facade YouTube (overnight Phase 5). */
 export function IconPlay(p: Props) {
   return (

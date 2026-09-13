@@ -289,6 +289,7 @@ export default function LibraryPage() {
                       >
                         <span aria-hidden="true">▶</span> Nghe
                       </Link>
+                      <DungTrongVideo chapterId={row.chapter.chapter_id} />
                     </>
                   ) : (
                     // Audio Studio — ban tao nhanh, KHONG gan voi mot "truyen"
@@ -305,6 +306,9 @@ export default function LibraryPage() {
                       {dangNghe ? "Đóng" : "Nghe"}
                     </button>
                   )}
+                  {row.fromStudio ? (
+                    <DungTrongVideo chapterId={row.chapter.chapter_id} />
+                  ) : null}
                 </div>
 
                 {/* Trinh phat chiem tron mot hang rieng ben duoi — xem
@@ -323,5 +327,26 @@ export default function LibraryPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * "Dùng trong Video" — dua THANG ban audio nay sang Video Composer.
+ *
+ * Vi sao no ton tai: khong co no, duong duy nhat de ghep mot ban doc vao
+ * video la TAI VE roi TAI LEN lai chinh tep minh vua tao. Day la mot lien
+ * ket chu khong phai mot nut goi API: Composer tu tao du an va gan san ban
+ * audio (xem `?chapter=` o `/studio/video`), nen bam nham van quay lai duoc
+ * bang nut Back.
+ */
+function DungTrongVideo({ chapterId }: { chapterId: string }) {
+  return (
+    <Link
+      className="btn btn-sm"
+      href={`/studio/video?chapter=${encodeURIComponent(chapterId)}`}
+      prefetch={false}
+    >
+      <span aria-hidden="true">🎬</span> Dùng trong Video
+    </Link>
   );
 }

@@ -13,6 +13,14 @@
 # san khong con lam do required check "Backend tests (moi truong sach)" cua
 # san pham web (su co 2026-09-13). Khong bat buoc tren branch protection,
 # nhung van chay day du va van hien do neu Router hong.
+#
+# `include_router` (mac dinh true): push/PR/dispatch thuong LUON chay job
+# `router` — khong doi gi. CHI production-deploy.yml dat gia tri nay thanh
+# false khi goi qua workflow_call, vi cong test truoc-khi-deploy cua no
+# ("test_gate") coi CA workflow duoc goi la MOT ket qua duy nhat (AND cua
+# moi job ben trong) — khong co khai niem "required/non-required" nhu
+# branch protection cua PR. Mot loi Router co san (khong lien quan gi den
+# san pham web) tung chan CA lan deploy vi dieu nay (su co 2026-09-13).
 
 name: CI
 
@@ -28,6 +36,11 @@ on:
         required: false
         default: 'history'
         type: string
+      include_router:
+        description: 'Co chay job Router/Control Center (scripts/tests) khong — mac dinh co'
+        required: false
+        default: true
+        type: boolean
   # Cho phep production-deploy.yml tai su dung CHINH XAC cac job nay lam
   # cong required test gate truoc khi deploy that, thay vi chep lai logic
   # test — khong doi hanh vi cua ba trigger o tren, chi THEM mot duong goi
@@ -39,6 +52,11 @@ on:
         required: false
         default: 'history'
         type: string
+      include_router:
+        description: 'Co chay job Router/Control Center (scripts/tests) khong — mac dinh co'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -86,6 +104,16 @@ jobs:
       #
       # KHONG lam yeu viec phat hien: van dung .gitleaks.toml va
       # .gitleaksignore cua repo, van --exit-code 1, van --redact.
+      #
+      # CHI quet `server/` va `web/` — day la HAI thu THUC SU duoc deploy
+      # (Render deploy `server/`, Cloudflare deploy ban build cua `web/`).
+      # `scripts/` (Router Control Center) khong bao gio duoc deploy o dau
+      # ca, nen no khong thuoc cau hoi "ma SAP DEPLOY co chua bi mat khong"
+      # — quet no o day tung lam do CA lan deploy vi cac fixture test rieng
+      # cua Router (chuoi gia dinh nhu "API_KEY: abcdefgh...", khong phai bi
+      # mat that) chua tung duoc doi qua che do quet cay lam viec nay (su co
+      # 2026-09-13). KHONG lam yeu do bang cach allowlist chuoi — chi thu
+      # hep DUNG pham vi cua cau hoi.
       - name: gitleaks (cay lam viec — cong deploy)
         if: inputs.secret_scan_mode == 'tree'
         env:
@@ -104,13 +132,22 @@ jobs:
           # `.gitleaks.deploy.toml` MO RONG `.gitleaks.toml` va chi them mien
           # tru theo duong-dan+luat cho cac fixture tong hop da xac minh.
           # Cau hinh PR/CI khong bi cham toi.
-          if ./gitleaks dir --help >/dev/null 2>&1; then
-            echo "che do: gitleaks dir (hien dai)"
-            ./gitleaks dir . --config .gitleaks.deploy.toml --redact --exit-code 1 --verbose
-          else
-            echo "che do: gitleaks detect --no-git (ban cu)"
-            ./gitleaks detect --no-git --source . --config .gitleaks.deploy.toml --redact --exit-code 1 --verbose
-          fi
+          # Quet TUNG thu muc rieng (server/, web/) thay vi mot lenh voi
+          # nhieu path — giu cu phap CLI don gian, tranh doan xem gitleaks
+          # dir/detect co nhan nhieu positional path hay khong. Gop ma loi:
+          # loi o BAT KY thu muc nao cung lam do buoc nay.
+          FAIL=0
+          for DUONG in server web; do
+            echo "--- quet $DUONG ---"
+            if ./gitleaks dir --help >/dev/null 2>&1; then
+              echo "che do: gitleaks dir (hien dai)"
+              ./gitleaks dir "$DUONG" --config .gitleaks.deploy.toml --redact --exit-code 1 --verbose || FAIL=1
+            else
+              echo "che do: gitleaks detect --no-git (ban cu)"
+              ./gitleaks detect --no-git --source "$DUONG" --config .gitleaks.deploy.toml --redact --exit-code 1 --verbose || FAIL=1
+            fi
+          done
+          exit $FAIL
 
   backend:
     # TEN GIU NGUYEN Y HET: day la required status check context tren
@@ -187,6 +224,13 @@ jobs:
     # chan PR cua san pham web nua. KHONG bo/xoa/xfail bat ky bai test Router
     # nao — job nay ton tai CHINH LA de tiep tuc chay het chung, tach rieng
     # khoi cong required cua backend web.
+    #
+    # `if` duoi day: push/PR/dispatch thuong khong co `inputs.include_router`
+    # (null) nen ve trai la true -> job LUON chay, khong doi gi. CHI khi
+    # production-deploy.yml goi qua workflow_call va dat rieng
+    # `include_router: false` thi job nay moi bi bo qua — vi test_gate cua
+    # deploy coi CA workflow duoc goi la MOT ket qua (xem ghi chu o dau tep).
+    if: inputs.include_router || inputs.include_router == null
     name: Router / Control Center tests (khong bat buoc, khong chan PR)
     runs-on: ubuntu-latest
     steps:

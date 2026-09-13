@@ -4244,7 +4244,12 @@ class ControlCenter:
         van = "\n".join(x for x in manh if x)
 
         v = so.vong(sc)
-        qd = v.xet(van, failure_reason=pb.failure_reason or "")
+        # VÂN TAY lấy từ bằng chứng ROUTER TỰ TÍNH, không từ văn xuôi của
+        # model. `van` (đủ dài để phân loại khớp được mẫu) chứa `pb.summary` —
+        # model viết mỗi lượt một khác, nên cùng một lần hỏng ra ba chữ ký và
+        # phép đếm lặp thành mã chết. Xem `VongSuCo.xet`.
+        qd = v.xet(van, failure_reason=pb.failure_reason or "",
+                   van_ban_chu_ky=bang_chung_them or "")
         so.cap_nhat_tu_vong(sc, v, qd)
         if pb.raw_log_ref:
             sc.bang_chung = tuple(list(sc.bang_chung)[-8:]

@@ -339,5 +339,103 @@ class TestDayNoiThat(unittest.TestCase):
         self.assertLess(canh, i)
 
 
+# ==========================================================================
+# 7. HAI KHUYẾT TẬT LƯỢT CHẠY THẬT THỨ HAI PHƠI RA
+# ==========================================================================
+class TestChuKyVaPhanLoaiTuDuongThat(unittest.TestCase):
+    """Neo vào ĐÚNG chuỗi mà `kiem_du_an` thật sự sinh ra.
+
+    Cả hai bài dưới đây đều dựng văn bản bằng cách GỌI `kiem_du_an`, không
+    bằng cách gõ tay lại một chuỗi *trông giống*. Lượt cắm dây đầu tiên hỏng
+    đúng vì bài kiểm tự bịa văn bản: mẫu bắt *"kiểm định không đạt"* còn báo
+    cáo thật viết *"phép kiểm của dự án KHÔNG đạt"*, và không bài nào thấy.
+    """
+
+    def _bao_cao_do(self):
+        from scripts.control_center.kiem_du_an import (LenhKiem, LoaiKiem,
+                                                       NguonKiem)
+        return LenhKiem, LoaiKiem, NguonKiem
+
+    def test_21_ly_do_KHONG_DAT_that_phan_loai_duoc(self):
+        """Văn bản THẬT của một lần kiểm đỏ phải ra `VERIFICATION_FAILURE`."""
+        from scripts.control_center import kiem_du_an as KD
+        ly_do = (f"{KD.MA_KIEM_DO} phép kiểm của dự án KHÔNG đạt: "
+                 r"C:\Program Files\nodejs\npm.CMD run test -> rc=1")
+        self.assertIsNot(
+            phan_loai(ly_do), LoaiHong.UNKNOWN,
+            "đường thật đã ghi loai=UNKNOWN cho một lần hỏng biết rõ nguyên "
+            "nhân — vì mẫu bắt văn xuôi mà văn xuôi đã đổi lời")
+        self.assertIs(phan_loai(ly_do), LoaiHong.VERIFICATION_FAILURE)
+
+    def test_21b_ma_ha_tang_thang_moi_mau_van_xuoi(self):
+        """Mã hạ tầng phải thắng cả chữ 'thiếu bằng chứng' lẫn 'test failed'."""
+        from scripts.control_center import kiem_du_an as KD
+        van = (f"{KD.MA_HA_TANG_HONG} LỆNH KIỂM tự nó hỏng\n"
+               "worker nói: thiếu bằng chứng, 1 test failed")
+        self.assertIn(phan_loai(van), HA_TANG_KIEM)
+
+    def test_21c_ma_nam_trong_ly_do_that_cua_kiem_du_an(self):
+        """Mã phải THẬT SỰ đi vào `ly_do`, không chỉ tồn tại như hằng số."""
+        from scripts.control_center import kiem_du_an as KD
+        src = Path(KD.__file__).read_text(encoding="utf-8")
+        self.assertIn("{MA_KIEM_DO} phép kiểm", src)
+        self.assertIn("{MA_HA_TANG_HONG} LỆNH KIỂM", src)
+
+    def test_22_chu_ky_ON_DINH_khi_van_xuoi_model_doi(self):
+        """Cùng một lần hỏng + văn xuôi khác nhau = MỘT chữ ký.
+
+        Đo được trên đường thật (2026-09-13): ba lần hỏng của cùng một lệnh
+        kiểm cho ra `6ea35e59ee`, `8c8a80a8da`, `9c2097db80`. `dem_chu_ky`
+        không bao giờ vượt 1, nên nhánh "lặp chữ ký" là mã CHẾT và vòng chỉ
+        dừng được nhờ ngân sách.
+        """
+        bc = ("KIEM_DU_AN_KHONG_DAT phép kiểm của dự án KHÔNG đạt: "
+              r"C:\Program Files\nodejs\npm.CMD run test -> rc=1")
+        v = VongSuCo(NganSach(sua_tai_cho=9, lap_lai_ke_hoach=9, lap_chu_ky=99))
+        cks = set()
+        for loi_ke in ("Tôi đã thêm nút #clear-completed vào index.html.",
+                       "Đã bổ sung handler cho việc xoá các mục hoàn thành.",
+                       "Cập nhật app.js: thêm listener và cập nhật DOM."):
+            qd = v.xet(f"{bc}\n{loi_ke}", van_ban_chu_ky=bc)
+            cks.add(qd.chu_ky)
+        self.assertEqual(len(cks), 1, f"ba chữ ký cho một lần hỏng: {cks}")
+        self.assertEqual(v.dem_chu_ky[cks.pop()], 3)
+
+    def test_22b_van_xuoi_van_duoc_dung_de_PHAN_LOAI(self):
+        """Tách vân tay khỏi phân loại, không phải vứt bớt văn bản đi."""
+        v = VongSuCo()
+        qd = v.xet("worker: MODULE_NOT_FOUND khi nạp tests",
+                   van_ban_chu_ky="rc=1")
+        self.assertIn(qd.loai, HA_TANG_KIEM,
+                      "phân loại phải đọc văn bản ĐẦY ĐỦ, chỉ vân tay mới "
+                      "lấy từ bằng chứng hẹp")
+
+    def test_22c_ngat_mach_no_duoc_khi_van_xuoi_doi(self):
+        """Lưới thứ hai — lặp chữ ký — phải thật sự chặn được, không chỉ ngân
+        sách."""
+        bc = "KIEM_DU_AN_KHONG_DAT phép kiểm của dự án KHÔNG đạt: @ -> rc=1"
+        v = VongSuCo(NganSach(sua_tai_cho=99, lap_lai_ke_hoach=99,
+                              lap_chu_ky=3, hoi_dong=0))
+        # Văn xuôi phải khác nhau về TỪ NGỮ, không chỉ khác con số: `chu_ky`
+        # đã quy mọi chữ số về `#`, nên "lần thứ 1/2/3" vẫn băm ra một giá
+        # trị và bài kiểm sẽ xanh ngay cả khi dây nối bị tháo.
+        cuoi = None
+        for loi_ke in ("Tôi đã thêm nút vào index.html.",
+                       "Đã bổ sung handler xoá mục hoàn thành.",
+                       "Cập nhật listener rồi vẽ lại danh sách."):
+            cuoi = v.xet(f"{bc}\n{loi_ke}", van_ban_chu_ky=bc)
+        self.assertTrue(cuoi.khong_tien_trien)
+        self.assertIs(cuoi.hanh_dong, HanhDong.LEO_THANG_CHU_SO_HUU,
+                      "ngân sách còn đầy mà vẫn phải dừng: đây là lưới lặp "
+                      "chữ ký, không phải lưới ngân sách")
+
+    def test_22d_engine_truyen_bang_chung_lam_VAN_TAY(self):
+        van = ENGINE.read_text(encoding="utf-8")
+        i = van.index("qd = v.xet(")
+        self.assertIn("van_ban_chu_ky=bang_chung_them", van[i:i + 220],
+                      "vân tay phải lấy từ bằng chứng Router tính, không từ "
+                      "`pb.summary` do model viết")
+
+
 if __name__ == "__main__":
     unittest.main()

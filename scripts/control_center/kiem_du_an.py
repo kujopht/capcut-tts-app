@@ -48,6 +48,18 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from scripts.router_v3.tien_trinh import an_cua_so
 
 
+#: MÃ MÁY ĐỌC ĐƯỢC mở đầu `ly_do` của một báo cáo KHÔNG đạt.
+#:
+#: Vì sao không để bộ phân loại đọc văn xuôi: bản đầu viết *"phép kiểm của dự
+#: án KHÔNG đạt"* và mẫu `VERIFICATION_FAILURE` bắt *"kiểm định không đạt"* —
+#: cùng một sự thật, hai cách nói, nên đường thật cho ra `loai=UNKNOWN` cho
+#: một lần hỏng mà ta biết chính xác nguyên nhân (đo 2026-09-13). Văn xuôi là
+#: để người đọc; phân loại phải có một MÃ ỔN ĐỊNH, và sửa lời văn ở đây không
+#: được phép làm câm bộ phân loại ở tệp khác.
+MA_KIEM_DO = "KIEM_DU_AN_KHONG_DAT"
+MA_HA_TANG_HONG = "KIEM_DU_AN_HA_TANG_HONG"
+
+
 class NguonKiem(str, Enum):
     """Bằng chứng nào cho ra lệnh này. Đi vào báo cáo, không phải trang trí."""
 
@@ -367,14 +379,15 @@ def chay(ke_hoach: KeHoachKiem, repo, *, tran_giay: float = 900.0,
         return BaoCaoKiem(
             ke_hoach=ke_hoach, ket_qua=tuple(ra), dat=False,
             thieu_bang_chung=False, ha_tang_hong=True,
-            ly_do=("LỆNH KIỂM tự nó hỏng, KHÔNG phải mã sản phẩm sai: "
+            ly_do=(f"{MA_HA_TANG_HONG} LỆNH KIỂM tự nó hỏng, KHÔNG phải mã "
+                   f"sản phẩm sai: "
                    + "; ".join(f"{' '.join(x.lenh.argv)} -> rc={x.ma} "
                                f"({x.dau_hieu})" for x in ha_tang[:2])))
     return BaoCaoKiem(
         ke_hoach=ke_hoach, ket_qua=tuple(ra), dat=not hong,
         thieu_bang_chung=False,
         ly_do=("tất cả phép kiểm của dự án đều xanh" if not hong else
-               "phép kiểm của dự án KHÔNG đạt: "
+               f"{MA_KIEM_DO} phép kiểm của dự án KHÔNG đạt: "
                + "; ".join(" ".join(x.lenh.argv) + f" -> rc={x.ma}"
                            for x in hong[:3])))
 

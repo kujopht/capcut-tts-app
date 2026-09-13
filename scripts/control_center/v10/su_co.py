@@ -108,14 +108,18 @@ _MAU: Tuple[Tuple[LoaiHong, re.Pattern], ...] = (
     (LoaiHong.ENVIRONMENT_FAILURE, re.compile(
         r"rev-parse HEAD|not a git repository|unknown revision|"
         r"chưa có commit|không cấp được cây làm việc|no such file", re.I)),
-    (LoaiHong.VERIFICATION_FAILURE, re.compile(
-        r"gate_scope|gate_contract_scope|gate_diff|ghi NGOÀI write_scope|"
-        r"kiểm định không đạt|thiếu bằng chứng", re.I)),
-    # HẠ TẦNG KIỂM ĐỊNH — xét TRƯỚC `TEST_FAILURE`/`DEPENDENCY_FAILURE`.
+    # HẠ TẦNG KIỂM ĐỊNH — xét TRƯỚC `VERIFICATION_FAILURE`, `TEST_FAILURE`
+    # và `DEPENDENCY_FAILURE`.
     #
     # Thứ tự ở đây quyết định hành động: một lệnh kiểm KHÔNG PHÂN GIẢI ĐƯỢC
     # phải dẫn tới "sửa lệnh kiểm", không phải "sửa mã sản phẩm". Đặt sau
-    # `TEST_FAILURE` thì `'test failed'` nuốt mất nó.
+    # `TEST_FAILURE` thì `'test failed'` nuốt mất nó; đặt sau
+    # `VERIFICATION_FAILURE` thì một chữ "thiếu bằng chứng" lẫn trong phong bì
+    # của worker cũng nuốt mất nó.
+    #
+    # `KIEM_DU_AN_HA_TANG_HONG` là MÃ do Router tự đặt sau khi ĐO — nó là một
+    # sự thật đã tính, không phải một phỏng đoán từ văn xuôi, nên nó phải
+    # thắng mọi mẫu bắt-chữ ở dưới.
     (LoaiHong.INVALID_VERIFICATION_COMMAND, re.compile(
         r"MODULE_NOT_FOUND|Cannot find module|"
         r"missing script|Unknown command|command not found|"
@@ -123,11 +127,16 @@ _MAU: Tuple[Tuple[LoaiHong, re.Pattern], ...] = (
         r"No such file or directory.*(test|spec)|"
         r"error TS18003|No inputs were found", re.I)),
     (LoaiHong.TEST_HARNESS_FAILURE, re.compile(
+        r"KIEM_DU_AN_HA_TANG_HONG|"
         r"no test files found|0 tests? (found|collected)|"
         r"ERR_UNKNOWN_FILE_EXTENSION|"
         r"Jest encountered an unexpected token|"
         r"pytest: error: unrecognized arguments|"
         r"INTERNALERROR", re.I)),
+    (LoaiHong.VERIFICATION_FAILURE, re.compile(
+        r"KIEM_DU_AN_KHONG_DAT|"
+        r"gate_scope|gate_contract_scope|gate_diff|ghi NGOÀI write_scope|"
+        r"kiểm định không đạt|thiếu bằng chứng", re.I)),
     (LoaiHong.DEPENDENCY_FAILURE, re.compile(
         r"ModuleNotFoundError|ImportError|npm ERR|"
         r"unresolved dependency", re.I)),
@@ -234,8 +243,27 @@ class VongSuCo:
                 "doi_cho_chay": self._con("doi_cho_chay", self.ns.doi_cho_chay),
                 "hoi_dong": self._con("hoi_dong", self.ns.hoi_dong)}
 
-    def xet(self, van_ban: str, *, failure_reason: str = "") -> QuyetDinhSuCo:
+    def xet(self, van_ban: str, *, failure_reason: str = "",
+            van_ban_chu_ky: str = "") -> QuyetDinhSuCo:
         """Một lần hỏng nữa — làm gì tiếp?
+
+        `van_ban_chu_ky` — VĂN BẢN DÙNG ĐỂ LẤY VÂN TAY, tách khỏi văn bản dùng
+        để PHÂN LOẠI, và đây là một phân biệt đã trả giá.
+
+        Phân loại muốn ĐỌC ĐƯỢC NHIỀU NHẤT: gom cả phong bì của worker vào thì
+        cơ hội khớp một mẫu cao hơn. Vân tay thì muốn ỔN ĐỊNH NHẤT: nó chỉ trả
+        lời đúng một câu — *"có phải vẫn đúng lần hỏng ấy không?"*.
+
+        Trộn hai thứ làm một thì văn xuôi của model quyết định vân tay, mà
+        model viết mỗi lượt một khác. Đo được trên đường thật (2026-09-13): ba
+        lần hỏng của CÙNG một lệnh kiểm với CÙNG mã thoát cho ra ba chữ ký
+        `6ea35e59ee`, `8c8a80a8da`, `9c2097db80`, nên `dem_chu_ky` không bao
+        giờ vượt 1 và nhánh "lặp chữ ký" là mã CHẾT. Vòng chỉ dừng được nhờ
+        ngân sách — tức là mất hẳn một trong hai lưới an toàn, và mất đúng cái
+        lưới sinh ra để nhận ra "thử mù".
+
+        Nên: bằng chứng do ROUTER TÍNH (lệnh, mã thoát, lớp hỏng) lấy vân tay;
+        văn xuôi của model chỉ để phân loại.
 
         Thứ tự xét, và mỗi bước có lý do:
 
@@ -249,7 +277,7 @@ class VongSuCo:
            -> leo thang, mỗi bậc CÓ TRẦN.
         """
         loai = phan_loai(van_ban, failure_reason=failure_reason)
-        ck = chu_ky(loai, van_ban or failure_reason)
+        ck = chu_ky(loai, van_ban_chu_ky or van_ban or failure_reason)
         self.dem_chu_ky[ck] = self.dem_chu_ky.get(ck, 0) + 1
         lap = self.dem_chu_ky[ck]
 

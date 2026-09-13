@@ -93,6 +93,14 @@ jobs:
       # Quet CAY LAM VIEC sap deploy, khong phai toan bo lich su repo — xem
       # ly do day du o ci.yml. Push/PR van giu nguyen che do lich su.
       secret_scan_mode: tree
+      # KHONG chay job `router` (scripts/tests, Router Control Center) o
+      # day: workflow_call coi CA workflow duoc goi la MOT ket qua duy nhat
+      # (AND cua moi job ben trong), khong co khai niem required/non-required
+      # nhu branch protection cua PR — nen mot loi Router co san, khong lien
+      # quan gi den san pham web, tung chan CA lan deploy production (su co
+      # 2026-09-13). Cong test cua san pham web van du: backend + web +
+      # gitleaks (quet server/ va web/ — hai thu THUC SU duoc deploy).
+      include_router: false
     # A reusable workflow can never hold MORE permission than its caller
     # grants. ci.yml's gitleaks job asks for `pull-requests: write` (it
     # annotates PRs), while this workflow's top-level grant is `contents:

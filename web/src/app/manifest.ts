@@ -6,10 +6,16 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Fanfic Audio Studio",
-    short_name: "Fanfic Audio",
+    name: "Fanfic World",
+    short_name: "Fanfic",
+    /*
+      Mo ta cu dat viec TAO AUDIO len truoc — dung thoi Audio Studio la ca
+      san pham. Day la nen tang doc/nghe fanfic; audio la mot cach thuong
+      thuc, khong phai cua vao. Bieu tuong tren man hinh chinh cua dien
+      thoai phai noi dung thu nguoi ta mo no ra de lam.
+    */
     description:
-      "Tạo audio từ văn bản bất kỳ và nghe fanfic bằng giọng đọc tiếng Việt.",
+      "Đọc và nghe fanfic tiếng Việt do cộng đồng viết, bằng mắt hoặc bằng tai.",
     start_url: "/",
     display: "standalone",
     background_color: "#0b0d12",

@@ -1,5 +1,5 @@
 /* ============================================================
-   Fanfic Audio Studio — design system
+   Fanfic World — design system
    Mot bo token duy nhat cho mau, chu, khoang cach, bo goc, do sau.
    Moi component o duoi deu dung lai token nay, khong hard-code gia tri.
    ============================================================ */
@@ -1044,11 +1044,28 @@ main { overflow-x: clip; }
   position: absolute;
   z-index: -1;
   inset: -22px -40px -16px -34px;
+  /*
+    BA lop, va lop thu ba moi la lop lam cho doc duoc.
+
+    Hai lop suong dau la MAU, khong phai do toi: `--hero-mist-*` la nhung sac
+    xanh tam trung (#123a5c / #1c6b82). Phu 46% mot mau tam trung len mot bau
+    troi sang thi ket qua VAN sang — do la ly do doan mo ta o trang chu gan
+    nhu khong doc duoc tren tam `01-home-sunny-harbor`, do that o 1440px.
+    Suong lam dung viec cua no (nhuom cho khoi chu thuoc ve buc tranh); thu
+    con thieu la mot lop TOI that.
+
+    Lop toi nam DUOI cung, om sat cum chu, va di qua CUNG mot `mask` nen no
+    mo dan het o ria — khong lam toi ca tam anh, chi dung vung co chu. Dung
+    nguyen tac huong my thuat cua du an da dat ra: mang toi CUC BO, khong ha
+    sang ca trang (xem ghi chu o `page-background.test.mjs`).
+  */
   background:
     radial-gradient(52% 74% at 24% 36%,
       color-mix(in srgb, var(--hero-mist-1, #05070f) 46%, transparent) 0%, transparent 72%),
     radial-gradient(42% 62% at 64% 76%,
-      color-mix(in srgb, var(--hero-mist-2, #05070f) 30%, transparent) 0%, transparent 74%);
+      color-mix(in srgb, var(--hero-mist-2, #05070f) 30%, transparent) 0%, transparent 74%),
+    radial-gradient(76% 96% at 30% 46%,
+      #05070fd9 0%, #05070fb3 46%, transparent 78%);
   mask-image: radial-gradient(130% 160% at 32% 46%, #000 40%, transparent 82%);
   -webkit-mask-image: radial-gradient(130% 160% at 32% 46%, #000 40%, transparent 82%);
   pointer-events: none;
@@ -3563,6 +3580,17 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   grid-template-areas: "members stories";
   gap: var(--s4);
   align-items: start;
+}
+/*
+  Tuan khong ai ghi XP thi cot thanh vien KHONG duoc ve ra (xem `page.tsx`),
+  va ke truyen an ca be ngang thay vi de trong mot phan ba man hinh.
+
+  `grid-template-areas` phai dat lai chu khong chi doi so cot: vung "members"
+  khong con phan tu nao, va mot vung duoc khai bao ma rong van giu cho cua no.
+*/
+.home-editorial-grid-mot-cot {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "stories";
 }
 .home-editorial-stories,
 .home-editorial-members,

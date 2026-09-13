@@ -12,7 +12,7 @@
 
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api, type Novel } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { fanficOnly } from "@/lib/workspace";
@@ -48,15 +48,66 @@ function FanficBrowser() {
   const { profile } = useSession();
 
   /*
-    Nhan `?q=` va `?tag=` tu URL — o tim o header dieu huong sang day chu
-    khong tu tim (xem `components/SiteSearch.tsx`), va the o trang chu cung
-    tro toi `?tag=`. Chi doc mot lan lam GIA TRI KHOI TAO: sau do o tim tren
-    trang nay lam chu trang thai, neu khong thi go phim se bi URL keo nguoc.
+    URL LA NGUON SU THAT cua bo loc, khong phai `useState`.
+
+    Truoc day trang nay chi doc `?q=`/`?tag=` MOT LAN lam gia tri khoi tao roi
+    giu trang thai cuc bo. Hau qua: go mot tu khoa, chon mot the, lat sang
+    trang 3 — URL van y nguyen `/fanfic`. Khong chia se duoc ket qua, khong
+    dat dau trang duoc, va nut Back cua trinh duyet thoat han khoi trang thay
+    vi lui mot buoc loc. `?page=` thi truoc day khong doc lay mot lan.
+
+    Nay ca ba deu suy TU URL. O nhap van giu mot trang thai cuc bo rieng
+    (`oNhap`) de go phim khong giat, roi lang xuong URL sau `DEBOUNCE_MS`.
   */
   const params = useSearchParams();
-  const [query, setQuery] = useState(() => params.get("q") ?? "");
-  const [tag, setTag] = useState(() => params.get("tag") ?? "");
-  const [page, setPage] = useState(0);
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const query = params.get("q") ?? "";
+  const tag = params.get("tag") ?? "";
+  const page = Math.max(0, Number(params.get("page") ?? "0") || 0);
+
+  /*
+    Gia tri DANG GO trong o nhap. Tach khoi `query` vi `query` chi doi sau khi
+    lang; neu buoc o nhap doc thang `query` thi moi ky tu se bi keo nguoc ve
+    gia tri cu cho toi khi URL kip cap nhat.
+  */
+  const [oNhap, datONhap] = useState(query);
+
+  /*
+    Back/Forward: URL doi tu BEN NGOAI, nen o nhap phai di theo. Chi dong bo
+    khi that su lech — neu khong, moi lan `query` doi se dam len chinh nhung
+    ky tu nguoi dung vua go.
+  */
+  const queryTruoc = useRef(query);
+  useEffect(() => {
+    if (queryTruoc.current !== query) {
+      queryTruoc.current = query;
+      datONhap(query);
+    }
+  }, [query]);
+
+  /** Ghi bo loc xuong URL. `thay` = khong them mot muc lich su moi. */
+  const datURL = useCallback(
+    (moi: { q?: string; tag?: string; page?: number }, thay = false) => {
+      const p = new URLSearchParams(params.toString());
+      const dat = (k: string, v: string) => {
+        if (v) p.set(k, v);
+        else p.delete(k);          // khong de `?q=` rong lam ban URL
+      };
+      if (moi.q !== undefined) dat("q", moi.q.trim());
+      if (moi.tag !== undefined) dat("tag", moi.tag);
+      if (moi.page !== undefined) dat("page", moi.page > 0 ? String(moi.page) : "");
+      const chuoi = p.toString();
+      const dich = chuoi ? `${pathname}?${chuoi}` : pathname;
+      // `scroll: false` — doi mot bo loc khong phai mot lan dieu huong sang
+      // trang khac; keo nguoi dung ve dau trang o day la cuop mat cho ho dang
+      // nhin.
+      if (thay) router.replace(dich, { scroll: false });
+      else router.push(dich, { scroll: false });
+    },
+    [params, pathname, router],
+  );
 
   const [novels, setNovels] = useState<Novel[]>([]);
   const [total, setTotal] = useState(0);
@@ -113,20 +164,39 @@ function FanficBrowser() {
       .catch(() => setTags([]));
   }, []);
 
-  /** Doi bo loc thi ve trang dau — trang 5 cua ket qua cu thuong khong ton tai. */
+  /*
+    Doi bo loc thi ve trang dau — trang 5 cua ket qua cu thuong khong ton tai.
+
+    O NHAP dung `replace`: mot tu khoa 12 ky tu ma day 12 muc vao lich su thi
+    nut Back thanh vo dung. CHON THE va LAT TRANG dung `push`: do la nhung
+    thao tac ROI RAC, va lui lai mot buoc loc la dieu nguoi ta that su muon.
+  */
   const changeQuery = (value: string) => {
-    setQuery(value);
-    setPage(0);
+    datONhap(value);
   };
   const changeTag = (value: string) => {
-    setTag(value);
-    setPage(0);
+    datURL({ tag: value, page: 0 });
   };
   const clearFilters = () => {
-    setQuery("");
-    setTag("");
-    setPage(0);
+    datONhap("");
+    datURL({ q: "", tag: "", page: 0 });
   };
+  const changePage = (value: number) => {
+    datURL({ page: value });
+  };
+
+  /*
+    O nhap -> URL, sau khi lang. Cung nhip `DEBOUNCE_MS` von da dung cho lan
+    goi API, nen khong them mot do tre thu hai nao.
+  */
+  useEffect(() => {
+    if (oNhap === query) return;
+    const id = window.setTimeout(() => {
+      queryTruoc.current = oNhap.trim();
+      datURL({ q: oNhap, page: 0 }, true);
+    }, DEBOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [oNhap, query, datURL]);
 
   const filtering = Boolean(query.trim() || tag);
   const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
@@ -167,7 +237,7 @@ function FanficBrowser() {
               id="fanfic-q"
               className="input"
               type="search"
-              value={query}
+              value={oNhap}
               onChange={(e) => changeQuery(e.target.value)}
               placeholder="Tên truyện hoặc mô tả…"
             />
@@ -262,7 +332,7 @@ function FanficBrowser() {
               <button
                 type="button"
                 className="btn btn-sm"
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                onClick={() => changePage(Math.max(0, page - 1))}
                 disabled={page === 0}
               >
                 <span aria-hidden="true">←</span> Trang trước
@@ -273,7 +343,7 @@ function FanficBrowser() {
               <button
                 type="button"
                 className="btn btn-sm"
-                onClick={() => setPage((p) => p + 1)}
+                onClick={() => changePage(page + 1)}
                 disabled={!hasMore}
               >
                 Trang sau <span aria-hidden="true">→</span>

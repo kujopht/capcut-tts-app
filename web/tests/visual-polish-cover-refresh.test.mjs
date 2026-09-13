@@ -44,7 +44,7 @@ test("homepage gom hero va cong dieu huong vao mot dai desktop gon", () => {
 test("homepage dung bang bien tap hai cot va chi lay sau truyen", () => {
   const home = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
   assert.match(home, /const GRID_COUNT = 6;/);
-  assert.match(home, /className="home-editorial-grid/);
+  assert.match(home, /home-editorial-grid/);
   assert.match(home, /className="home-editorial-stories/);
   assert.match(home, /className="home-editorial-members/);
   assert.match(home, /Truyện mới đáng chú ý/);
@@ -54,6 +54,30 @@ test("homepage dung bang bien tap hai cot va chi lay sau truyen", () => {
   assert.match(editorial, /grid-template-areas:\s*"members stories"/);
   assert.match(rule(".home-editorial-stories"), /grid-area:\s*stories/);
   assert.match(rule(".home-editorial-members"), /grid-area:\s*members/);
+});
+
+test("cot thanh vien KHONG duoc dat cho khi tuan do khong ai ghi XP", () => {
+  /*
+    Hai cot la hinh dang khi CO du lieu, khong phai mot hang so.
+
+    Truoc day cot "Thành viên nổi bật" luon duoc ve, nen o mot san pham chua
+    dong nguoi thi mot phan ba be ngang man hinh danh cho dong chu "Chưa có
+    thành viên ghi XP trong tuần này" — ngay canh ke truyen that. Cai gia
+    khong chi la cho trong: no noi rang hai thu do ngang hang nhau.
+  */
+  const home = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+  assert.match(home, /const coBangVang = !loading && bangVangTuan\.length > 0;/,
+    "trang chủ không còn phân biệt có/không có dữ liệu bảng vàng");
+  assert.match(home, /coBangVang \? "" : " home-editorial-grid-mot-cot"/,
+    "lưới không đổi sang một cột khi bảng vàng rỗng");
+  assert.match(home, /\{coBangVang \? \(/,
+    "cột thành viên vẫn được vẽ khi không có dữ liệu");
+
+  const mot = rule(".home-editorial-grid-mot-cot");
+  assert.match(mot, /grid-template-columns:\s*minmax\(0, 1fr\)/);
+  // Vung "members" phai bi GO khoi so do: mot vung da khai bao ma rong van
+  // giu cho cua no, nen chi doi so cot thi khong du.
+  assert.match(mot, /grid-template-areas:\s*"stories"/);
 });
 
 test("animation va cong dong cung chia mot hang phu gon", () => {

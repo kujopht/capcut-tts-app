@@ -82,12 +82,49 @@ test("L2: co dieu huong trang, va nut bi vo hieu o hai dau", () => {
 
 test("L2: doi bo loc thi ve trang dau", () => {
   const src = fanfic();
-  // Trang 5 cua ket qua cu thuong khong ton tai trong ket qua moi
-  for (const fn of ["changeQuery", "changeTag", "clearFilters"]) {
+  /*
+    Bao dam KHONG doi: doi mot bo loc thi ve trang dau — trang 5 cua ket qua
+    cu thuong khong ton tai trong ket qua moi.
+
+    Chi CACH VIET doi: bo loc gio nam o URL (chia se/dat dau trang/Back deu
+    chay duoc), nen "ve trang dau" la `page: 0` gui vao `datURL` chu khong
+    con la `setPage(0)`.
+  */
+  for (const fn of ["changeTag", "clearFilters"]) {
     const at = src.indexOf(`const ${fn} =`);
     assert.notEqual(at, -1, `thieu ${fn}`);
-    assert.match(src.slice(at, at + 220), /setPage\(0\)/, `${fn} phai ve trang dau`);
+    assert.match(src.slice(at, at + 220), /page: 0/, `${fn} phai ve trang dau`);
   }
+  /*
+    `changeQuery` chi cap nhat o nhap; viec ha xuong URL nam o hieu ung lang
+    (debounce) ngay duoi no — va CHINH CHO DO phai mang `page: 0`.
+  */
+  const at = src.indexOf("if (oNhap === query) return;");
+  assert.notEqual(at, -1, "thiếu hiệu ứng lắng cho ô nhập");
+  assert.match(src.slice(at, at + 320), /datURL\(\{ q: oNhap, page: 0 \}, true\)/,
+    "gõ từ khoá mới phải về trang đầu, và KHÔNG đẩy thêm mục lịch sử");
+});
+
+test("bo loc nam o URL — chia se, dat dau trang va Back deu chay", () => {
+  /*
+    Truoc pass 2, trang nay doc `?q=`/`?tag=` DUNG MOT LAN lam gia tri khoi
+    tao roi giu trang thai cuc bo: go tu khoa, chon the, lat sang trang 3 —
+    URL van y nguyen `/fanfic`. Khong gui duoc ket qua cho ai, khong dat dau
+    trang duoc, va Back thoat han khoi trang thay vi lui mot buoc loc.
+    `?page=` thi khong duoc doc lay mot lan.
+  */
+  const src = fanfic();
+  assert.match(src, /const query = params\.get\("q"\) \?\? "";/);
+  assert.match(src, /const tag = params\.get\("tag"\) \?\? "";/);
+  assert.match(src, /const page = Math\.max\(0, Number\(params\.get\("page"\)/);
+
+  // O nhap dung `replace` (12 ky tu khong duoc thanh 12 muc lich su); chon
+  // the / lat trang dung `push` (thao tac roi rac, Back phai lui duoc).
+  assert.match(src, /router\.replace\(dich, \{ scroll: false \}\)/);
+  assert.match(src, /router\.push\(dich, \{ scroll: false \}\)/);
+  // Doi bo loc KHONG duoc keo nguoi dung ve dau trang.
+  assert.ok(!/router\.(push|replace)\(dich\)(?!\s*,)/.test(src),
+    "điều hướng bộ lọc thiếu scroll: false");
 });
 
 test("L2: go chu khong ban mot request moi ky tu", () => {

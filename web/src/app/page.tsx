@@ -703,6 +703,8 @@ export default function HomePage() {
     bao ngoai khi khong co gi de hien, khong chi tung ke ben trong.
   */
   const coKeThuHai = !loading && (animationSeries.length > 0 || communityPosts.length > 0);
+  /* Cung nguyen tac voi `coKeThuHai`: khong dat cho cho mot cot rong. */
+  const coBangVang = !loading && bangVangTuan.length > 0;
 
   return (
     // Themed Page Hero — "Ocean Sky": bien+troi+phieu luu, cyan troi la
@@ -763,7 +765,24 @@ export default function HomePage() {
         Bang bien tap hai cot. DOM dat truyen truoc de mobile/doc man hinh gap
         noi dung chinh truoc; CSS dua thanh vien sang cot trai tren desktop.
       */}
-      <div className="home-editorial-grid rise rise-2">
+      {/*
+        MOT cot hay HAI, tuy co thu de bay hay khong.
+
+        Truoc day cot "Thành viên nổi bật" LUON duoc dat cho, ke ca khi tuan
+        do khong ai ghi XP — va o mot san pham chua dong nguoi thi do la
+        trang thai THUONG XUYEN, khong phai ngoai le. Ket qua: mot phan ba be
+        ngang man hinh danh cho dong chu "Chưa có thành viên ghi XP trong
+        tuần này", ngay canh ke truyen that.
+
+        Cai gia khong chi la cho trong. No noi rang hai thu do ngang hang
+        nhau, trong khi mot ben la noi dung nguoi ta den de doc con ben kia
+        la mot chi so phu.
+      */}
+      <div
+        className={`home-editorial-grid rise rise-2${
+          coBangVang ? "" : " home-editorial-grid-mot-cot"
+        }`}
+      >
         <section className="home-editorial-stories stack-2" aria-labelledby="home-noi-bat">
           <div className="section-head">
             <div className="stack-1">
@@ -791,34 +810,38 @@ export default function HomePage() {
           )}
         </section>
 
-        <aside className="home-editorial-members stack-2" aria-labelledby="home-bang-vang">
-          <div className="section-head">
-            <div className="stack-1">
-              <h2 className="section-title section-title-icon" id="home-bang-vang">
-                <IconCrown size={20} /> Thành viên nổi bật
-              </h2>
-              <p className="hint">Dẫn đầu XP trong tuần này.</p>
+        {coBangVang ? (
+          <aside className="home-editorial-members stack-2" aria-labelledby="home-bang-vang">
+            <div className="section-head">
+              <div className="stack-1">
+                <h2 className="section-title section-title-icon" id="home-bang-vang">
+                  <IconCrown size={20} /> Thành viên nổi bật
+                </h2>
+                <p className="hint">Dẫn đầu XP trong tuần này.</p>
+              </div>
+              <Link href="/leaderboard" className="section-more" aria-label="Xem bảng xếp hạng" prefetch={false}>
+                Xem hết <span aria-hidden="true">→</span>
+              </Link>
             </div>
-            <Link href="/leaderboard" className="section-more" aria-label="Xem bảng xếp hạng" prefetch={false}>
-              Xem hết <span aria-hidden="true">→</span>
-            </Link>
-          </div>
-          {loading ? (
-            <div className="home-member-loading" role="status" aria-label="Đang tải thành viên">
-              {Array.from({ length: 5 }, (_, i) => (
-                <span key={i} className="sk" aria-hidden="true" />
-              ))}
-            </div>
-          ) : bangVangTuan.length > 0 ? (
             <ol className="lb-list home-lb-list">
               {bangVangTuan.map((it) => (
                 <HangBangVang key={it.user_id} it={it} />
               ))}
             </ol>
-          ) : (
-            <KeTrongGon icon="✨" text="Chưa có thành viên ghi XP trong tuần này." />
-          )}
-        </aside>
+          </aside>
+        ) : loading ? (
+          /*
+            Trong lúc tải thì VẪN giữ chỗ: nếu tuần này có người, cột sẽ hiện
+            ra, và bỏ trống rồi chèn vào sau làm cả trang nhảy một nhịp.
+          */
+          <aside className="home-editorial-members stack-2" aria-hidden="true">
+            <div className="home-member-loading" role="status" aria-label="Đang tải thành viên">
+              {Array.from({ length: 5 }, (_, i) => (
+                <span key={i} className="sk" aria-hidden="true" />
+              ))}
+            </div>
+          </aside>
+        ) : null}
       </div>
 
       {/*
@@ -948,8 +971,14 @@ export default function HomePage() {
           <Link className="btn btn-primary" href="/studio/write" prefetch={false}>
             Bắt đầu viết
           </Link>
-          <Link className="btn" href="/studio/audio" prefetch={false}>
-            Thử Audio Studio
+          {/*
+            "Mở Studio" chu khong "Thử Audio Studio": tu #197, Audio la MOT
+            module trong Studio, va dat ten mot module canh nut "Bắt đầu
+            viết" lam nguoi doc tuong day la hai san pham khac nhau. Dua ho
+            toi cua chinh, roi ho tu chon module.
+          */}
+          <Link className="btn" href="/studio" prefetch={false}>
+            Mở Fanfic Studio
           </Link>
         </div>
       </section>

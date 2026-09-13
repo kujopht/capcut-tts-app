@@ -207,5 +207,122 @@ class TestRaoCanKhongDuocIM_LANG_CHET(unittest.TestCase):
                       "việc hình dạng bảo mật vẫn rơi được vào Codex")
 
 
+class TestRaoCanQuaDUONG_THAT(unittest.TestCase):
+    """V1.0 — kiểm rào qua CHÍNH hình dạng chỗ gọi thật dùng.
+
+    Chủ sở hữu nói thẳng: *"Do not merely test the helper with the type it
+    expects."* Bản V0.9.3 của bộ kiểm này gọi hàm bằng `dict` — đúng thứ nó
+    mong — nên nó xanh suốt trong khi đường thật (truyền `TaskContract`) đã
+    chết từ V0.7.
+    """
+
+    def setUp(self):
+        import shutil
+        import subprocess
+        import tempfile
+        from scripts.control_center.engine import ControlCenter
+        from scripts.control_center.model import Project
+        self._tmp = Path(tempfile.mkdtemp(prefix="rao-that-"))
+        kho = self._tmp / "kho"
+        kho.mkdir()
+        subprocess.run(["git", "-C", str(kho), "init", "-q"],
+                       capture_output=True)
+        self.cc = ControlCenter(root=self._tmp / "data", probe=False,
+                                leader_bat=False)
+        self.cc.them_project(Project(project_id="p", name="P",
+                                     repo_path=str(kho)))
+        self.ctx = self.cc.ctx("p")
+        self._rmtree = shutil.rmtree
+
+    def tearDown(self):
+        try:
+            self.cc.shutdown()
+        finally:
+            self._rmtree(self._tmp, ignore_errors=True)
+
+    def _hop_dong(self, **kw):
+        """ĐÚNG kiểu `_giao_khong_luoi` dựng: một `TaskContract`."""
+        from scripts.router_v4.capabilities import Requirements
+        from scripts.router_v4.contract import TaskContract
+        d = dict(task_id="t1", objective="Triển khai ứng dụng Web Todo",
+                 type="testing", allowed_scope=(".",),
+                 requirements=Requirements(repo_write=True))
+        d.update(kw)
+        return TaskContract(**d)
+
+    def test_13_nang_luc_HOP_LE_duoc_chap_nhan(self):
+        """Runtime đủ năng lực KHÔNG bị cấm oan."""
+        from scripts.router_v4.capabilities import Requirements
+        hd = self._hop_dong(allowed_scope=(), type="analysis",
+                            objective="xem kiến trúc",
+                            requirements=Requirements())
+        cam, _ = self.cc._cam_runtime_theo_nang_luc(self.ctx, hd)
+        self.assertEqual(tuple(cam), ())
+
+    def test_14_nang_luc_BI_TU_CHOI_thi_runtime_do_bi_cam(self):
+        cam, ly_do = self.cc._cam_runtime_theo_nang_luc(
+            self.ctx, self._hop_dong())
+        self.assertIn("CODEX01", cam)
+        self.assertIn("repo_write", ly_do)
+
+    def test_15_viec_HINH_DANG_BAO_MAT_khong_lot_vao_Codex(self):
+        """Lớp bảo vệ V0.7 — nó cũng đã chết cùng cách."""
+        from scripts.router_v4.capabilities import Requirements
+        hd = self._hop_dong(
+            objective="rà soát phân quyền IAM và xoay khoá bí mật",
+            type="security_review", allowed_scope=(),
+            requirements=Requirements())
+        cam, _ = self.cc._cam_runtime_theo_nang_luc(self.ctx, hd)
+        self.assertIn("CODEX01", cam)
+
+    def test_16_KIEU_LA_thi_FAIL_CLOSED_chu_khong_tra_rong(self):
+        """Hình dạng lạ phải KÊU LÊN, không được đoán 'chắc không cần gì'."""
+        from scripts.control_center.nang_luc import NangLucLoi
+        for xau in ("một chuỗi", 42, ["danh", "sách"], object()):
+            with self.subTest(kieu=type(xau).__name__):
+                with self.assertRaises(NangLucLoi):
+                    self.cc._cam_runtime_theo_nang_luc(self.ctx, xau)
+
+    def test_17_to_dict_tra_ve_rac_cung_FAIL_CLOSED(self):
+        from scripts.control_center.nang_luc import NangLucLoi
+
+        class Rac:
+            def to_dict(self):
+                return "không phải dict"
+
+        with self.assertRaises(NangLucLoi):
+            self.cc._cam_runtime_theo_nang_luc(self.ctx, Rac())
+
+    def test_18_NangLucLoi_KHONG_bi_nuot_boi_except_rong(self):
+        """`NangLucLoi` là `TypeError` — khối `except` rộng sẽ nuốt nó.
+
+        Đây chính là cách rào chết lần đầu. Bài kiểm đọc cấu trúc để chắc
+        `NangLucLoi` được bắt RIÊNG và ném lại TRƯỚC khối rộng.
+        """
+        goc = Path(__file__).resolve().parents[2]
+        van = (goc / "scripts" / "control_center" / "engine.py").read_text(
+            encoding="utf-8")
+        i = van.index("def _cam_runtime_theo_nang_luc")
+        than = van[i:i + 3000]
+        j = than.index("except NangLucLoi")
+        k = than.index("except (ImportError")
+        self.assertLess(j, k, "phải bắt NangLucLoi TRƯỚC khối rộng")
+        self.assertIn("raise", than[j:k])
+        self.assertNotIn("TypeError", than[k:k + 120],
+                         "khối rộng không được bắt TypeError nữa")
+
+    def test_19_CHO_GOI_THAT_chan_viec_lai_khi_khong_cham_duoc(self):
+        """Cấu trúc: chỗ giao việc phải FAIL CLOSED, không giao tiếp."""
+        goc = Path(__file__).resolve().parents[2]
+        van = (goc / "scripts" / "control_center" / "engine.py").read_text(
+            encoding="utf-8")
+        i = van.index("cam, ly_do_cam = self._cam_runtime_theo_nang_luc(")
+        khoi = van[i:i + 1400]
+        self.assertIn("except NangLucLoi", khoi)
+        self.assertIn("CAPABILITY_RESOLUTION_FAILED", khoi)
+        self.assertIn("TaskState.BLOCKED", khoi)
+        self.assertIn('"dispatched": False', khoi)
+
+
 if __name__ == "__main__":
     unittest.main()

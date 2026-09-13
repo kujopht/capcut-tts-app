@@ -52,6 +52,7 @@ from scripts.router_v4.scheduler import Demand, Scheduler
 
 from scripts.control_center import leader
 from scripts.control_center.bootstrap import co_moc_git, la_kho_git
+from scripts.control_center.nang_luc import NangLucLoi
 from scripts.control_center.execution import dieu_phoi as DP
 from scripts.control_center.execution import ghi_nho as EGN
 from scripts.control_center.execution import ke_hoach as EKH
@@ -3277,7 +3278,26 @@ class ControlCenter:
         # khong doi: chi nhan them `exclude`, va `decide()` tu roi ve khong
         # tranh khi khong con ai.
         tranh = tuple(self._runtime_anh_em_dang_chay(t))
-        cam, ly_do_cam = self._cam_runtime_theo_nang_luc(ctx, hd)
+        try:
+            cam, ly_do_cam = self._cam_runtime_theo_nang_luc(ctx, hd)
+        except NangLucLoi as exc:
+            # FAIL CLOSED. Không xác định được việc này đòi năng lực gì thì
+            # KHÔNG gửi nó đi — gửi đi là chạy với một rào an toàn đã tắt, và
+            # ta biết chính xác cái giá của điều đó (V0.9.3, rào chết im lặng
+            # từ V0.7).
+            self.store.ghi_su_kien(
+                "CAPABILITY_RESOLUTION_FAILED", project_id=t.project_id,
+                task_id=t.task_id, level="ERROR",
+                detail=f"{type(exc).__name__}: {exc}"[:300],
+                meta={"hinh_dang": type(hd).__name__})
+            lm.tra(t.project_id, t.task_id)
+            self.store.doi_trang_thai(
+                t.task_id, TaskState.BLOCKED,
+                reason=(f"không xác định được năng lực việc đòi hỏi "
+                        f"({exc}) — KHÔNG giao khi rào năng lực không chấm "
+                        f"được")[:400])
+            return {"task_id": t.task_id, "dispatched": False,
+                    "reason": "capability_resolution_failed"}
         da_tu_choi = self._cam_runtime_da_tu_choi(t.contract)
         if da_tu_choi:
             cam = tuple(sorted(set(cam) | set(da_tu_choi)))
@@ -3431,6 +3451,78 @@ class ControlCenter:
         self._fabric_cfg_cache = cfg if isinstance(cfg, dict) else {}
         return self._fabric_cfg_cache
 
+    def _kiem_du_an_sau_khi_ghi(self, ctx, task_id: str, hd, kq,
+                                moi: TaskState, ly_do: str
+                                ) -> Tuple[TaskState, str]:
+        """Chạy phép kiểm CỦA CHÍNH DỰ ÁN trước khi cho một việc GHI `DONE`.
+
+        Ba kết cục, và chúng phải phân biệt được trong sổ:
+
+            đạt            -> giữ `DONE`
+            không đạt      -> `FAILED` (có bằng chứng, sửa được)
+            không có gì chạy -> `NEEDS_EVIDENCE` — KHÔNG phải `DONE`
+
+        Việc CHỈ ĐỌC không đi qua đây: nó không sinh ra mã để kiểm, và bắt nó
+        chạy bộ test của dự án là tốn thời gian cho một câu trả lời không nói
+        gì về việc đó.
+
+        Router chạy các lệnh này, KHÔNG phải agent — cùng mô hình với
+        `probe_van_hanh`: Router làm phép đo rồi đính bằng chứng. Không quyền
+        nào của agent được nới.
+        """
+        try:
+            from scripts.control_center import kiem_du_an as KDA
+        except Exception:                                     # noqa: BLE001
+            return moi, ly_do
+
+        # Chỉ việc GHI, chỉ khi worker thật sự đổi tệp, và chỉ khi trong đó
+        # có MÃ NGUỒN/SẢN PHẨM.
+        #
+        # Một việc chỉ sửa `docs/*.md` cũng là việc GHI, nhưng bắt nó chạy cả
+        # bộ test của dự án là đòi một bằng chứng không nói gì về nó — và
+        # biến mọi việc tài liệu trên một kho không có test thành
+        # `NEEDS_EVIDENCE`. Chủ sở hữu nói rõ: cổng này dành cho *thay đổi mã
+        # nguồn/sản phẩm*.
+        pham_vi = tuple(getattr(hd, "allowed_scope", ()) or ())
+        doi = tuple((kq.envelope.changes if kq and kq.envelope else ()) or ())
+        if not pham_vi or not doi or not KDA.co_ma_nguon(doi):
+            return moi, ly_do
+
+        cay = getattr(kq, "worktree", "") or ""
+        if not cay or not Path(cay).is_dir():
+            return moi, ly_do
+
+        lenh_kh = []
+        try:
+            for c in (getattr(hd.verification, "commands", ()) or ()):
+                if isinstance(c, (list, tuple)):
+                    lenh_kh.append(tuple(str(x) for x in c))
+        except Exception:                                     # noqa: BLE001
+            pass
+
+        try:
+            bc = KDA.xac_minh(cay, lenh_ke_hoach=lenh_kh)
+        except Exception as exc:                              # noqa: BLE001
+            # Một lỗi Ở CHÍNH cổng kiểm không được âm thầm thành `DONE`.
+            self.store.ghi_su_kien(
+                "PROJECT_VERIFY_ERROR", project_id=ctx.project.project_id,
+                task_id=task_id, level="ERROR",
+                detail=f"{type(exc).__name__}: {exc}"[:300])
+            return TaskState.NEEDS_EVIDENCE, (
+                f"không chạy được phép kiểm của dự án: {exc}"[:400])
+
+        self.store.ghi_su_kien(
+            "PROJECT_VERIFIED", project_id=ctx.project.project_id,
+            task_id=task_id,
+            level=("INFO" if bc.dat else "WARNING"),
+            detail=bc.ly_do[:400], meta=bc.to_dict())
+
+        if bc.dat:
+            return moi, ly_do
+        if bc.thieu_bang_chung:
+            return TaskState.NEEDS_EVIDENCE, bc.ly_do[:400]
+        return TaskState.FAILED, bc.ly_do[:400]
+
     def _cam_runtime_theo_nang_luc(self, ctx, hd) -> Tuple[Tuple[str, ...], str]:
         """`(runtime bị CẤM, lý do)` theo NĂNG LỰC việc đòi hỏi.
 
@@ -3463,11 +3555,13 @@ class ControlCenter:
             #
             # Mot phep phong thu bien mot rao an toan thanh mot ham rong la
             # kieu hong te nhat: moi thu trong nhu binh thuong.
-            d = hd if isinstance(hd, dict) else None
-            if d is None:
-                lay = getattr(hd, "to_dict", None)
-                d = lay() if callable(lay) else {}
-            can = NL.nang_luc_viec(d if isinstance(d, dict) else {})
+            # V1.0 — MỘT CỬA DUY NHẤT, và nó KÊU LÊN khi không đọc được.
+            #
+            # `nang_luc_tu_hop_dong` nhận đúng hai hình dạng (`dict`, hoặc đối
+            # tượng có `.to_dict()`) và ném `NangLucLoi` cho mọi thứ khác.
+            # Bản V0.9.3 ở đây tự xoay xở rồi rơi về `{}` — tức là vẫn còn
+            # một đường trả rỗng âm thầm, đúng cái vừa phải sửa.
+            can = NL.nang_luc_tu_hop_dong(hd)
             if not can:
                 return (), ""
             fab = getattr(getattr(ctx, "sessions", None), "fabric", None)
@@ -3477,7 +3571,13 @@ class ControlCenter:
             if not cam:
                 return (), ""
             return cam, NL.ly_do_khong_hop(", ".join(cam), can)
-        except (ImportError, AttributeError, TypeError):
+        except NangLucLoi:
+            # KHÔNG nuốt. `NangLucLoi` là `TypeError`, nên khối `except` rộng
+            # ở dưới sẽ bắt được nó và trả `()` — tức là dựng lại đúng cái
+            # hỏng im lặng mà V0.9.3 vừa sửa. Ném lên để chỗ giao việc CHẶN
+            # việc lại thay vì gửi đi với một rào đã tắt.
+            raise
+        except (ImportError, AttributeError):
             return (), ""
 
     def _cam_runtime_da_tu_choi(self, hd) -> Tuple[str, ...]:
@@ -4375,6 +4475,22 @@ class ControlCenter:
             if pb.requires_decision:
                 ly_do = (pb.decision_request or ly_do or
                          "agent yêu cầu một quyết định")
+
+            # V1.0 — CỔNG KIỂM ĐỊNH CỦA CHÍNH DỰ ÁN.
+            #
+            # `DONE` phải nghĩa là mục tiêu gốc CÓ BẰNG CHỨNG KHÁCH QUAN. Tới
+            # đây `moi` mới chỉ dựa trên lời khai của worker cộng các cổng
+            # HÌNH DẠNG của V4 (shape/diff/scope/security) — không cổng nào
+            # trong đó chạy một dòng mã nào của dự án.
+            #
+            # Đo được (RouterDogfood02, 2026-09-13): một việc có tiêu chí
+            # "viết test và verify" đạt `DONE`, mà bộ kiểm của chính dự án
+            # chưa từng chạy; khi chạy thì nó đỏ 3/5. Cổng `tests` của V4
+            # xanh với "0 lệnh test xanh" vì không ai đưa cho nó lệnh nào.
+            if moi is TaskState.DONE:
+                moi, ly_do = self._kiem_du_an_sau_khi_ghi(
+                    ctx, task_id, hd, kq, moi, ly_do)
+
             self.store.doi_trang_thai(task_id, moi, reason=ly_do[:600],
                                       session_id=session_id)
             if moi is TaskState.REVIEW:

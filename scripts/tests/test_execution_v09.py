@@ -124,8 +124,31 @@ class Test01MayTrangThai(unittest.TestCase):
         self.assertIn("VERIFYING", str(e.exception))
 
     def test_moi_duong_toi_DONE_di_qua_VERIFYING(self):
-        di_toi_done = [s for s in TT if co_the_chuyen(s, TT.DONE) and s is not TT.DONE]
-        self.assertEqual(di_toi_done, [TT.VERIFYING])
+        """V1.0 SIẾT CHẶT luật này, không nới nó.
+
+        V0.9: cửa duy nhất vào `DONE` là `VERIFYING` — "đang kiểm định".
+        V1.0: cửa duy nhất là `VERIFIED` — "đã kiểm định và ĐẠT".
+
+        Khác biệt không phải chữ nghĩa. `VERIFYING -> DONE` gộp ba tình
+        huống rất khác nhau vào một mũi tên: đã xác minh đạt, đã chạy mà
+        không đạt, và KHÔNG CÓ GÌ ĐỂ CHẠY. Cái thứ ba trông y hệt cái thứ
+        nhất trong sổ — và đó chính là chuyện đã xảy ra ở RouterDogfood02
+        (2026-09-13): một việc `DONE` mà bộ kiểm của dự án chưa từng chạy.
+        """
+        di_toi_done = [s for s in TT if co_the_chuyen(s, TT.DONE)
+                       and s is not TT.DONE]
+        self.assertEqual(di_toi_done, [TT.VERIFIED])
+        # Và `VERIFYING` vẫn là cửa duy nhất vào `VERIFIED`.
+        di_toi_verified = [s for s in TT if co_the_chuyen(s, TT.VERIFIED)
+                           and s is not TT.VERIFIED]
+        self.assertEqual(di_toi_verified, [TT.VERIFYING])
+
+    def test_THIEU_BANG_CHUNG_khong_bao_gio_thanh_DONE(self):
+        """Bất biến trung tâm của V1.0."""
+        self.assertFalse(co_the_chuyen(TT.NEEDS_EVIDENCE, TT.DONE))
+        self.assertFalse(co_the_chuyen(TT.FAILED_VERIFICATION, TT.DONE))
+        self.assertFalse(co_the_chuyen(TT.RUNNING, TT.VERIFIED),
+                         "không được nhảy cóc qua VERIFYING")
 
     def test_DONE_va_CANCELLED_la_ngo_cut(self):
         for s in (TT.DONE, TT.CANCELLED):

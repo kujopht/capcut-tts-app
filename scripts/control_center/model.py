@@ -45,6 +45,15 @@ class TaskState(str, Enum):
     RUNNING = "RUNNING"
     BLOCKED = "BLOCKED"
     REVIEW = "REVIEW"
+    #: V1.0 — worker báo xong, các cổng HÌNH DẠNG xanh, nhưng KHÔNG có phép
+    #: kiểm nào của dự án để chạy. Đây KHÔNG phải `DONE` và cũng KHÔNG phải
+    #: `FAILED`: chưa có gì sai, mà cũng chưa có gì chứng minh là đúng.
+    #:
+    #: Tách riêng vì hai thứ kia đều nói dối trong tình huống này. Gọi là
+    #: `DONE` thì một việc chưa từng được kiểm trông y hệt việc đã kiểm
+    #: (RouterDogfood02, 2026-09-13). Gọi là `FAILED` thì đổ lỗi cho worker
+    #: về một thứ nó làm đúng, và đốt lượt thử lại vào một việc không hỏng.
+    NEEDS_EVIDENCE = "NEEDS_EVIDENCE"
     DONE = "DONE"
     FAILED = "FAILED"
     PAUSED = "PAUSED"
@@ -52,6 +61,10 @@ class TaskState(str, Enum):
     @property
     def terminal(self) -> bool:
         return self in (TaskState.DONE, TaskState.FAILED)
+
+    @property
+    def thieu_bang_chung(self) -> bool:
+        return self is TaskState.NEEDS_EVIDENCE
 
     @property
     def active(self) -> bool:
@@ -81,8 +94,15 @@ _CHUYEN_HOP_LE.update({
                                   TaskState.BLOCKED, TaskState.PAUSED,
                                   TaskState.FAILED}),
     TaskState.RUNNING: frozenset({TaskState.REVIEW, TaskState.DONE,
+                                  TaskState.NEEDS_EVIDENCE,
                                   TaskState.FAILED, TaskState.BLOCKED,
                                   TaskState.PAUSED, TaskState.QUEUED}),
+    # `NEEDS_EVIDENCE` KHÔNG đi thẳng tới `DONE`. Muốn ra `DONE` thì phải
+    # chạy lại (`QUEUED`) và lần đó phải có phép kiểm THẬT chạy được — hoặc
+    # người vận hành quyết (`BLOCKED`). Đây là toàn bộ giá trị của trạng
+    # thái này; cho nó một mũi tên tới `DONE` là xoá nó đi.
+    TaskState.NEEDS_EVIDENCE: frozenset({TaskState.QUEUED, TaskState.BLOCKED,
+                                         TaskState.PAUSED, TaskState.FAILED}),
     TaskState.BLOCKED: frozenset({TaskState.QUEUED, TaskState.WAITING,
                                   TaskState.PAUSED, TaskState.FAILED,
                                   TaskState.DONE}),

@@ -675,9 +675,31 @@ class BoDieuPhoi:
             level=("INFO" if bc.dat else "WARNING"),
             detail=f"{bc.trang_thai.value}: {bc.ly_do}"[:400],
             meta=bc.to_dict())
+        # Chấm lại một lần thực thi ĐÃ KẾT THÚC là chuyện bình thường (báo
+        # cáo, nghiệm thu, đọc lại sổ). Nó KHÔNG được sinh ra một lượt chuyển
+        # trạng thái nào — `DONE` là ngõ cụt, và đúng như vậy.
+        da_xong = y.trang_thai.ket_thuc
         if bc.dat:
-            self._ket_thuc(y, TT.DONE, bc.ly_do)
+            # V1.0 — ĐI QUA `VERIFIED`, không nhảy thẳng `DONE`.
+            #
+            # Một bước nữa trông như thủ tục, nhưng nó là chỗ DUY NHẤT sổ ghi
+            # lại rằng phép kiểm đã CHẠY và đã ĐẠT. Không có nó, `DONE` không
+            # phân biệt được với `DONE` của một việc chưa từng được kiểm —
+            # đúng cái đã xảy ra ở RouterDogfood02.
+            if not da_xong:
+                self.so.doi_trang_thai(execution_id, TT.VERIFIED,
+                                       ly_do=bc.ly_do, pha="đã xác minh")
+                self._ket_thuc(y, TT.DONE, bc.ly_do)
             return bc
+        if da_xong:
+            return bc
+        if bc.trang_thai is TrangThaiXacMinh.THIEU_BANG_CHUNG:
+            # THIẾU BẰNG CHỨNG ≠ HỎNG. Nói đúng tên nó ra trước khi quyết.
+            self.so.doi_trang_thai(execution_id, TT.NEEDS_EVIDENCE,
+                                   ly_do=bc.ly_do, pha="thiếu bằng chứng")
+        else:
+            self.so.doi_trang_thai(execution_id, TT.FAILED_VERIFICATION,
+                                   ly_do=bc.ly_do, pha="kiểm định không đạt")
         ns = self._ngan_sach(execution_id, kh)
         cd = ap_tran(ChanDoan(
             LoaiHong.LOI_HIEN_THUC

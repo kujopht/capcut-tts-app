@@ -954,7 +954,9 @@ def tieu_chi_can_ngu_nghia(kh: KeHoachThucThi) -> List[str]:
 
 
 def nen_goi_reviewer(kh: KeHoachThucThi, y: YDinhThucThi,
-                     bc: "BaoCaoKiemDinh") -> Tuple[bool, str]:
+                     bc: "BaoCaoKiemDinh", *,
+                     model_da_lam: str = "", loai_viec: str = "",
+                     co_kiem_schema: bool = False) -> Tuple[bool, str]:
     """`(có gọi không, vì sao)` — quyết định SAU khi kiểm tất định đã chạy.
 
     Chính sách §A, và thứ tự các mệnh đề dưới đây LÀ chính sách đó:
@@ -971,6 +973,13 @@ def nen_goi_reviewer(kh: KeHoachThucThi, y: YDinhThucThi,
     4. Chạm production hoặc rủi ro CAO thì gọi, kể cả khi mọi phép đo đều
        xanh: ở mức đó, "mọi phép kiểm đạt" và "việc này an toàn" là hai câu
        khác nhau.
+    5. **(V1.0)** Họ **Gemini** viết MÃ SẢN PHẨM -> BẮT BUỘC phản biện khác
+       họ, kể cả khi mọi phép đo đều xanh và không tiêu chí nào đòi ngữ
+       nghĩa. Luật ở `v10.vai_tro.can_review_doc_lap`; hàm này chỉ HỎI nó.
+
+    Mệnh đề 5 đứng SAU mệnh đề 2: một phép đo đã đỏ vẫn là câu trả lời, và
+    hỏi thêm một model lúc đó chỉ mở đường cho một `ACCEPT` che mất nó. Nó
+    đứng TRƯỚC mệnh đề 3 vì "máy móc" không miễn được luật này.
     """
     if bc.buoc_hong:
         return False, ("phép kiểm tất định đã bắt được lỗi ở bước "
@@ -981,6 +990,18 @@ def nen_goi_reviewer(kh: KeHoachThucThi, y: YDinhThucThi,
     if do_may:
         return False, (f"{len(do_may)} tiêu chí KHÔNG ĐẠT theo phép đo tất "
                        f"định — máy đã trả lời")
+    # (V1.0) Luật B5 — hỏi CHỦ SỞ HỮU của nó, không chép lại luật vào đây.
+    if model_da_lam:
+        try:
+            from scripts.control_center.v10.vai_tro import can_review_doc_lap
+            yc = can_review_doc_lap(loai_viec=loai_viec,
+                                    model_da_lam=model_da_lam,
+                                    co_kiem_schema=co_kiem_schema)
+        except Exception:                                     # noqa: BLE001
+            yc = None
+        if yc is not None and yc.bat_buoc:
+            return True, f"(V1.0) {yc.ly_do}"
+
     nn = tieu_chi_can_ngu_nghia(kh)
     if nn:
         return True, ("tiêu chí nghiệm thu đòi phán đoán ngữ nghĩa: "

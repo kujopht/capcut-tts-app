@@ -626,7 +626,23 @@ class BoDieuPhoi:
         # để nghe lại điều đã biết vừa tốn hạn mức vừa mở đường cho một
         # `ACCEPT` che mất một phép đo đã đỏ.
         if phan_bien is None and self._goi_phan_bien is not None:
-            nen, vi_sao = nen_goi_reviewer(kh, y, bc)
+            # AI VIẾT MÃ SẢN PHẨM — luật B5 của V1.0 cần biết. Lấy model của
+            # bước THỰC SỰ có `files_changed`: một bước chỉ-đọc chạy bằng
+            # Gemini không kích hoạt luật, còn một bước GHI thì có, dù nó
+            # nằm ở đâu trong kế hoạch.
+            model_ma, loai_ma = "", ""
+            for _k in kqb.values():
+                if _k is None or not getattr(_k, "files_changed", ()):
+                    continue
+                if _k.model:
+                    # "implementation", KHÔNG phải "implement": chuỗi này
+                    # phải nằm trong `vai_tro.VIEC_SUA_MA`, và lệch một chữ
+                    # là cả luật B5 thành lệnh rỗng mà không ai báo. Có bài
+                    # kiểm neo đúng điều đó.
+                    model_ma, loai_ma = _k.model, "implementation"
+                    break
+            nen, vi_sao = nen_goi_reviewer(kh, y, bc, model_da_lam=model_ma,
+                                           loai_viec=loai_ma)
             self.so.ghi_su_kien(
                 execution_id, "REVIEW_GATE", project_id=y.project_id,
                 detail=f"{'GỌI' if nen else 'BỎ QUA'} Reviewer: {vi_sao}"[:300],

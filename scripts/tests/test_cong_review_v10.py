@@ -101,6 +101,75 @@ class TestKhongThuHepOan(unittest.TestCase):
                                        model_da_lam=m)
                 self.assertFalse(r.bat_buoc)
 
+    def test_11_luat_B5_da_duoc_CAM_vao_duong_that(self):
+        """Chính sách này từng là MÃ CHẾT — định nghĩa, kiểm, không ai gọi.
+
+        Đúng lời chủ sở hữu về vòng sự cố: *"tested but not wired"*. Bài này
+        neo rằng nó đã được cắm, và cắm ở ĐÚNG chỗ duy nhất giữ chính sách
+        gọi Reviewer.
+        """
+        from pathlib import Path
+        goc = Path(__file__).resolve().parents[2] / "scripts" / "control_center"
+        kd = (goc / "execution" / "kiem_dinh.py").read_text(encoding="utf-8")
+        self.assertIn("can_review_doc_lap", kd,
+                      "`nen_goi_reviewer` phải HỎI luật B5")
+        dp = (goc / "execution" / "dieu_phoi.py").read_text(encoding="utf-8")
+        i = dp.index("nen_goi_reviewer(")
+        self.assertIn("model_da_lam=", dp[i:i + 200],
+                      "chỗ gọi phải truyền model ĐÃ VIẾT MÃ, không thì luật "
+                      "B5 không bao giờ kích hoạt")
+
+    def test_11c_HANH_VI_gemini_sua_ma_thi_CONG_bat_goi_reviewer(self):
+        """Bài neo cấu trúc là chưa đủ — nó bắt được việc XOÁ lời gọi, nhưng
+        không bắt được việc VÔ HIỆU HOÁ nó (đã đo: một đột biến làm luật
+        không bao giờ kích hoạt mà bộ kiểm vẫn xanh).
+
+        Bài này hỏi thẳng cái cổng: mọi phép đo XANH, không tiêu chí nào đòi
+        ngữ nghĩa, không chạm production, rủi ro thấp — mà mã sản phẩm do họ
+        Gemini viết, thì vẫn PHẢI gọi phản biện.
+        """
+        from scripts.control_center.execution import ke_hoach as KH
+        from scripts.control_center.execution import y_dinh as YD
+        from scripts.control_center.execution.kiem_dinh import (BaoCaoKiemDinh,
+                                                                nen_goi_reviewer)
+
+        y = YD.tao_y_dinh(project_id="demo",
+                          goal="sửa scripts/app.py cho đúng",
+                          cau_nguoi_dung="sửa scripts/app.py cho đúng")
+        kh = KH.KeHoachThucThi(
+            execution_id=y.execution_id,
+            buoc=(KH.BuocKeHoach(buoc_id="a", tieu_de="a", muc_tieu="làm a"),))
+        # Mọi phép đo XANH: không bước hỏng, không tiêu chí đỏ.
+        bc = BaoCaoKiemDinh(execution_id=y.execution_id, buoc_dat=("a",))
+
+        nen, _ = nen_goi_reviewer(kh, y, bc)
+        self.assertFalse(nen, "không có luật nào -> không tiêu một lượt model")
+
+        nen2, vs2 = nen_goi_reviewer(kh, y, bc,
+                                     model_da_lam="gemini-3.1-pro-low",
+                                     loai_viec="implementation")
+        self.assertTrue(nen2, "họ Gemini viết mã sản phẩm -> BẮT BUỘC phản "
+                              "biện, kể cả khi mọi phép đo đều xanh")
+        self.assertIn("gemini", vs2.lower())
+
+        nen3, _ = nen_goi_reviewer(kh, y, bc, model_da_lam="claude-sonnet-5",
+                                   loai_viec="implementation")
+        self.assertFalse(nen3, "luật B5 hẹp có chủ đích — không phải họ nào "
+                               "cũng kích hoạt")
+
+    def test_11b_chuoi_loai_viec_o_cho_goi_PHAI_khop_tap_luat(self):
+        """Lệch một chữ giữa hai tệp là cả luật thành lệnh rỗng, im lặng."""
+        from pathlib import Path
+
+        from scripts.control_center.v10.vai_tro import VIEC_SUA_MA
+        dp = (Path(__file__).resolve().parents[2] / "scripts"
+              / "control_center" / "execution" / "dieu_phoi.py"
+              ).read_text(encoding="utf-8")
+        i = dp.index("loai_ma = _k.model,")
+        chuoi = dp[i:i + 80].split('"')[1]
+        self.assertIn(chuoi, VIEC_SUA_MA,
+                      f"chỗ gọi dùng {chuoi!r}, không có trong VIEC_SUA_MA")
+
     def test_10_nhan_dang_ho_model_dung(self):
         self.assertEqual(ho_model("gemini-3.8-flash-high"), "gemini")
         self.assertEqual(ho_model("claude-sonnet-4-6"), "claude")

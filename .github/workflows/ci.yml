@@ -7,6 +7,12 @@
 # Ung dung desktop (`app.py`, `desktop_app/`, `capcut_tts_api/`) KHONG chay o day:
 # no can PySide6 va mot man hinh, con cai dat PySide6 tren CI se pha vo dung dieu
 # ma job `backend` phai chung minh — rang `server/requirements.txt` la du.
+#
+# Job `router` (Router Control Center, `scripts/tests`) la MOT HE THONG
+# RIENG, khong phai backend web — tach thanh job cua no de mot loi Router co
+# san khong con lam do required check "Backend tests (moi truong sach)" cua
+# san pham web (su co 2026-09-13). Khong bat buoc tren branch protection,
+# nhung van chay day du va van hien do neu Router hong.
 
 name: CI
 
@@ -107,6 +113,11 @@ jobs:
           fi
 
   backend:
+    # TEN GIU NGUYEN Y HET: day la required status check context tren
+    # branch protection cua `main` (xac minh qua
+    # `gh api repos/.../branches/main/protection`). Doi ten se lam GitHub
+    # cho la required check khong bao gio chay — PR se ket "Waiting for
+    # status to be reported" mai mai. Doi TRACH NHIEM cua job, KHONG doi ten.
     name: Backend tests (moi truong sach)
     runs-on: ubuntu-latest
     steps:
@@ -161,36 +172,53 @@ jobs:
         run: |
           "$RUNNER_TEMP/venv/bin/python" -m unittest discover -s server/tests -t . -v
 
-      # Phu thuoc cua ROUTER CONTROL CENTER, khong phai cua backend web.
-      #
-      # `scripts/tests/` gio co ca bai kiem cua Control Center, va API cuc bo
-      # cua no doi `python-multipart` cho `POST /api/attachments`. Cai o day —
-      # SAU buoc "Import ung dung chi voi phu thuoc runtime" o tren — de buoc
-      # ay van chung minh dung dieu no sinh ra de chung minh:
-      # `server/requirements.txt` TU NO du cho backend web. Dat truoc buoc do
-      # se lam phep chung minh kia rong.
-      #
-      # `server/requirements.txt` KHONG duoc nhan goi nay: `server/` khong
-      # dung mot `Form(`/`File(`/`UploadFile` nao cua FastAPI, va job nay ton
-      # tai dung de giu tap phu thuoc runtime cua backend khoi phinh ra.
-      - name: Cai phu thuoc giao dien web cua Control Center
+      # Job nay CHI chung minh backend web (`server/`) — Router Control
+      # Center (`scripts/`) co job rieng ben duoi ("router"), khong bat
+      # buoc, khong duoc phep lam do required check nay. Xem su co
+      # 2026-09-13: mot loi Router co san tu truoc chan moi PR cua san pham
+      # web du server/tests sach 100%.
+      - name: Bien dich ma backend (server/)
         run: |
-          "$RUNNER_TEMP/venv/bin/python" -m pip install \
-            -r requirements-control-center-web.txt
+          "$RUNNER_TEMP/venv/bin/python" -m compileall -q server
 
-      # scripts/tests/ da ton tai tu truoc (vd test_setup_appwrite_readiness.py)
-      # nhung chua bao gio duoc CI THAT SU chay — buoc "Bien dich" ben duoi chi
-      # kiem tra cu phap, khong chay assertion nao. Them buoc nay de cac test
-      # thuan (khong cham mang/Appwrite that, xem tung tep) that su duoc kiem.
+  router:
+    # KHONG required tren branch protection (co y — xem ghi chu o job
+    # "backend"). Van chay va van hien do neu Router hong: chi la khong con
+    # chan PR cua san pham web nua. KHONG bo/xoa/xfail bat ky bai test Router
+    # nao — job nay ton tai CHINH LA de tiep tuc chay het chung, tach rieng
+    # khoi cong required cua backend web.
+    name: Router / Control Center tests (khong bat buoc, khong chan PR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Tao venv ngoai cay lam viec
+        run: python -m venv "$RUNNER_TEMP/venv"
+
+      # Phu thuoc cua ROUTER CONTROL CENTER, khong phai cua backend web.
+      # `scripts/tests/` doi `python-multipart` cho `POST /api/attachments`
+      # cua API cuc bo Control Center. `server/requirements.txt` KHONG duoc
+      # nhan goi nay: `server/` khong dung mot `Form(`/`File(`/`UploadFile`
+      # nao cua FastAPI.
+      - name: Cai phu thuoc Router / Control Center
+        run: |
+          PY="$RUNNER_TEMP/venv/bin/python"
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install -r requirements-control-center-web.txt
+
       - name: Chay scripts/tests
         env:
           PYTHONPATH: ""
         run: |
           "$RUNNER_TEMP/venv/bin/python" -m unittest discover -s scripts/tests -t . -v
 
-      - name: Bien dich toan bo ma backend
+      - name: Bien dich ma Router (scripts/)
         run: |
-          "$RUNNER_TEMP/venv/bin/python" -m compileall -q server scripts
+          "$RUNNER_TEMP/venv/bin/python" -m compileall -q scripts
 
   web:
     name: Web tests, TypeScript, ESLint, production build

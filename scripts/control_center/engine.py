@@ -3658,7 +3658,7 @@ class ControlCenter:
             return ()
         return tuple(sorted(ra))
 
-    def _con_da_ket_thuc(self, c, *, con_goi: str = "") -> bool:
+    def _con_da_ket_thuc(self, c) -> bool:
         """Con này còn gì tự chạy nữa không? (xem `_tong_hop_toa`)
 
         `BLOCKED` chỉ tính là KẾT THÚC khi hồ sơ sự cố bền nói rằng vòng phục
@@ -3689,10 +3689,22 @@ class ControlCenter:
         # không trừ nó ra thì không lần gộp nào xảy ra nữa và cha treo với
         # MỌI lần toả, không riêng lần có con hỏng. (Đã vấp: bộ kiểm `toa`
         # đi từ 2s sang hết giờ ở cả 10 lượt.)
-        if c.task_id != con_goi:
-            with self._khoa:
-                if c.task_id in self._dang_chay:
-                    return False
+        #
+        # Nhận ra "chính nó" bằng ĐỐI TƯỢNG LUỒNG, không bằng một tham số
+        # truyền tay: `_dang_chay` vốn đã giữ sẵn luồng của từng việc, nên
+        # phép so sánh này đúng ở MỌI chỗ gọi — kể cả lưới an toàn trong
+        # `tick()` — và không phải sửa chữ ký.
+        #
+        # Chữ ký LÀ thứ phải giữ: bộ kiểm khoá đọc/ghi V0.6.1 thay
+        # `_tong_hop_toa` bằng một bản do thám hai tham số để canh "khoá con
+        # đã nhả trước khi gộp chưa". Thêm một tham số vào đây làm chỗ gọi
+        # ném `TypeError`, `_chay` nuốt mất, và việc cha KHÔNG BAO GIỜ được
+        # gộp — bài ấy hết 40s rồi đỏ. Một lưới an toàn của bộ kiểm bị chính
+        # bản sửa này làm câm.
+        with self._khoa:
+            luong = self._dang_chay.get(c.task_id)
+        if luong is not None and luong is not threading.current_thread():
+            return False
         try:
             from scripts.control_center.v10.su_co import HanhDong
             from scripts.control_center.v10.su_co_ben import SoSuCo
@@ -3715,8 +3727,7 @@ class ControlCenter:
                 sc.chien_luoc in (HanhDong.HOI_DONG.value,
                                   HanhDong.LEO_THANG_CHU_SO_HUU.value))
 
-    def _tong_hop_toa(self, ctx: ProjectContext, cha_id: str, *,
-                      con_goi: str = "") -> Optional[Dict]:
+    def _tong_hop_toa(self, ctx: ProjectContext, cha_id: str) -> Optional[Dict]:
         """Mọi con đã kết thúc -> gộp vào cha, khử trùng, giữ nguồn gốc.
 
         Con còn chạy/chờ thì cha CHỜ — không gộp nửa chừng. Hai con xong cùng
@@ -3750,8 +3761,7 @@ class ControlCenter:
                 return None
             con = [self.store.task(cid) for cid in (toa.get("con") or [])]
             con = [c for c in con if c is not None]
-            if not con or any(not self._con_da_ket_thuc(c, con_goi=con_goi)
-                              for c in con):
+            if not con or any(not self._con_da_ket_thuc(c) for c in con):
                 return None
             ds = []
             for c in con:
@@ -4801,9 +4811,7 @@ class ControlCenter:
                 # Con cua mot lan TOA: neu day la con cuoi cung ket thuc thi
                 # gop vao cha. Con con dang chay/cho thi ham nay tu tra ve.
                 if ((xong.contract or {}).get("_toa") or {}).get("cha_id"):
-                    # `con_goi`: luồng này LÀ của `task_id`, nên nó tự miễn
-                    # phép kiểm "còn bay" — xem `_con_da_ket_thuc`.
-                    self._tong_hop_toa(ctx, xong.parent_id, con_goi=task_id)
+                    self._tong_hop_toa(ctx, xong.parent_id)
 
         except Exception as exc:                          # noqa: BLE001
             self.store.ghi_su_kien(

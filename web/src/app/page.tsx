@@ -971,8 +971,14 @@ export default function HomePage() {
           <Link className="btn btn-primary" href="/studio/write" prefetch={false}>
             Bắt đầu viết
           </Link>
-          <Link className="btn" href="/studio/audio" prefetch={false}>
-            Thử Audio Studio
+          {/*
+            "Mở Studio" chu khong "Thử Audio Studio": tu #197, Audio la MOT
+            module trong Studio, va dat ten mot module canh nut "Bắt đầu
+            viết" lam nguoi doc tuong day la hai san pham khac nhau. Dua ho
+            toi cua chinh, roi ho tu chon module.
+          */}
+          <Link className="btn" href="/studio" prefetch={false}>
+            Mở Fanfic Studio
           </Link>
         </div>
       </section>

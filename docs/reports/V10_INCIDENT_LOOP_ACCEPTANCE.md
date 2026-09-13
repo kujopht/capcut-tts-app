@@ -556,3 +556,47 @@ tên, đúng cái hình dạng đã gây ra gần hết khuyết tật của đ�
 sự cố; cắm thêm hai hệ con vào lúc này, không có dặm đường thật để xác minh,
 đúng là cách đẻ ra khuyết tật thứ năm — và bốn khuyết tật trước đều do một
 lượt chạy thật phát hiện chứ không phải do bài kiểm.
+
+## 12. HỒI QUY ĐẦY ĐỦ BẮT ĐƯỢC THỨ MÀ BÀI NHẮM ĐÍCH KHÔNG BẮT
+
+129 bài nhắm đích xanh, ma trận đột biến 10/10, hai dogfood thật đều đạt — và
+hồi quy đầy đủ vẫn ra **4 bài đỏ**. Cả bốn ở `test_control_center_slice.py`,
+và cả bốn CÙNG MỘT gốc:
+
+```
+_can_luot()  chờ  state is FAILED  làm chỗ nghỉ
+```
+
+Từ khi vòng sự cố sở hữu chính sách phục hồi, một việc cạn bậc thang sẽ LEO
+THANG và nghỉ ở `BLOCKED`. Chờ một trạng thái không bao giờ tới nữa = hết 60s
+rồi báo đỏ, bốn lần — bộ kiểm ấy vì thế chạy 541s; sau khi sửa còn 300s.
+
+Đây là **cùng một sự thay đổi ngữ nghĩa** đã làm treo việc cha ở §7b, chỉ
+hiện ra ở một mặt khác. Một thay đổi trạng thái nhỏ chạm tới mọi chỗ từng
+coi `FAILED` là chỗ nghỉ cuối cùng — và chỉ hồi quy ĐẦY ĐỦ mới liệt kê hết
+được những chỗ ấy.
+
+**Không hạ chuẩn để cho xanh.** Điều các bài ấy canh vẫn nguyên vẹn:
+
+* `_can_luot` vẫn đòi `attempts >= MAX_ATTEMPTS`, nên một lần thử lại vô hạn
+  vẫn làm nó treo tới hết giờ đúng như trước;
+* `test_thu_lai_CO_TRAN_khong_lap_vo_han` vẫn khẳng định `attempts <= 3` — đó
+  mới là thứ nó canh — và nay đòi hỏi **THÊM**: nếu nghỉ ở `BLOCKED` thì phải
+  có hồ sơ sự cố ĐÃ ĐÓNG, tức leo thang thật, chứ không phải một việc bị chặn
+  vì lý do khác lẫn vào.
+
+## 13. NHỮNG GÌ TÔI **KHÔNG** CHỨNG MINH ĐƯỢC ĐÊM NAY
+
+| Hạng mục | Trạng thái |
+|---|---|
+| Gemini **viết mã** trên đường thật | ✅ AG02/`gemini-3.1-pro-low` sửa tệp thật, `npm` thật |
+| Luật review B5 **chạy** trên đường thật | ❌ **CHƯA** — đã cắm (§9) và có bài HÀNH VI, nhưng hết hạn mức Antigravity trước khi có một lượt kiểm định nào đi qua nó. Chưa thấy một dòng `REVIEW_GATE` nào do luật B5 bật |
+| nhánh `CHO_QUOTA` tới được trạng thái việc | ❌ hạng mục mở số 1 (§10c) |
+| `phien_leader.py`, `han_muc.py` | ❌ mã chết (§11) |
+| Claude Opus 5 làm runtime worker | ❌ **CHƯA XÁC MINH** — không đổi, và KHÔNG đụng vào trạng thái riêng của Claude Code để giả vờ ngược lại |
+
+Dòng thứ hai là chỗ dễ đọc nhầm nhất, nên nói thẳng: **cổng review đã được
+cắm, nhưng chưa có một dặm đường thật nào** — đúng cái trạng thái mà vòng sự
+cố ở trong trước đêm nay. Nó hơn lúc trước ở chỗ không còn là mã chết và có
+bài kiểm hành vi, nhưng nó CHƯA đạt cùng một mức bằng chứng với §6/§10b, và
+tôi không tính nó là đã chứng minh.

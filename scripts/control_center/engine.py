@@ -4168,6 +4168,110 @@ class ControlCenter:
                   "cam": hd["_cam_runtime"]})
         return True
 
+    def _dieu_phoi_su_co(self, ctx: ProjectContext, task_id: str, pb,
+                         session_id: str, *, placement_key: str = "",
+                         trang_thai=None) -> Optional[str]:
+        """CHỦ SỞ HỮU DUY NHẤT của chính sách phục hồi — V1.0.
+
+        Một lần hỏng đi qua đây, không đi thẳng vào `_thu_lai_neu_dang` nữa:
+
+            hỏng -> SỰ CỐ (bền) -> phân loại -> chọn chiến lược -> nguyên liệu
+
+        Nguyên liệu hiện có, và mỗi cái là một thứ Router VỐN đã làm được:
+
+            SUA_TAI_CHO / DOI_CHO_CHAY / LAP_LAI_KE_HOACH
+                -> `_thu_lai_neu_dang` (xếp lại, đổi chỗ chạy, có trần)
+            SUA_MOI_TRUONG / SUA_HA_TANG_KIEM
+                -> cũng xếp lại, NHƯNG ghi rõ chỗ cần sửa là môi trường /
+                   lệnh kiểm, không phải mã sản phẩm
+            CHO_QUOTA
+                -> KHÔNG xếp lại ngay; hết hạn mức thì chờ, không mua thêm
+            HOI_DONG / LEO_THANG_CHU_SO_HUU
+                -> `BLOCKED` kèm bằng chứng, và CHỈ ở đây người mới bị gọi
+
+        Trả về tên hành động đã chọn (để bài kiểm đọc được), hoặc `None` khi
+        tầng sự cố không dùng được — lúc đó rơi về nguyên liệu cũ thay vì
+        làm chết một lượt chạy.
+        """
+        try:
+            from scripts.control_center.v10.su_co import HanhDong
+            from scripts.control_center.v10.su_co_ben import SoSuCo
+            from scripts.control_center.v10.su_kien import (BusSuKien,
+                                                            LoaiSuKien,
+                                                            SuKienDoi)
+        except Exception:                                     # noqa: BLE001
+            self._thu_lai_neu_dang(ctx, task_id, pb, session_id,
+                                   placement_key=placement_key)
+            return None
+
+        t = self.store.task(task_id)
+        if t is None:
+            return None
+        so = SoSuCo(self.store)
+        bus = BusSuKien(self.store)
+        sc = so.mo_hoac_lay(project_id=t.project_id, task_id=task_id,
+                            muc_tieu=t.objective or t.title)
+        sc.cho_chay_truoc = placement_key or (pb.worker or "")
+
+        # BẰNG CHỨNG trước, phân loại sau. Đuôi đầu ra của lệnh kiểm là thứ
+        # phân biệt "mã sai" với "lệnh kiểm sai" — xem `kiem_du_an`.
+        manh = [pb.summary or "", pb.failure_reason or ""]
+        manh += [str(x) for x in (pb.risks or [])[:3]]
+        manh += [str(x) for x in (pb.findings or [])[:3]]
+        if getattr(t, "blocked_reason", ""):
+            manh.append(str(t.blocked_reason))
+        van = "\n".join(x for x in manh if x)
+
+        v = so.vong(sc)
+        qd = v.xet(van, failure_reason=pb.failure_reason or "")
+        so.cap_nhat_tu_vong(sc, v, qd)
+        if pb.raw_log_ref:
+            sc.bang_chung = tuple(list(sc.bang_chung)[-8:]
+                                  + [f"log:{pb.raw_log_ref}"])
+        so.ghi(sc, chi_tiet=f"{qd.loai.value} -> {qd.hanh_dong.value}: "
+                            f"{qd.ly_do}")
+        bus.phat(SuKienDoi(
+            LoaiSuKien.INCIDENT, t.project_id, sc.cho_chay_truoc or "router",
+            f"{qd.loai.value}: {qd.ly_do}", task_id=task_id,
+            execution_id=sc.execution_id,
+            bang_chung=tuple(sc.bang_chung)[-4:]))
+
+        hd = qd.hanh_dong
+        XEP_LAI = (HanhDong.SUA_TAI_CHO, HanhDong.DOI_CHO_CHAY,
+                   HanhDong.LAP_LAI_KE_HOACH, HanhDong.SUA_MOI_TRUONG,
+                   HanhDong.SUA_HA_TANG_KIEM)
+        if hd in XEP_LAI:
+            bus.phat(SuKienDoi(
+                LoaiSuKien.REPAIR, t.project_id, "router",
+                f"{hd.value}: {qd.ly_do}", task_id=task_id,
+                execution_id=sc.execution_id))
+            self._thu_lai_neu_dang(ctx, task_id, pb, session_id,
+                                   placement_key=placement_key)
+            return hd.value
+
+        if hd is HanhDong.CHO_QUOTA:
+            self.store.ghi_su_kien(
+                "INCIDENT_WAIT_QUOTA", project_id=t.project_id,
+                task_id=task_id, level="WARNING", detail=qd.ly_do[:300],
+                meta=qd.to_dict())
+            return hd.value
+
+        # HOI_DONG / LEO_THANG — CHỈ ở đây người dùng mới bị gọi.
+        bus.phat(SuKienDoi(
+            LoaiSuKien.ESCALATION, t.project_id, "router",
+            f"{hd.value}: {qd.ly_do}", task_id=task_id,
+            execution_id=sc.execution_id,
+            bang_chung=tuple(sc.bang_chung)[-4:]))
+        so.dong(sc, ly_do=f"{hd.value}: {qd.ly_do}")
+        try:
+            self.store.doi_trang_thai(
+                task_id, TaskState.BLOCKED,
+                reason=(f"phục hồi tự chủ đã cạn ({qd.loai.value}, "
+                        f"chữ ký {qd.chu_ky}): {qd.ly_do}")[:400])
+        except Exception:                                     # noqa: BLE001
+            pass
+        return hd.value
+
     def _thu_lai_neu_dang(self, ctx: ProjectContext, task_id: str, pb,
                           session_id: str, placement_key: str = "") -> None:
         """Thử lại một việc hỏng — CÓ TRẦN, và đổi chỗ chạy.
@@ -4527,9 +4631,16 @@ class ControlCenter:
             # `tra()` idempotent; `finally` chi nha lai neu chua nha o day.
             lm.tra(ctx.project.project_id, task_id)
             da_nha_khoa = True
-            if moi is TaskState.FAILED:
-                self._thu_lai_neu_dang(ctx, task_id, pb, session_id,
-                                       placement_key=p.key)
+            if moi in (TaskState.FAILED, TaskState.NEEDS_EVIDENCE):
+                # V1.0 — `VongSuCo` LÀ CHỦ SỞ HỮU CHÍNH SÁCH PHỤC HỒI.
+                #
+                # `_thu_lai_neu_dang` KHÔNG còn tự quyết nữa; nó tụt xuống
+                # thành một NGUYÊN LIỆU ("thử lại ở chỗ khác") mà bộ điều
+                # phối sự cố gọi khi nó chọn như vậy. Một chính sách phục hồi
+                # có hai chủ là cách hai chỗ đếm hai ngân sách khác nhau cho
+                # cùng một việc.
+                self._dieu_phoi_su_co(ctx, task_id, pb, session_id,
+                                      placement_key=p.key, trang_thai=moi)
             # KET QUA PHAI VE TOI O CHAT. Day la yeu cau CHAN PHAT HANH.
             #
             # Mot huy hieu DONE ma khong co cau tra loi thi khong phai la

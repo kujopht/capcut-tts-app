@@ -426,14 +426,59 @@ class TestRanhGioi(unittest.TestCase):
         self.assertIn("cho_phep_cao_cap: bool = False", van,
                       "bậc ngoại lệ phải TẮT mặc định")
 
-    def test_35_V09_van_tuong_thich___khong_sua_gi_cua_no(self):
-        """V1.0 là tầng THÊM VÀO. Không module V0.9.x nào import nó."""
-        goc = Path(__file__).resolve().parents[2] / "scripts" / "control_center"
-        for p in goc.glob("*.py"):
-            with self.subTest(tep=p.name):
-                self.assertNotIn("v10", p.read_text(encoding="utf-8"),
-                                 f"{p.name} đã phụ thuộc vào V1.0 — nền móng "
-                                 f"phải còn tháo ra được")
+    def test_35_V10_DA_DUOC_CAM_VAO_engine___va_cam_AN_TOAN(self):
+        """Bài kiểm này TRƯỚC ĐÂY đòi điều NGƯỢC LẠI, và nó đã đúng lúc đó.
+
+        Ở bản nền móng, `v10` là thư viện thuần và bất biến là "không module
+        V0.9.x nào import nó" — để nền móng còn tháo ra được. Chủ sở hữu xem
+        xong đã nói thẳng điều còn thiếu: *"The v1.0 incident loop is tested
+        but not wired."* Nên bất biến đổi, và đổi có chủ đích.
+
+        Bất biến MỚI gồm hai nửa, và nửa thứ hai mới là nửa khó:
+
+        1. `engine` THẬT SỰ gọi tầng sự cố V1.0;
+        2. nó import TRONG HÀM và có đường lùi — một `v10` hỏng không được
+           làm chết cả Control Center, và càng không được làm chết một lượt
+           chạy đang bay.
+        """
+        goc = (Path(__file__).resolve().parents[2] / "scripts"
+               / "control_center" / "engine.py")
+        van = goc.read_text(encoding="utf-8")
+        self.assertIn("from scripts.control_center.v10.su_co_ben import SoSuCo",
+                      van, "engine chưa dùng tầng sự cố V1.0")
+        i = van.index("def _dieu_phoi_su_co")
+        than = van[i:i + 5000]
+        # Import NẰM TRONG hàm, không ở đầu module.
+        self.assertIn("from scripts.control_center.v10.su_co import HanhDong",
+                      than)
+        # Và có đường lùi về nguyên liệu cũ khi tầng đó không dùng được.
+        j = than.index("except Exception")
+        self.assertIn("_thu_lai_neu_dang", than[j:j + 400],
+                      "v10 hỏng phải lùi về nguyên liệu cũ, không làm chết "
+                      "lượt chạy")
+
+    def test_36_chinh_sach_phuc_hoi_co_DUNG_MOT_chu(self):
+        """`_thu_lai_neu_dang` tụt xuống thành NGUYÊN LIỆU.
+
+        Chỗ hỏng thật phải gọi bộ điều phối sự cố, không gọi thẳng nguyên
+        liệu — hai chủ sở hữu chính sách là hai ngân sách đếm song song cho
+        cùng một việc.
+        """
+        goc = (Path(__file__).resolve().parents[2] / "scripts"
+               / "control_center" / "engine.py")
+        van = goc.read_text(encoding="utf-8")
+        # Chỗ gọi ở đường hỏng THẬT
+        i = van.index("if moi in (TaskState.FAILED, TaskState.NEEDS_EVIDENCE)")
+        khoi = van[i:i + 700]
+        self.assertIn("self._dieu_phoi_su_co(", khoi)
+        self.assertNotIn("self._thu_lai_neu_dang(", khoi,
+                         "đường hỏng thật không được gọi thẳng nguyên liệu")
+        # `_thu_lai_neu_dang` chỉ được gọi TỪ bộ điều phối (và từ đường lùi).
+        cho_goi = [d for d in van.splitlines()
+                   if "self._thu_lai_neu_dang(" in d]
+        self.assertTrue(cho_goi)
+        self.assertLessEqual(len(cho_goi), 2,
+                             f"nguyên liệu bị gọi từ quá nhiều nơi: {cho_goi}")
 
 
 if __name__ == "__main__":

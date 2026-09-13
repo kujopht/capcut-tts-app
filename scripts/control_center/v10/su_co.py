@@ -31,6 +31,19 @@ class LoaiHong(str, Enum):
     IMPLEMENTATION_ERROR = "IMPLEMENTATION_ERROR"
     TEST_FAILURE = "TEST_FAILURE"
     BUILD_FAILURE = "BUILD_FAILURE"
+    # V1.0 — TÁCH HỎNG HẠ TẦNG KIỂM ĐỊNH KHỎI HỎNG SẢN PHẨM.
+    #
+    # Đo được trong chính bài nghiệm thu 2026-09-13: `scripts.test` viết là
+    # `node --test tests/`, mà trên Node 24 + Windows câu đó nạp `tests` như
+    # một MODULE và chết `MODULE_NOT_FOUND`. `rc=1`, nên cổng từ chối `DONE`
+    # — đúng. Nhưng worker đã làm ĐÚNG: chạy lại đúng cây đó bằng lệnh đúng
+    # cho 4/4 đạt.
+    #
+    # Gộp hai thứ này làm một dẫn tới hành động SAI: hệ đi sửa mã sản phẩm
+    # (không hỏng) thay vì sửa lệnh kiểm (hỏng). Và nó đổ lỗi cho worker về
+    # một việc nó làm đúng.
+    INVALID_VERIFICATION_COMMAND = "INVALID_VERIFICATION_COMMAND"
+    TEST_HARNESS_FAILURE = "TEST_HARNESS_FAILURE"
     ENVIRONMENT_FAILURE = "ENVIRONMENT_FAILURE"
     DEPENDENCY_FAILURE = "DEPENDENCY_FAILURE"
     PERMISSION_FAILURE = "PERMISSION_FAILURE"
@@ -47,6 +60,12 @@ class HanhDong(str, Enum):
     """Bước TIẾP THEO của vòng — không phải một trạng thái."""
 
     SUA_MOI_TRUONG = "SUA_MOI_TRUONG"
+    #: V1.0 — sửa LỆNH/HẠ TẦNG KIỂM ĐỊNH, không phải mã sản phẩm.
+    #:
+    #: Hành động khác hẳn `SUA_TAI_CHO`: chỗ cần sửa là manifest/script kiểm,
+    #: và bằng chứng cần thu là "kho khai những lệnh nào" chứ không phải
+    #: "mã sai ở đâu".
+    SUA_HA_TANG_KIEM = "SUA_HA_TANG_KIEM"
     SUA_TAI_CHO = "SUA_TAI_CHO"
     LAP_LAI_KE_HOACH = "LAP_LAI_KE_HOACH"
     DOI_CHO_CHAY = "DOI_CHO_CHAY"
@@ -63,6 +82,16 @@ KHONG_PHU_THUOC_CHO: frozenset = frozenset({
     LoaiHong.AUTHORITY_FAILURE,
     LoaiHong.STALE_STATE,
     LoaiHong.PERMISSION_FAILURE,
+})
+
+#: Hỏng nằm ở LỆNH/HẠ TẦNG KIỂM ĐỊNH, không ở mã sản phẩm.
+#:
+#: `rc != 0` KHÔNG phải bằng chứng rằng mã sản phẩm sai — nó chỉ nói "lệnh
+#: này trả về khác 0". Nhóm này là những lần mà nguyên nhân nằm ở chính phép
+#: đo, và đổ lỗi cho mã là đi sửa nhầm thứ.
+HA_TANG_KIEM: frozenset = frozenset({
+    LoaiHong.INVALID_VERIFICATION_COMMAND,
+    LoaiHong.TEST_HARNESS_FAILURE,
 })
 
 _MAU: Tuple[Tuple[LoaiHong, re.Pattern], ...] = (
@@ -82,8 +111,25 @@ _MAU: Tuple[Tuple[LoaiHong, re.Pattern], ...] = (
     (LoaiHong.VERIFICATION_FAILURE, re.compile(
         r"gate_scope|gate_contract_scope|gate_diff|ghi NGOÀI write_scope|"
         r"kiểm định không đạt|thiếu bằng chứng", re.I)),
+    # HẠ TẦNG KIỂM ĐỊNH — xét TRƯỚC `TEST_FAILURE`/`DEPENDENCY_FAILURE`.
+    #
+    # Thứ tự ở đây quyết định hành động: một lệnh kiểm KHÔNG PHÂN GIẢI ĐƯỢC
+    # phải dẫn tới "sửa lệnh kiểm", không phải "sửa mã sản phẩm". Đặt sau
+    # `TEST_FAILURE` thì `'test failed'` nuốt mất nó.
+    (LoaiHong.INVALID_VERIFICATION_COMMAND, re.compile(
+        r"MODULE_NOT_FOUND|Cannot find module|"
+        r"missing script|Unknown command|command not found|"
+        r"is not recognized as an internal or external command|"
+        r"No such file or directory.*(test|spec)|"
+        r"error TS18003|No inputs were found", re.I)),
+    (LoaiHong.TEST_HARNESS_FAILURE, re.compile(
+        r"no test files found|0 tests? (found|collected)|"
+        r"ERR_UNKNOWN_FILE_EXTENSION|"
+        r"Jest encountered an unexpected token|"
+        r"pytest: error: unrecognized arguments|"
+        r"INTERNALERROR", re.I)),
     (LoaiHong.DEPENDENCY_FAILURE, re.compile(
-        r"ModuleNotFoundError|ImportError|npm ERR|cannot find module|"
+        r"ModuleNotFoundError|ImportError|npm ERR|"
         r"unresolved dependency", re.I)),
     (LoaiHong.BUILD_FAILURE, re.compile(
         r"build failed|compile error|SyntaxError|tsc .*error", re.I)),
@@ -238,6 +284,12 @@ class VongSuCo:
             return ra(HanhDong.LEO_THANG_CHU_SO_HUU,
                       f"chữ ký hỏng lặp {lap} lần và đã cạn hội đồng — "
                       f"không còn cách nào mới để thử", True)
+        if loai in HA_TANG_KIEM:
+            # KHÔNG đổ lỗi cho mã sản phẩm khi thứ hỏng là lệnh kiểm.
+            return ra(HanhDong.SUA_HA_TANG_KIEM,
+                      f"{loai.value}: thứ hỏng là LỆNH/HẠ TẦNG kiểm định, "
+                      f"không phải mã sản phẩm — đi sửa lệnh kiểm và chạy "
+                      f"lại phép kiểm, đừng sửa mã")
         if loai in KHONG_PHU_THUOC_CHO:
             return ra(HanhDong.SUA_MOI_TRUONG,
                       f"{loai.value} hỏng y hệt ở mọi chỗ chạy — sửa môi "

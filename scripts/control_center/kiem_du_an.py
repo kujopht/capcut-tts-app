@@ -272,16 +272,36 @@ def kham_pha(repo, *, lenh_ke_hoach: Sequence[Sequence[str]] = ()
     return KeHoachKiem(tuple(thay.values()), tuple(chu))
 
 
+#: Dấu hiệu LỆNH KIỂM tự nó hỏng — không phải mã sản phẩm sai.
+#:
+#: Đo được 2026-09-13: `node --test tests/` trên Node 24 + Windows nạp
+#: `tests` như một MODULE và chết `MODULE_NOT_FOUND`. `rc=1`, nhưng mã sản
+#: phẩm hoàn toàn đúng (chạy lại bằng lệnh đúng: 4/4 đạt). Kết luận "sản
+#: phẩm sai" từ `rc != 0` là đi sửa nhầm thứ.
+_LENH_HONG = re.compile(
+    r"MODULE_NOT_FOUND|Cannot find module|missing script|"
+    r"is not recognized as an internal or external command|"
+    r"command not found|Unknown command|"
+    r"no test files found|0 tests? (found|collected)|"
+    r"ERR_UNKNOWN_FILE_EXTENSION|error TS18003|No inputs were found|"
+    r"pytest: error: unrecognized arguments|INTERNALERROR", re.I)
+
+
 @dataclass
 class KetQuaChay:
     lenh: LenhKiem
     ma: int = 0
     dat: bool = False
     duoi: str = ""          # đuôi stdout/stderr, đã cắt
+    cwd: str = ""
+    #: `True` khi bằng chứng cho thấy CHÍNH LỆNH hỏng, không phải sản phẩm.
+    lenh_hong: bool = False
+    dau_hieu: str = ""      # đoạn văn bản đã khớp, làm bằng chứng
 
     def to_dict(self) -> Dict:
         return {"lenh": self.lenh.to_dict(), "ma": self.ma, "dat": self.dat,
-                "duoi": self.duoi[:600]}
+                "duoi": self.duoi[:600], "cwd": self.cwd,
+                "lenh_hong": self.lenh_hong, "dau_hieu": self.dau_hieu[:120]}
 
 
 @dataclass
@@ -292,13 +312,16 @@ class BaoCaoKiem:
     dat: bool = False
     #: `True` khi không có phép kiểm nào để chạy — THIẾU BẰNG CHỨNG.
     thieu_bang_chung: bool = False
+    #: `True` khi CHÍNH LỆNH KIỂM hỏng (không phân giải được, không có test
+    #: nào được thu…). Khác hẳn "mã sản phẩm sai", và dẫn tới hành động khác.
+    ha_tang_hong: bool = False
     ly_do: str = ""
 
     def to_dict(self) -> Dict:
         return {"ke_hoach": self.ke_hoach.to_dict(),
                 "ket_qua": [x.to_dict() for x in self.ket_qua],
                 "dat": self.dat, "thieu_bang_chung": self.thieu_bang_chung,
-                "ly_do": self.ly_do}
+                "ha_tang_hong": self.ha_tang_hong, "ly_do": self.ly_do}
 
 
 def chay(ke_hoach: KeHoachKiem, repo, *, tran_giay: float = 900.0,
@@ -328,9 +351,25 @@ def chay(ke_hoach: KeHoachKiem, repo, *, tran_giay: float = 900.0,
             ma, duoi = 124, f"vượt trần {tran_giay:.0f}s"
         except (OSError, ValueError) as exc:
             ma, duoi = 127, f"{type(exc).__name__}: {exc}"
-        ra.append(KetQuaChay(l, ma, ma == 0, duoi))
+        m = _LENH_HONG.search(duoi or "")
+        ra.append(KetQuaChay(l, ma, ma == 0, duoi, cwd=str(goc),
+                             lenh_hong=bool(m) and ma != 0,
+                             dau_hieu=(m.group(0) if m else "")))
 
     hong = [x for x in ra if not x.dat]
+    ha_tang = [x for x in hong if x.lenh_hong]
+    if ha_tang:
+        # PHÂN BIỆT HAI THỨ RẤT KHÁC NHAU.
+        #
+        # "sản phẩm sai" -> đi sửa mã. "lệnh kiểm sai" -> đi sửa lệnh kiểm.
+        # Trước đây cả hai đều chỉ là `dat=False`, nên tầng phục hồi không có
+        # cách nào chọn đúng hành động.
+        return BaoCaoKiem(
+            ke_hoach=ke_hoach, ket_qua=tuple(ra), dat=False,
+            thieu_bang_chung=False, ha_tang_hong=True,
+            ly_do=("LỆNH KIỂM tự nó hỏng, KHÔNG phải mã sản phẩm sai: "
+                   + "; ".join(f"{' '.join(x.lenh.argv)} -> rc={x.ma} "
+                               f"({x.dau_hieu})" for x in ha_tang[:2])))
     return BaoCaoKiem(
         ke_hoach=ke_hoach, ket_qua=tuple(ra), dat=not hong,
         thieu_bang_chung=False,

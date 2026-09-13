@@ -5305,6 +5305,17 @@ body.co-mini { padding-bottom: 74px; }
   .sp-chang-nut .btn { flex: 1; }
   .sp-the-luoi { grid-template-columns: minmax(0, 1fr); }
 
+  /*
+    Cac quy tac mobile cua Media Studio KHONG nam o day nua — xem chu thich
+    o khoi CSS "Media Studio" (cuoi tep) de biet ly do: cascade CSS quyet
+    dinh theo THU TU trong tep khi hai luat cung do dac hieu, va cac luat
+    KHONG DIEU KIEN (`.tl`, `.ms`, `.insp`...) cua Media Studio nam o CUOI
+    tep — dat ban va o day (truoc chung) se bi chinh ban goc de len ngay
+    ca tren mobile, du DOM van dung. Do sinh mot vong 640px thu hai o cuoi
+    tep, ngay sau ban goc — van la MOT bo quy tac mobile duy nhat cho Media
+    Studio, chi doi vi tri de thang duoc thu tu cascade.
+  */
+
   /* Bento (Phan D, V4 visual completion): the doi 2 cot tro ve 1 cot khi
      man hinh qua hep de giu ca hai cot doc duoc. */
   .bento-span-2 { grid-column: span 1; }
@@ -8276,6 +8287,13 @@ button.cq-the:hover { background: #ffffff0a; }
 @media (max-width: 1100px) {
   /* Inspector xuong duoi phan xem truoc thay vi bop ca hai. */
   .vc-khung { grid-template-columns: minmax(0, 1fr); }
+
+  /*
+    Quy tac may tinh bang cua Media Studio chuyen xuong cuoi tep, ngay sau
+    cac luat KHONG DIEU KIEN cua no — cung ly do da ghi o khoi 640px: cascade
+    CSS xu theo THU TU trong tep khi hai luat cung do dac hieu, va dat ban va
+    o day (truoc ban goc) se bi chinh ban goc de len.
+  */
 }
 
 /* ==================================================== Studio Project ======
@@ -8429,3 +8447,489 @@ button.cq-the:hover { background: #ffffff0a; }
 .sp-chon-muc:disabled { cursor: default; opacity: 0.55; }
 .sp-chon-nhan { min-width: 0; }
 .sp-chon-phu { flex: 0 0 auto; font-size: var(--t-xs); }
+
+/* ===================================================== Media Studio ======
+ *
+ * "Fantasy = khong khi, Modern = thao tac" — nhung o DAY can can nghieng han
+ * ve phia thao tac. §15 dat ty le: trang du an ~60% khong khi, trinh soan
+ * ~15%. Ly do khong phai tham my: mot tam tranh sac nam duoi mot duong thoi
+ * gian se canh tranh voi chinh cac clip, va nguoi dung phai nhin ky moi biet
+ * mep clip o dau.
+ *
+ * Cach lam KHONG phai la tang `--toi` toan trang (do la ngan sach do chu kho
+ * dat, va lam ca site toi di de cuu mot trinh soan la doi sai thu). Thay vao
+ * do, khu trinh soan tu dat mot LOP NEN DAC cua rieng no.
+ *
+ * Vang: KHONG dung o day, cung ly do da ghi o khoi Video Composer.
+ * Quang sang: CHI cho clip dang chon va dau phat.
+ */
+
+/* Khi dang o trinh soan, thanh ben co lai con hang icon, va dau trang
+   thu gon (bo dong eyebrow trang tri, giu <h1> + nut menu mobile). */
+.studio-dau-ranh { margin-bottom: var(--s3); }
+.studio-dau-ranh .studio-tieu-de { font-size: var(--t-lg); }
+
+/*
+  LOI THAT DA XAY RA, bat qua QA trinh duyet: `.studio-ranh .studio-khung`
+  (hai lop, do dac hieu 0-2-0) de len ca ban `.studio-khung { grid-template-
+  columns: minmax(0, 1fr); }` da co san cho mobile (mot lop, 0-1-0) — BAT KE
+  be rong man hinh, vi do dac hieu cao hon luon thang du dung sau trong tep.
+
+  Duoi 900px `.studio-nav` la `display: none` (chi hien khi bam mo menu),
+  nen `.studio-khung` chi con MOT o luoi con. Grid tu dat o do vao O DAU
+  TIEN con trong — track 52px — de trong nguyen track 294px, va `.studio-
+  than` (chua ca `.ms`/`.tl`/`.insp`) bi ep vao dung 52px. Day chinh la
+  nguyen nhan `.tl`/`.insp` do duoc 34px tren dien thoai o QA that.
+
+  Sua bang cach CHI bat rail 52px tu 901px tro len — duoi nguong do, ban
+  mobile mot-cot da co san (o tren, dinh nghia truoc ca khoi Media Studio)
+  tiep tuc la luat CHI dinh nghia duy nhat cho `.studio-khung`.
+*/
+/*
+  CA BON luat ranh (khung 52px, nav dinh sticky, icon giua, nhan bi an) chi
+  co y nghia khi thanh ben la mot COT DOC hep luon hien — dung tren desktop.
+  Duoi 901px, menu Studio la mot BANG THA XUONG khi bam "Menu Studio" (xem
+  `.studio-nav-mo`), va o do nguoi dung can THAY CHU nhu moi trang Studio
+  khac, khong phai mot hang icon khong nhan.
+*/
+@media (min-width: 901px) {
+  .studio-ranh .studio-khung { grid-template-columns: 52px minmax(0, 1fr); gap: var(--s3); }
+  .studio-ranh .studio-nav { top: 12px; padding: 6px; }
+  .studio-ranh .studio-muc { justify-content: center; padding: 10px 0; }
+  .studio-ranh .studio-muc-nhan {
+    /* An bang CSS chu KHONG bo khoi DOM: trinh doc man hinh van doc duoc. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+.ms {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  /* Nen dac RIENG cua trinh soan — khong dung toi lop phu toan trang. */
+  background: linear-gradient(180deg, #070910f7, #05070cfa);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  padding: var(--s3);
+}
+
+.ms-tren {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 280px;
+  gap: var(--s3);
+  align-items: start;
+}
+.ms-trai { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
+.ms-giua { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.ms-bang-tin {
+  padding: var(--s2) var(--s3);
+  border: 1px solid #7c5cff33;
+  border-radius: var(--r2);
+  background: #7c5cff12;
+}
+.ms-chan { margin: 0; }
+
+/* ------------------------------------------------------------ kho tai san */
+
+.mb { display: flex; flex-direction: column; gap: var(--s2); }
+.mb-nhom {
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #0b0e18a8;
+  overflow: hidden;
+}
+.mb-dau {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  font-weight: 650;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+.mb-dem {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #ffffff12;
+  color: var(--text-3);
+  font-size: var(--t-xs);
+  font-weight: 500;
+}
+.mb-ds {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--s2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mb-rong { padding: 2px 4px 8px; }
+.mb-muc {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r1);
+  background: #ffffff06;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.mb-muc:hover { border-color: var(--brand); }
+.mb-dang-dung { border-color: #4ade8055; }
+.mb-muc-nhan { min-width: 0; }
+.mb-muc-phu { font-size: var(--t-xs); }
+.mb-tai { margin: var(--s2); align-self: flex-start; }
+.an-hoan-toan {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ----------------------------------------------------------------- TTS -- */
+
+.tts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #0b0e18a8;
+}
+.tts-ten { margin: 0; font-size: var(--t-sm); font-weight: 650; }
+.tts-van-ban { resize: vertical; min-height: 120px; font-family: inherit; }
+.tts-hang { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: var(--s2); }
+.tts-toc { min-width: 0; }
+.tts-tien-do { margin: 0; }
+
+/* ------------------------------------------------------------ xem truoc - */
+
+.mp { display: flex; flex-direction: column; gap: var(--s2); }
+.mp-khung {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #000;
+  overflow: hidden;
+}
+.mp-chi-audio { background: radial-gradient(circle at 50% 45%, #131a2e, #05070c 70%); }
+.mp-video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.mp-rong {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: 100%;
+  padding: var(--s4);
+  text-align: center;
+}
+.mp-rong-icon { font-size: 34px; }
+.mp-phu-de {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 5%;
+  display: flex;
+  justify-content: center;
+  padding: 0 6%;
+  pointer-events: none;
+}
+.mp-phu-de span {
+  padding: 5px 12px;
+  border-radius: var(--r1);
+  background: #000000b8;
+  color: #fff;
+  font-size: clamp(13px, 2.1vw, 19px);
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: balance;
+}
+.mp-dieu-khien { display: flex; align-items: center; gap: var(--s2); }
+.mp-phat { min-width: 46px; }
+.mp-thanh { flex: 1; min-width: 0; }
+.mp-gio {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+}
+
+/* ------------------------------------------------------------ inspector - */
+
+.insp {
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #0b0e18a8;
+  padding: var(--s3);
+  min-width: 0;
+}
+.insp-khoi { display: flex; flex-direction: column; gap: var(--s2); }
+.insp-ten { margin: 0; font-size: var(--t-sm); font-weight: 650; }
+.insp-o { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); }
+.insp-cap { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); }
+.insp-nut { flex-wrap: wrap; }
+.insp-tom { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.insp-tom > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  font-size: var(--t-sm);
+}
+.insp-tom dt { color: var(--text-3); }
+.insp-tom dd {
+  margin: 0;
+  min-width: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------- duong thoi gian ---- */
+
+.tl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #080a12c4;
+  padding: var(--s2);
+}
+.tl-thanh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+.tl-phong { gap: var(--s2); }
+.tl-phong input { width: 140px; }
+
+/* CUON NGANG NAM O DAY — trang khong bao gio duoc tran ngang. */
+.tl-cuon { overflow-x: auto; overflow-y: hidden; }
+.tl-trong { position: relative; padding-bottom: 2px; }
+
+.tl-thuoc {
+  position: relative;
+  height: 24px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--kinh-vien);
+}
+.tl-vach { position: absolute; top: 0; height: 100%; }
+.tl-vach i {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  width: 1px;
+  height: 12px;
+  background: #ffffff26;
+}
+.tl-vach b {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.tl-lane { display: flex; align-items: stretch; gap: var(--s2); margin-top: 6px; }
+.tl-lane-nhan {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 62px;
+  display: flex;
+  align-items: center;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+  background: #080a12;
+  padding-right: 4px;
+}
+.tl-lane-than {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border-radius: var(--r1);
+  background: #ffffff06;
+}
+.tl-trong-lane {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: var(--t-xs);
+}
+
+.tl-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r1);
+  overflow: hidden;
+  cursor: grab;
+  font: inherit;
+  font-size: var(--t-xs);
+  color: var(--text);
+  text-align: left;
+  touch-action: none;
+}
+.tl-clip:active { cursor: grabbing; }
+.tl-clip-video {
+  background: linear-gradient(180deg, #1d2b52, #16203c);
+  border-color: #2f4a86;
+}
+.tl-clip-audio {
+  background: linear-gradient(180deg, #17324a, #102438);
+  border-color: #2b6f8f;
+}
+.tl-clip-sub {
+  background: linear-gradient(180deg, #2a2350, #1d1839);
+  border-color: #5a48a8;
+}
+.tl-tat { opacity: 0.5; }
+
+/* Quang sang CHI o clip dang chon — §15. */
+.tl-chon { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand), 0 0 12px #7c5cff4d; }
+
+.tl-ten {
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.tl-song {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.42;
+  pointer-events: none;
+}
+.tl-song path { fill: #7fd7ff; }
+
+.tl-tay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: ew-resize;
+  background: #ffffff1f;
+  touch-action: none;
+}
+.tl-tay-trai { left: 0; border-radius: var(--r1) 0 0 var(--r1); }
+.tl-tay-phai { right: 0; border-radius: 0 var(--r1) var(--r1) 0; }
+.tl-tay:hover { background: #ffffff3d; }
+
+.tl-dau-phat { position: absolute; top: 0; bottom: 0; width: 0; z-index: 3; pointer-events: none; }
+.tl-dau-phat i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 62px;
+  width: 2px;
+  background: var(--brand);
+  box-shadow: 0 0 8px #7c5cffcc;
+}
+
+/*
+  Quy tac RANH GIOI cua Media Studio nam O DAY — SAU ban khong dieu kien o
+  tren, khong o hai khoi 640px/1100px chinh tac o dau tep.
+
+  LOI THAT DA XAY RA: dat cac ban va nay o khoi 640px/1100px chinh tac (nam
+  som hon trong tep) trong khi `.tl`/`.ms`/`.insp` khong dieu kien nam O DAY
+  (cuoi tep) — CSS xu hai luat cung do dac hieu bang THU TU trong tep, nen
+  ban khong dieu kien (den SAU) luon de len ban co dieu kien (den TRUOC), BAT
+  KE be rong man hinh. Do gioi la nut lane bi ket lai 62px/12px va `.tl` bi
+  bop con vai chuc pixel tren dien thoai — kiem tra QUA TRINH DUYET THAT moi
+  bat duoc, vi moi bai test chi quet CHUOI CHU xuat hien trong khoi, khong
+  quet THU TU ap dung cuoi cung.
+*/
+@media (max-width: 1100px) {
+  /*
+    MEDIA STUDIO tren may tinh bang — §14 "stack/reconfigure inspector".
+
+    Ba cot 260/1fr/280 can it nhat ~1100px moi giu duoc khung xem truoc 16:9
+    du to de nhin. Duoi nguong do, Inspector xuong duoi va nam CANH kho tai
+    san: ca hai deu la cot phu, va de chung canh nhau giu duoc chieu cao cua
+    phan xem truoc thay vi day no xuong duoi hai khoi chong nhau.
+  */
+  .ms-tren { grid-template-columns: 240px minmax(0, 1fr); }
+  .insp { grid-column: 1 / -1; }
+  .insp-khoi { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--s2) var(--s3); align-items: end; }
+  .insp-ten,
+  .insp-tom { grid-column: 1 / -1; }
+}
+
+@media (max-width: 640px) {
+  /*
+    MEDIA STUDIO tren dien thoai — §14: KHONG bop ca trinh soan xuong 390px.
+
+    Thu tu uu tien doc theo mot cot: xem truoc -> chon clip -> chinh clip ->
+    kho tai san + tao loi doc. Duong thoi gian VAN con (no la cach duy nhat
+    thay duoc lech giua hinh va tieng), chi la no tu cuon ngang BEN TRONG
+    khoi cua minh — ca trang thi khong bao gio duoc tran ngang.
+
+    `order` chu khong phai doi thu tu trong JSX: thu tu DOM la thu tu doc cua
+    trinh doc man hinh va cua phim Tab, va no van dung o moi be ngang. Chi
+    cach BAY la khac.
+  */
+  .ms { padding: var(--s2); border-radius: var(--r2); }
+  .ms-tren { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+  .ms-giua { order: 1; }
+  .insp { order: 2; }
+  .ms-trai { order: 3; }
+  .tl-lane-nhan { flex-basis: 48px; font-size: 11px; }
+  .tl-dau-phat i { left: 48px; }
+  .tl-lane-than { min-width: 260px; }
+  .tl-thanh { gap: var(--s2); }
+  .tl-phong input { width: 100%; }
+  .tts-hang { grid-template-columns: minmax(0, 1fr); }
+  .insp-cap { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ------------------------------------------------------- the Noi dung --- */
+
+.sc-the-hang { display: flex; gap: 2px; border-bottom: 1px solid var(--kinh-vien); }
+.sc-the {
+  padding: 9px 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.sc-the:hover { color: var(--text); }
+.sc-the-mo { color: var(--text); border-bottom-color: var(--brand); }

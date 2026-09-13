@@ -7,8 +7,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+// Audio Studio gop vao Media Studio (feat/studio-media-workspace) — vong
+// theo doi job chuyen tu `/studio/audio/page.tsx` sang `/studio/media/page.tsx`.
 const studio = readFileSync(
-  new URL("../src/app/studio/audio/page.tsx", import.meta.url), "utf8");
+  new URL("../src/app/studio/media/page.tsx", import.meta.url), "utf8");
 // Vong theo doi da chuyen sang hook dung chung voi `/write` — cac rang buoc ve
 // nhip poll gio kiem o day. Hanh vi phai giu nguyen, chi doi cho o.
 const tracker = readFileSync(
@@ -20,42 +22,39 @@ const jobsLib = readFileSync(
  * LOI 1 — /studio ket o "Dang xu ly" sau khi tai lai trang giua luc job chay.
  *
  * Tai hien: tao audio o /studio, refresh trang khi job con `running`, roi cho.
- * Job hoan tat tren backend nhung the trong "Lich su audio" van hien "Dang xu
- * ly" mai — do bang chung: sau refresh trinh duyet chi goi `/api/jobs` DUNG MOT
- * LAN roi thoi.
+ * Job hoan tat tren backend nhung khung tien do van hien "Dang xu ly" mai — do
+ * bang chung: sau refresh trinh duyet chi goi `/api/jobs` DUNG MOT LAN roi thoi.
  *
- * Nguyen nhan: `activeJob` chi duoc dat trong ham submit, nen sau khi tai lai
- * trang no la `null`; effect poll bat dau bang `if (!activeJob) ... return` nen
- * thoat ngay va khong bao gio hoi lai backend.
+ * Nguyen nhan goc (Audio Studio cu): `activeJob` chi duoc dat trong ham submit,
+ * nen sau khi tai lai trang no la `null`; effect poll bat dau bang
+ * `if (!activeJob) ... return` nen thoat ngay va khong bao gio hoi lai backend.
+ *
+ * Media Studio KHONG con khai niem "chuong dang xem": no la MOT bang TTS duy
+ * nhat (khong phai danh sach nhieu chuong nhu Audio Studio cu), nen phan
+ * "tro toi chuong cua job" khong con ap dung — nhung phan con lai cua bai hoc
+ * (nap lai danh sach job, dua ca hai trang thai pending/running vao lai vong
+ * theo doi, va tu do bat lai nut "Đang tạo…") van la bat bien phai giu.
  */
 test("job dang chay tu phien truoc duoc nap lai de vong poll tiep tuc", () => {
-  const i = studio.indexOf("khoiPhucJob(jobList.jobs)");
+  const i = studio.indexOf("khoiPhuc(js.jobs)");
   assert.ok(i > 0, "khong tim thay cho nap danh sach job luc khoi tao");
 
-  // Doan ngay sau khi nap danh sach phai tim job chua ket thuc va tro toi
-  // chuong cua no. Chi xet 900 ky tu ke tiep de rang buoc that su noi ve CHO NAY.
-  const sau = studio.slice(i, i + 900);
-  assert.match(sau, /jobList\.jobs\.filter\(dangChayJob\)/,
+  // Doan ngay sau khi nap danh sach phai bat lai nut "Đang tạo…" neu con job
+  // chua ket thuc — neu khong, nguoi dung thay nut nhu the khong co gi dang
+  // chay, du job that van song tren backend.
+  const sau = studio.slice(i, i + 300);
+  assert.match(sau, /js\.jobs\.some\(dangChayJob\)/,
     "phai do trong danh sach vua nap xem con job nao chua ket thuc");
-  assert.match(sau, /setActiveChapterId\(/,
-    "phai tro toi chuong cua job do, neu khong khung tien do khong hien gi");
+  assert.match(sau, /datDangTaoTts\(true\)/,
+    "phai bật lại nút 'Đang tạo…' nếu còn job dở dang");
 
   // `dangChayJob` giu ca hai trang thai chua ket thuc.
   assert.match(jobsLib, /const CHUA_XONG: JobStatus\[\] = \["pending", "running"\];/,
     "job dang xep hang cung phai duoc theo doi tiep");
 
-  // Va `khoiPhucJob` dua ca danh sach vao vong theo doi, nen poll chay lai.
+  // Va `khoiPhuc` dua ca danh sach vao vong theo doi, nen poll chay lai.
   assert.match(tracker, /const khoiPhuc = useCallback\(\(danh_sach: TtsJob\[\]\) => \{/);
   assert.match(tracker, /setJobs\(moiNhatTheoChuong\(danh_sach\)\);/);
-});
-
-test("nap lai khong duoc de len job nguoi dung dang theo doi", () => {
-  const i = studio.indexOf("jobList.jobs.filter(dangChayJob)");
-  const sau = studio.slice(i, i + 400);
-  // `current || ...` — giu nguyen chuong dang xem neu da co. Neu ghi de vo
-  // dieu kien, mot lan `load()` xen vao se keo nguoi dung ve job khac.
-  assert.match(sau, /setActiveChapterId\(\(current\) => current \|\| /,
-    "chi dat khi chua theo doi job nao");
 });
 
 test("vong poll van dung o trang thai ket thuc", () => {

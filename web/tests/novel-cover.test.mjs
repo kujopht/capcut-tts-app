@@ -15,7 +15,9 @@ function read(rel) {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 }
 
-const write = () => read("../src/app/studio/write/page.tsx");
+// "Viết truyện" doi ten tep khi gop vao `/studio/content` — noi dung KHONG
+// doi, xem CLAUDE_MEDIA_WORKSPACE / feat/studio-media-workspace.
+const write = () => read("../src/components/studio/VietTruyen.tsx");
 const api = () => read("../src/lib/api.ts");
 const limits = () => read("../src/lib/limits.ts");
 

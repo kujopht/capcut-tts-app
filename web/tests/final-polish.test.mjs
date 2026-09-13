@@ -17,7 +17,9 @@ const callsApi = (src, method) =>
   new RegExp(`api\\s*\\.\\s*${method}\\s*\\(`).test(src);
 
 const fanfic = () => read("../src/app/fanfic/page.tsx");
-const studio = () => read("../src/app/studio/audio/page.tsx");
+// Audio Studio gop vao Media Studio (feat/studio-media-workspace) — logic
+// theo doi job chuyen tu `/studio/audio/page.tsx` sang `/studio/media/page.tsx`.
+const trangMedia = () => read("../src/app/studio/media/page.tsx");
 const home = () => read("../src/app/page.tsx");
 const api = () => read("../src/lib/api.ts");
 const css = () => read("../src/app/globals.css");
@@ -169,23 +171,31 @@ test("L2: listNovels cu khong bi doi — tuong thich nguoc", () => {
    L3 — badge lich su Studio
    ===================================================================== */
 
-test("L3: lich su duoc dong bo o MOI vong poll", () => {
+test("L3: khong con mang lich su rieng de dong bo sai", () => {
   /*
-    Truoc day `/studio` giu mot mang `jobs` rieng va phai tu dong bo trong
-    vong poll — co luc khung "Tien trinh" da hien "Dang xu ly" ma the trong
-    "Lich su audio" van con "Dang xep hang".
+    Truoc day `/studio` giu mot mang `jobs` rieng VA mot `history` suy tu no
+    — co luc khung "Tien trinh" da hien "Dang xu ly" ma the "Lich su audio"
+    van con "Dang xep hang", vi hai cho doc hai ban sao khac nhau cua cung
+    mot su that.
 
-    Gio lich su duoc SUY RA tu ban do cua `useJobTracker`, cai duoc ghi lai o
-    moi nhip. Hai cho khong the noi hai dieu khac nhau nua vi chung la mot.
+    Media Studio khong con MOT trong hai the do nua: no khong giu mang `jobs`
+    rieng (moi trang thai job di qua DUNG mot `useJobTracker`), va no cung
+    khong con mot khoi "Lich su audio" rieng suy tu job — lich su audio thuc
+    su nam trong Media Bin, doc THANG tu kho (`studio.assets("audio", ...)`),
+    khong phai suy tu vong theo doi TTS. Hai nguon do khong con co hoi lech
+    nhau vi mot cai KHONG con ton tai o dang du lieu tren client nua.
   */
-  const src = studio();
-  assert.match(src, /const history = useMemo<HistoryItem\[\]>\(\(\) => \{/);
-  assert.match(src, /return Object\.values\(jobs\)/,
-    "lich su phai lay tu vong theo doi, khong giu mang rieng");
+  const src = trangMedia();
   assert.ok(
     !/const \[jobs, setJobs\] = useState/.test(src),
-    "/studio van giu mang job rieng — se lech voi khung tien do",
+    "Media Studio vẫn giữ mảng job riêng — sẽ lệch với khung tiến trình",
   );
+  assert.ok(
+    !/HistoryItem\[\]/.test(src),
+    "Media Studio vẫn suy ra một danh sách lịch sử riêng từ job",
+  );
+  assert.match(src, /const jobs = useJobTracker\(\{/,
+    "phải theo dõi job qua đúng một useJobTracker");
 });
 
 test("L3: toast van chi keu o trang thai ket thuc", async () => {
@@ -211,10 +221,20 @@ test("L3: toast van chi keu o trang thai ket thuc", async () => {
   ban_do = gopNhipPoll(ban_do.jobs, [xong]);
   assert.equal(ban_do.xong.length, 0, "bao lai o nhip sau");
 
-  // Va o `/studio` moi trang thai ket thuc chi co DUNG mot toast.
-  const src = studio();
-  assert.match(src, /onCompleted: \(\) => toast\.ok\("Audio đã sẵn sàng\."\)/);
-  assert.match(src, /onFailed: \(\) => toast\.error\("Tạo audio thất bại/);
+  /*
+    O Media Studio, `useJobTracker` van goi `onCompleted`/`onFailed` DUNG MOT
+    lan cho moi lan job chuyen sang trang thai ket thuc (bao toan boi
+    `gopNhipPoll` da kiem o tren — khong doi). Cach bao nguoi dung thi khac
+    Audio Studio cu: job dang duoc theo doi ngay trong TtsPanel dang mo (khong
+    phai mot trang lich su rieng), nen loi hien INLINE qua `<JobProgress>` +
+    `datLoiTts`, khong can toast rieng cho that bai. Thanh cong thi VAN toast
+    (audio vua gan len duong thoi gian, o mot khu vuc khac tren man hinh).
+  */
+  const src = trangMedia();
+  assert.match(src, /onCompleted: \(j\) => void ganTrackMoi\(j\)/);
+  assert.match(src, /onFailed: \(j\) => \{/);
+  const at = src.indexOf("onFailed: (j) => {");
+  assert.match(src.slice(at, at + 200), /datLoiTts\(j\.error_message \|\| "Tạo lời đọc thất bại\."\)/);
 });
 
 /* =====================================================================
@@ -321,7 +341,7 @@ test("khong pha M2/M3/M4: cac tinh nang van con", () => {
   // M2: nghe tai cho da doi thanh lien ket sang `/listen/[id]` (overnight
   // Phase 2, Phan 2A) — dong co toan cuc DUY NHAT thay vi mot AudioPlayer
   // rieng cho tung hang. Kiem o `ui.test.mjs`.
-  assert.match(read("../src/app/studio/write/page.tsx"), /api\.reorderChapters\(/);  // M3
+  assert.match(read("../src/components/studio/VietTruyen.tsx"), /api\.reorderChapters\(/);  // M3
   assert.match(novel(), /chapter\.audio_outdated \?/);                        // M4
   assert.match(read("../src/app/listen/[id]/page.tsx"), /audioOutdated/);
 });
@@ -342,14 +362,20 @@ test("publish, unpublish, xoa, doi thu tu va tai MP3 van con", () => {
   assert.match(read("../src/components/AudioPlayer.tsx"), /Tải MP3/);
 });
 
-test("Subtitle Studio: nut chon tep video/audio dung .btn, khong phai input tho", () => {
-  // Muc "2. Phu de nguon" tren cung trang da boc input file trong
-  // <label className="btn ..."> de trong giong nut cua he thong thay vi
-  // hop chon tep mac dinh cua trinh duyet. Muc "1. Chon video/audio" phai
-  // theo cung mot khuon, khong de sot lai input tho.
-  const src = read("../src/app/studio/subtitle/page.tsx");
-  const m = src.match(/<label className="btn[^>]*">[\s\S]*?<\/label>/g) ?? [];
-  const boBoc = m.some((block) => /accept="video\/\*,audio\/\*"/.test(block));
-  assert.ok(boBoc, "input chon video/audio phai duoc boc trong <label className=\"btn ...\">");
-  assert.match(src, /accept="video\/\*,audio\/\*"[\s\S]*?className="sr-only"/);
+test("Media Bin: nut chon tep dung .btn kich hoat input an, khong phai input tho", () => {
+  /*
+    Subtitle Studio cu boc input file trong <label className="btn ...">.
+    Media Bin (thay the sau khi gop Audio/Phu de/Video — feat/studio-media-
+    workspace) dung mot khuon KHAC nhung cung dat duoc dieu do: mot <button
+    className="btn ..."> bam vao thi kich hoat (`.click()`) mot <input
+    type="file"> nam AN HOAN TOAN ben canh, khong phai hop chon tep tho mac
+    dinh cua trinh duyet nam lo ra tren giao dien.
+  */
+  const src = read("../src/components/media/MediaBin.tsx");
+  assert.match(src, /className="btn btn-sm btn-ghost mb-tai"/,
+    "nút chọn tệp phải dùng .btn, không phải input thô");
+  assert.match(src, /onClick=\{\(\) => nhapRef\.current\?\.click\(\)\}/,
+    "nút phải kích hoạt input ẩn qua ref, không tự là input");
+  assert.match(src, /type="file"[\s\S]{0,80}className="an-hoan-toan"/,
+    "input thật phải bị ẩn hoàn toàn khỏi giao diện");
 });

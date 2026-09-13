@@ -30,8 +30,17 @@ import {
 } from "../src/lib/jobs.ts";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
-const write = () => read("../src/app/studio/write/page.tsx");
-const studio = () => read("../src/app/studio/audio/page.tsx");
+/*
+  `/write` va `/studio/audio` da doi ten/vi tri sau khi Media Studio gop ba
+  cong cu (Audio/Phu de/Video) lam mot — xem CLAUDE_MEDIA_WORKSPACE. Logic TTS
+  cua Media Studio nam RAI tren hai tep: trang chinh (`media/page.tsx`, giu
+  `useJobTracker`/khoi phuc) va bang soan (`TtsPanel.tsx`, giu `<JobProgress>`
+  va chu tien do) — noi hai tep lai de cac phep quet cu van dung nguyen.
+*/
+const write = () => read("../src/components/studio/VietTruyen.tsx");
+const studio = () =>
+  read("../src/app/studio/media/page.tsx") + "\n" +
+  read("../src/components/media/TtsPanel.tsx");
 const tracker = () => read("../src/lib/useJobTracker.ts");
 const khung = () => read("../src/components/JobProgress.tsx");
 

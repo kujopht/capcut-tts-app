@@ -39,22 +39,43 @@ test("moi route cu VAN con nguyen", () => {
   }
 });
 
-test("Audio Studio giu nguyen chuc nang, chi doi cho dung trong dieu huong", () => {
-  const studio = read("../src/app/studio/audio/page.tsx");
-  for (const dau_hieu of [
-    "MAX_CHARS",          // gioi han ky tu
-    ".createJob(",        // tao job that
-    "useJobTracker",      // theo doi tien trinh — dung chung voi `/write`
-    "ensureStudioNovel",  // kho chua rieng cua Studio
-    "voiceSections",      // bo chon giong
-    "AudioPlayer",        // nghe tai cho
-    "Lịch sử audio",
+test("Audio Studio giu nguyen chuc nang, chi doi cho VA doi khung", () => {
+  /*
+    "chi doi cho dung trong dieu huong" dung mot lan (Audio Studio thanh mot
+    diem den o thanh ben). Lan nay (feat/studio-media-workspace) di xa hon:
+    Audio/Phu de/Video gop thanh Media Studio, va logic vi the RAI tren nhieu
+    tep hon mot trang don — moi dau hieu duoi day duoc do tren dung tep con
+    giu no, khong phai tren MOT tep duy nhat nhu truoc.
+
+    Hai dau hieu THAT SU bien mat, va co y: "AudioPlayer" (nghe tai cho qua
+    mot trinh phat rieng cho danh sach lich su) va "Lịch sử audio" (mot khoi
+    rieng duoi form). Ca hai duoc thay bang thu tot hon trong Media Studio —
+    nghe qua `<Preview>` dung chung (cung mot dong ho voi video/phu de) va
+    lich su qua Media Bin (kho tai san doc THANG tu backend, khong phai mot
+    ban sao suy tu job) — nen bai nay kiem CHUC NANG thay the, khong doi lai
+    ten cu.
+  */
+  const trang = read("../src/app/studio/media/page.tsx");
+  const panel = read("../src/components/media/TtsPanel.tsx");
+  const inspector = read("../src/components/media/Inspector.tsx");
+  const preview = read("../src/components/media/Preview.tsx");
+
+  for (const [dau_hieu, o_dau] of [
+    ["MAX_CHARS", panel],          // gioi han ky tu
+    [".createJob(", trang],        // tao job that
+    ["useJobTracker", trang],      // theo doi tien trinh — dung chung voi `/write`
+    ["ensureStudioNovel", trang],  // kho chua rieng cua Studio
+    ["voiceSections", panel],      // bo chon giong
   ]) {
-    // Vong poll da chuyen sang `lib/useJobTracker.ts` de `/studio` va `/write`
-    // dung chung mot ban. `/studio` khong con tu goi `getJob` nua — do la chu
-    // y, va `job-progress-shared.test.mjs` khoa lai chinh cho do.
-    assert.ok(studio.includes(dau_hieu), `Audio Studio mất "${dau_hieu}"`);
+    assert.ok(o_dau.includes(dau_hieu), `Media Studio mất "${dau_hieu}"`);
   }
+
+  // Nghe tai cho: khong con la mot <AudioPlayer> rieng, ma la <audio> dung
+  // chung mot dong ho voi video/phu de trong Preview.
+  assert.match(preview, /<audio /);
+  // Tai MP3: khong con trong AudioPlayer, ma la mot lien ket tai xuong o
+  // Inspector khi dang chon clip loi doc.
+  assert.match(inspector, /href=\{urlAudio\} download/);
 });
 
 /* ============================================================ dieu huong */

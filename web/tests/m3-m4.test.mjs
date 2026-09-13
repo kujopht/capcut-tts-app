@@ -9,7 +9,9 @@ import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 
-const write = () => read("../src/app/studio/write/page.tsx");
+// "Viết truyện" doi ten tep khi gop vao `/studio/content` — xem
+// `docs/reports/` mission gop Studio (feat/studio-media-workspace).
+const write = () => read("../src/components/studio/VietTruyen.tsx");
 const novel = () => read("../src/app/novels/[id]/page.tsx");
 const chapter = () => read("../src/app/chapters/[id]/page.tsx");
 /** Trang Nghe rieng (overnight Phase 2, Phan 2A) — day la noi trinh phat

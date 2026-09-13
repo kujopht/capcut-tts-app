@@ -101,7 +101,18 @@ class VideoProject:
     video_trim_end: float = 0.0
 
     #: Loi doc bat dau o giay thu may cua video. Am = bat dau truoc.
+    #:
+    #: Mot so AM cung chinh la "cat bot DAU loi doc": bo loc dich no thanh
+    #: `atrim=start=…` chu khong phai `adelay` (xem `video_render._loc_am`),
+    #: nen mep TRAI cua clip audio o trinh soan thao khong can truong rieng.
     audio_offset: float = 0.0
+
+    #: Cat bot CUOI loi doc, tinh bang giay tu dau tep. `0` = dung het.
+    #:
+    #: Ton tai vi mep PHAI cua clip khong quy duoc ve `audio_offset` nhu mep
+    #: trai. Khong co truong nay thi tay cam ben phai o duong thoi gian la
+    #: mot loi noi doi: keo duoc, nhin thay ngan lai, va mat khi tai lai.
+    audio_trim_end: float = 0.0
 
     video_volume: float = 1.0
     audio_volume: float = 1.0
@@ -129,6 +140,7 @@ class VideoProject:
             "video_trim_start": self.video_trim_start,
             "video_trim_end": self.video_trim_end,
             "audio_offset": self.audio_offset,
+            "audio_trim_end": self.audio_trim_end,
             "video_volume": self.video_volume,
             "audio_volume": self.audio_volume,
             "mute_original_audio": self.mute_original_audio,

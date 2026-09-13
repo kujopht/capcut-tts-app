@@ -153,6 +153,28 @@ class BanVaTest(unittest.TestCase):
     def test_bo_tham_chieu_bang_chuoi_rong(self):
         self.assertEqual(kiem_ban_va({"audio_track_id": None})["audio_track_id"], "")
 
+    def test_audio_trim_end_hop_le_di_qua(self):
+        ra = kiem_ban_va({"audio_trim_end": 12.5})
+        self.assertEqual(ra["audio_trim_end"], 12.5)
+
+    def test_audio_trim_end_am_bi_tu_choi(self):
+        with self.assertRaises(VideoValidationError):
+            kiem_ban_va({"audio_trim_end": -1.0})
+
+    def test_audio_trim_end_qua_dai_bi_tu_choi(self):
+        """Khong ep theo `dai_nguon` cua VIDEO — do la do dai cua LOI DOC."""
+        with self.assertRaises(VideoValidationError):
+            kiem_ban_va({"audio_trim_end": 10 * 3600.0})
+
+    def test_audio_trim_end_khong_phai_so_bi_tu_choi(self):
+        for xau in ("12.5", True, None):
+            with self.assertRaises(VideoValidationError):
+                kiem_ban_va({"audio_trim_end": xau})
+
+    def test_audio_trim_end_bang_0_hop_le(self):
+        """`0` nghia la "dung het" — mot gia tri hop le, khong phai loi."""
+        self.assertEqual(kiem_ban_va({"audio_trim_end": 0.0})["audio_trim_end"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

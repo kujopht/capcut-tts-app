@@ -163,7 +163,7 @@ test("kho R2 thi PUT THANG, khong di qua API", () => {
 /* ================================================ Video <-> du an ======= */
 
 test("video tao tu du an duoc GAN NGUOC vao du an do", () => {
-  const src = read("../src/app/studio/video/page.tsx");
+  const src = read("../src/app/studio/media/page.tsx");
   assert.match(src, /params\.get\("studio"\)/);
   assert.match(src, /studio\s*\n?\s*\.attach\(studioId, "video", r\.project\.project_id\)/);
   // Gan nguoc hong thi KHONG duoc chan viec dung Composer.
@@ -181,7 +181,7 @@ test("tham so tao-moi chi DUNG MOT LAN", () => {
     du an video rong nua — va tu `?studio=` thi moi lan nhu the con gan them
     mot muc vao du an Studio.
   */
-  const src = read("../src/app/studio/video/page.tsx");
+  const src = read("../src/app/studio/media/page.tsx");
   assert.match(src, /window\.history\.replaceState\(/,
     "tham số tạo-mới không được dọn khỏi URL sau khi dùng");
   assert.match(src, /\?project=\$\{encodeURIComponent\(r\.project\.project_id\)\}/);

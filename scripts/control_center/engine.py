@@ -3658,12 +3658,63 @@ class ControlCenter:
             return ()
         return tuple(sorted(ra))
 
+    def _con_da_ket_thuc(self, c) -> bool:
+        """Con này còn gì tự chạy nữa không? (xem `_tong_hop_toa`)
+
+        `BLOCKED` chỉ tính là KẾT THÚC khi hồ sơ sự cố bền nói rằng vòng phục
+        hồi đã leo thang và ĐÓNG. `BLOCKED` vì chờ thẩm quyền/tài nguyên thì
+        KHÔNG — việc ấy còn chạy tiếp sau khi người mở rào, và gộp sớm là vứt
+        đi một kết quả sắp có.
+        """
+        if c.state is TaskState.DONE:
+            return True
+        if c.state not in (TaskState.FAILED, TaskState.BLOCKED):
+            return False
+        try:
+            from scripts.control_center.v10.su_co import HanhDong
+            from scripts.control_center.v10.su_co_ben import SoSuCo
+        except Exception:                                     # noqa: BLE001
+            return c.state is TaskState.FAILED
+        sc = SoSuCo(self.store).hien_tai(c.task_id)
+        if sc is None:
+            # Khong co su co nao: `FAILED` la cho nghi that su.
+            return c.state is TaskState.FAILED
+        if sc.trang_thai != "DA_DONG":
+            # SU CO CON MO -> vong phuc hoi VAN dang so huu viec nay.
+            #
+            # `FAILED` khong con la trang thai nghi tu khi vong su co duoc cam
+            # vao: no la mot nhip TRUNG GIAN tren duong toi "xep lai" hoac
+            # "leo thang". Anh em gop ngay luc do se chot mot ket qua ma
+            # chinh he van dang sua — do that: cung mot bai kiem cho ra
+            # (3 xong, 1 hong) hoac (3 xong, 0 hong) tuy nhip may.
+            return False
+        return (c.state is TaskState.FAILED or
+                sc.chien_luoc in (HanhDong.HOI_DONG.value,
+                                  HanhDong.LEO_THANG_CHU_SO_HUU.value))
+
     def _tong_hop_toa(self, ctx: ProjectContext, cha_id: str) -> Optional[Dict]:
         """Mọi con đã kết thúc -> gộp vào cha, khử trùng, giữ nguồn gốc.
 
-        Con BLOCKED (cần người) hay còn chạy/chờ thì cha CHỜ — không gộp nửa
-        chừng. Hai con xong cùng lúc gọi vào đây cùng lúc: khoá + kiểm lại
-        trạng thái cha, chỉ một lượt gộp.
+        Con còn chạy/chờ thì cha CHỜ — không gộp nửa chừng. Hai con xong cùng
+        lúc gọi vào đây cùng lúc: khoá + kiểm lại trạng thái cha, chỉ một
+        lượt gộp.
+
+        `BLOCKED` MANG HAI NGHĨA, và chỉ một nghĩa là kết thúc:
+
+        * *chờ thẩm quyền / chờ tài nguyên* — việc CHƯA chạy xong, người mở
+          rào là nó chạy tiếp. Cha phải CHỜ, đúng như thiết kế ban đầu.
+        * *phục hồi tự chủ đã cạn* (V1.0) — vòng sự cố đã thử hết bậc thang
+          và leo thang. Với riêng con ấy thì KHÔNG còn gì tự chạy nữa.
+
+        Nghĩa thứ hai trước V1.0 không tồn tại: một con hỏng thì nằm ở
+        `FAILED`. Từ khi leo thang tới được trạng thái việc, nó đi tiếp sang
+        `BLOCKED` — và nếu vẫn coi đó là "chờ", cha treo VĨNH VIỄN. Đo được
+        thật: `test_mot_con_hong_khong_huy_anh_em` từ 2.7s thành 61s rồi đỏ.
+        Với một hệ chạy qua đêm không người trực, treo cũng tệ ngang lặp vô
+        hạn — mà cả tầng này sinh ra để chặn lặp vô hạn.
+
+        Phân biệt hai nghĩa bằng HỒ SƠ SỰ CỐ BỀN (một sự thật có cấu trúc),
+        KHÔNG bằng cách dò chữ trong `blocked_reason`.
         """
         from scripts.control_center import toa as TOA
         with self._khoa_toa:
@@ -3675,7 +3726,7 @@ class ControlCenter:
                 return None
             con = [self.store.task(cid) for cid in (toa.get("con") or [])]
             con = [c for c in con if c is not None]
-            if not con or any(c.state not in (TaskState.DONE, TaskState.FAILED) for c in con):
+            if not con or any(not self._con_da_ket_thuc(c) for c in con):
                 return None
             ds = []
             for c in con:
@@ -4254,8 +4305,18 @@ class ControlCenter:
         if pb.raw_log_ref:
             sc.bang_chung = tuple(list(sc.bang_chung)[-8:]
                                   + [f"log:{pb.raw_log_ref}"])
-        so.ghi(sc, chi_tiet=f"{qd.loai.value} -> {qd.hanh_dong.value}: "
-                            f"{qd.ly_do}")
+        # TRẠNG THÁI VÀO là BẰNG CHỨNG, không phải một bộ phân loại thứ hai.
+        #
+        # `FAILED` = có phép đo và phép đo nói sai. `NEEDS_EVIDENCE` = KHÔNG
+        # có phép đo. Người đọc sổ cần phân biệt được hai thứ đó, nên nó được
+        # GHI. Nhưng nó KHÔNG được phép suy ra `loai`: nguồn của `loai` là văn
+        # bản hỏng, và dựng một đường suy luận thứ hai cho cùng một sự thật
+        # đúng là chế độ hỏng đã phải sửa ba lần trong bản này (hai nơi giữ
+        # một sự thật rồi bất đồng). Muốn `loai` đúng thì sửa ở NGUỒN — đó là
+        # việc mã máy `KIEM_DU_AN_*` làm.
+        tt_vao = getattr(trang_thai, "value", None) or str(trang_thai or "")
+        so.ghi(sc, chi_tiet=f"[{tt_vao}] {qd.loai.value} -> "
+                            f"{qd.hanh_dong.value}: {qd.ly_do}")
         bus.phat(SuKienDoi(
             LoaiSuKien.INCIDENT, t.project_id, sc.cho_chay_truoc or "router",
             f"{qd.loai.value}: {qd.ly_do}", task_id=task_id,

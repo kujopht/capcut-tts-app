@@ -433,7 +433,7 @@ def tong_hop(cha: Dict[str, Any], cac_con: Sequence[Dict[str, Any]]) -> Dict[str
     ung: List[Dict[str, Any]] = []
     da_thay: Dict[str, Dict[str, Any]] = {}
     con_ra: List[Dict[str, Any]] = []
-    xong = hong = khac = 0
+    xong = hong = khac = leo_thang = 0
     for c in sorted(cac_con, key=lambda x: int(x.get("chi_so") or 0)):
         st = str(c.get("state") or "")
         pb = ((c.get("result") or {}).get("envelope") or {}) if c.get("result") else {}
@@ -449,6 +449,18 @@ def tong_hop(cha: Dict[str, Any], cac_con: Sequence[Dict[str, Any]]) -> Dict[str
             xong += 1
         elif st == "FAILED":
             hong += 1
+        elif st == "BLOCKED":
+            # Tới được đây thì con đã KẾT THÚC (xem `engine._con_da_ket_thuc`):
+            # con `BLOCKED` vì chờ thẩm quyền/tài nguyên KHÔNG cho gộp, nên
+            # `BLOCKED` ở đây chỉ có một nghĩa — vòng phục hồi đã cạn và leo
+            # thang lên người.
+            #
+            # Nó phải được kể là HỎNG. Con ấy không giao được thứ được giao;
+            # đếm nó vào `khac` làm bản tổng hợp nói "3 xong, 0 hỏng" trong
+            # khi có một việc đang chờ người — một câu đúng về kỹ thuật mà
+            # sai về sự thật, đúng loại câu mục 2 của V0.9 cấm.
+            hong += 1
+            leo_thang += 1
         else:
             khac += 1
         if not uv or gap_dau(uv).startswith("khong co"):
@@ -464,6 +476,7 @@ def tong_hop(cha: Dict[str, Any], cac_con: Sequence[Dict[str, Any]]) -> Dict[str
     khoang = [dict((c.get("result") or {}).get("khoang_chay") or {}, task_id=c.get("task_id"))
               for c in cac_con if (c.get("result") or {}).get("khoang_chay")]
     return {"so_con": len(cac_con), "xong": xong, "hong": hong, "khac": khac,
+            "leo_thang": leo_thang,
             "ung_vien": ung, "trung_da_bo": trung, "con": con_ra,
             "cha": cha.get("task_id"), "muc_tieu": str(cha.get("title") or ""),
             "khoang_chay": khoang, "song_song_toi_da": song_song_toi_da(khoang)}

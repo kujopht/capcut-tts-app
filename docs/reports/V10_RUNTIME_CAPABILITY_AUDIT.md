@@ -153,6 +153,28 @@ trúc thì tự do.
 
 ---
 
+## 4c. `codex-chatgpt-web` — KHÔNG CÀI TRÊN MÁY NÀY (đo 2026-09-13)
+
+Dò trực tiếp: không có lệnh `codex-chatgpt-web` / `codex-web` / `chatgpt-web`
+trên `PATH`, và không có thư mục cài ở `%LOCALAPPDATA%\Programs\`,
+`%APPDATA%\`, hay `%USERPROFILE%\`.
+
+Nên **không có probe nào chạy được**, và adapter ở lại **UNVERIFIED**. Đây là
+kết luận ĐO ĐƯỢC, không phải một lựa chọn thận trọng.
+
+**Thiếu chính xác những gì** (để lần sau không phải dò lại):
+
+1. bản thân ứng dụng — chưa cài;
+2. một phiên ChatGPT đã đăng nhập trong trình duyệt nhúng của nó (Router
+   **không** được chạm vào, không được sao chép, không được lưu ở đâu);
+3. một quyết định tường minh của chủ sở hữu rằng chấp nhận một transport
+   KHÔNG CHÍNH THỨC cho vai Sol/Astra, kèm hiểu rằng nó chịu ToS của ChatGPT;
+4. một `runtime_id` + `quota_pool` RIÊNG trong fabric (vd `GPTWEB01`), không
+   trộn vào bể `codex` đang đo được.
+
+Cho tới khi đủ bốn thứ đó, Router vẫn đi đường chính thức: `codex-cli`
+0.153.4, cùng bản CLI phơi ra `gpt-5.6-sol` và `gpt-6-astra`.
+
 ## 5. Thứ KHÔNG chứng minh được ở đây
 
 | Thứ | Trạng thái |

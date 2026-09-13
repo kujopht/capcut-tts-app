@@ -1501,3 +1501,37 @@ này, và còn chỗ nào khác đang tự suy ra nó?*
 
 **PHA TIẾP THEO: KHÔNG phải v0.10.** Dùng THẬT Router đã phát hành để làm
 tiếp việc phát triển fanfic.world qua Project Leader (dogfood).
+
+## §25 — v0.9.1 và v0.9.2 ĐÃ PHÁT HÀNH (2026-09-12)
+
+Dogfood sinh ra hai bản vá, đúng như §24 dự đoán: dùng thật thì ma sát lộ ra
+ở chỗ không bài kiểm nào nhìn tới.
+
+| Bản | Thẻ | `main` | Nội dung |
+|---|---|---|---|
+| v0.9.1 | `router-control-center-v0.9.1` | `5af3a3e` | môi giới bảo trì kho CÓ KIỂU; thang leo tra cứu thành phần; bản đồ 10 vai trong viên nang; vệ sinh khung nhìn |
+| v0.9.2 | `router-control-center-v0.9.2` | (mục này) | TẠO DỰ ÁN MỚI từ một cái TÊN — backend + giao diện |
+
+### v0.9.2 — vì sao nó tồn tại
+
+`+ Dự án mới` chỉ nhận MỘT đường dẫn tuyệt đối tới kho ĐÃ CÓ. Tốt cho nhận
+nuôi Fanfic, nhưng bắt đầu từ số không thì người dùng phải tự `mkdir`, tự
+`git init`, rồi mới quay lại gõ đường dẫn — ba bước tay cho thứ đáng lẽ là
+một cái tên. Nay hai luồng tách bạch, **một máy móc đăng ký chứ không phải
+hai**: luồng tạo mới chạm đĩa xong gọi thẳng `nhan_du_an()`, nên danh tính,
+ký ức, viên nang và registry đều đi đúng đường Fanfic đã đi.
+
+Nghiệm thu: `RouterDogfood02` tạo **chỉ bằng giao diện nhìn thấy được**
+(Chrome thật, `Input.dispatchMouseEvent`), **43/43**, trên sổ chính tắc, với
+một lượt Leader model thật — 0 việc, 0 execution, 0 chữ Fanfic.
+`docs/reports/V092_PROJECT_BOOTSTRAP.md`, ảnh `V092_ROUTERDOGFOOD02.png`.
+
+### Việc còn treo (KHÔNG chặn phát hành)
+
+**`webmain` không lấy khoá MỘT-NGƯỜI-GHI.** `KhoaKho` chỉ được lấy ở
+`desktop.py` — vỏ Qt. `webmain.py` là ĐƯỜNG CHÍNH từ V0.2 và không lấy khoá
+nào, nên hai Control Center web chạy cạnh nhau trên cùng sổ chính tắc là
+chuyện không ai chặn. Đây chính là hình dạng đã làm hỏng năm lần chạy ở V0.9,
+và là lý do dogfood v0.9.2 phải TỰ ĐO nhiễm bẩn (chụp sổ trước/sau) thay vì
+giả định không có. **Lại là hai cái nhìn về một sự thật không khớp nhau** —
+tài liệu nói có khoá, đường chính không lấy. Sửa ở bản sau.

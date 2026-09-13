@@ -54,6 +54,25 @@ def _un(s: Optional[str], mac_dinh: Any) -> Any:
         return mac_dinh
 
 
+#: DẤU HIỆU một lần thực thi do BÀI NGHIỆM THU sinh ra.
+#:
+#: Bám vào HIỆN VẬT của bài kiểm (`docs/reports/_v09_ghi_chu_*`, các chuỗi
+#: `V09-…`) chứ không bám vào từ chung như "nghiệm thu" — người dùng hoàn
+#: toàn có thể nói "làm cho tôi bộ nghiệm thu X" trong một việc THẬT, và ẩn
+#: mất việc đó thì bộ lọc này còn tệ hơn vấn đề nó chữa.
+_DAU_NGHIEM_THU: Tuple[str, ...] = (
+    "_v09_ghi_chu_", "V09-ACCEPT", "V09-REPAIR", "V09-RESTART",
+    "control_center_v09_real_acceptance",
+)
+
+
+def la_nghiem_thu(y: Any) -> bool:
+    """Lần thực thi này có phải do bài nghiệm thu sinh ra? TẤT ĐỊNH."""
+    van = " ".join(str(getattr(y, k, "") or "")
+                   for k in ("goal", "nguon_cau", "nguon_message"))
+    return any(d.lower() in van.lower() for d in _DAU_NGHIEM_THU)
+
+
 class SoThucThi:
     """CRUD của vòng kín. Bọc `ControlStore`, không thay thế nó."""
 
@@ -171,7 +190,22 @@ class SoThucThi:
     def danh_sach(self, project_id: str = "", *,
                   states: Sequence[TrangThaiThucThi] = (),
                   dang_song: Optional[bool] = None,
+                  gom_nghiem_thu: bool = True,
                   limit: int = 200) -> List[YDinhThucThi]:
+        """`gom_nghiem_thu=False` ẩn các lần thực thi CỦA BÀI NGHIỆM THU.
+
+        Dogfood thật: sau đợt v0.9, ô chat/trạng thái Fanfic bị lấp bởi hàng
+        chục `ex_…` của bài nghiệm thu (WAITING_AUTHORITY/BLOCKED của kịch
+        bản test), làm việc THẬT khó đọc.
+
+        Hai điều bản lọc này KHÔNG làm:
+
+        * **Không xoá gì.** Lịch sử vẫn nguyên; đây chỉ là bộ lọc của MỘT
+          phép đọc. Gọi với mặc định `True` là thấy lại đủ.
+        * **Không giấu việc đang sống.** Chỉ ẩn lần nghiệm thu ĐÃ KẾT THÚC.
+          Một lần nghiệm thu đang chạy vẫn hiện — nếu nó đang giữ tài nguyên
+          thì người vận hành phải thấy.
+        """
         q = "SELECT * FROM executions WHERE 1=1"
         a: List[Any] = []
         if project_id:
@@ -186,9 +220,13 @@ class SoThucThi:
                   else " AND state IN (%s)") % ",".join("?" * len(kt))
             a += kt
         q += " ORDER BY created_at DESC LIMIT ?"
-        a.append(int(limit))
-        return [self._tu_hang(h)
-                for h in self.store.ket_noi().execute(q, a).fetchall()]
+        a.append(int(limit) * (3 if not gom_nghiem_thu else 1))
+        ds = [self._tu_hang(h)
+              for h in self.store.ket_noi().execute(q, a).fetchall()]
+        if not gom_nghiem_thu:
+            ds = [y for y in ds
+                  if not (la_nghiem_thu(y) and y.trang_thai.ket_thuc)]
+        return ds[:int(limit)]
 
     def dang_chay(self, project_id: str = "") -> List[YDinhThucThi]:
         """Lần thực thi CÒN SỐNG. Đây là thứ §12 trả lời "xong chưa bro?"."""

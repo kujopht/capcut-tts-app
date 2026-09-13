@@ -233,7 +233,9 @@
       "auth_profile": "codex-cli:default",
       "transport": "cli",
       "concurrency": 1,
-      "supported_models": ["codex-default"]
+      "supported_models": ["codex-default"],
+      "refuses": ["repo_write"],
+      "refuses_notes": "ĐO 2026-09-13: `CodexAdapter` gọi `codex exec --skip-git-repo-check -m <model> --color never -`, KHÔNG cờ sandbox, và `codex exec` mặc định chạy sandbox CHỈ ĐỌC. Một việc GHI giao tới đây trả về 'Sandbox hệ thống chặn mọi thao tác ghi và không cho phép yêu cầu nâng quyền' sau 226s — hai lần liên tiếp trên cùng một việc, lần thứ hai vì phiên CODEX01 còn ấm và luật DÙNG LẠI chỉ xét phạm vi chứ không xét năng lực. Codex vẫn nhận REVIEW (thế mạnh thật của nó, và review không cần ghi). Muốn mở ghi thì phải bật `--sandbox workspace-write` — CẤP THÊM quyền cho một CLI ngoài, cần probe + người duyệt, không phải một dòng lọt vào giữa bản vá phạm vi ghi."
     },
     {
       "runtime_id": "OPENCODE01",

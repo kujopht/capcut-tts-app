@@ -1159,6 +1159,70 @@ class TestVerticalSlice(unittest.TestCase):
             with self.cc._khoa:
                 self.cc._dang_chay.pop(tid, None)
 
+    def test_khoa_mo_coi_duoc_nha_TRONG_PHIEN_chu_khong_doi_recover(self):
+        """Khoá mồ côi phải được thu hồi ở ĐƯỜNG LẬP LỊCH SỐNG.
+
+        `_nha_khoa_mo_coi` đã đúng và đã an toàn từ V0.9.1, nhưng nó chỉ
+        được gọi ở `recover()` — tức là lúc KHỞI ĐỘNG LẠI. Trong một phiên
+        đang chạy, một việc kết thúc ở trạng thái cuối mà chưa nhả khoá sẽ
+        chặn mọi việc sau nó **hết `LOCK_TTL` = 1 giờ**, và bộ lập lịch chỉ
+        lặng lẽ đẩy việc kia sang `WAITING` mỗi lượt.
+
+        Đây chính là lớp lỗi mà `docs/reports/V091_DOGFOOD_HOTFIX.md` ghi
+        nhận là "một cuộc đua ở tầng KHOÁ, phụ thuộc tải" và cố ý chưa sửa
+        ở lần phát hành đó: hiếm, nhưng khi trúng thì bế tắc là VĨNH VIỄN
+        trong phạm vi phiên.
+
+        Bài kiểm này TẤT ĐỊNH — không ngủ, không đua, không phụ thuộc tải:
+        nó dựng thẳng trạng thái mồ côi rồi gọi đúng MỘT lượt `tick()`.
+        """
+        from scripts.control_center.locks import LockManager
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        t1, t2 = self.cc.store.tasks("demo")
+        # Tien de cua bai kiem: hai viec THAT SU tranh nhau mot khoa GHI.
+        self.assertEqual(t1.resources, t2.resources)
+        self.assertEqual(t1.resources,
+                         ("WRITE:FILESYSTEM:web/admin/content-queue",))
+
+        # t1 giu khoa roi CHET o trang thai cuoi ma khong nha — mo coi.
+        LockManager(self.cc.store).xin(
+            "demo", [(LockKind.FILESYSTEM, "web/admin/content-queue")],
+            task_id=t1.task_id)
+        self.cc.store.doi_trang_thai(t1.task_id, TaskState.FAILED, force=True,
+                                     reason="chủ khoá kết thúc mà chưa nhả")
+        self.assertTrue(self.cc.store.locks("demo"), "tiền đề: khoá còn đó")
+
+        # MOT luot lap lich song. KHONG goi `recover()`.
+        kq = self.cc.tick()
+
+        self.assertIn(t2.task_id, kq["dispatched"],
+                      "việc sau phải chạy được ngay trong phiên — khoá mồ côi "
+                      "không được giam nó tới hết TTL (1 giờ)")
+
+    def test_khoa_PRODUCTION_mo_coi_VAN_giam_viec_o_duong_lap_lich(self):
+        """Thu hồi ở đường sống KHÔNG được nới bất biến khoá production.
+
+        Cùng kịch bản với bài trên, chỉ đổi loại khoá. Một khoá production
+        "mồ côi" có thể là một cutover đang chạy lâu hơn dự kiến; đoán sai
+        là thả việc thứ hai vào giữa nó. `WAITING` ở đây là câu trả lời
+        ĐÚNG, không phải một lỗi cần sửa.
+        """
+        from scripts.control_center.locks import LockManager
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        t1 = self.cc.store.tasks("demo")[0]
+        LockManager(self.cc.store).xin(
+            "demo", [(LockKind.PRODUCTION, "fanfic.world")],
+            task_id=t1.task_id)
+        self.cc.store.doi_trang_thai(t1.task_id, TaskState.FAILED, force=True,
+                                     reason="chủ khoá kết thúc mà chưa nhả")
+
+        self.cc.tick()
+
+        con = [l.kind for l in self.cc.store.locks("demo")]
+        self.assertIn(LockKind.PRODUCTION, con,
+                      "khoá PRODUCTION KHÔNG được tự nhả ở đường lập lịch")
+
     def test_recover_KHONG_dung_vao_viec_dang_co_LEASE_song(self):
         """Tiến trình thứ hai gọi `recover()` KHÔNG được cướp việc đang chạy.
 

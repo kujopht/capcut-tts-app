@@ -1134,7 +1134,22 @@ class Test14DuongDayEngine(unittest.TestCase):
         self.gia = BoGoiGia(kich_ban={
             VaiTro.STRATEGIST: [LuotVai(ok=True, van_ban=CL_OK, giay=3.0)],
             VaiTro.REVIEWER: [LuotVai(ok=True, van_ban=PB_OK, giay=2.0)]})
+        # FABRIC TIÊM VÀO — không dò máy chủ đang chạy bài kiểm.
+        #
+        # Không có dòng này, `ControlCenter` tự dựng fabric từ những CLI có
+        # THẬT trên máy (`agy`, `codex`). Trên máy lập trình chúng có, nên
+        # `Scheduler` tìm được chỗ và hội đồng chạy; trên runner CI không có
+        # gì cả, mọi runtime ở OFFLINE, `Scheduler` loại sạch ứng viên và
+        # `hoi_dong.chay` trả `KHÔNG_CÓ_CHỖ` — KHÔNG ném lỗi, nên
+        # `REASONING_ERROR` rỗng và bài kiểm đỏ ở một khẳng định khác
+        # (`0 != 2 : Strategist và Reviewer phải THẬT SỰ được gọi`). Đó là lý
+        # do năm bài trong lớp này xanh ở máy và đỏ ở CI.
+        #
+        # `fabric_thu()` cho ba họ model trên một runtime IDLE, nên phép xếp
+        # chỗ tất định ở mọi nền. Vai vẫn do `BoGoiGia` chạy, nên bài kiểm
+        # vẫn đo đúng thứ nó sinh ra để đo: ĐƯỜNG DÂY, không phải nhà cung cấp.
         self.cc = ControlCenter(root=self.goc, probe=False,
+                                fabric=fabric_thu(),
                                 bo_goi_vai=self.gia)
         self.cc.them_project(Project(project_id="w", name="W",
                                      repo_path=str(self.goc)))

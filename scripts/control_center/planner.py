@@ -42,7 +42,9 @@ from scripts.router_v4.capabilities import Priority, Reasoning, Requirements
 from scripts.router_v4.contract import Execution, TaskContract, Verification
 from scripts.control_center.model import (LockKind, PermissionClass, Project,
                                           Task, TaskState)
-from scripts.control_center.permissions import PermissionEnvelope, envelope_for
+from scripts.control_center.locks import GOC
+from scripts.control_center.permissions import (PermissionEnvelope,
+                                                ThamQuyenGhi, envelope_for)
 
 # ---------------------------------------------------------------------------
 # Tu vung
@@ -84,7 +86,13 @@ _Y_GHI = re.compile(
     r"migrate|dọn|don|clean ?up|generate|sinh|chạy test|chay test|run tests?|"
     r"viết test|viet test|hoàn thiện|hoan thien|hoàn thành|hoan thanh|"
     r"triển khai|trien khai|rename|đổi tên|doi ten|move|di chuyển|di chuyen|"
-    r"patch|edit|chỉnh|chinh|apply|install|cài|cai)\b", re.I)
+    r"patch|edit|chỉnh|chinh|apply|install|cài|cai|"
+    # V0.9.3 — lời CHO PHÉP thường gặp mà bảng cũ không có. CỤM, không phải
+    # từ đơn: `code` trần biến "đọc code" thành việc GHI, `làm` trần biến
+    # "làm sao để…" thành việc GHI. Cả hai đều đã suýt lọt.
+    r"tự code|tu code|code nó|code no|code luôn|code luon|code đi|code di|"
+    r"viết code|viet code|làm luôn|lam luon|làm đi|lam di|làm tiếp|lam tiep|"
+    r"xây dựng|xay dung)\b", re.I)
 
 #: Loai viec suy ra tu dong tu. Thu tu QUAN TRONG: mau dung truoc thang.
 _LOAI_VIEC: Tuple[Tuple[str, re.Pattern], ...] = (
@@ -106,11 +114,31 @@ _LOAI_VIEC: Tuple[Tuple[str, re.Pattern], ...] = (
     ("documentation", re.compile(
         r"\b(document|write docs?|readme|changelog|handoff|"
         r"viết tài liệu|viet tai lieu|tài liệu hoá)\b", re.I)),
+    # V0.9.3 — "TRIỂN KHAI" TRẦN LÀ MỘT ĐỘNG TỪ GHI.
+    #
+    # Bảng này đòi chữ `code` ngay sau (`triển khai code`), nên câu THẬT đã
+    # chặn RouterDogfood02 — "Triển khai ứng dụng Web Todo…" — trượt hết mọi
+    # mẫu rồi rơi về mặc định `analysis`, tức CHỈ ĐỌC, tức worker bị chặn vì
+    # muốn xong việc thì phải ghi.
+    #
+    # `_Y_GHI` ngay bên trên ĐÃ liệt `triển khai` là động từ ghi từ lâu: hai
+    # cái nhìn về một sự thật, và tầng cấp quyền tin cái sai.
+    #
+    # Nghĩa *deploy* của "triển khai" KHÔNG bị nới ở đây: `permissions`
+    # phân loại nó bằng CỤM có đích production ("triển khai lên production",
+    # "triển khai worker") và vẫn chặn y như cũ. Xem ghi chú dài ở
+    # `_MAU_GATED`, nơi cùng bài học này đã trả giá một lần.
     ("implementation", re.compile(
         r"\b(finish|complete|implement|build|add|create|fix|refactor|migrate|"
         r"wire up|hook up|clean ?up|update|improve|port|"
         r"hoàn thiện|hoan thien|hoàn thành|hoan thanh|làm xong|lam xong|"
-        r"triển khai code|viết|viet|sửa|sua|thêm|them|tạo|tao|dọn|don)\b",
+        r"triển khai|trien khai|viết|viet|sửa|sua|thêm|them|tạo|tao|dọn|don|"
+        # Lời CHO PHÉP người dùng hay gõ. CỤM, không phải từ đơn: `code` trần
+        # biến "đọc code" thành việc ghi, `làm` trần biến "làm sao để…" thành
+        # việc ghi.
+        r"tự code|tu code|code nó|code no|code luôn|code luon|code đi|code di|"
+        r"viết code|viet code|làm luôn|lam luon|làm đi|lam di|làm tiếp|"
+        r"lam tiep|xây dựng|xay dung)\b",
         re.I)),
 )
 
@@ -177,6 +205,65 @@ KHONG_CAP_CHO_AGENT: Tuple[str, ...] = (f"python {_TOOL} tests",)
 #: Duong dan trong cau: `web/admin/content-queue`, `server/tts_bridge.py`.
 #: Doi hoi it nhat mot dau `/` de khong bat nham moi tu thuong.
 _DUONG_DAN = re.compile(r"\b([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)+/?)")
+
+#: Doan duong dan "trong": chu thuong/so/gach — `server`, `web_v2`, `docs`.
+_DOAN_THUONG = re.compile(r"^[a-z0-9][a-z0-9._*-]*$")
+
+
+#: Cap tu VAN XUOI noi bang dau gach cheo — KHONG phai cay thu muc.
+#:
+#: Tieng Viet lan tieng Anh ky thuat deu viet kieu nay de noi "hoac":
+#: "tu repair/replan", "test/verify", "start/stop", "doc/ghi". Chung khop
+#: `_DUONG_DAN` y het mot duong dan hai doan.
+#:
+#: DANH SACH NGAN VA CU THE, khong phai mot bo doan y: chi nhung dong tu
+#: thuong gap trong cau CHI DAO QUY TRINH cua nguoi dung. Mot thu muc that
+#: ten `repair` van qua duoc khi cau viet no nhu mot duong dan
+#: (`repair/`, `src/repair`, hoac no ton tai trong kho).
+_TU_QUY_TRINH = frozenset((
+    "repair", "replan", "retry", "rollback", "verify", "test", "tests",
+    "debug", "fix", "review", "start", "stop", "build", "deploy",
+    "read", "write", "doc", "ghi", "sua", "kiem", "chay",
+    "and", "or", "va", "hoac",
+))
+
+
+def _la_duong_dan(p: str, cau: str) -> bool:
+    """`p` khớp `_DUONG_DAN` rồi — nhưng nó có THỰC SỰ là đường dẫn không?
+
+    `HTML/CSS/JS` và `repair/replan` đều khớp mẫu, và cả hai đều KHÔNG phải
+    thư mục. Dấu hiệu CHẤP NHẬN, có một là đủ:
+
+    * kết thúc bằng `/` — người viết đang chỉ một thư mục (`docs/`);
+    * có phần mở rộng tệp ở đoạn cuối (`web/app.js`);
+    * MỌI đoạn đều là tên thư mục thường (chữ thường/số/`_`/`-`/`.`).
+
+    `A/B/C` viết HOA toàn bộ là một liệt kê ("HTML/CSS/JS"), không phải cây
+    thư mục. Chữ hoa trong đường dẫn thật vẫn qua được khi có dấu hiệu khác
+    (`docs/README.md` có phần mở rộng; `src/Main/` có gạch chéo cuối).
+
+    VÀ MỘT PHÉP TỪ CHỐI, thêm sau một hỏng ĐO ĐƯỢC (2026-09-13): câu uỷ
+    quyền thật có cụm *"tự repair/replan trong phạm vi cần thiết"*. Leader
+    chép cụm đó vào mục tiêu, `repair/replan` được đọc thành đường dẫn, và
+    nó trở thành PHẠM VI GHI của việc. Agent làm đúng phạm vi được giao —
+    nên cả ứng dụng Todo (6 tệp, 30 KB) nằm gọn trong một thư mục tên
+    `repair/replan/`. Việc vẫn `DONE`, cổng kiểm định vẫn xanh; chỉ có sản
+    phẩm là ở sai chỗ.
+
+    Hai đoạn ĐỀU là từ chỉ quy trình thì đó là văn xuôi, không phải thư mục
+    — trừ khi câu viết nó như đường dẫn (`/` cuối, phần mở rộng) hoặc nó có
+    thật trong kho.
+    """
+    if p.endswith("/") or f"{p}/" in cau:
+        return True
+    doan = [x for x in p.split("/") if x]
+    if not doan:
+        return False
+    if re.search(r"\.[A-Za-z0-9]{1,5}$", doan[-1]):
+        return True
+    if len(doan) >= 2 and all(d.lower() in _TU_QUY_TRINH for d in doan):
+        return False
+    return all(_DOAN_THUONG.match(x) for x in doan)
 
 #: Dau hieu RUI RO CAO -> can suy luan manh hon.
 _RUI_RO_CAO = re.compile(
@@ -392,7 +479,18 @@ class RulePlanner:
         for ten, mau in _LOAI_VIEC:
             if mau.search(s):
                 return ten
-        return "analysis"                   # mac dinh AN TOAN NHAT: chi doc
+        # MAC DINH AN TOAN NHAT: chi doc.
+        #
+        # V0.9.3 da thu mot luat RONG o day — "co dong tu trong `_Y_GHI` va
+        # khong co dong tu DOC -> implementation" — va DA BO. No dung ve
+        # nguyen tac nhung rong hon khuyet tat do duoc: no keo ca `deploy`,
+        # `delete`, `install`, `commit`… thanh viec GHI, va hoi quy bat ngay
+        # (`test_control_center_slice`: mot viec GATED "deploy the web to
+        # production" sau khi duyet ket thuc o REVIEW thay vi DONE).
+        #
+        # Cho thieu that su chi la mot dong tu, va no da duoc them thang vao
+        # bang `_LOAI_VIEC` o tren. Sua dung cho hong, khong sua rong hon.
+        return "analysis"
 
     @staticmethod
     def duong_dan_trong(s: str) -> Tuple[str, ...]:
@@ -403,6 +501,19 @@ class RulePlanner:
             if p.lower().startswith(("http:", "https:")) or "://" in p:
                 continue
             if re.fullmatch(r"[\d.]+(/[\d.]+)*", p):
+                continue
+            # V0.9.3 — DAU GACH CHEO KHONG PHAI LA DUONG DAN.
+            #
+            # Do duoc tren RouterDogfood02: "giao dien HTML/CSS/JS thuan" ->
+            # pham vi `HTML/CSS/JS`, va "tu repair/replan" -> `repair/replan`.
+            # Ca hai thanh khoa FILESYSTEM tren thu muc khong ton tai. Vo hai
+            # khi chi doc; khi la pham vi GHI thi no la mot pham vi BIA.
+            #
+            # Nguoi ta viet duong dan co dau hieu: co dau cham mo rong
+            # (`app.js`), co dau gach cheo cuoi (`docs/`), hoac cac doan deu
+            # la ten thu muc thuong (chu thuong/so/_/-). `A/B/C` toan chu HOA
+            # la mot liet ke, khong phai mot cay thu muc.
+            if not _la_duong_dan(p, s or ""):
                 continue
             ra.append(p)
         return tuple(dict.fromkeys(ra))
@@ -513,7 +624,8 @@ class RulePlanner:
     # -- diem vao -----------------------------------------------------------
 
     def plan(self, intent: str, project: Project, *,
-             id_prefix: str = "") -> PlanResult:
+             id_prefix: str = "",
+             quyen_ghi: Optional[ThamQuyenGhi] = None) -> PlanResult:
         kq = PlanResult(intent=intent, planner=self.name)
         menh_de = self.tach(intent)
         if not menh_de:
@@ -531,6 +643,27 @@ class RulePlanner:
                 if self.default_write_scope:
                     scope = self.default_write_scope
                     suy_ra = True
+                elif quyen_ghi is not None and quyen_ghi.cho_phep:
+                    # V0.9.3 — NGUOI DUNG DA CHO PHEP. Day KHONG phai doan.
+                    #
+                    # Truoc day nhanh nay luon ha xuong CHI DOC, nen mot du an
+                    # TAO MOI (luon chua khai `default_write_scope`) khong bao
+                    # gio trien khai duoc: worker nhan `analysis` +
+                    # ALLOWED_SCOPE rong roi bi chan vi muon xong viec thi
+                    # phai ghi. Do la ngo cut, khong phai canh bao.
+                    #
+                    # CO TRAN: goc CAY LAM VIEC CUA CHINH VIEC NAY — mot
+                    # worktree co lap cua rieng no, khong phai kho that, khong
+                    # phai du an khac. Lop GATED (deploy/push/IAM/secret…)
+                    # KHONG he duoc noi; `envelope_for` van chan doc lap.
+                    scope = (GOC,)
+                    suy_ra = True
+                    kq.notes.append(
+                        f"{tid}: phạm vi ghi = gốc cây làm việc của việc này, "
+                        f"vì bạn đã cho phép tường minh "
+                        f"({quyen_ghi.bang_chung!r}). Vẫn CÓ TRẦN: chỉ trong "
+                        f"worktree cô lập của nó, và mọi thao tác ra ngoài "
+                        f"kho vẫn phải hỏi bạn.")
                 else:
                     # KHONG doan pham vi ghi. Ha xuong CHI DOC va noi ro.
                     kind = "analysis"
@@ -613,6 +746,30 @@ class RulePlanner:
             "những lệnh trên mới xong được, trả `blocked` và nói rõ cần lệnh gì "
             "— ĐỪNG thử biến thể, mọi biến thể đều trượt.")
         if scope:
+            # V0.9.3 — VIEC GHI: NOI THANG RANG KIEM THU KHONG PHAI VIEC CUA
+            # AGENT.
+            #
+            # Do duoc tren RouterDogfood02 (2026-09-13): mot viec
+            # `type=testing` co pham vi ghi `.` chet sau 27 giay voi
+            # `tool_permission_denied` — agent voi lay `command` ngay o buoc
+            # dau, va CA LUOT MAT TRANG (nhat ky tho chi con dung mot dong
+            # cua agy, khong co mot chu nao cua agent).
+            #
+            # Khoi CONG CU o tren LIET KE lenh chay duoc, nen no doc ra nhu
+            # "chay lenh la mot phan binh thuong cua viec nay". Voi mot viec
+            # ten `testing` thi agent di thang toi `npm test`/`pytest`.
+            #
+            # Cach dung KHONG phai noi quyen (xem ghi chu dai o tren, va
+            # `CLAUDE.md`: da tra gia BON lan). Cach dung la noi dung su that
+            # ve phan cong: agent LAM RA TEP, Router CHAY KIEM DINH.
+            d.append(
+                "PHÂN CÔNG: việc này là việc TẠO/SỬA TỆP. Hãy hoàn thành nó "
+                "CHỈ bằng công cụ đọc/ghi tệp. ĐỪNG chạy lệnh để build, cài "
+                "đặt, khởi động server hay chạy test — môi trường này không "
+                "cho, và một lần thử là mất trắng cả lượt. Phần kiểm thử và "
+                "verify do ROUTER chạy sau bằng cổng kiểm định của nó; bạn "
+                "không cần (và không nên) tự chạy.")
+        if scope:
             # KHAI BAO `changes` KHONG PHAI THU TUC GIAY TO — no la dieu kien
             # de viec duoc tinh la xong.
             #
@@ -690,8 +847,10 @@ class RouterPlanner:
         self.fallback = fallback or RulePlanner()
 
     def plan(self, intent: str, project: Project, *,
-             id_prefix: str = "") -> PlanResult:
-        du_phong = self.fallback.plan(intent, project, id_prefix=id_prefix)
+             id_prefix: str = "",
+             quyen_ghi: Optional[ThamQuyenGhi] = None) -> PlanResult:
+        du_phong = self.fallback.plan(intent, project, id_prefix=id_prefix,
+                                      quyen_ghi=quyen_ghi)
         try:
             tho = self.run_readonly(
                 _LUOC_DO_PHAN_RA + "\nÝ ĐỊNH:\n" + (intent or ""))
@@ -734,6 +893,17 @@ class RouterPlanner:
                 if self.fallback.default_write_scope:
                     duong = self.fallback.default_write_scope
                     suy_ra = True
+                elif quyen_ghi is not None and quyen_ghi.cho_phep:
+                    # Cung luat voi `RulePlanner.plan` — va phai o CA HAI bo
+                    # lap ke hoach. Sua mot cho thi bo kia van ha xuong chi
+                    # doc, va nguoi dung gap mot khuyet tat "luc co luc khong"
+                    # tuy vao bo nao chay.
+                    duong = (GOC,)
+                    suy_ra = True
+                    kq.notes.append(
+                        f"{tid}: phạm vi ghi = gốc cây làm việc của việc này, "
+                        f"vì bạn đã cho phép tường minh "
+                        f"({quyen_ghi.bang_chung!r}).")
                 else:
                     kind = "analysis"
             deps = tuple(ten_map[int(j)] for j in (x.get("depends_on") or [])

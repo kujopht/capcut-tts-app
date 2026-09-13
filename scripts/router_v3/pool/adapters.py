@@ -90,10 +90,35 @@ class CodexAdapter(WorkerAdapter):
         return WorkerSpec(
             worker_id=self._worker_id, provider_family=self.provider,
             execution_type=ExecutionType.LOCAL_CLI, pool="CODEX",
-            capabilities=frozenset({"review", "implement"}),
+            # `implement` DA BI RUT — V0.9.3, do duoc 2026-09-13.
+            #
+            # Adapter nay goi `codex exec --skip-git-repo-check -m <model>
+            # --color never -`. KHONG co co sandbox nao, va `codex exec` mac
+            # dinh chay o sandbox CHI DOC. Nen mot viec GHI giao cho Codex
+            # tra ve dung cau nay, sau 226 giay:
+            #
+            #   "Sandbox he thong chan moi thao tac ghi va khong cho phep
+            #    yeu cau nang quyen."
+            #   "Khong the tao hoac sua tep vi workspace dang o che do
+            #    read-only."
+            #
+            # Khai `implement` trong khi khong ghi duoc la MOT LOI KHAI SAI,
+            # va bo xep cho tin no: lan thu 2 cua viec Todo bi day sang
+            # CODEX01 roi chet o do. Nang luc phai dung voi thuc te cua
+            # adapter — day la phep sua HEP va CHI THU HEP.
+            #
+            # KHONG bat `--sandbox workspace-write` trong lan nay: do la CAP
+            # THEM quyen ghi cho mot CLI ngoai, can mot lan xem xet rieng cua
+            # chu so huu va mot probe co gioi han. Ghi lai o
+            # `docs/reports/V093_WRITE_SCOPE_DOGFOOD.md`.
+            #
+            # `review` GIU NGUYEN: do van la the manh cua Codex (review doc
+            # lap khac ho model), va review khong can ghi.
+            capabilities=frozenset({"review"}),
             max_concurrent=1, auth_realm="codex-cli:default",
             workspace=self._workspace,
-            notes="codex exec; KHÔNG BAO GIỜ review bảo mật")
+            notes="codex exec (sandbox CHỈ ĐỌC — không nhận việc ghi); "
+                  "KHÔNG BAO GIỜ review bảo mật")
 
     def health(self) -> HealthReport:
         exe = find_codex()

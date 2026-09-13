@@ -112,12 +112,25 @@ export function Logo({
   size?: number;
   showText?: boolean;
 }) {
-  if (!showText) return <LogoMark size={size} title="Fanfic Audio Studio" />;
+  /*
+    "Fanfic World", khong con "Fanfic Audio Studio".
+
+    Audio Studio tung la CA san pham. Gio no la MOT module trong Fanfic
+    Studio (#197), con san pham la mot nen tang doc/nghe/xem — khu quan tri
+    da goi dung ten do tu lau ("Fanfic World"), chi rieng thuong hieu o
+    ngoai la con ket lai o cai ten cu.
+
+    Dong phu van bi an trong header (`.site-header .brand-text-sub`), nen
+    thanh dieu huong van doc la "Fanfic" — dung nhu truoc, va dung voi
+    huong: thuong hieu ngan la "Fanfic", danh tinh san pham day du la
+    "Fanfic World".
+  */
+  if (!showText) return <LogoMark size={size} title="Fanfic World" />;
   return (
     <>
       <LogoMark size={size} />
       <span>
-        Fanfic <span className="brand-text-sub">Audio Studio</span>
+        Fanfic <span className="brand-text-sub">World</span>
       </span>
     </>
   );

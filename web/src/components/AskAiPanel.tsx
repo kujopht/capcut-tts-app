@@ -96,8 +96,10 @@ async function goiChat(payload: ChatRequest): Promise<ChatAnswer> {
       body: JSON.stringify(payload),
     });
   } catch {
+    // Cung ly do voi `lib/api.ts`: cau nay nguoi DOC thay, va ho khong co
+    // "backend" nao de kiem tra.
     throw new Error(
-      "Không kết nối được máy chủ. Hãy kiểm tra backend đã chạy chưa.",
+      "Không kết nối được máy chủ. Kiểm tra kết nối mạng rồi thử lại.",
     );
   }
 

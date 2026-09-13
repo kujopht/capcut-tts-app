@@ -24,16 +24,28 @@ export const metadata: Metadata = {
   // sai tren production. Phat hien khi kiem tra log Worker that sau khi
   // deploy Phase V (2026-08-21).
   metadataBase: new URL("https://fanfic.world"),
-  // `template` de moi trang tu dat tieu de rieng ma van giu ten san pham
-  title: { default: "Fanfic Audio Studio", template: "%s · Fanfic Audio Studio" },
+  /*
+    "Fanfic World" — ten SAN PHAM, va no khop voi chinh ten mien.
+
+    Ten cu "Fanfic Audio Studio" co tu thoi Audio Studio la ca san pham. Gio
+    Audio chi la mot module trong Fanfic Studio (#197), con day la nen tang
+    doc/nghe/xem; khu quan tri da goi no la "Fanfic World" tu lau. De ten cu
+    o day nghia la moi the chia se len Facebook/Zalo, moi ket qua tim kiem,
+    va moi tab trinh duyet deu gioi thieu san pham bang mot cai ten khong con
+    ton tai.
+
+    `default` la ten tran; `template` de tung trang tu dat tieu de rieng ma
+    van giu ten san pham o duoi.
+  */
+  title: { default: "Fanfic World", template: "%s · Fanfic World" },
   description: DESCRIPTION,
-  applicationName: "Fanfic Audio Studio",
+  applicationName: "Fanfic World",
   // `icon.svg`, `apple-icon.tsx` va `opengraph-image.tsx` trong cung thu muc
   // duoc Next tu gan vao <head> — khong khai bao tay o day.
   openGraph: {
     type: "website",
-    siteName: "Fanfic Audio Studio",
-    title: "Fanfic Audio Studio",
+    siteName: "Fanfic World",
+    title: "Fanfic World",
     description: DESCRIPTION,
     locale: "vi_VN",
   },

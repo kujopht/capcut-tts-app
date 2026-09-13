@@ -731,8 +731,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch {
+    /*
+      Cau nay NGUOI DUNG doc, khong phai nguoi phat trien.
+
+      Ban cu la "Hãy kiểm tra backend đã chạy chưa." — mot cau lenh cho nguoi
+      dang chay may chu tren may minh. Doc gia mo trang bang dien thoai khong
+      co "backend" nao de kiem, va cau do vua vo nghia vua lam ho tuong minh
+      da lam sai gi. Noi dieu HO lam duoc: thu lai.
+    */
     throw new ApiError(
-      "Không kết nối được máy chủ. Hãy kiểm tra backend đã chạy chưa.",
+      "Không kết nối được máy chủ. Kiểm tra kết nối mạng rồi thử lại.",
       0,
     );
   }

@@ -2,7 +2,14 @@ import { ImageResponse } from "next/og";
 import { BrandMark } from "@/components/BrandMark";
 
 /** Anh xem truoc khi chia se link. */
-export const alt = "Fanfic Audio Studio — tạo audio từ văn bản và nghe fanfic";
+/*
+  Toan bo tam anh nay noi ve viec TAO AUDIO — dung thoi Audio Studio la ca
+  san pham. Day la thu duy nhat nguoi ta thay khi mot duong dan fanfic.world
+  duoc dan vao Facebook/Zalo/Discord, nen no phai gioi thieu dung san pham:
+  mot noi de DOC va NGHE fanfic, trong do audio la mot cach thuong thuc chu
+  khong phai cua vao.
+*/
+export const alt = "Fanfic World — đọc và nghe fanfic tiếng Việt";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -27,7 +34,7 @@ export default function OpengraphImage() {
           <BrandMark size={104} />
           <div style={{ display: "flex", fontSize: 54, fontWeight: 700 }}>
             <span style={{ color: "#e9edf5" }}>Fanfic</span>
-            <span style={{ color: "#a8b2c5", marginLeft: 14 }}>Audio Studio</span>
+            <span style={{ color: "#a8b2c5", marginLeft: 14 }}>World</span>
           </div>
         </div>
 
@@ -41,7 +48,7 @@ export default function OpengraphImage() {
             maxWidth: 900,
           }}
         >
-          Biến chữ thành giọng đọc, và nghe fanfic mọi lúc
+          Truyện của cộng đồng, đọc bằng mắt hoặc bằng tai
         </div>
 
         <div
@@ -52,7 +59,7 @@ export default function OpengraphImage() {
             color: "#a8b2c5",
           }}
         >
-          Tạo audio từ văn bản bất kỳ · Khám phá truyện đã xuất bản
+          Khám phá truyện đã xuất bản · Nghe bằng giọng đọc tự nhiên
         </div>
 
         <div
@@ -62,7 +69,8 @@ export default function OpengraphImage() {
             gap: 14,
           }}
         >
-          {["Audio Studio", "Fanfic", "Thư viện"].map((label) => (
+          {/* Ba khu vuc THAT o dieu huong chinh, theo dung thu tu do. */}
+          {["Khám phá", "Animation", "Studio"].map((label) => (
             <div
               key={label}
               style={{

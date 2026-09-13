@@ -106,7 +106,7 @@ function LoginForm() {
         <span className="auth-portal-halo" aria-hidden="true">
           <MotifPortalHalo />
         </span>
-        <LogoMark size={54} title="Fanfic Audio Studio" />
+        <LogoMark size={54} title="Fanfic World" />
         <div className="hero-copy">
           <h1 className="page-title">
             {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}

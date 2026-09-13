@@ -613,7 +613,7 @@ test("favicon khong chua chu", () => {
   const svg = read("../src/app/icon.svg");
   assert.ok(!/<text/.test(svg), "favicon khong duoc co chu");
   // <title> la nhan cho doc man hinh, khong phai chu ve tren hinh
-  assert.match(svg, /<title>Fanfic Audio Studio<\/title>/);
+  assert.match(svg, /<title>Fanfic World<\/title>/);
 });
 
 test("co du bo favicon: ico, svg, png va apple-touch-icon", () => {
@@ -666,10 +666,57 @@ test("logo duoc dat o header, footer va trang dang nhap", () => {
 
 test("metadata co Open Graph va tieu de theo mau", () => {
   const layout = read("../src/app/layout.tsx");
-  assert.match(layout, /template: "%s · Fanfic Audio Studio"/);
+  assert.match(layout, /template: "%s · Fanfic World"/);
   assert.match(layout, /openGraph:/);
   assert.match(layout, /locale: "vi_VN"/);
   assert.match(layout, /twitter: \{ card: "summary_large_image" \}/);
+});
+
+test("ten san pham la Fanfic World o MOI be mat chia se duoc", () => {
+  /*
+    "Fanfic Audio Studio" co tu thoi Audio Studio la ca san pham. Tu #197 no
+    la mot module trong Fanfic Studio, con san pham la nen tang doc/nghe/xem
+    — chinh khu quan tri da goi no la "Fanfic World" tu lau, va do cung la
+    ten mien.
+
+    Cai gia cua viec de sot mot cho: moi the chia se len Facebook/Zalo, moi
+    ket qua tim kiem va moi tab trinh duyet deu gioi thieu san pham bang mot
+    cai ten khong con ton tai. Nen bai kiem nay quet CA BO be mat do cung
+    luc, thay vi chot tung cho mot.
+  */
+  /*
+    Quet phan MA, khong quet chu thich.
+
+    Chu thich o `layout.tsx`/`Logo.tsx` CO nhac ten cu — de giai thich vi sao
+    no doi. Mot bai kiem cam nhac lich su la mot bai kiem cam viet chu thich;
+    cung nguyen tac da ghi o `fanfic-first-shell.test.mjs`.
+  */
+  const chiMa = (s) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const cu = /Fanfic Audio Studio/;
+  for (const tep of [
+    "../src/app/layout.tsx",
+    "../src/app/manifest.ts",
+    "../src/app/opengraph-image.tsx",
+    "../src/app/icon.svg",
+    "../src/app/login/page.tsx",
+    "../src/components/Logo.tsx",
+  ]) {
+    assert.ok(!cu.test(chiMa(read(tep))), `${tep} còn tên sản phẩm cũ`);
+  }
+  assert.match(read("../src/app/manifest.ts"), /name: "Fanfic World"/);
+  assert.match(read("../src/app/opengraph-image.tsx"), /Fanfic World/);
+
+  /*
+    Thuong hieu NGAN o header van la "Fanfic" — dong phu bi an o do
+    (`.site-header .brand-text-sub`), nen doi dong phu khong dung toi thanh
+    dieu huong. Giu khang dinh nay de lan sau ai do doi logo thi biet rang
+    hai cho nay CO Y khac nhau.
+  */
+  const logo = read("../src/components/Logo.tsx");
+  assert.match(logo, /Fanfic <span className="brand-text-sub">World<\/span>/);
+  assert.match(read("../src/app/globals.css"),
+    /\.site-header \.brand-text-sub \{ display: none; \}/);
 });
 
 test("anh sinh phia may chu khai bao dung kich thuoc", () => {

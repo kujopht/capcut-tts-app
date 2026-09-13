@@ -34,6 +34,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   IconBook,
+  IconClapper,
   IconCompass,
   IconFeather,
   IconFilm,
@@ -93,6 +94,17 @@ export const MUC_STUDIO: MucStudio[] = [
     nhan: "Phụ đề",
     mo_ta: "Căn chỉnh và xuất phụ đề cho video.",
     icon: IconFilm,
+  },
+  {
+    /*
+      Video dung SAU Phụ đề, va do la thu tu cua QUY TRINH chu khong phai
+      thu tu them vao: Nội dung -> Dịch -> Hình ảnh -> Audio -> Phụ đề ->
+      Video. Video la cho moi thu phia truoc gop lai, nen no dung cuoi.
+    */
+    href: "/studio/video",
+    nhan: "Video",
+    mo_ta: "Ghép lời đọc vào video, xem trước rồi xuất MP4.",
+    icon: IconClapper,
   },
   {
     href: "/studio/library",

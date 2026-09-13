@@ -1474,6 +1474,20 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         ])
         return _track_from_doc(docs[0]) if docs else None
 
+    def track_by_id(self, track_id: str) -> Optional[AudioTrack]:
+        """Doc theo ID tai lieu — khong phai mot truy van loc.
+
+        `track_id` CHINH LA id tai lieu (xem `_create` o `create_track`), nen
+        day la mot lan doc thang chu khong phai mot lan quet co dieu kien.
+
+        `_get` NEM khi 404; chu ky nay tra `Optional` nen phai bat — vang mat
+        la mot cau tra loi binh thuong o day, khong phai mot loi.
+        """
+        try:
+            return _track_from_doc(self._get(COL_TRACKS, track_id))
+        except NotFoundError:
+            return None
+
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]:
         """
         MOI track cua chuong.

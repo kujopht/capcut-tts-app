@@ -3824,6 +3824,163 @@ export const translate = {
 
 };
 
+/* ======================================================= Video Composer === */
+
+export interface VideoProject {
+  project_id: string;
+  owner_id: string;
+  title: string;
+  video_asset_id: string;
+  audio_track_id: string;
+  subtitle_asset_id: string;
+  video_trim_start: number;
+  video_trim_end: number;
+  audio_offset: number;
+  video_volume: number;
+  audio_volume: number;
+  mute_original_audio: boolean;
+  render_state: "draft" | "queued" | "rendering" | "ready" | "failed";
+  render_error: string;
+  has_output: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Đường PHÁT được của từng tệp nguồn — khoá đối tượng không bao giờ ra ngoài.
+ *
+ * Hai dạng, y hệt `/api/audio/{id}/url`:
+ *   `*_url`    — URL ký có hạn (kho R2), gắn thẳng vào `<video src>`.
+ *   `*_stream` — đường qua backend (kho cục bộ). Phải `fetch` kèm token rồi
+ *                tạo blob: `<video src>` không gửi được `Authorization`.
+ */
+export interface VideoSources {
+  video_url: string;
+  audio_url: string;
+  subtitle_url: string;
+  video_stream: string;
+  audio_stream: string;
+  subtitle_stream: string;
+  video_duration: number;
+  audio_duration: number;
+}
+
+export interface VideoAsset {
+  asset_id: string;
+  media_type: string;
+  object_key: string;
+  duration_seconds: number;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface VideoAudioChoice {
+  track_id: string;
+  chapter_id: string;
+  chapter_title: string;
+  voice_id: string;
+  duration_seconds: number;
+  created_at: string;
+}
+
+export type VideoProjectPatch = Partial<
+  Pick<
+    VideoProject,
+    | "title"
+    | "video_asset_id"
+    | "audio_track_id"
+    | "subtitle_asset_id"
+    | "video_trim_start"
+    | "video_trim_end"
+    | "audio_offset"
+    | "video_volume"
+    | "audio_volume"
+    | "mute_original_audio"
+  >
+>;
+
+export const videoStudio = {
+  createProject: (title: string, audioTrackId = "") =>
+    request<{ project: VideoProject }>("/api/video/projects", {
+      method: "POST",
+      body: JSON.stringify({ title, audio_track_id: audioTrackId }),
+    }),
+
+  listProjects: () => request<{ projects: VideoProject[] }>("/api/video/projects"),
+
+  getProject: (id: string) =>
+    request<{ project: VideoProject; sources: VideoSources }>(
+      `/api/video/projects/${encodeURIComponent(id)}`,
+    ),
+
+  /**
+   * CHỈ gửi những trường thật sự đổi.
+   *
+   * Backend dùng `exclude_unset`, nên gửi cả đối tượng sẽ ghi đè cả những
+   * trường người dùng không hề chạm tới.
+   */
+  patchProject: (id: string, patch: VideoProjectPatch) =>
+    request<{ project: VideoProject; sources: VideoSources }>(
+      `/api/video/projects/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ),
+
+  deleteProject: (id: string) =>
+    request<{ deleted: boolean }>(`/api/video/projects/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
+  listAssets: () => request<{ assets: VideoAsset[] }>("/api/video/assets"),
+
+  uploadAsset: (filename: string, mime: string, base64: string, durationSeconds = 0) =>
+    request<{ asset: VideoAsset }>("/api/video/assets", {
+      method: "POST",
+      body: JSON.stringify({
+        filename,
+        mime,
+        base64,
+        duration_seconds: durationSeconds,
+      }),
+    }),
+
+  audioLibrary: () => request<{ tracks: VideoAudioChoice[] }>("/api/video/audio-library"),
+
+  render: (id: string) =>
+    request<{ project: VideoProject }>(
+      `/api/video/projects/${encodeURIComponent(id)}/render`,
+      { method: "POST" },
+    ),
+
+  output: (id: string) =>
+    request<{ url: string; stream_url: string }>(
+      `/api/video/projects/${encodeURIComponent(id)}/output`,
+    ),
+
+  /**
+   * Đổi một cặp (url | stream) thành thứ `<video src>` dùng được.
+   *
+   * Kho R2 cho URL ký — dùng thẳng. Kho cục bộ thì phải tải qua backend KÈM
+   * token rồi gói thành blob, vì thẻ media không gửi được header
+   * `Authorization`. Trả về cả hàm dọn: blob URL sống tới khi bị thu hồi, và
+   * quên thu hồi là rò bộ nhớ đúng bằng kích thước tệp video.
+   */
+  resolveMedia: async (
+    url: string,
+    streamPath: string,
+  ): Promise<{ src: string; revoke: () => void }> => {
+    if (url) return { src: url, revoke: () => undefined };
+    if (!streamPath) return { src: "", revoke: () => undefined };
+    const token = getToken();
+    const r = await fetch(`${API_BASE}${streamPath}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!r.ok) return { src: "", revoke: () => undefined };
+    const blob = await r.blob();
+    const src = URL.createObjectURL(blob);
+    return { src, revoke: () => URL.revokeObjectURL(src) };
+  },
+};
+
 /**
  * Image Studio V1 (overnight build) — export RIENG, cung khuon voi
  * `translate`/`social`, khong nhet vao `api` chung.

@@ -742,6 +742,17 @@ class MetadataStore(Protocol):
         ...
     def track_for_chapter(self, chapter_id: str) -> Optional[AudioTrack]: ...
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]: ...
+    def track_by_id(self, track_id: str) -> Optional[AudioTrack]:
+        """Mot track theo DUNG id cua no.
+
+        Video Composer can cho nay: du an giu `audio_track_id`, va mot chuong
+        co the co NHIEU track (`tracks_for_chapter`), nen tra ve "ban moi
+        nhat cua chuong" se doi mat ban nguoi dung da chon.
+
+        Nguoi goi VAN phai tu kiem `track.owner_id` — ham nay khong biet ai
+        dang hoi.
+        """
+        ...
 
     def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, AudioStamp]:
         """
@@ -1794,6 +1805,10 @@ class MockMetadataStore(MockSocialStore):
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]:
         with self._lock:
             return [t for t in self.tracks.values() if t.chapter_id == chapter_id]
+
+    def track_by_id(self, track_id: str) -> Optional[AudioTrack]:
+        with self._lock:
+            return self.tracks.get(track_id)
 
     def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, AudioStamp]:
         """Mot luot duy nhat qua bang track — xem contract o `MetadataStore`."""

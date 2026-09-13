@@ -13,6 +13,7 @@ Backend KHONG import GUI: da xac minh khong module PySide6 nao bi keo vao.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import random
@@ -42,6 +43,7 @@ from server.adapters import (
     AppwriteUnavailableError,
     AuthError,
     MockImportRecordStore,
+    MockMediaAssetStore,
     MockMetadataStore,
     NotFoundError,
     PermissionDenied,
@@ -136,12 +138,16 @@ from server.domain import (
     Chapter,
     ContentState,
     JobStatus,
+    MediaAsset,
+    MediaProcessingState,
+    MediaType,
     Novel,
     NovelStatus,
     Profile,
     PublicationMode,
     PublishState,
     RightsBasis,
+    StorageTier,
     TtsJob,
     job_fingerprint,
     now_iso,
@@ -214,6 +220,12 @@ from server.image_byop_service import (
 from server.image_spending_guard import SharedPremiumDisabled, SharedPremiumSpendingGuard
 from server.image_payment import CheckoutStatus, MockPaymentProvider
 from server.image_library_store import MockImageLibraryStore
+from server.video_project_store import MockVideoProjectStore
+from server.video_renderer import provider_mac_dinh
+from server.video_runner import VideoRenderRunner
+from server.video_service import VideoService
+from server.video_validate import (MIME_PHU_DE, VideoValidationError,
+                                   kiem_mime_phu_de, kiem_mime_video)
 from server.image_community_catalogue import CommunityCatalogueCache
 from server.image_service import (
     ByopNotConnected,
@@ -422,6 +434,20 @@ def account_deletion_service() -> AccountDeletionService:
 #: restart. Xem `docs/reports/image-studio-v1-summary.md`.
 image_wallet_store = MockWalletStore()
 image_library_store = MockImageLibraryStore()
+
+#: Video Composer V1. Cung ly do mock voi Image Studio o tren: chay day du
+#: tren kho trong bo nho, chi khong ben vung qua restart. `media_asset_store`
+#: giu ca video nguon LAN phu de (`MediaType.VIDEO`/`SUBTITLES`) — khong mo
+#: mot kho media thu hai, xem ghi chu o `MediaType.VIDEO`.
+media_asset_store = MockMediaAssetStore()
+video_project_store = MockVideoProjectStore()
+video_svc = VideoService(store, project_store=video_project_store,
+                         media_store=media_asset_store)
+#: `provider_mac_dinh()` tu do may nay co FFmpeg khong, va roi ve mot
+#: provider noi thang "chua bat dich vu render" neu khong — thay vi de mot
+#: `FileNotFoundError` noi len thanh loi 500 khong giai thich duoc.
+video_render_runner = VideoRenderRunner(
+    video_svc, store, media_asset_store, storage, provider_mac_dinh())
 image_quick_free_provider = QuickFreeImageProvider()
 #: `None` khi CHUA cau hinh POLLINATIONS_API_KEY (Shared Premium bi khoa ro
 #: rang o tang service — KHONG am tham lui ve mot khoa rong).
@@ -8290,3 +8316,303 @@ def image_checkout_confirm(
             note=f"mock checkout {checkout_id}",
         )
     return {"status": phien.status.value}
+
+
+# ====================================================== Video Composer (V1) ==
+#
+# MOT video + MOT loi doc + (tuy chon) MOT phu de. Xem `server/video_domain.py`
+# cho ly do pham vi hep den the.
+#
+# Moi duong duoi day deu doi dang nhap: khong co duong nao cho khach vang lai,
+# ke ca doc. Mot du an video la thu rieng.
+
+
+def _video(fn, *args, **kwargs):
+    """Goi tang dich vu va doi loi cua no thanh ma HTTP.
+
+    MOT cho lam phep doi nay, cung ly do voi `_xa_hoi`: lap `try/except` ba
+    tang o muoi route la muoi cho co the quen mot tang — va tang bi quen o
+    day la `NotFoundError`, tuc mot loi 500 thay vi mot 404. Da vap dung the
+    trong lan chay dau.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except VideoValidationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+
+class VideoProjectIn(BaseModel):
+    title: Annotated[str, StringConstraints(min_length=1, max_length=120)]
+    #: Duong cua nut "Dùng trong Video": gan san ban audio vua tao.
+    audio_track_id: Annotated[str, StringConstraints(max_length=64)] = ""
+
+
+class VideoProjectPatchIn(BaseModel):
+    """Ban va — MOI truong deu tuy chon.
+
+    `model_dump(exclude_unset=True)` la mau chot: no phan biet "khong gui
+    truong nay" voi "gui gia tri mac dinh". Thieu no thi mot lan doi am luong
+    se am tham dat lai ca diem cat ve 0.
+    """
+
+    title: Optional[Annotated[str, StringConstraints(max_length=120)]] = None
+    video_asset_id: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
+    audio_track_id: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
+    subtitle_asset_id: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
+    video_trim_start: Optional[float] = None
+    video_trim_end: Optional[float] = None
+    audio_offset: Optional[float] = None
+    video_volume: Optional[float] = None
+    audio_volume: Optional[float] = None
+    mute_original_audio: Optional[bool] = None
+
+
+@app.post("/api/video/projects", status_code=status.HTTP_201_CREATED)
+def video_project_create(
+    payload: VideoProjectIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    du_an = _video(video_svc.tao, profile, title=payload.title,
+                   audio_track_id=payload.audio_track_id)
+    return {"project": du_an.to_dict()}
+
+
+@app.get("/api/video/projects")
+def video_project_list(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"projects": [d.to_dict() for d in video_svc.danh_sach(profile)]}
+
+
+@app.get("/api/video/projects/{project_id}")
+def video_project_get(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    du_an = _video(video_svc.lay, profile, project_id)
+    return {"project": du_an.to_dict(), "sources": _video_nguon(profile, du_an)}
+
+
+@app.patch("/api/video/projects/{project_id}")
+def video_project_patch(
+    project_id: str, payload: VideoProjectPatchIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    ban_va = payload.model_dump(exclude_unset=True)
+    du_an = _video(video_svc.sua, profile, project_id, ban_va)
+    return {"project": du_an.to_dict(), "sources": _video_nguon(profile, du_an)}
+
+
+@app.delete("/api/video/projects/{project_id}")
+def video_project_delete(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    return {"deleted": _video(video_svc.xoa, profile, project_id)}
+
+
+#: Cac loai tep mot du an video tro toi. Danh sach CHO PHEP — duong stream
+#: nhan mot trong bon chuoi nay chu khong nhan mot khoa doi tuong tu ngoai.
+VIDEO_LOAI_TEP = ("video", "audio", "subtitle", "output")
+
+
+def _video_khoa(profile: Profile, du_an, loai: str) -> str:
+    """Khoa doi tuong cua MOT tep trong du an — sau khi kiem quyen.
+
+    Quyen duoc kiem o DAY chu khong o duong goi: moi tep deu phai thuoc ve
+    chinh nguoi dang hoi, va tra ve chuoi rong thay vi nem, de duong goi tu
+    quyet dinh 404 hay bo qua.
+    """
+    if loai == "audio":
+        t = store.track_by_id(du_an.audio_track_id) if du_an.audio_track_id else None
+        return t.object_key if t is not None and t.owner_id == profile.user_id else ""
+    if loai == "output":
+        return du_an.output_object_key
+    ma = du_an.video_asset_id if loai == "video" else du_an.subtitle_asset_id
+    if not ma:
+        return ""
+    try:
+        a = media_asset_store.get_asset(ma)
+    except NotFoundError:
+        return ""
+    return a.object_key if a.owner_id == profile.user_id else ""
+
+
+def _video_nguon(profile: Profile, du_an) -> Dict[str, Any]:
+    """Duong PHAT duoc cho tung tep nguon.
+
+    Tra ve CA HAI, y het `/api/audio/{id}/url`:
+
+      `*_url`    — URL ky co han (kho R2). Gan thang vao `<video src>`.
+      `*_stream` — duong qua backend (kho cuc bo, `signed_url` tra None).
+                   Giao dien phai `fetch` no KEM TOKEN roi tao blob, vi
+                   `<video src>` khong gui duoc header `Authorization`.
+
+    Khoa doi tuong khong bao gio ra ngoai — xem `VideoProject.to_dict`.
+    """
+    goc = f"/api/video/projects/{du_an.project_id}/media"
+    ra: Dict[str, Any] = {
+        "video_url": "", "audio_url": "", "subtitle_url": "",
+        "video_stream": "", "audio_stream": "", "subtitle_stream": "",
+        "video_duration": 0.0, "audio_duration": 0.0,
+    }
+    for loai in ("video", "audio", "subtitle"):
+        khoa = _video_khoa(profile, du_an, loai)
+        if not khoa:
+            continue
+        url = storage.signed_url(khoa, expires_seconds=3600) or ""
+        ra[f"{loai}_url"] = url
+        if not url:
+            ra[f"{loai}_stream"] = f"{goc}/{loai}"
+    if du_an.video_asset_id:
+        try:
+            ra["video_duration"] = media_asset_store.get_asset(
+                du_an.video_asset_id).duration_seconds
+        except NotFoundError:
+            pass
+    if du_an.audio_track_id:
+        t = store.track_by_id(du_an.audio_track_id)
+        if t is not None:
+            ra["audio_duration"] = t.duration_seconds
+    return ra
+
+
+#: Kieu MIME theo loai tep — de trinh duyet biet phai giai ma bang gi.
+_VIDEO_MIME = {"video": "video/mp4", "audio": "audio/mpeg",
+               "subtitle": "text/plain; charset=utf-8", "output": "video/mp4"}
+
+
+@app.get("/api/video/projects/{project_id}/media/{loai}")
+def video_project_media(
+    project_id: str, loai: str, profile: Profile = Depends(current_profile),
+) -> Response:
+    """Stream mot tep cua du an QUA backend — duong cua kho cuc bo.
+
+    Voi R2 thi giao dien dung `*_url` va khong bao gio goi toi day; duong nay
+    van giu nguyen phep kiem quyen de hai duong khong the lech nhau.
+    """
+    if loai not in VIDEO_LOAI_TEP:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loại tệp không hợp lệ.")
+    du_an = _video(video_svc.lay, profile, project_id)
+    khoa = _video_khoa(profile, du_an, loai)
+    if not khoa:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có tệp này.")
+    url = storage.signed_url(khoa, expires_seconds=3600)
+    if url:  # pragma: no cover - duong cua R2, can credential that
+        return Response(status_code=307, headers={"Location": url})
+    try:
+        data = storage.get(khoa)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    return Response(content=data, media_type=_VIDEO_MIME[loai])
+
+
+class VideoAssetIn(BaseModel):
+    """Tep dang base64 — CUNG rang buoc voi `AuthorizedImportIn`: than
+    multipart doi `python-multipart`, von CO Y khong nam trong
+    `server/requirements.txt`.
+
+    Nhuoc diem da biet: base64 lam moi byte thanh ~1.37 byte tren duong
+    truyen, nen day KHONG phai duong di lau dai cho video lon. Duong dung la
+    URL ky san tai thang len R2 (`put_object`), hien chua co — ghi lai o
+    bao cao de lam sau.
+    """
+
+    filename: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    mime: Annotated[str, StringConstraints(min_length=1, max_length=100)]
+    #: 200 MB nhi phan -> ~274 MB chuoi base64.
+    base64: Annotated[str, StringConstraints(min_length=1, max_length=280_000_000)]
+    duration_seconds: float = 0.0
+
+
+@app.post("/api/video/assets", status_code=status.HTTP_201_CREATED)
+def video_asset_upload(
+    payload: VideoAssetIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    import binascii
+
+    try:
+        du_lieu = base64.b64decode(payload.base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tệp không hợp lệ.") from exc
+
+    la_phu_de = payload.mime.split(";")[0].strip().lower() in MIME_PHU_DE
+    _video(kiem_mime_phu_de if la_phu_de else kiem_mime_video,
+           payload.mime, len(du_lieu))
+
+    loai = MediaType.SUBTITLES if la_phu_de else MediaType.VIDEO
+    duoi = "srt" if la_phu_de else "mp4"
+    key = f"video-studio/{profile.user_id}/{uuid.uuid4().hex[:16]}.{duoi}"
+    storage.put(key, du_lieu, content_type=payload.mime.split(";")[0].strip())
+
+    asset = media_asset_store.create_asset(MediaAsset(
+        owner_id=profile.user_id, media_type=loai,
+        storage_tier=StorageTier.HOT, object_key=key,
+        content_hash=hashlib.sha256(du_lieu).hexdigest(),
+        size_bytes=len(du_lieu),
+        duration_seconds=max(0.0, float(payload.duration_seconds or 0.0)),
+        processing_state=MediaProcessingState.READY,
+    ))
+    return {"asset": asset.to_dict()}
+
+
+@app.get("/api/video/assets")
+def video_asset_list(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    ds = [a for a in media_asset_store.list_assets(profile.user_id)
+          if a.media_type in (MediaType.VIDEO, MediaType.SUBTITLES)]
+    return {"assets": [a.to_dict() for a in ds]}
+
+
+@app.get("/api/video/audio-library")
+def video_audio_library(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Ban audio DA HOAN TAT cua nguoi nay — nguon cua "Chọn audio từ thư viện".
+
+    Doc tu chinh bang track cua he TTS; khong co bang thu hai nao cho video.
+    """
+    ra = []
+    for ch in store.chapters_for_owner(profile.user_id):
+        for t in store.tracks_for_chapter(ch.chapter_id):
+            if t.owner_id != profile.user_id:
+                continue
+            ra.append({
+                "track_id": t.track_id,
+                "chapter_id": t.chapter_id,
+                "chapter_title": ch.title,
+                "voice_id": t.voice_id,
+                "duration_seconds": t.duration_seconds,
+                "created_at": t.created_at,
+            })
+    ra.sort(key=lambda x: x["created_at"], reverse=True)
+    return {"tracks": ra[:100]}
+
+
+@app.post("/api/video/projects/{project_id}/render")
+def video_project_render(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Xep hang mot lan render.
+
+    Tra ve NGAY, khong cho render xong: mot lan render dai hang phut, va giu
+    mot ket noi HTTP mo suot thoi gian do la cach chac chan nhat de no chet
+    giua chung.
+    """
+    du_an = _video(video_svc.xin_render, profile, project_id)
+    video_render_runner.chay_nen(profile.user_id, du_an.project_id)
+    return {"project": du_an.to_dict()}
+
+
+@app.get("/api/video/projects/{project_id}/output")
+def video_project_output(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """URL co han cua ban MP4 da render."""
+    du_an = _video(video_svc.lay, profile, project_id)
+    if not du_an.output_object_key:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Chưa có bản render nào.")
+    # Cung hop dong voi `_video_nguon`: kho R2 cho URL ky, kho cuc bo cho
+    # duong stream qua backend.
+    url = storage.signed_url(du_an.output_object_key, expires_seconds=3600)
+    return {
+        "url": url or "",
+        "stream_url": "" if url else
+        f"/api/video/projects/{project_id}/media/output",
+    }

@@ -198,14 +198,18 @@ thật trong worktree cô lập, và cổng kiểm định chạy `npm` thật.
 `--session-id`/`-r` (đo được, §1 audit) nhưng chưa lượt Leader nào chạy qua
 nó dưới quyền Router. Đánh dấu **UNVERIFIED**, không giả vờ.
 
-### Giới hạn còn lại của vòng này
+### Giới hạn còn lại của vòng này — ĐÃ ĐƯỢC GỠ Ở VÒNG SAU
 
-Vòng thử lại ở đây là **`_thu_lai_neu_dang` của V0.9** (thử lại có trần, đổi
-chỗ chạy), KHÔNG phải `su_co.VongSuCo` của V1.0 — module đó vẫn là thư viện
-thuần, chưa cắm vào engine (`test_35` khoá lại điều đó có chủ đích). Nên:
-phân loại sự cố, đếm chữ ký, ngắt mạch khi không tiến triển đã có **bài kiểm
-tất định** (41 bài) nhưng **chưa chạy trên đường thật**. Nói rõ ra thay vì
-gộp chung vào "vòng tự chữa đã hoạt động".
+Ở thời điểm viết mục này, vòng thử lại vẫn là **`_thu_lai_neu_dang` của
+V0.9**, KHÔNG phải `su_co.VongSuCo`. Chủ sở hữu đọc đúng chỗ đó và trả lại
+với một câu:
+
+> *"The v1.0 incident loop is tested but not wired."*
+
+Đã sửa. `VongSuCo` nay là **chủ sở hữu duy nhất của chính sách phục hồi** và
+`_thu_lai_neu_dang` tụt xuống thành nguyên liệu. Bằng chứng, gồm cả **hai
+khuyết tật của chính dây nối** mà lượt chạy thật đầu tiên phơi ra, ở
+`V10_INCIDENT_LOOP_ACCEPTANCE.md`.
 
 ## 8. `codex-chatgpt-web` — KHÔNG CÀI, adapter ở lại UNVERIFIED
 
@@ -272,6 +276,13 @@ targeted         147 bài (kiểm định 20 · review 10 · năng lực 19 ·
 `test_toa_v061.test_neu_nguoi_dung_neu_model_thi_ghim_provider` đỏ MỘT lần
 trong khối 4 (đếm được 2 việc `RUNNING` thay vì 4) rồi xanh ở lần chạy lại,
 và xanh 22/22 hai lần khi chạy riêng. Nó khẳng định số việc chạy ĐỒNG THỜI —
-một đại lượng phụ thuộc tải máy. Cùng họ với ghi chú "một cuộc đua tầng
-khoá" đã ghi ở V0.9.1. **Ghi lại làm vấn đề đã biết, không sửa trong bản
-này.**
+một đại lượng phụ thuộc tải máy.
+
+> **ĐÃ ĐIỀU TRA VÀ SỬA (2026-09-13).** Câu *"cùng họ với một cuộc đua tầng
+> khoá ở V0.9.1"* ở bản trước của mục này **SAI**. Đo trực tiếp: cửa sổ 4 con
+> cùng ở `RUNNING` chỉ dài **~40ms** khi executor giả chạy xong ngay; trễ
+> 0.05s còn 3/4, trễ 0.20s còn **2/4** — đúng con số đã quan sát. `claim_task`
+> đặt `RUNNING` đồng bộ trong `tick()`, nên không có chiều "chưa kịp".
+> Mọi bài anh em khẳng định cùng một thứ đều đã có độ trễ executor; chỉ bài
+> này quên. **Khuyết tật của bài kiểm, không phải của sản phẩm, không phải
+> tầng khoá.** Chi tiết: `V10_INCIDENT_LOOP_ACCEPTANCE.md` §8.

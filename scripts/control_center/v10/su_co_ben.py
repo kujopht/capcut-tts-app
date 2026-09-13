@@ -52,6 +52,29 @@ class SuCoBen:
     tao_luc: float = field(default_factory=time.time)
     cap_nhat_luc: float = field(default_factory=time.time)
 
+    # -- CHỜ TÀI NGUYÊN (V1.0) ---------------------------------------------
+    #
+    # Nằm CHUNG hồ sơ sự cố, không tách kho thứ hai: chờ tài nguyên là một
+    # nhánh của cùng một sự cố, và nó phải sống sót qua khởi động lại theo
+    # đúng cơ chế đã có. Tách ra là dựng nơi thứ hai cho cùng một loại sự
+    # thật — chế độ hỏng đã phải sửa nhiều lần trong bản này.
+    #
+    #: Bể/tài khoản đang chờ (tên bể trong `SoTaiNguyen`).
+    be_tai_nguyen: str = ""
+    #: Nhà cung cấp + tài khoản, để bảng điều khiển đọc được mà không tra sổ.
+    provider: str = ""
+    account_id: str = ""
+    #: Câu NGUYÊN VĂN nhà cung cấp trả về. Bằng chứng, không phải diễn giải.
+    ly_do_tai_nguyen: str = ""
+    #: Mốc reset ĐO ĐƯỢC. `None` = KHÔNG ĐO ĐƯỢC, và nó phải ở nguyên `None`.
+    reset_luc: Optional[float] = None
+    #: Lần chạy tiếp đủ điều kiện sớm nhất. `None` = chưa hẹn được.
+    thu_lai_luc: Optional[float] = None
+    #: Các bể đã XÉT và vì sao bị loại — `[(tên, lý do)]`.
+    ung_vien_da_xet: Tuple[Tuple[str, str], ...] = ()
+    #: Số lần đã CHỜ RESET cho sự cố này (trần ở `tai_nguyen.TRAN_CHO_RESET`).
+    dem_cho_tai_nguyen: int = 0
+
     def to_dict(self) -> Dict:
         return {"incident_id": self.incident_id, "project_id": self.project_id,
                 "task_id": self.task_id, "muc_tieu": self.muc_tieu[:600],
@@ -62,7 +85,15 @@ class SuCoBen:
                 "chien_luoc": self.chien_luoc,
                 "cho_chay_truoc": self.cho_chay_truoc,
                 "trang_thai": self.trang_thai, "tao_luc": self.tao_luc,
-                "cap_nhat_luc": self.cap_nhat_luc}
+                "cap_nhat_luc": self.cap_nhat_luc,
+                "be_tai_nguyen": self.be_tai_nguyen,
+                "provider": self.provider, "account_id": self.account_id,
+                "ly_do_tai_nguyen": self.ly_do_tai_nguyen[:300],
+                "reset_luc": self.reset_luc,
+                "thu_lai_luc": self.thu_lai_luc,
+                "ung_vien_da_xet": [list(x) for x in
+                                    self.ung_vien_da_xet[:12]],
+                "dem_cho_tai_nguyen": self.dem_cho_tai_nguyen}
 
     @classmethod
     def from_dict(cls, d: Dict) -> "SuCoBen":
@@ -83,7 +114,22 @@ class SuCoBen:
             cho_chay_truoc=str(d.get("cho_chay_truoc") or ""),
             trang_thai=str(d.get("trang_thai") or "DANG_MO"),
             tao_luc=float(d.get("tao_luc") or time.time()),
-            cap_nhat_luc=float(d.get("cap_nhat_luc") or time.time()))
+            cap_nhat_luc=float(d.get("cap_nhat_luc") or time.time()),
+            be_tai_nguyen=str(d.get("be_tai_nguyen") or ""),
+            provider=str(d.get("provider") or ""),
+            account_id=str(d.get("account_id") or ""),
+            ly_do_tai_nguyen=str(d.get("ly_do_tai_nguyen") or ""),
+            # `or None` LÀ SAI ở đây: `0.0` là một mốc hợp lệ về kiểu, và
+            # quan trọng hơn — `None` phải đi ra `None`, không được biến
+            # thành một con số. Đọc tường minh.
+            reset_luc=(float(d["reset_luc"])
+                       if d.get("reset_luc") is not None else None),
+            thu_lai_luc=(float(d["thu_lai_luc"])
+                         if d.get("thu_lai_luc") is not None else None),
+            ung_vien_da_xet=tuple(
+                (str(x[0]), str(x[1])) for x in
+                (d.get("ung_vien_da_xet") or []) if len(x) >= 2),
+            dem_cho_tai_nguyen=int(d.get("dem_cho_tai_nguyen") or 0))
 
 
 class SoSuCo:

@@ -54,6 +54,30 @@ class TaskState(str, Enum):
     #: (RouterDogfood02, 2026-09-13). Gọi là `FAILED` thì đổ lỗi cho worker
     #: về một thứ nó làm đúng, và đốt lượt thử lại vào một việc không hỏng.
     NEEDS_EVIDENCE = "NEEDS_EVIDENCE"
+    #: V1.0 — CHỜ TÀI NGUYÊN. Hết hạn mức nhà cung cấp, bể model tạm không
+    #: dùng được, tài khoản hết chỗ chạy song song, đang đợi cửa sổ reset.
+    #:
+    #: Ba trạng thái sẵn có đều NÓI DỐI ở tình huống này, và mỗi cái sai một
+    #: kiểu — đây là lý do nó phải là một trạng thái riêng:
+    #:
+    #:   `FAILED`  — đổ lỗi cho worker và cho mã sản phẩm về một thứ không ai
+    #:               làm sai; đốt lượt thử lại vào một việc không hỏng.
+    #:   `BLOCKED` — nghĩa là CẦN NGƯỜI. Hạn mức tự hồi theo thời gian, nên
+    #:               đánh `BLOCKED` là biến một lần chờ hồi được thành một
+    #:               lần dừng vĩnh viễn, và gọi người dậy lúc 3 giờ sáng cho
+    #:               một việc Router tự xử được.
+    #:   `WAITING` — nghĩa là chờ việc phụ thuộc; nó không mang theo bể nào,
+    #:               mốc reset nào, hay danh sách đường thay thế nào.
+    #:
+    #: Đo được trên đường thật (2026-09-13): một tài khoản Antigravity trả
+    #: "Individual quota reached … Resets in 48h57m19s". Vòng sự cố phân loại
+    #: ĐÚNG (`QUOTA_EXHAUSTED` -> `CHO_QUOTA`, không mua thêm credit) nhưng
+    #: quyết định ấy không tới được trạng thái việc: bảng điều khiển đọc
+    #: "hỏng" trong khi sự thật là "đang chờ hạn mức".
+    #:
+    #: Ý định THỰC THI và mục tiêu GỐC vẫn thuộc về việc này — không đẻ việc
+    #: mới chỉ vì hạn mức đổi.
+    WAITING_RESOURCE = "WAITING_RESOURCE"
     DONE = "DONE"
     FAILED = "FAILED"
     PAUSED = "PAUSED"
@@ -74,6 +98,11 @@ class TaskState(str, Enum):
     @property
     def needs_human(self) -> bool:
         return self is TaskState.BLOCKED
+
+    @property
+    def cho_tai_nguyen(self) -> bool:
+        """Đang chờ TÀI NGUYÊN, không chờ người. Router tự tiếp được."""
+        return self is TaskState.WAITING_RESOURCE
 
 
 #: Chuyen trang thai HOP LE. Khoa bang may thay vi bang quy uoc: mot bang
@@ -96,13 +125,32 @@ _CHUYEN_HOP_LE.update({
     TaskState.RUNNING: frozenset({TaskState.REVIEW, TaskState.DONE,
                                   TaskState.NEEDS_EVIDENCE,
                                   TaskState.FAILED, TaskState.BLOCKED,
-                                  TaskState.PAUSED, TaskState.QUEUED}),
+                                  TaskState.PAUSED, TaskState.QUEUED,
+                                  TaskState.WAITING_RESOURCE}),
+    # CHỜ TÀI NGUYÊN — Router VẪN sở hữu việc này.
+    #
+    # `-> QUEUED` là đường thường: tài nguyên về (đổi tài khoản/bể, hoặc tới
+    # mốc reset đo được) thì CHÍNH việc này chạy tiếp, mang theo mục tiêu gốc.
+    # `-> RUNNING` cho đường giao thẳng không qua hàng đợi.
+    # `-> BLOCKED` chỉ khi hết đường tài nguyên VÀ không có mốc reset nào —
+    # lúc đó mới thật sự cần người.
+    # `-> FAILED`/`PAUSED` cho người vận hành dừng tay.
+    #
+    # KHÔNG có mũi tên tới `DONE`/`REVIEW`: chờ hạn mức không chứng minh được
+    # gì về công việc, và cổng nghiệm thu không được nới bởi một trạng thái
+    # tài nguyên.
+    TaskState.WAITING_RESOURCE: frozenset({TaskState.QUEUED,
+                                           TaskState.RUNNING,
+                                           TaskState.BLOCKED,
+                                           TaskState.PAUSED,
+                                           TaskState.FAILED}),
     # `NEEDS_EVIDENCE` KHÔNG đi thẳng tới `DONE`. Muốn ra `DONE` thì phải
     # chạy lại (`QUEUED`) và lần đó phải có phép kiểm THẬT chạy được — hoặc
     # người vận hành quyết (`BLOCKED`). Đây là toàn bộ giá trị của trạng
     # thái này; cho nó một mũi tên tới `DONE` là xoá nó đi.
     TaskState.NEEDS_EVIDENCE: frozenset({TaskState.QUEUED, TaskState.BLOCKED,
-                                         TaskState.PAUSED, TaskState.FAILED}),
+                                         TaskState.PAUSED, TaskState.FAILED,
+                                         TaskState.WAITING_RESOURCE}),
     TaskState.BLOCKED: frozenset({TaskState.QUEUED, TaskState.WAITING,
                                   TaskState.PAUSED, TaskState.FAILED,
                                   TaskState.DONE}),
@@ -138,7 +186,13 @@ _CHUYEN_HOP_LE.update({
     # này; `FAILED` bị bỏ quên vì trước V1.0 không có gì leo thang cả.
     #
     # Nó KHÔNG mở đường nào tới `DONE`, và không nới một cổng an toàn nào.
-    TaskState.FAILED: frozenset({TaskState.QUEUED, TaskState.BLOCKED}),
+    #
+    # `FAILED -> WAITING_RESOURCE` là mũi tên THỨ BA của cùng quyết định ấy:
+    # bộ điều phối chạy sau khi lượt đã bị chấm `FAILED`, và khi nguyên nhân
+    # là HẠN MỨC thì cả "xếp lại ngay" lẫn "gọi người" đều sai — thứ đúng là
+    # giữ việc lại, ghi rõ đang chờ bể nào và tới bao giờ.
+    TaskState.FAILED: frozenset({TaskState.QUEUED, TaskState.BLOCKED,
+                                 TaskState.WAITING_RESOURCE}),
 })
 
 

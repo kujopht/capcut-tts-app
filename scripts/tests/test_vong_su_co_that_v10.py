@@ -462,9 +462,17 @@ class TestLeoThangToiNoi(unittest.TestCase):
                          _CHUYEN_HOP_LE[TaskState.FAILED])
         self.assertNotIn(TaskState.REVIEW,
                          _CHUYEN_HOP_LE[TaskState.FAILED])
+        # Ghim CHÍNH XÁC tập đích, không chỉ "có chứa": mục đích của bài này
+        # là bắt một lần NỚI RỘNG ngoài ý muốn. Ba mũi tên, mỗi cái là một
+        # kết cục của bộ điều phối sự cố, và không cái nào tới nghiệm thu:
+        #   QUEUED            xếp lại (SUA_TAI_CHO…)
+        #   BLOCKED           leo thang (HOI_DONG / LEO_THANG)
+        #   WAITING_RESOURCE  chờ tài nguyên (CHO_QUOTA) — V1.0
         self.assertEqual(_CHUYEN_HOP_LE[TaskState.FAILED],
-                         frozenset({TaskState.QUEUED, TaskState.BLOCKED}),
-                         "chỉ THÊM đúng một mũi tên leo thang, không nới rộng")
+                         frozenset({TaskState.QUEUED, TaskState.BLOCKED,
+                                    TaskState.WAITING_RESOURCE}),
+                         "chỉ THÊM mũi tên của một kết cục điều phối có "
+                         "thật, không nới rộng")
 
     def test_23c_KHO_THAT_nhan_FAILED_sang_BLOCKED(self):
         """Bảng chuyển cho phép là một chuyện; SỔ có nhận hay không là chuyện

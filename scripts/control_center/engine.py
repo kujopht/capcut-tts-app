@@ -3046,6 +3046,21 @@ class ControlCenter:
         except Exception as exc:                            # noqa: BLE001
             self.store.ghi_su_kien("EXEC_SCAN_ERROR", level="WARNING",
                                    detail=f"{type(exc).__name__}: {exc}"[:300])
+        # V1.0 — ĐÁNH THỨC việc CHỜ TÀI NGUYÊN đã tới mốc reset. Chạy TRƯỚC
+        # phép kiểm trần song song: một việc đang chờ hạn mức không chiếm khe
+        # nào, và nó phải kịp vào danh sách sẵn sàng của CHÍNH nhịp này —
+        # không thì mỗi lần đánh thức lại trễ thêm một nhịp.
+        #
+        # Thiếu vòng quét này thì `CHO_RESET` chỉ là một dòng chữ trong sổ và
+        # việc nằm đó vĩnh viễn: vẫn là treo, chỉ khác tên.
+        for p in self.projects():
+            try:
+                self._quet_cho_tai_nguyen(self.ctx(p.project_id))
+            except Exception as exc:                        # noqa: BLE001
+                self.store.ghi_su_kien(
+                    "TAI_NGUYEN_SCAN_ERROR", project_id=p.project_id,
+                    level="WARNING",
+                    detail=f"{type(exc).__name__}: {exc}"[:300])
         with self._khoa:
             đang = len([t for t in self._dang_chay.values() if t.is_alive()])
             self._dang_chay = {k: v for k, v in self._dang_chay.items()
@@ -4264,6 +4279,208 @@ class ControlCenter:
                   "cam": hd["_cam_runtime"]})
         return True
 
+    def _so_tai_nguyen(self, ctx: ProjectContext):
+        """Sổ bể hạn mức, dựng TỪ fabric thật — không bịa hình dạng bể.
+
+        Mỗi runtime trong fabric là một khe chạy được; ta khai đúng những gì
+        fabric nói và để `suc_khoe=UNKNOWN` cho phần không đo được. Đây là
+        luật V0.6.1/V0.8 chép nguyên: đo một tài khoản rồi áp cho cả tám là
+        biến một phép đo thành bảy con số bịa.
+        """
+        from scripts.control_center.v10.han_muc import (BeQuota, SoTaiNguyen,
+                                                        SucKhoe)
+        so = SoTaiNguyen()
+        # `Fabric.runtimes` là DICT (`runtime_id -> WorkerRuntime`) — gọi nó
+        # như hàm ném `TypeError`, và một `except` quanh đây sẽ nuốt mất rồi
+        # cho ra một bể RỖNG, tức "hết đường" cho mọi lần. Bản đầu của hàm
+        # này viết đúng như vậy.
+        rts = list(getattr(ctx.fabric, "runtimes", {}).values())
+        for r in rts:
+            if not getattr(r, "dispatchable", True):
+                # `CLAUDE_LEAD` có mặt trong fabric để `explain()` nói được vì
+                # sao nó không được chọn — nó KHÔNG phải một khe chạy được.
+                continue
+            # HỌ MODEL suy từ `supported_models`, KHÔNG từ `provider`:
+            # Antigravity phục vụ cả gemini lẫn claude lẫn gpt, nên lấy
+            # provider làm họ là áp một cấu trúc tưởng tượng lên bể — đúng
+            # thứ `han_muc` cấm ở luật số hai.
+            ho = []
+            for m in (getattr(r, "supported_models", ()) or ()):
+                s = str(m).lower()
+                for ten in ("gemini", "claude", "gpt", "codex"):
+                    if ten in s and ten not in ho:
+                        ho.append(ten)
+            sk = SucKhoe.UNKNOWN
+            if getattr(r, "drained", False):
+                sk = SucKhoe.UNAVAILABLE
+            elif str(getattr(r, "needs_provisioning", "") or ""):
+                sk = SucKhoe.AUTH_REQUIRED
+            elif float(getattr(r, "cooldown_until", 0.0) or 0.0) > time.time():
+                sk = SucKhoe.DEGRADED
+            so.khai(BeQuota(
+                ten=str(getattr(r, "runtime_id", "") or ""),
+                account_id=str(getattr(r, "account_id", "") or ""),
+                provider=str(getattr(r, "provider", "") or ""),
+                ho_model=tuple(ho),
+                hong_gan_day=int(getattr(r, "consecutive_failures", 0) or 0),
+                suc_khoe=sk))
+        return so
+
+    def _cho_tai_nguyen(self, ctx: ProjectContext, t, sc, so, bus, qd, *,
+                        bang_chung_them: str = "") -> str:
+        """CHỜ TÀI NGUYÊN — đổi chỗ, hẹn giờ, hay gọi người.
+
+        Ba kết cục, và ranh giới giữa chúng là ranh giới THẨM QUYỀN:
+
+            DOI_CHO    còn đường hợp lệ  -> xếp lại NGAY, không hỏi ai
+            CHO_RESET  hết đường, có mốc -> giữ việc, hẹn giờ
+            LEO_THANG  hết đường, không mốc / phải mua / phải hạ chuẩn
+                       -> `BLOCKED` kèm bằng chứng
+
+        Không lần nào trong ba lần ấy được mua credit hay bật overage.
+        """
+        from scripts.control_center.v10.han_muc import (SucKhoe,
+                                                        doc_tin_hieu_quota)
+        from scripts.control_center.v10.su_kien import LoaiSuKien, SuKienDoi
+        from scripts.control_center.v10.tai_nguyen import (HanhDongTaiNguyen,
+                                                           YeuCauVai,
+                                                           quyet_dinh)
+
+        van = f"{bang_chung_them}\n{qd.ly_do}"
+        be_ten = sc.cho_chay_truoc.split("/")[0] if sc.cho_chay_truoc else ""
+        stn = self._so_tai_nguyen(ctx)
+        be_hong = stn.lay(be_ten)
+        # Ghi tín hiệu CHỈ cho bể đã nêu tên. `doc_tin_hieu_quota` chỉ đọc
+        # thứ CÓ trong văn bản — không đo được mốc reset thì nó để `None`, và
+        # `None` phải đi tới cuối ở nguyên `None`.
+        if be_hong is not None:
+            stn.ghi_nhan_tin_hieu(be_ten, van)
+        else:
+            sk, khi = doc_tin_hieu_quota(van)
+            del sk, khi
+
+        qdt = quyet_dinh(be_hong, stn.tat_ca(),
+                         yeu_cau=YeuCauVai(mo_ta=t.title or ""),
+                         da_cho=sc.dem_cho_tai_nguyen)
+
+        sc.be_tai_nguyen = be_ten
+        sc.provider = (be_hong.provider if be_hong is not None else "")
+        sc.account_id = (be_hong.account_id if be_hong is not None else "")
+        sc.ly_do_tai_nguyen = (van or "").strip()[:300]
+        sc.reset_luc = (be_hong.reset_luc if be_hong is not None else None)
+        sc.ung_vien_da_xet = qdt.da_xet
+        sc.thu_lai_luc = qdt.cho_toi
+
+        self.store.ghi_su_kien(
+            "INCIDENT_WAIT_QUOTA", project_id=t.project_id,
+            task_id=t.task_id, level="WARNING",
+            detail=f"{qdt.hanh_dong.value}: {qdt.ly_do}"[:300],
+            meta={**qd.to_dict(), "tai_nguyen": qdt.to_dict()})
+
+        if qdt.hanh_dong is HanhDongTaiNguyen.DOI_CHO:
+            # Còn đường: KHÔNG đánh thức ai. Xếp lại để bộ lập lịch chọn chỗ
+            # khác — cùng cơ chế `reassign`, không phải một đường thứ hai.
+            bus.phat(SuKienDoi(
+                LoaiSuKien.REPAIR, t.project_id, "router",
+                f"DOI_CHO[{qdt.be_chon}]: {qdt.ly_do}", task_id=t.task_id,
+                execution_id=sc.execution_id))
+            so.ghi(sc, chi_tiet=f"CHO_TAI_NGUYEN -> DOI_CHO: {qdt.ly_do}")
+            self._nhan_cho_tai_nguyen(t, f"đổi chỗ: {qdt.ly_do}")
+            self._danh_thuc_tai_nguyen(t.task_id, ly_do=qdt.ly_do)
+            return "DOI_CHO"
+
+        if qdt.hanh_dong is HanhDongTaiNguyen.CHO_RESET:
+            sc.dem_cho_tai_nguyen += 1
+            sc.thu_lai_luc = qdt.cho_toi
+            bus.phat(SuKienDoi(
+                LoaiSuKien.INCIDENT, t.project_id, "router",
+                f"CHO_RESET: {qdt.ly_do}", task_id=t.task_id,
+                execution_id=sc.execution_id))
+            so.ghi(sc, chi_tiet=f"CHO_TAI_NGUYEN -> CHO_RESET: {qdt.ly_do}")
+            self._nhan_cho_tai_nguyen(t, qdt.ly_do)
+            return "CHO_RESET"
+
+        # LEO_THANG — hết đường VÀ không mốc, hoặc phải mua/hạ chuẩn.
+        bus.phat(SuKienDoi(
+            LoaiSuKien.ESCALATION, t.project_id, "router",
+            f"TAI_NGUYEN: {qdt.ly_do}", task_id=t.task_id,
+            execution_id=sc.execution_id,
+            bang_chung=tuple(sc.bang_chung)[-4:]))
+        so.dong(sc, ly_do=f"TAI_NGUYEN LEO_THANG: {qdt.ly_do}")
+        try:
+            self.store.doi_trang_thai(
+                t.task_id, TaskState.BLOCKED,
+                reason=f"chờ tài nguyên đã cạn đường: {qdt.ly_do}"[:400])
+        except Exception as e:                                # noqa: BLE001
+            self.store.ghi_su_kien(
+                "ESCALATION_KHONG_DAT", project_id=t.project_id,
+                task_id=t.task_id, level="ERROR",
+                detail=f"leo thang TAI_NGUYEN không đặt được BLOCKED: "
+                       f"{type(e).__name__}: {e}"[:400],
+                meta={"hanh_dong": "TAI_NGUYEN_LEO_THANG"})
+        return "LEO_THANG"
+
+    def _nhan_cho_tai_nguyen(self, t, ly_do: str) -> None:
+        """Đưa việc sang `WAITING_RESOURCE` — KHÔNG yên lặng nếu hỏng."""
+        try:
+            self.store.doi_trang_thai(
+                t.task_id, TaskState.WAITING_RESOURCE,
+                reason=f"chờ tài nguyên: {ly_do}"[:400])
+        except Exception as e:                                # noqa: BLE001
+            self.store.ghi_su_kien(
+                "CHO_TAI_NGUYEN_KHONG_DAT", project_id=t.project_id,
+                task_id=t.task_id, level="ERROR",
+                detail=f"{type(e).__name__}: {e}"[:300])
+
+    def _danh_thuc_tai_nguyen(self, task_id: str, *, ly_do: str = "") -> bool:
+        """`WAITING_RESOURCE` -> `QUEUED`: CHÍNH việc này chạy tiếp.
+
+        Không đẻ việc mới. Mục tiêu gốc, ý định thực thi, hợp đồng — tất cả
+        vẫn thuộc về việc này; hạn mức đổi không phải lý do để tạo một việc
+        khác cho người dùng.
+        """
+        t = self.store.task(task_id)
+        if t is None or t.state is not TaskState.WAITING_RESOURCE:
+            return False
+        try:
+            self.store.doi_trang_thai(
+                task_id, TaskState.QUEUED,
+                reason=f"tài nguyên đã sẵn sàng: {ly_do}"[:400])
+        except Exception:                                     # noqa: BLE001
+            return False
+        self.store.ghi_su_kien(
+            "TAI_NGUYEN_SAN_SANG", project_id=t.project_id, task_id=task_id,
+            level="INFO", detail=(ly_do or "tài nguyên đã sẵn sàng")[:300])
+        return True
+
+    def _quet_cho_tai_nguyen(self, ctx: ProjectContext) -> int:
+        """Mỗi nhịp: việc nào tới giờ thì đánh thức. Trả số việc đã đánh thức.
+
+        Đây là nửa còn lại của `CHO_RESET` — thiếu nó thì "hẹn giờ" chỉ là
+        một dòng chữ trong sổ và việc nằm đó vĩnh viễn, tức vẫn là treo, chỉ
+        khác tên.
+        """
+        try:
+            from scripts.control_center.v10.su_co_ben import SoSuCo
+        except Exception:                                     # noqa: BLE001
+            return 0
+        n = 0
+        bay_gio = time.time()
+        for t in self.store.tasks(ctx.project.project_id,
+                                  states=(TaskState.WAITING_RESOURCE,)):
+            sc = SoSuCo(self.store).hien_tai(t.task_id)
+            if sc is None:
+                continue
+            khi = sc.thu_lai_luc
+            if khi is None or khi > bay_gio:
+                # `None` = chưa hẹn được; KHÔNG coi là "tới giờ". Đánh thức
+                # một việc không có mốc là thử lại mù có lịch.
+                continue
+            if self._danh_thuc_tai_nguyen(
+                    t.task_id, ly_do=f"tới mốc reset của {sc.be_tai_nguyen}"):
+                n += 1
+        return n
+
     def _dieu_phoi_su_co(self, ctx: ProjectContext, task_id: str, pb,
                          session_id: str, *, placement_key: str = "",
                          trang_thai=None,
@@ -4372,11 +4589,13 @@ class ControlCenter:
             return hd.value
 
         if hd is HanhDong.CHO_QUOTA:
-            self.store.ghi_su_kien(
-                "INCIDENT_WAIT_QUOTA", project_id=t.project_id,
-                task_id=task_id, level="WARNING", detail=qd.ly_do[:300],
-                meta=qd.to_dict())
-            return hd.value
+            # HẾT HẠN MỨC KHÔNG PHẢI MỘT LẦN HỎNG, và cũng không phải một lần
+            # cần người. Bản đầu chỉ ghi một dòng sự kiện rồi bỏ mặc việc nằm
+            # ở `FAILED` — đo được trên đường thật (2026-09-13): sổ ghi đúng
+            # "CHO_QUOTA, không mua thêm credit", mà bảng điều khiển đọc
+            # "hỏng" trong khi sự thật là "đang chờ hạn mức".
+            return self._cho_tai_nguyen(ctx, t, sc, so, bus, qd,
+                                        bang_chung_them=bang_chung_them)
 
         # HOI_DONG / LEO_THANG — CHỈ ở đây người dùng mới bị gọi.
         bus.phat(SuKienDoi(

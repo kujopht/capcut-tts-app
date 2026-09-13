@@ -57,14 +57,25 @@ function CanBanXuLy({ data }: { data: AdminOverview }) {
     cho no VE RONG khi khong con viec — nen con so phai dem dung thu nguoi
     quan tri se thuc su mo ra doc.
 
-    Loc o day chu khong them mot endpoint moi: `/api/admin/novels?state=draft`
-    DA tra ve `tags` va so `chapters` cho tung dong.
+    PHAN LOAI O MAY CHU, khong loc bang the o trinh duyet.
+
+    Ban dau cho nay tu loc `!tags.includes("audio-studio")`. Sau khi luong
+    kiem duyet co `kind=story`, giu lai phep loc cu la de hai con so LECH
+    NHAU: `kind=story` (xem `server/novel_kind.py`) con loai ca ban ghi
+    `qa-canary`/`test` va cac lan chay media `work:` — thu ma phep loc theo
+    the KHONG thay. The la the o day dem NHIEU hon so dong that su hien ra
+    o `/admin/stories?state=draft`, va mot cai the noi doi con te hon mot
+    cai the khong co.
+
+    `chapters > 0` thi GIU: no la tin hieu "co noi dung de doc", khong phai
+    mot phep phan loai.
   */
-  const napNhap = useCallback(() => adminApi.novels("", "draft", 100), []);
+  const napNhap = useCallback(
+    () => adminApi.novels("", "draft", 100, 0, "story"),
+    [],
+  );
   const { data: dsNhap } = useAsyncData(napNhap);
-  const nhap = (dsNhap?.novels ?? []).filter(
-    (n) => !n.tags.includes("audio-studio") && n.chapters > 0,
-  ).length;
+  const nhap = (dsNhap?.novels ?? []).filter((n) => n.chapters > 0).length;
 
   const viec = [
     {

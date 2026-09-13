@@ -39,9 +39,21 @@ Bằng chứng chính, từ sổ chứ không phải từ lời:
 * **ma trận đột biến 10/10** (§10), trong đó **hai** bài ban đầu xanh khi
   tháo dây — bộ kiểm chưa đủ, và đã được thay bằng bài HÀNH VI.
 
-Hai hạng mục MỞ, ghi rõ chứ không giấu: nhánh `CHO_QUOTA` cũng chưa tới được
-trạng thái việc (§10c), và `phien_leader.py` + `han_muc.py` vẫn là **mã
-chết** (§11).
+Và luật review B5 — cũng là **mã chết** cho tới đêm nay — nay đã cắm VÀ đã
+chạy thật: Gemini viết mã → `codex/codex-default` phản biện `REVISE`, khác họ,
+độc lập (§14).
+
+### BA HẠNG MỤC MỞ, ghi rõ chứ không giấu
+
+| # | Hạng mục | Mục |
+|---|---|---|
+| 1 | nhánh `CHO_QUOTA` chưa tới được trạng thái việc — bảng đọc "hỏng" trong khi sự thật là "đang chờ hạn mức" | §10c |
+| 2 | `phien_leader.py` + `han_muc.py` vẫn là **mã chết** — KHÔNG tính là năng lực V1.0 đang chạy | §11 |
+| 3 | `.beamignore` thiếu `build/`/`dist/` — có từ TRƯỚC đêm nay, không thuộc V1.0 | §12d |
+
+Không hạng mục nào trong ba cái đó được "sửa cho xanh" lúc nửa đêm: cái thứ
+nhất cần một quyết định thiết kế của chủ sở hữu, hai cái sau nằm ngoài phạm
+vi được giao.
 
 ---
 
@@ -635,8 +647,50 @@ lưới an toàn trong `tick()`) và **không chạm chữ ký**, nên không b�
 nào gãy.
 
 Bài học, và nó đáng ghi: **đổi chữ ký một hàm mà bộ kiểm có quyền thay thế
-là một thay đổi giao diện công khai.** Ba lượt hồi quy đầy đủ, ba khuyết tật
+là một thay đổi giao diện công khai.** Bốn lượt hồi quy đầy đủ, bốn kết quả
 khác nhau, không lượt nào thừa.
+
+### 12e. Số cuối
+
+```
+hồi quy đầy đủ   2698 bài · 2697 đạt · 1 đỏ
+                 (bài đỏ = §12d, KHÔNG thuộc V1.0, có từ trước đêm nay)
+các bộ liên quan 418 bài · 418 đạt · 0 đỏ
+V1.0             sự cố 34 · nền móng 42 · kiểm định 20 · review 13
+V0.9.3           năng lực 19 · phạm vi ghi 46 · mốc git 11
+tầng bị chạm     toả 22 · khoá đọc/ghi 23 · lát cắt 90 · thực thi 97
+đột biến         10/10 đỏ (cây gốc xanh trước và sau mỗi lần)
+```
+
+### 12d. Lượt thứ tư — một bài đỏ KHÔNG thuộc về V1.0
+
+Lượt hồi quy thứ tư: `test_beam_operator.test_real_repo_payload_is_under_
+threshold` đỏ. Nó **không liên quan gì tới đêm nay**, và quy trách được chắc
+chắn mà không cần chạy thêm lượt nào:
+
+* bài này đo **payload của THƯ MỤC LÀM VIỆC**: 903.8 MB / 2118 tệp;
+* phần áp đảo là `build/` và `dist/` — đầu ra PyInstaller của bản desktop
+  RCC, **ngày 2026-09-09 … 09-10**, tức có từ trước đêm nay nhiều ngày;
+* cả hai thư mục ấy `.gitignore` bỏ qua và KHÔNG được theo dõi, nên chúng có
+  mặt ở **mọi** commit trong thư mục này — kể cả commit gốc `1133a2d`;
+* toàn bộ thay đổi đêm nay là tệp văn bản được theo dõi, cỡ ~60 KB.
+
+Nó cũng **skip ở hai lượt trước** (`skipped=4`) vì cần gói `beta9`, và chỉ
+chạy ở lượt này (`skipped=1`) — nên nó không hề "mới đỏ".
+
+Nhưng nó đang chỉ đúng một khuyết tật THẬT, và là khuyết tật **cùng họ** với
+sự cố 2.64 GB mà chính nó sinh ra để canh: `.beamignore` liệt kê `.router`,
+`.claude/worktrees`, `web`, `server`, `scripts`, `desktop_app`, `tests`,
+`docs`… mà **thiếu `build/` và `dist/`**. Một lưới canh payload không phủ
+đúng thư mục lớn nhất của kho.
+
+**Tôi KHÔNG sửa `.beamignore`, và KHÔNG xoá `build/`/`dist/`.** Cả hai là
+thao tác thuộc đường ĐÓNG GÓI/TRIỂN KHAI của một sản phẩm khác (Beam apps),
+nằm ngoài phạm vi chủ sở hữu giao đêm nay; xoá thư mục dựng của người khác
+lại càng không phải việc tôi tự quyết lúc nửa đêm. Ghi lại làm **hạng mục mở
+số 3**, kèm cách sửa đã rõ (thêm hai dòng vào `.beamignore`; khối chú thích
+sẵn có trong tệp đã chứng minh KHÔNG gì ngoài `beam_apps/` cần cho Beam
+runtime, nên loại trừ chúng là an toàn theo đúng lập luận đã ghi ở đó).
 
 **Không hạ chuẩn để cho xanh.** Điều các bài ấy canh vẫn nguyên vẹn:
 

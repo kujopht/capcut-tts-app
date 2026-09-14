@@ -6180,6 +6180,7 @@ body.co-mini { padding-bottom: 74px; }
    and sets --studio-shell-height, so only workspaces/panels—not the document—
    scroll. Mobile keeps normal page scrolling for touch usability. */
 @media (min-width: 901px) {
+  body.studio-app-active { display: flow-root; }
   body.studio-app-active .site-footer { display: none; }
   body.studio-app-active main { min-height: 0; }
   .studio-page {

@@ -31,7 +31,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import {
   IconCompass,
   IconFeather,
@@ -199,6 +199,28 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
     sua chu khong phai ten cua san pham.
   */
   const cheDoRanh = pathname.startsWith("/studio/media");
+
+  /* Studio nam trong phan viewport con lai sau dock dieu huong that. */
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const capNhat = () => {
+      const dock = document.querySelector<HTMLElement>(".site-header");
+      const top = dock?.getBoundingClientRect().bottom ?? 0;
+      root.style.setProperty("--studio-shell-height", `${Math.max(0, window.innerHeight - top)}px`);
+    };
+    document.body.classList.add("studio-app-active");
+    capNhat();
+    const observer = new ResizeObserver(capNhat);
+    const dock = document.querySelector<HTMLElement>(".site-header");
+    if (dock) observer.observe(dock);
+    window.addEventListener("resize", capNhat);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", capNhat);
+      document.body.classList.remove("studio-app-active");
+      root.style.removeProperty("--studio-shell-height");
+    };
+  }, []);
 
   return (
     <div className={`page studio-page${cheDoRanh ? " studio-ranh" : ""}`}>

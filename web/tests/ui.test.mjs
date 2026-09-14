@@ -88,7 +88,7 @@ test("Studio la MOT san pham: khung chung + cac muc dung thu tu", () => {
   assert.deepEqual(order, [
     ["/studio", "Dự án"],
     ["/studio/content", "Nội dung"],
-    ["/studio/media", "Media"],
+    ["/studio/audio", "Audio"],
     ["/studio/image", "Hình ảnh"],
   ]);
 

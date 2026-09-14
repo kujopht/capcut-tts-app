@@ -8517,12 +8517,36 @@ button.cq-the:hover { background: #ffffff0a; }
   border-radius: var(--r3);
   padding: var(--s3);
 }
+.audio-studio { display:grid; grid-template-columns:minmax(0,680px) minmax(240px,1fr); gap:var(--s5); align-items:start; }
+.audio-studio-intro { grid-column:1 / -1; }
+.audio-studio h2 { margin:0 0 var(--s2); }
+.audio-recent { min-width:0; }
+.audio-item { display:flex; align-items:center; justify-content:space-between; gap:var(--s2); padding:var(--s2); border-bottom:1px solid var(--kinh-vien); }
+.ms-audio-moi-nut { margin: var(--s2); }
+.ms-audio-moi { position: fixed; z-index: 40; inset: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) auto auto; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: hidden; border: 1px solid var(--kinh-vien); border-radius: var(--r2); background: var(--nen-2); }
+.ms-audio-moi-dau { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: var(--s3); border-bottom: 1px solid var(--kinh-vien); }
+.ms-audio-moi-than { max-height: calc(100dvh - 104px); overflow: auto; padding: var(--s3); }
 
 .ms-tren {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr) 280px;
   gap: var(--s3);
   align-items: start;
+}
+@media (min-width:1101px) {
+  .studio-page.studio-ranh { max-width:none; height:calc(100dvh - 96px); }
+  .studio-ranh .studio-khung { height:100%; grid-template-columns:56px minmax(0,1fr); gap:var(--s2); }
+  .studio-ranh .studio-than { height:100%; min-height:0; }
+  .studio-ranh .studio-dau { display:none; }
+  .studio-ranh .studio-nav { top:0; height:100%; border-radius:var(--r2); padding:var(--s1); }
+  .studio-ranh .studio-muc { justify-content:center; padding:10px 0; }
+  .studio-ranh .studio-muc-nhan { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .studio-ranh .ms { height:100%; box-sizing:border-box; display:grid; grid-template-rows:minmax(0,1fr) clamp(180px,28vh,260px); overflow:hidden; }
+  .studio-ranh .ms-tren { min-height:0; grid-template-columns:240px minmax(0,1fr) 280px; }
+  .studio-ranh .ms-trai,.studio-ranh .insp { overflow:auto; min-height:0; }
+  .studio-ranh .mp-khung { max-height:calc(100dvh - 420px); }
+  .studio-ranh .tl { min-height:0; overflow:hidden; }
+  .studio-ranh .tl-cuon { overflow-x: auto; overflow-y: auto; min-height: 0; }
 }
 .ms-trai { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
 .ms-giua { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
@@ -8915,6 +8939,7 @@ button.cq-the:hover { background: #ffffff0a; }
   .tl-phong input { width: 100%; }
   .tts-hang { grid-template-columns: minmax(0, 1fr); }
   .insp-cap { grid-template-columns: minmax(0, 1fr); }
+  .audio-studio { grid-template-columns:minmax(0,1fr); }
 }
 
 /* ------------------------------------------------------- the Noi dung --- */

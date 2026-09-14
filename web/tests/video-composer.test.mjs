@@ -179,7 +179,7 @@ test("hoi trang thai render CHI khi con dang chay", () => {
 
 /* ====================================================== Studio + CSS === */
 
-test("Studio con BON diem den chinh, Media dung sau Noi dung", () => {
+test("Studio con BON diem den chinh, Audio dung sau Noi dung", () => {
   /*
     Truoc day Studio co TAM muc — Tổng quan, Viết truyện, Dịch tiểu thuyết,
     Audio, Hình ảnh, Phụ đề, Video, Tác phẩm của tôi — la ban do cua NGUOI
@@ -191,7 +191,7 @@ test("Studio con BON diem den chinh, Media dung sau Noi dung", () => {
   assert.deepEqual(thu_tu, [
     "/studio",
     "/studio/content",
-    "/studio/media",
+    "/studio/audio",
     "/studio/image",
   ]);
 });

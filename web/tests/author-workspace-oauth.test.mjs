@@ -58,11 +58,10 @@ test("route cu khong doi: /write va /studio deu con", () => {
 
 test("tao loi doc nam trong Studio, KHONG trong thanh chinh", () => {
   /*
-    Sau khi gop Audio/Phu de/Video thanh Media Studio (`feat/studio-media-
-    workspace`), khong con muc dieu huong rieng nao ten "Audio" — chuc nang
-    tao loi doc nam trong `/studio/media` (bang TTS ngay trong trinh soan).
+    Audio la cong cu tao chinh cua Studio. Media Editor chi la buoc tuy chon
+    sau khi da co audio, va khong duoc dua len thanh dieu huong chinh.
     Bai nay giu lai dung MOT dieu tu ban truoc: loi vao Studio van la MOT
-    lien ket `/studio`, va Studio van co mot muc dan toi noi tao loi doc.
+    lien ket `/studio`, va Studio co muc Audio rieng de tao loi doc.
   */
   const nav = read("../src/components/NavAuth.tsx");
   const links = nav.slice(
@@ -80,7 +79,7 @@ test("tao loi doc nam trong Studio, KHONG trong thanh chinh", () => {
   );
   assert.match(studio, /href="\/studio"/);
   const shell = read("../src/components/StudioShell.tsx");
-  assert.match(shell, /href: "\/studio\/media"/, "Studio mất mục Media (nơi tạo lời đọc)");
+  assert.match(shell, /href: "\/studio\/audio"/, "Studio mất mục Audio (nơi tạo lời đọc)");
 });
 
 test("loi vao Studio va menu tai khoan la HAI thu tach biet", () => {

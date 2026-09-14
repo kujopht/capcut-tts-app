@@ -1,16 +1,12 @@
 "use client";
 
 /**
- * MEDIA STUDIO — loi doc, phu de va video tren MOT duong thoi gian.
+ * MEDIA STUDIO — trinh sua video/phu de TUY CHON tren MOT duong thoi gian.
  *
- * Thay cho ba diem den cu (`/studio/audio`, `/studio/subtitle`,
- * `/studio/video`). Ba cai do la ba buoc cua MOT viec, va tach chung ra bat
- * nguoi dung tu ghep lai — ke ca phai tai xuong roi tai len giua cac buoc.
- *
- * HAI CHE DO, MOT KHONG GIAN. `?mode=audio` khong mo mot ung dung khac; no
- * chi doi thu duoc nhan manh. Do la dieu kien cua §5: bat dau chi voi am
- * thanh roi them video sau ma KHONG phai tao lai loi doc. Neu che do audio
- * la mot trang rieng thi "them video" se la "bat dau lai".
+ * Audio Studio la noi tao loi doc chinh. Trang nay nhan mot audio da co qua
+ * `?audio=` de nguoi dung co the dat no vao video ma khong phai tai xuong va
+ * tai len lai. `/studio/video` va `/studio/subtitle` chi la duong dan tuong
+ * thich tro vao day.
  *
  * NGUON SU THAT: `VideoProject` o backend giu video/loi doc/phu de + cac
  * thong so cat-lech-am luong. Duong thoi gian la mot CACH NHIN cua ban ghi
@@ -48,7 +44,6 @@ import {
   type ClipAudio,
   type ClipVideo,
   type DangChon,
-  daiAudio,
   tongDai,
 } from "@/lib/media/timeline";
 import {
@@ -103,6 +98,7 @@ function MediaStudio() {
   const [loi, datLoi] = useState("");
   const [dangTai, datDangTai] = useState("");
   const [dangTaoTts, datDangTaoTts] = useState(false);
+  const [moTaoAudio, datMoTaoAudio] = useState(false);
   const [loiTts, datLoiTts] = useState("");
   const [dangXuat, datDangXuat] = useState(false);
   const [trangThaiXuat, datTrangThaiXuat] = useState("");
@@ -705,15 +701,20 @@ function MediaStudio() {
             onNhapPhuDe={(f) => void taiLen(f, "subtitles")}
             dangTai={dangTai}
           />
-          <TtsPanel
-            voices={voices}
-            giong={giong}
-            onGiong={datGiong}
-            dangTao={dangTaoTts}
-            loi={loiTts}
-            onTao={(y) => void taoTts(y)}
-            job={jobs.dangChay[0] ?? null}
-          />
+          <button className="btn btn-sm ms-audio-moi-nut" type="button" onClick={() => datMoTaoAudio(true)}>
+            + Tạo audio mới
+          </button>
+          {moTaoAudio ? (
+            <div className="ms-audio-moi" role="dialog" aria-modal="true" aria-label="Tạo audio mới">
+              <div className="ms-audio-moi-dau">
+                <strong>Tạo audio mới</strong>
+                <button className="btn btn-sm" type="button" onClick={() => datMoTaoAudio(false)}>Đóng</button>
+              </div>
+              <div className="ms-audio-moi-than">
+            <TtsPanel voices={voices} giong={giong} onGiong={datGiong} dangTao={dangTaoTts} loi={loiTts} onTao={(y) => void taoTts(y)} job={jobs.dangChay[0] ?? null} />
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="ms-giua">
@@ -783,12 +784,6 @@ function MediaStudio() {
         onThemSub={themSub}
         onXoaSub={boSub}
       />
-
-      {audio ? (
-        <p className="hint ms-chan">
-          Lời đọc dài {daiAudio(audio).toFixed(1)}s · kéo clip để đổi thời điểm bắt đầu.
-        </p>
-      ) : null}
     </div>
   );
 }

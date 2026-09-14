@@ -33,9 +33,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  IconClapper,
   IconCompass,
   IconFeather,
+  IconMic,
   IconSparkles,
 } from "@/components/Icons";
 
@@ -83,10 +83,10 @@ export const MUC_STUDIO: MucStudio[] = [
     icon: IconFeather,
   },
   {
-    href: "/studio/media",
-    nhan: "Media",
-    mo_ta: "Lời đọc, phụ đề và video trên một dòng thời gian.",
-    icon: IconClapper,
+    href: "/studio/audio",
+    nhan: "Audio",
+    mo_ta: "Tạo, nghe và tải lời đọc cho tác phẩm của bạn.",
+    icon: IconMic,
   },
   {
     href: "/studio/image",
@@ -105,7 +105,6 @@ export const MUC_STUDIO: MucStudio[] = [
  * ket 404 thi phai tim ra truoc da.
  */
 export const DUONG_CU: Record<string, string> = {
-  "/studio/audio": "/studio/media?mode=audio",
   "/studio/subtitle": "/studio/media?panel=subtitle",
   "/studio/video": "/studio/media",
   "/studio/write": "/studio/content?tab=write",

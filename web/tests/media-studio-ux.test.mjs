@@ -25,12 +25,12 @@ const chiMa = (s) =>
 
 /* ============================================================ dieu huong = */
 
-test("Studio primary nav chi con BON diem den cao cap, khong con Audio/Phu de/Video rieng", () => {
+test("Studio primary nav is audio-first; Media, Video and Subtitle stay contextual", () => {
   const s = shell();
   const order = [...s.matchAll(/href: "([^"]+)",\s*\n\s*nhan: "([^"]+)"/g)]
     .map((m) => m[1]);
-  assert.deepEqual(order, ["/studio", "/studio/content", "/studio/media", "/studio/image"]);
-  for (const cu of ["/studio/audio", "/studio/subtitle", "/studio/video",
+  assert.deepEqual(order, ["/studio", "/studio/content", "/studio/audio", "/studio/image"]);
+  for (const cu of ["/studio/media", "/studio/subtitle", "/studio/video",
                     "/studio/write", "/studio/translate", "/studio/library"]) {
     assert.ok(!order.includes(cu), `${cu} vẫn còn là điểm đến cấp cao`);
   }
@@ -38,13 +38,12 @@ test("Studio primary nav chi con BON diem den cao cap, khong con Audio/Phu de/Vi
 
 /* ================================================ tuong thich duong dan == */
 
-test("ca NAM duong dan cu deu chuyen huong dung dich", () => {
+test("only Video and Subtitle compatibility routes redirect to Media", () => {
   const s = shell();
   const map = {};
   for (const m of s.matchAll(/"(\/studio\/[a-z]+)": "([^"]+)"/g)) map[m[1]] = m[2];
 
   const kyVong = {
-    "/studio/audio": "/studio/media?mode=audio",
     "/studio/subtitle": "/studio/media?panel=subtitle",
     "/studio/video": "/studio/media",
     "/studio/write": "/studio/content?tab=write",
@@ -55,9 +54,8 @@ test("ca NAM duong dan cu deu chuyen huong dung dich", () => {
   }
 });
 
-test("moi trang chuyen huong THAT SU dung ChuyenHuong voi dung dich", () => {
+test("Audio is a real page; compatibility pages use ChuyenHuong", () => {
   const kyVong = {
-    "../src/app/studio/audio/page.tsx": "/studio/media?mode=audio",
     "../src/app/studio/subtitle/page.tsx": "/studio/media?panel=subtitle",
     "../src/app/studio/video/page.tsx": "/studio/media",
     "../src/app/studio/write/page.tsx": "/studio/content?tab=write",
@@ -70,6 +68,15 @@ test("moi trang chuyen huong THAT SU dung ChuyenHuong voi dung dich", () => {
     assert.match(src, new RegExp(`<ChuyenHuong den="${dich.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" />`),
       `${p} không trỏ tới "${dich}"`);
   }
+  const audio = read("../src/app/studio/audio/page.tsx");
+  assert.match(audio, /Audio Studio/);
+  assert.ok(!audio.includes("ChuyenHuong"));
+  assert.match(audio, /Chỉnh với video/);
+  assert.match(audio, /AudioPlayer/);
+  assert.match(audio, /\/studio\/media\?audio=\$\{encodeURIComponent\(a\.track_id\)\}/,
+    "Chỉnh với video phải mang đúng audio hiện có vào Media");
+  assert.match(read("../src/components/AudioPlayer.tsx"), /aria-label=\{`Tải xuống audio MP3:/,
+    "Audio gần đây phải có hành động tải xuống rõ ràng, dùng URL audio chuẩn");
 });
 
 test("ChuyenHuong giu nguyen tham so nguoi dung mang theo, dung replace khong dung push", () => {
@@ -88,6 +95,14 @@ test("che do chi-audio KHONG doi hoi video — nut Tao loi doc khong phu thuoc v
   // KHONG co dieu kien nao ve video trong ca tep.
   assert.match(panel, /const guiDuoc = soKyTu > 0 && !vuotTran && Boolean\(giong\) && !dangTao;/);
   assert.ok(!chiMa(panel).includes("video"), "TtsPanel không được biết gì về video");
+});
+
+test("Media Editor chi mo form Tao audio khi nguoi dung yeu cau", () => {
+  const trang = trangMedia();
+  assert.match(trang, /moTaoAudio/);
+  assert.match(trang, /role="dialog"/);
+  assert.match(trang, /\+ Tạo audio mới/);
+  assert.match(trang, /datMoTaoAudio\(true\)/);
 });
 
 test("ban tin chi-audio dua tren TRANG THAI THAT (!video), khong phai tham so URL da mat", () => {

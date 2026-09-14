@@ -93,13 +93,14 @@ export function AudioPlayer({
           </audio>
 
           <div className="row row-spread">
-            <span className="hint" role="status">
-              {ready ? "Sẵn sàng phát" : "Đang chuẩn bị…"}
+            <span className="hint" role="status" aria-label="Nghe audio">
+              {ready ? "Nghe" : "Đang chuẩn bị…"}
             </span>
             <a
               className="btn btn-sm"
               href={audio.downloadUrl}
               download={audioFileName(title)}
+              aria-label={`Tải xuống audio MP3: ${title}`}
             >
               <span aria-hidden="true">⬇</span> Tải MP3
             </a>

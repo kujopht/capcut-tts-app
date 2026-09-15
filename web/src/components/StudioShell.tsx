@@ -31,7 +31,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useLayoutEffect, useState } from "react";
+import { useState } from "react";
 import {
   IconCompass,
   IconFeather,
@@ -188,58 +188,15 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
   const tieuDe =
     !dangMo || dangMo.href === "/studio" ? "Xưởng sáng tác" : dangMo.nhan;
 
-  /*
-    Trinh soan Media chay o che do RANH: thanh ben co lai con hang icon, va
-    dau trang bien mat.
-
-    Ly do do duoc chieu ngang, khong phai tham my. Mot duong thoi gian can
-    moi pixel ngang no lay duoc; nhet no vao cot noi dung hep cua trang cong
-    cu cu se lam moi clip ngan toi muc khong bam trung. Dau trang cung di
-    theo vi trong mot trinh soan, cai to nhat tren man hinh phai la thu dang
-    sua chu khong phai ten cua san pham.
-  */
-  const cheDoRanh = pathname.startsWith("/studio/media");
-
-  /* Studio nam trong phan viewport con lai sau dock dieu huong that. */
-  useLayoutEffect(() => {
-    const root = document.documentElement;
-    const capNhat = () => {
-      const dock = document.querySelector<HTMLElement>(".site-header");
-      const top = dock?.getBoundingClientRect().bottom ?? 0;
-      root.style.setProperty("--studio-shell-height", `${Math.max(0, window.innerHeight - top)}px`);
-    };
-    document.body.classList.add("studio-app-active");
-    capNhat();
-    const observer = new ResizeObserver(capNhat);
-    const dock = document.querySelector<HTMLElement>(".site-header");
-    if (dock) observer.observe(dock);
-    window.addEventListener("resize", capNhat);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", capNhat);
-      document.body.classList.remove("studio-app-active");
-      root.style.removeProperty("--studio-shell-height");
-    };
-  }, []);
-
   return (
-    <div className={`page studio-page${cheDoRanh ? " studio-ranh" : ""}`}>
-      {/*
-        `<h1>` VA nut mo menu mobile LUON co mat, ke ca o che do ranh — trang
-        thieu mot tieu de la mot trang mat luoc do tai lieu cho trinh doc man
-        hinh, va duoi 900px `.studio-nav` chi hien khi `.studio-nav-mo` duoc
-        bat (xem CSS): bo nut nay se khoa nguoi dung mobile khoi MOI dieu
-        huong Studio khac, khong loi ra duoc khoi Media Studio. Cai bi bo o
-        che do ranh CHI la dong eyebrow "Fanfic Studio" — trang tri, khong
-        chuc nang.
-      */}
-      <header className={`studio-dau row row-spread${cheDoRanh ? " studio-dau-ranh" : ""}`}>
+    <div className="page studio-page">
+      {/* Tiêu đề và nút menu luôn hiện: trên mobile, đây là lối vào duy nhất
+          cho các điểm đến Studio khác. */}
+      <header className="studio-dau row row-spread">
         <div className="stack-2">
-          {cheDoRanh ? null : (
-            <span className="eyebrow eyebrow-icon">
-              <IconSparkles size={17} /> Fanfic Studio
-            </span>
-          )}
+          <span className="eyebrow eyebrow-icon">
+            <IconSparkles size={17} /> Fanfic Studio
+          </span>
           <h1 className="page-title studio-tieu-de">{tieuDe}</h1>
         </div>
         <button
@@ -269,12 +226,6 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
                 aria-current={dang ? "page" : undefined}
                 onClick={() => setMoMobile(false)}
                 prefetch={false}
-                /*
-                  O che do ranh chi con icon, nen `title` la thu DUY NHAT con
-                  noi duoc muc nay la gi khi ro chuot. Nhan chu van o lai
-                  trong DOM cho trinh doc man hinh — an bang CSS, khong bo di.
-                */
-                title={cheDoRanh ? nhan : undefined}
               >
                 <Icon size={17} />
                 <span className="studio-muc-nhan">{nhan}</span>

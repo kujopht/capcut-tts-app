@@ -77,6 +77,61 @@ function tenTuKhoa(khoa: string): string {
   return laHex ? "Video đã tải lên" : ten;
 }
 
+/**
+ * Media la buoc thu hai sau Audio, khong phai mot TTS Studio thu hai. Khong
+ * ve preview/timeline khi chua co video: day la luc nguoi dung can mot loi
+ * moi ro rang, khong phai mot trinh soan day cac panel trong.
+ */
+function KhoiDongMedia({
+  tenAudio,
+  dangTai,
+  onTaiVideo,
+}: {
+  tenAudio: string;
+  dangTai: boolean;
+  onTaiVideo: (file: File) => void;
+}) {
+  const nhapRef = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <section className="media-khoi-dong card stack-3" aria-labelledby="media-khoi-dong-title">
+      <span className="eyebrow">VIDEO EDITOR</span>
+      <div className="stack-2">
+        <h2 className="section-title" id="media-khoi-dong-title">Thêm video để bắt đầu chỉnh</h2>
+        <p className="hint">
+          {tenAudio
+            ? <>Audio <strong>{tenAudio}</strong> đã sẵn sàng. Chọn video để mở trình chỉnh sửa.</>
+            : "Chọn video trước, rồi thêm một audio có sẵn hoặc quay lại Audio Studio để tạo lời đọc."}
+        </p>
+      </div>
+      <div className="row">
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => nhapRef.current?.click()}
+          disabled={dangTai}
+        >
+          {dangTai ? "Đang tải video…" : "+ Tải video"}
+        </button>
+        <Link className="btn btn-ghost" href="/studio/audio" prefetch={false}>Quay lại Audio Studio</Link>
+      </div>
+      <input
+        ref={nhapRef}
+        type="file"
+        accept="video/mp4,video/quicktime,video/webm,video/x-matroska"
+        className="an-hoan-toan"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onTaiVideo(file);
+          event.target.value = "";
+        }}
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+    </section>
+  );
+}
+
 function MediaStudio() {
   const router = useRouter();
   const params = useSearchParams();
@@ -685,6 +740,16 @@ function MediaStudio() {
   if (dangNap) return <Loading />;
   if (loi) return <ErrorState message={loi} onRetry={() => window.location.reload()} />;
 
+  if (!video) {
+    return (
+      <KhoiDongMedia
+        tenAudio={audio?.nhan || ""}
+        dangTai={dangTai === "video"}
+        onTaiVideo={(file) => void taiLen(file, "video")}
+      />
+    );
+  }
+
   return (
     <div className="ms">
       <div className="ms-tren">
@@ -718,21 +783,6 @@ function MediaStudio() {
         </div>
 
         <div className="ms-giua">
-          {/*
-            Dieu kien CHI con la `!video` — bo phan `cheDoAudio` (tu
-            `?mode=audio`). Tham so URL bi tieu thu va xoa khoi thanh dia chi
-            ngay sau khi du an duoc tao (xem hieu ung khoi dong: doi sang
-            `?project=`), nen ban tin se BIEN MAT sau lan render dau tien du
-            trang thai THAT (chua co video) khong doi — dung luc nguoi dung
-            can loi trac an nay nhat. `!video` mot minh phan anh dung tinh
-            trang hien tai, bat ke nguoi dung toi day bang duong nao.
-          */}
-          {!video ? (
-            <p className="hint ms-bang-tin">
-              Chế độ chỉ âm thanh. Tạo lời đọc rồi tải xuống — hoặc thêm video
-              bất cứ lúc nào, lời đọc vẫn giữ nguyên.
-            </p>
-          ) : null}
           <Preview
             video={video}
             audio={audio}

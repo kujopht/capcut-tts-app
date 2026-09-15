@@ -8550,7 +8550,7 @@ button.cq-the:hover { background: #ffffff0a; }
 .audio-item + .audio-item { margin-top:var(--s2); }
 .audio-item > .btn { align-self:flex-end; }
 @media (min-width: 901px) {
-  .audio-studio { height:100%; min-height:0; grid-template-rows:auto minmax(0,1fr); }
+  .audio-studio { height:100%; min-height:0; grid-template-rows:auto minmax(0,1fr); align-items:stretch; }
   .audio-create-pane,.audio-recent { min-height:0; overflow-y:auto; padding-right:var(--s1); }
   .audio-recent { scrollbar-width:thin; scrollbar-color:var(--kinh-vien) transparent; }
 }
@@ -8574,7 +8574,7 @@ button.cq-the:hover { background: #ffffff0a; }
   .studio-ranh .studio-muc { justify-content:center; padding:10px 0; }
   .studio-ranh .studio-muc-nhan { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
   .studio-ranh .ms { height:100%; box-sizing:border-box; display:grid; grid-template-rows:minmax(0,1fr) clamp(180px,28vh,260px); overflow:hidden; }
-  .studio-ranh .ms-tren { min-height:0; grid-template-columns:240px minmax(0,1fr) 280px; }
+  .studio-ranh .ms-tren { min-height:0; grid-template-columns:240px minmax(0,1fr) 280px; align-items:stretch; }
   .studio-ranh .ms-trai,.studio-ranh .insp { overflow:auto; min-height:0; }
   .studio-ranh .mp-khung { max-height:calc(100dvh - 420px); }
   .studio-ranh .tl { min-height:0; overflow:hidden; }

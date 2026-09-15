@@ -88,22 +88,23 @@ test("Audio co loi vao Media tuy chon ca khi chua chon audio", () => {
     "thẻ audio có sẵn vẫn phải mang đúng track_id sang Media");
 });
 
-test("Studio desktop la app shell; workspace va Recent Audio tu cuon noi bo", () => {
+test("Studio dung page flow tu nhien, khong khoa chieu cao hay ep scroll noi bo", () => {
   const s = css();
-  assert.match(s, /body\.studio-app-active \.site-footer \{ display: none; \}/);
-  assert.match(s, /height: var\(--studio-shell-height,/);
-  assert.match(s, /\.studio-than \{ min-height: 0; overflow: auto; \}/);
-  assert.match(s, /\.audio-create-pane,\.audio-recent \{ min-height:0; overflow-y:auto;/);
-  assert.match(s, /\.audio-studio \{ height:100%; min-height:0; grid-template-rows:auto minmax\(0,1fr\); align-items:stretch; \}/);
+  const sach = chiMa(s);
+  assert.match(sach, /\.studio-page \{[\s\S]*max-width: 1240px;[\s\S]*margin-inline: auto;/);
+  assert.ok(!sach.includes("studio-app-active"));
+  assert.ok(!sach.includes("--studio-shell-height"));
+  assert.ok(!/\.studio-than\s*\{[^}]*overflow:\s*auto/.test(sach));
+  assert.ok(!/\.audio-create-pane,\.audio-recent\s*\{[^}]*overflow-y:\s*auto/.test(sach));
 });
 
-test("Media desktop nam trong cung shell va panel/timeline tu cuon", () => {
+test("Media giu bo cuc chuyen dung nhung khong dung rail hay viewport shell", () => {
   const s = css();
-  assert.match(s, /\.studio-ranh \.studio-than \{ overflow: hidden; \}/);
-  assert.match(s, /\.studio-ranh \.ms \{ height:100%;[\s\S]*overflow:hidden;/);
-  assert.match(s, /\.studio-ranh \.ms-tren \{ min-height:0; grid-template-columns:240px minmax\(0,1fr\) 280px; align-items:stretch; \}/);
-  assert.match(s, /\.studio-ranh \.ms-trai,\.studio-ranh \.insp \{ overflow:auto; min-height:0; \}/);
-  assert.match(s, /\.studio-ranh \.tl-cuon \{ overflow-x: auto; overflow-y: auto; min-height: 0; \}/);
+  const sach = chiMa(s);
+  assert.ok(!sach.includes("studio-ranh"));
+  assert.match(sach, /\.ms-tren\s*\{[\s\S]*grid-template-columns: 260px minmax\(0, 1fr\) 280px;/);
+  assert.match(sach, /\.tl-cuon\s*\{ overflow-x: auto; overflow-y: hidden; \}/,
+    "timeline van duoc phep cuon ngang mot cach co chu dich");
 });
 
 test("ChuyenHuong giu nguyen tham so nguoi dung mang theo, dung replace khong dung push", () => {
@@ -132,19 +133,13 @@ test("Media Editor chi mo form Tao audio khi nguoi dung yeu cau", () => {
   assert.match(trang, /datMoTaoAudio\(true\)/);
 });
 
-test("ban tin chi-audio dua tren TRANG THAI THAT (!video), khong phai tham so URL da mat", () => {
-  /*
-    Loi that tu QA trinh duyet: ban tin chi con dieu kien `cheDoAudio &&
-    !video`, va `cheDoAudio` doc tu `?mode=audio`. Tham so do bi TIEU THU VA
-    XOA khoi URL ngay sau khi du an duoc tao (doi sang `?project=<id>` —
-    xem hieu ung khoi dong), nen ban tin BIEN MAT sau lan render dau tien du
-    trang thai THAT (chua co video) khong doi — dung luc nguoi dung can loi
-    trac an nay nhat. Dieu kien phai la `!video` mot minh.
-  */
+test("Media chỉ mở editor sau khi có video; trước đó hiển thị onboarding", () => {
   const trang = trangMedia();
-  assert.ok(!chiMa(trang).includes("cheDoAudio"),
-    "vẫn còn biến cheDoAudio đọc từ tham số URL đã bị tiêu thụ");
-  assert.match(trang, /\{!video \? \(\s*<p className="hint ms-bang-tin">/);
+  assert.match(trang, /function KhoiDongMedia\(/);
+  assert.match(trang, /if \(!video\) \{\s*return \(\s*<KhoiDongMedia/);
+  assert.match(trang, /onTaiVideo=\{\(file\) => void taiLen\(file, "video"\)\}/,
+    "onboarding phải dùng đúng luồng upload video hiện có");
+  assert.match(trang, /accept="video\/mp4,video\/quicktime,video\/webm,video\/x-matroska"/);
 });
 
 test("xem truoc CHI-AUDIO khong bat buoc video — Preview ve duoc khi chi co audio", () => {
@@ -272,9 +267,9 @@ test("phu de sua xong duoc GHI len backend (thanh mot MediaAsset SRT moi)", () =
   assert.match(than, /subtitle_asset_id: r\.asset\.asset_id,/);
 });
 
-/* ================================================ h1 + nav o che do ranh = */
+/* ======================================================== h1 + nav ===== */
 
-test("che do RANH cua Media Studio VAN giu <h1> VA nut mo menu mobile", () => {
+test("Studio giữ h1 và nút mở menu mobile trong page flow thường", () => {
   /*
     Loi that tu QA trinh duyet: ban dau che do ranh an CA header, keo theo
     mat luon <h1> (trang khong con tieu de nao cho trinh doc man hinh) VA
@@ -293,13 +288,13 @@ test("che do RANH cua Media Studio VAN giu <h1> VA nut mo menu mobile", () => {
     !/\{cheDoRanh \? null : \(\s*<button/.test(than),
     "nút mở menu mobile không được ẩn ở chế độ ranh",
   );
-  assert.match(than, /\{cheDoRanh \? null : \(\s*<span className="eyebrow/,
-    "chỉ được phép ẩn dòng eyebrow trang trí ở chế độ ranh");
+  assert.match(than, /<span className="eyebrow eyebrow-icon">/,
+    "dòng nhận diện Studio luôn hiện trong bố cục trang bình thường");
 });
 
-/* ========================================= khung ranh sup tren mobile === */
+/* =========================================================== mobile ===== */
 
-test("khung 52px cua che do RANH CHI ap dung tu 901px — khong sup tren mobile", () => {
+test("Studio mobile đổi sang một cột, không có desktop rail ẩn nhãn", () => {
   /*
     Loi that tu QA trinh duyet, sau MOT lop sua khac (thu tu cascade) van
     con: `.studio-ranh .studio-khung { grid-template-columns: 52px minmax(0,
@@ -320,11 +315,8 @@ test("khung 52px cua che do RANH CHI ap dung tu 901px — khong sup tren mobile"
   // Bo chu thich TRUOC khi tim — chinh chu thich giai thich loi nay co chua
   // nguyen van chuoi selector de doi chieu.
   const sach = chiMa(css());
-  const at = sach.indexOf(".studio-ranh .studio-khung");
-  assert.notEqual(at, -1, "thiếu luật khung rail của chế độ ranh");
-  const truoc = sach.slice(Math.max(0, at - 200), at);
-  assert.match(truoc, /@media \(min-width: 901px\) \{/,
-    "khung 52px của chế độ ranh phải nằm trong @media (min-width: 901px) — không được áp dụng vô điều kiện");
+  assert.ok(!sach.includes("studio-ranh"));
+  assert.match(sach, /@media \(max-width: 900px\) \{[\s\S]*\.studio-khung \{ grid-template-columns: minmax\(0, 1fr\); \}/);
 });
 
 /* ============================================== nguon media bin dung ==== */

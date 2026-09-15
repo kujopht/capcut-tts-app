@@ -6128,7 +6128,12 @@ body.co-mini { padding-bottom: 74px; }
    Chung khac nhau o MAU, va chi o mau: khu quan tri phu mot lop toi de dim
    hoa van trang chu xuong (`.admin-page::before`), con Studio thi khong —
    day la cho nguoi dung sang tac, no duoc phep giu khong khi cua san pham. */
-.studio-page { max-width: 1240px; position: relative; }
+.studio-page {
+  width: min(1240px, calc(100% - 2 * var(--s5)));
+  max-width: 1240px;
+  margin-inline: auto;
+  position: relative;
+}
 .studio-dau { margin-bottom: var(--s5); }
 .studio-tieu-de { font-size: var(--t-xl); }
 
@@ -6175,31 +6180,6 @@ body.co-mini { padding-bottom: 74px; }
 .studio-muc[aria-current="page"] svg { color: var(--brand-hover); }
 
 .studio-than { min-width: 0; }
-
-/* Desktop Studio is an app frame. StudioShell measures the real global dock
-   and sets --studio-shell-height, so only workspaces/panels—not the document—
-   scroll. Mobile keeps normal page scrolling for touch usability. */
-@media (min-width: 901px) {
-  body.studio-app-active { display: flow-root; }
-  body.studio-app-active .site-footer { display: none; }
-  body.studio-app-active main { min-height: 0; }
-  .studio-page {
-    box-sizing: border-box;
-    width: min(1240px, calc(100% - 2 * var(--s5)));
-    height: var(--studio-shell-height, calc(100dvh - 82px));
-    margin: 0 auto;
-    padding: var(--s4) 0;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: var(--s3);
-    overflow: hidden;
-  }
-  .studio-dau { min-height: 0; margin: 0; }
-  .studio-khung { min-height: 0; height: 100%; align-items: stretch; }
-  .studio-nav { min-height: 0; height: auto; overflow-y: auto; }
-  .studio-than { min-height: 0; overflow: auto; }
-  .studio-ranh .studio-than { overflow: hidden; }
-}
 
 /* Vo NGOAI cua mot trang cong cu khi no nam trong khung Studio.
    Thay cho `.page`: giu dung cach xep chong doc va khoang cach, nhung BO
@@ -8491,8 +8471,6 @@ button.cq-the:hover { background: #ffffff0a; }
 
 /* Khi dang o trinh soan, thanh ben co lai con hang icon, va dau trang
    thu gon (bo dong eyebrow trang tri, giu <h1> + nut menu mobile). */
-.studio-dau-ranh { margin-bottom: var(--s3); }
-.studio-dau-ranh .studio-tieu-de { font-size: var(--t-lg); }
 
 /*
   LOI THAT DA XAY RA, bat qua QA trinh duyet: `.studio-ranh .studio-khung`
@@ -8517,21 +8495,6 @@ button.cq-the:hover { background: #ffffff0a; }
   `.studio-nav-mo`), va o do nguoi dung can THAY CHU nhu moi trang Studio
   khac, khong phai mot hang icon khong nhan.
 */
-@media (min-width: 901px) {
-  .studio-ranh .studio-khung { grid-template-columns: 52px minmax(0, 1fr); gap: var(--s3); }
-  .studio-ranh .studio-nav { top: 12px; padding: 6px; }
-  .studio-ranh .studio-muc { justify-content: center; padding: 10px 0; }
-  .studio-ranh .studio-muc-nhan {
-    /* An bang CSS chu KHONG bo khoi DOM: trinh doc man hinh van doc duoc. */
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-}
-
 .ms {
   display: flex;
   flex-direction: column;
@@ -8549,11 +8512,7 @@ button.cq-the:hover { background: #ffffff0a; }
 .audio-item { display:flex; flex-direction:column; align-items:stretch; gap:var(--s2); padding:var(--s3); border:1px solid var(--kinh-vien); border-radius:var(--r2); background:#080a14b8; }
 .audio-item + .audio-item { margin-top:var(--s2); }
 .audio-item > .btn { align-self:flex-end; }
-@media (min-width: 901px) {
-  .audio-studio { height:100%; min-height:0; grid-template-rows:auto minmax(0,1fr); align-items:stretch; }
-  .audio-create-pane,.audio-recent { min-height:0; overflow-y:auto; padding-right:var(--s1); }
-  .audio-recent { scrollbar-width:thin; scrollbar-color:var(--kinh-vien) transparent; }
-}
+.media-khoi-dong { max-width: 720px; margin: var(--s5) auto; }
 .ms-audio-moi-nut { margin: var(--s2); }
 .ms-audio-moi { position: fixed; z-index: 40; inset: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) auto auto; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: hidden; border: 1px solid var(--kinh-vien); border-radius: var(--r2); background: var(--nen-2); }
 .ms-audio-moi-dau { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: var(--s3); border-bottom: 1px solid var(--kinh-vien); }
@@ -8564,21 +8523,6 @@ button.cq-the:hover { background: #ffffff0a; }
   grid-template-columns: 260px minmax(0, 1fr) 280px;
   gap: var(--s3);
   align-items: start;
-}
-@media (min-width:1101px) {
-  .studio-page.studio-ranh { max-width:none; }
-  .studio-ranh .studio-khung { height:100%; grid-template-columns:56px minmax(0,1fr); gap:var(--s2); }
-  .studio-ranh .studio-than { height:100%; min-height:0; }
-  .studio-ranh .studio-dau { display:none; }
-  .studio-ranh .studio-nav { top:0; height:100%; border-radius:var(--r2); padding:var(--s1); }
-  .studio-ranh .studio-muc { justify-content:center; padding:10px 0; }
-  .studio-ranh .studio-muc-nhan { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
-  .studio-ranh .ms { height:100%; box-sizing:border-box; display:grid; grid-template-rows:minmax(0,1fr) clamp(180px,28vh,260px); overflow:hidden; }
-  .studio-ranh .ms-tren { min-height:0; grid-template-columns:240px minmax(0,1fr) 280px; align-items:stretch; }
-  .studio-ranh .ms-trai,.studio-ranh .insp { overflow:auto; min-height:0; }
-  .studio-ranh .mp-khung { max-height:calc(100dvh - 420px); }
-  .studio-ranh .tl { min-height:0; overflow:hidden; }
-  .studio-ranh .tl-cuon { overflow-x: auto; overflow-y: auto; min-height: 0; }
 }
 .ms-trai { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
 .ms-giua { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }

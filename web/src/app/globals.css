@@ -6176,6 +6176,31 @@ body.co-mini { padding-bottom: 74px; }
 
 .studio-than { min-width: 0; }
 
+/* Desktop Studio is an app frame. StudioShell measures the real global dock
+   and sets --studio-shell-height, so only workspaces/panels—not the document—
+   scroll. Mobile keeps normal page scrolling for touch usability. */
+@media (min-width: 901px) {
+  body.studio-app-active { display: flow-root; }
+  body.studio-app-active .site-footer { display: none; }
+  body.studio-app-active main { min-height: 0; }
+  .studio-page {
+    box-sizing: border-box;
+    width: min(1240px, calc(100% - 2 * var(--s5)));
+    height: var(--studio-shell-height, calc(100dvh - 82px));
+    margin: 0 auto;
+    padding: var(--s4) 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--s3);
+    overflow: hidden;
+  }
+  .studio-dau { min-height: 0; margin: 0; }
+  .studio-khung { min-height: 0; height: 100%; align-items: stretch; }
+  .studio-nav { min-height: 0; height: auto; overflow-y: auto; }
+  .studio-than { min-height: 0; overflow: auto; }
+  .studio-ranh .studio-than { overflow: hidden; }
+}
+
 /* Vo NGOAI cua mot trang cong cu khi no nam trong khung Studio.
    Thay cho `.page`: giu dung cach xep chong doc va khoang cach, nhung BO
    `padding` dau trang va hoat anh vao-trang — khung da lam ca hai mot lan roi,
@@ -8517,11 +8542,18 @@ button.cq-the:hover { background: #ffffff0a; }
   border-radius: var(--r3);
   padding: var(--s3);
 }
-.audio-studio { display:grid; grid-template-columns:minmax(0,680px) minmax(240px,1fr); gap:var(--s5); align-items:start; }
-.audio-studio-intro { grid-column:1 / -1; }
+.audio-studio { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,0.9fr); gap:var(--s5); align-items:start; }
+.audio-studio-intro { grid-column:1 / -1; display:flex; align-items:end; justify-content:space-between; gap:var(--s3); }
 .audio-studio h2 { margin:0 0 var(--s2); }
-.audio-recent { min-width:0; }
-.audio-item { display:flex; align-items:center; justify-content:space-between; gap:var(--s2); padding:var(--s2); border-bottom:1px solid var(--kinh-vien); }
+.audio-create-pane,.audio-recent { min-width:0; }
+.audio-item { display:flex; flex-direction:column; align-items:stretch; gap:var(--s2); padding:var(--s3); border:1px solid var(--kinh-vien); border-radius:var(--r2); background:#080a14b8; }
+.audio-item + .audio-item { margin-top:var(--s2); }
+.audio-item > .btn { align-self:flex-end; }
+@media (min-width: 901px) {
+  .audio-studio { height:100%; min-height:0; grid-template-rows:auto minmax(0,1fr); align-items:stretch; }
+  .audio-create-pane,.audio-recent { min-height:0; overflow-y:auto; padding-right:var(--s1); }
+  .audio-recent { scrollbar-width:thin; scrollbar-color:var(--kinh-vien) transparent; }
+}
 .ms-audio-moi-nut { margin: var(--s2); }
 .ms-audio-moi { position: fixed; z-index: 40; inset: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) auto auto; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: hidden; border: 1px solid var(--kinh-vien); border-radius: var(--r2); background: var(--nen-2); }
 .ms-audio-moi-dau { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: var(--s3); border-bottom: 1px solid var(--kinh-vien); }
@@ -8534,7 +8566,7 @@ button.cq-the:hover { background: #ffffff0a; }
   align-items: start;
 }
 @media (min-width:1101px) {
-  .studio-page.studio-ranh { max-width:none; height:calc(100dvh - 96px); }
+  .studio-page.studio-ranh { max-width:none; }
   .studio-ranh .studio-khung { height:100%; grid-template-columns:56px minmax(0,1fr); gap:var(--s2); }
   .studio-ranh .studio-than { height:100%; min-height:0; }
   .studio-ranh .studio-dau { display:none; }
@@ -8542,7 +8574,7 @@ button.cq-the:hover { background: #ffffff0a; }
   .studio-ranh .studio-muc { justify-content:center; padding:10px 0; }
   .studio-ranh .studio-muc-nhan { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
   .studio-ranh .ms { height:100%; box-sizing:border-box; display:grid; grid-template-rows:minmax(0,1fr) clamp(180px,28vh,260px); overflow:hidden; }
-  .studio-ranh .ms-tren { min-height:0; grid-template-columns:240px minmax(0,1fr) 280px; }
+  .studio-ranh .ms-tren { min-height:0; grid-template-columns:240px minmax(0,1fr) 280px; align-items:stretch; }
   .studio-ranh .ms-trai,.studio-ranh .insp { overflow:auto; min-height:0; }
   .studio-ranh .mp-khung { max-height:calc(100dvh - 420px); }
   .studio-ranh .tl { min-height:0; overflow:hidden; }

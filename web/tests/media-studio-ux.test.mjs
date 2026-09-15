@@ -79,6 +79,33 @@ test("Audio is a real page; compatibility pages use ChuyenHuong", () => {
     "Audio gần đây phải có hành động tải xuống rõ ràng, dùng URL audio chuẩn");
 });
 
+test("Audio co loi vao Media tuy chon ca khi chua chon audio", () => {
+  const audio = read("../src/app/studio/audio/page.tsx");
+  assert.match(audio, /\+ Thêm video để chỉnh/);
+  assert.match(audio, /href="\/studio\/media"/,
+    "CTA không được đòi audio_id mới vào được Media");
+  assert.match(audio, /\/studio\/media\?audio=\$\{encodeURIComponent\(a\.track_id\)\}/,
+    "thẻ audio có sẵn vẫn phải mang đúng track_id sang Media");
+});
+
+test("Studio desktop la app shell; workspace va Recent Audio tu cuon noi bo", () => {
+  const s = css();
+  assert.match(s, /body\.studio-app-active \.site-footer \{ display: none; \}/);
+  assert.match(s, /height: var\(--studio-shell-height,/);
+  assert.match(s, /\.studio-than \{ min-height: 0; overflow: auto; \}/);
+  assert.match(s, /\.audio-create-pane,\.audio-recent \{ min-height:0; overflow-y:auto;/);
+  assert.match(s, /\.audio-studio \{ height:100%; min-height:0; grid-template-rows:auto minmax\(0,1fr\); align-items:stretch; \}/);
+});
+
+test("Media desktop nam trong cung shell va panel/timeline tu cuon", () => {
+  const s = css();
+  assert.match(s, /\.studio-ranh \.studio-than \{ overflow: hidden; \}/);
+  assert.match(s, /\.studio-ranh \.ms \{ height:100%;[\s\S]*overflow:hidden;/);
+  assert.match(s, /\.studio-ranh \.ms-tren \{ min-height:0; grid-template-columns:240px minmax\(0,1fr\) 280px; align-items:stretch; \}/);
+  assert.match(s, /\.studio-ranh \.ms-trai,\.studio-ranh \.insp \{ overflow:auto; min-height:0; \}/);
+  assert.match(s, /\.studio-ranh \.tl-cuon \{ overflow-x: auto; overflow-y: auto; min-height: 0; \}/);
+});
+
 test("ChuyenHuong giu nguyen tham so nguoi dung mang theo, dung replace khong dung push", () => {
   const src = read("../src/components/studio/ChuyenHuong.tsx");
   assert.match(src, /router\.replace\(/, "phải dùng replace, không phải push");

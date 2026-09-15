@@ -45,7 +45,7 @@ const MAX_CHARS = 20_000;
 const CANH_BAO_TAI = 0.85;
 
 export function TtsPanel({
-  voices, giong, onGiong, dangTao, loi, onTao, job,
+  voices, giong, onGiong, dangTao, loi, onTao, job, initialDraft,
 }: {
   voices: Voice[];
   giong: string;
@@ -59,10 +59,12 @@ export function TtsPanel({
    * san pham la hai cho ke chuyen khac nhau.
    */
   job: TtsJob | null;
+  initialDraft?: { tieuDe?: string; vanBan?: string; tocDo?: string } | null;
 }) {
-  const [tieuDe, datTieuDe] = useState("");
-  const [vanBan, datVanBan] = useState("");
-  const [tocDo, datTocDo] = useState("1.0");
+  const [tieuDe, datTieuDe] = useState(initialDraft?.tieuDe ?? "");
+  const [vanBan, datVanBan] = useState(initialDraft?.vanBan ?? "");
+  const [tocDo, datTocDo] = useState(initialDraft?.tocDo ?? "1.0");
+
 
   /*
     Hai nhom, va nhom "de xuat" dung TRUOC — thu tu trong do do MAY CHU cap

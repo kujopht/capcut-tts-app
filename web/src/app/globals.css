@@ -256,7 +256,6 @@ body {
   line-height: var(--lh-normal);
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
-  overflow-x: clip;
 }
 
 /* ==================================================== tranh nen theo trang */
@@ -6138,6 +6137,7 @@ body.co-mini { padding-bottom: 74px; }
   max-width: 1440px;
   margin-inline: auto;
   position: relative;
+  overflow-x: clip;
 }
 .studio-dau {
   margin-bottom: var(--s3);

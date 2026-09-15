@@ -111,3 +111,34 @@ test("P1-04: VietTruyen renders explicit EmptyState login prompt for unauthentic
   assert.match(src, /<EmptyState[\s\S]*?icon="✍️"[\s\S]*?title="Đăng nhập để bắt đầu viết truyện"/);
   assert.match(src, /loginHref\("\/studio\/content"\)/);
 });
+
+/* ============================================== Hardening: Overflow Scoping & Session Race */
+
+test("Hardening: global body does NOT use overflow-x: clip; clipping is scoped to .studio-page", () => {
+  const s = chiMa(css());
+  // body must not have overflow-x: clip
+  assert.ok(!/body\s*\{[^}]*overflow-x:\s*clip/m.test(s),
+    "body must not have global overflow-x: clip");
+  // .studio-page must have overflow-x: clip
+  assert.match(s, /\.studio-page\s*\{[^}]*overflow-x:\s*clip;/m,
+    ".studio-page must scope overflow-x: clip to Studio");
+});
+
+test("Hardening: AudioStudio prevents session hydration race and does not prematurely redirect", () => {
+  const src = audio();
+  // Uses sessionLoading from useSession
+  assert.match(src, /loading:\s*sessionLoading/);
+  // Awaits session resolution rather than blindly redirecting on !profile
+  assert.match(src, /if\s*\(sessionLoading\)/);
+  // Recent section differentiates sessionLoading from confirmed unauthenticated
+  assert.match(src, /sessionLoading\s*\?[\s\S]*?Đang tải danh sách audio/);
+});
+
+test("Hardening: AudioStudio draft flow handles all 4 fields and purges draft on restore to prevent resurrection", () => {
+  const src = audio();
+  // Draft persistence saves all 4 fields
+  assert.match(src, /JSON\.stringify\(\{\s*tieuDe,\s*vanBan,\s*giong,\s*tocDo\s*\}\)/);
+  // layBanNhap removes draft immediately on read
+  assert.match(src, /sessionStorage\.removeItem\("fanfic_audio_draft"\)/);
+});
+

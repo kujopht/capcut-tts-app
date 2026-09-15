@@ -2,41 +2,77 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { TtsPanel } from "@/components/media/TtsPanel";
 import { AudioPlayer } from "@/components/AudioPlayer";
-import { api, videoStudio, type TtsJob, type VideoAudioChoice, type Voice } from "@/lib/api";
+import { api, getToken, videoStudio, type Profile, type TtsJob, type VideoAudioChoice, type Voice } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { defaultVoiceId } from "@/lib/voices";
 import { ensureStudioNovel } from "@/lib/workspace";
 import { useJobTracker } from "@/lib/useJobTracker";
 import { loginHref } from "@/lib/nav";
 
-function layBanNhap(): { tieuDe?: string; vanBan?: string; giong?: string; tocDo?: string } | null {
+interface AudioDraft {
+  tieuDe?: string;
+  vanBan?: string;
+  giong?: string;
+  tocDo?: string;
+}
+
+let initialDraftCached: AudioDraft | null = null;
+let initialDraftLoaded = false;
+
+function getInitialDraft(): AudioDraft | null {
   if (typeof window === "undefined") return null;
+  if (initialDraftLoaded) return initialDraftCached;
+  initialDraftLoaded = true;
   try {
-    const saved = sessionStorage.getItem("fanfic_audio_draft");
-    if (saved) {
+    const raw = sessionStorage.getItem("fanfic_audio_draft");
+    if (raw) {
       sessionStorage.removeItem("fanfic_audio_draft");
-      const parsed = JSON.parse(saved);
-      if (parsed && typeof parsed === "object") return parsed;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        initialDraftCached = parsed as AudioDraft;
+        return initialDraftCached;
+      }
     }
   } catch {
-    // ignore storage access errors
+    // ignore
   }
+  initialDraftCached = null;
   return null;
 }
+
+const emptySubscribe = () => () => {};
+const getServerSnapshot = () => null;
 
 /** Audio is deliberately a focused primary surface. Media is an opt-in next step. */
 export default function AudioStudio() {
   const router = useRouter();
-  const { profile } = useSession();
-  const [draft] = useState(layBanNhap);
+  const { profile, loading: sessionLoading } = useSession();
+
+  const draft = useSyncExternalStore(
+    emptySubscribe,
+    getInitialDraft,
+    getServerSnapshot,
+  );
+
   const [voices, setVoices] = useState<Voice[]>([]);
   const [voice, setVoice] = useState(() => draft?.giong ?? "");
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState(() => (draft ? "Đã khôi phục bản nháp của bạn." : ""));
   const [recent, setRecent] = useState<VideoAudioChoice[]>([]);
+
+  const sessionWaiters = useRef<Array<(p: Profile | null) => void>>([]);
+
+  useEffect(() => {
+    if (!sessionLoading) {
+      while (sessionWaiters.current.length > 0) {
+        const resolve = sessionWaiters.current.shift();
+        resolve?.(profile);
+      }
+    }
+  }, [sessionLoading, profile]);
 
   const refresh = async () => {
     const r = await videoStudio.audioLibrary().catch(() => ({ tracks: [] }));
@@ -63,7 +99,7 @@ export default function AudioStudio() {
       const v = await api.voices().catch(() => ({ voices: [] as Voice[] }));
       if (!mounted) return;
       setVoices(v.voices);
-      setVoice((curr) => curr || defaultVoiceId(v.voices));
+      setVoice((curr) => curr || draft?.giong || defaultVoiceId(v.voices));
       if (profile) {
         await refresh();
         const j = await api.listJobs().catch(() => ({ jobs: [] as TtsJob[] }));
@@ -74,10 +110,29 @@ export default function AudioStudio() {
     return () => {
       mounted = false;
     };
-  }, [profile, khoiPhuc]);
+  }, [profile, khoiPhuc, draft]);
 
   const create = async ({ tieuDe, vanBan, giong, tocDo }: { tieuDe: string; vanBan: string; giong: string; tocDo: string }) => {
-    if (!profile) {
+    let activeProfile = profile;
+    if (sessionLoading) {
+      setCreating(true);
+      activeProfile = await new Promise<Profile | null>((resolve) => {
+        if (typeof window !== "undefined" && !getToken()) {
+          resolve(null);
+          return;
+        }
+        const timer = setTimeout(() => {
+          resolve(profile);
+        }, 5000);
+        sessionWaiters.current.push((p) => {
+          clearTimeout(timer);
+          resolve(p);
+        });
+      });
+    }
+
+    if (!activeProfile) {
+      setCreating(false);
       try {
         sessionStorage.setItem("fanfic_audio_draft", JSON.stringify({ tieuDe, vanBan, giong, tocDo }));
       } catch {
@@ -114,11 +169,12 @@ export default function AudioStudio() {
       </div>
       <div className="audio-create-pane">
         <TtsPanel
+          key={draft ? "restored-draft" : "fresh"}
           voices={voices}
-          giong={voice}
+          giong={voice || draft?.giong || ""}
           onGiong={setVoice}
           dangTao={creating}
-          loi={notice}
+          loi={notice || (draft ? "Đã khôi phục bản nháp của bạn." : "")}
           onTao={create}
           job={jobs.dangChay[0] ?? null}
           initialDraft={draft}
@@ -127,7 +183,11 @@ export default function AudioStudio() {
       <section className="audio-recent">
         <h2>Audio gần đây</h2>
         <p className="hint">Nghe, tải xuống hoặc mở một bản có sẵn trong Media Editor.</p>
-        {!profile ? (
+        {sessionLoading ? (
+          <div className="card stack-2" style={{ padding: "var(--s3)", marginTop: "var(--s2)", textAlign: "center" }}>
+            <p className="hint">Đang tải danh sách audio…</p>
+          </div>
+        ) : !profile ? (
           <div className="card stack-2" style={{ padding: "var(--s3)", marginTop: "var(--s2)", textAlign: "center" }}>
             <p className="hint">Đăng nhập để xem và quản lý danh sách audio bạn đã tạo.</p>
             <Link className="btn btn-sm btn-primary" href={loginHref("/studio/audio")} prefetch={false} style={{ alignSelf: "center" }}>

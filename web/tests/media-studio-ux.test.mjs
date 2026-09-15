@@ -91,11 +91,14 @@ test("Audio co loi vao Media tuy chon ca khi chua chon audio", () => {
 test("Studio dung page flow tu nhien, khong khoa chieu cao hay ep scroll noi bo", () => {
   const s = css();
   const sach = chiMa(s);
-  assert.match(sach, /\.studio-page \{[\s\S]*max-width: 1240px;[\s\S]*margin-inline: auto;/);
+  assert.match(sach, /\.studio-page \{[\s\S]*max-width: 1440px;[\s\S]*margin-inline: auto;/);
   assert.ok(!sach.includes("studio-app-active"));
   assert.ok(!sach.includes("--studio-shell-height"));
   assert.ok(!/\.studio-than\s*\{[^}]*overflow:\s*auto/.test(sach));
-  assert.ok(!/\.audio-create-pane,\.audio-recent\s*\{[^}]*overflow-y:\s*auto/.test(sach));
+  assert.match(sach, /\.audio-recent\s*\{[^}]*max-height:min\(680px, calc\(100dvh - 170px\)\); overflow-y:auto;/,
+    "Audio gần đây là danh sách dài duy nhất được cuộn nội bộ trên desktop");
+  assert.match(sach, /@media \(max-width: 640px\) \{[\s\S]*\.audio-recent \{ max-height:none; overflow:visible; padding:0; \}/,
+    "mobile trở lại page scroll tự nhiên");
 });
 
 test("Media giu bo cuc chuyen dung nhung khong dung rail hay viewport shell", () => {

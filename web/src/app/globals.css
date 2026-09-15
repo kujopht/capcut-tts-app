@@ -6129,8 +6129,8 @@ body.co-mini { padding-bottom: 74px; }
    hoa van trang chu xuong (`.admin-page::before`), con Studio thi khong —
    day la cho nguoi dung sang tac, no duoc phep giu khong khi cua san pham. */
 .studio-page {
-  width: min(1240px, calc(100% - 2 * var(--s5)));
-  max-width: 1240px;
+  width: min(1440px, calc(100% - 2 * var(--s5)));
+  max-width: 1440px;
   margin-inline: auto;
   position: relative;
 }
@@ -6139,8 +6139,8 @@ body.co-mini { padding-bottom: 74px; }
 
 .studio-khung {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
-  gap: var(--s5);
+  grid-template-columns: 176px minmax(0, 1fr);
+  gap: var(--s4);
   align-items: start;
 }
 
@@ -6150,7 +6150,7 @@ body.co-mini { padding-bottom: 74px; }
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: var(--s2);
+  padding: 6px;
   border: 1px solid var(--kinh-vien);
   border-radius: var(--r3);
   background: #080a14c4;
@@ -6162,7 +6162,8 @@ body.co-mini { padding-bottom: 74px; }
   display: flex;
   align-items: center;
   gap: var(--s2);
-  padding: 9px 12px;
+  gap: 9px;
+  padding: 9px 10px;
   border-radius: var(--r2);
   color: var(--text-2);
   text-decoration: none;
@@ -8505,10 +8506,12 @@ button.cq-the:hover { background: #ffffff0a; }
   border-radius: var(--r3);
   padding: var(--s3);
 }
-.audio-studio { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,0.9fr); gap:var(--s5); align-items:start; }
+.audio-studio { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(340px,0.8fr); gap:var(--s4); align-items:start; }
 .audio-studio-intro { grid-column:1 / -1; display:flex; align-items:end; justify-content:space-between; gap:var(--s3); }
 .audio-studio h2 { margin:0 0 var(--s2); }
 .audio-create-pane,.audio-recent { min-width:0; }
+.audio-create-pane { padding-right: var(--s1); }
+.audio-recent { align-self:start; max-height:min(680px, calc(100dvh - 170px)); overflow-y:auto; padding:0 var(--s1) var(--s2) 0; scrollbar-width:thin; scrollbar-color:var(--kinh-vien) transparent; }
 .audio-item { display:flex; flex-direction:column; align-items:stretch; gap:var(--s2); padding:var(--s3); border:1px solid var(--kinh-vien); border-radius:var(--r2); background:#080a14b8; }
 .audio-item + .audio-item { margin-top:var(--s2); }
 .audio-item > .btn { align-self:flex-end; }
@@ -8916,6 +8919,8 @@ button.cq-the:hover { background: #ffffff0a; }
   .tts-hang { grid-template-columns: minmax(0, 1fr); }
   .insp-cap { grid-template-columns: minmax(0, 1fr); }
   .audio-studio { grid-template-columns:minmax(0,1fr); }
+  .audio-create-pane { padding-right:0; }
+  .audio-recent { max-height:none; overflow:visible; padding:0; }
 }
 
 /* ------------------------------------------------------- the Noi dung --- */

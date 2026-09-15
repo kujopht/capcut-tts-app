@@ -101,6 +101,13 @@ test("Studio dung page flow tu nhien, khong khoa chieu cao hay ep scroll noi bo"
     "mobile trở lại page scroll tự nhiên");
 });
 
+test("desktop uu tien tao audio: sidebar gon, Recent Audio hep va tablet xep doc", () => {
+  const sach = chiMa(css());
+  assert.match(sach, /grid-template-columns: 160px minmax\(0, 1fr\);/);
+  assert.match(sach, /\.audio-studio \{ display:grid; grid-template-columns:minmax\(0,1fr\) clamp\(290px,22vw,340px\);/);
+  assert.match(sach, /@media \(max-width: 1100px\) \{[\s\S]*\.audio-studio \{ grid-template-columns:minmax\(0,1fr\); \}/);
+});
+
 test("Media giu bo cuc chuyen dung nhung khong dung rail hay viewport shell", () => {
   const s = css();
   const sach = chiMa(s);

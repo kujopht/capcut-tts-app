@@ -108,6 +108,12 @@ test("desktop uu tien tao audio: sidebar gon, Recent Audio hep va tablet xep doc
   assert.match(sach, /@media \(max-width: 1100px\) \{[\s\S]*\.audio-studio \{ grid-template-columns:minmax\(0,1fr\); \}/);
 });
 
+test("desktop Studio dung compact tool header thay vi page hero chung", () => {
+  const sach = chiMa(css());
+  assert.match(sach, /@media \(min-width: 901px\) \{[\s\S]*\.studio-page \{ padding-top: var\(--s4\); gap: var\(--s2\); \}[\s\S]*\.studio-dau \{ margin-bottom: 0; \}/,
+    "desktop phai dua workspace len gan navbar ma van giu h1/eyebrow trong StudioShell");
+});
+
 test("Media giu bo cuc chuyen dung nhung khong dung rail hay viewport shell", () => {
   const s = css();
   const sach = chiMa(s);

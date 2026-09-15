@@ -6137,6 +6137,19 @@ body.co-mini { padding-bottom: 74px; }
 .studio-dau { margin-bottom: var(--s3); }
 .studio-tieu-de { font-size: var(--t-xl); }
 
+/* Studio la mot khu vuc LAM VIEC, khong phai mot trang hero. Tren desktop,
+   `.page` thuong de 48px dau trang + 24px gap cho cac trang noi dung dai.
+   Neu giu nguyen o day, nguoi dung phai di qua mot khoang nen lon truoc khi
+   cham duoc cong cu. Header Studio van giu eyebrow va h1 duy nhat, nhung tro
+   thanh mot thanh nhan dien gon: 16px sau navbar, header, roi 8px vao tool.
+
+   Chi ap dung tu desktop/tablet lon: duoi 900px menu Studio la bang tha va
+   page flow rong rai hon de cham/scroll tu nhien van de dung cho mobile. */
+@media (min-width: 901px) {
+  .studio-page { padding-top: var(--s4); gap: var(--s2); }
+  .studio-dau { margin-bottom: 0; }
+}
+
 .studio-khung {
   display: grid;
   grid-template-columns: 160px minmax(0, 1fr);

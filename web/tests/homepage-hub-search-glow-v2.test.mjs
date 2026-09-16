@@ -161,52 +161,14 @@ test("hero moi la mot vung noi dung, khong phai chia doi 50/50", () => {
   }
 });
 
-test("cong the gioi (Storyworld Portal) LUON ve, khong phu thuoc so truyen/animation/cong dong", () => {
-  // Phuc hoi Storyworld Portal (2026-08-24): `TheGioiCong` thay `LuoiTinhNang`
-  // cu, nhung giu dung bat bien "luon ve" — dieu huong chinh cua trang chu
-  // khong duoc phep bien mat chi vi mot nguon du lieu phu rong/loi.
+test("trang chu da bo trung lap cong the gioi, tap trung vao noi dung that", () => {
   const src = home();
-  const at = src.indexOf("<TheGioiCong");
-  assert.notEqual(at, -1);
-  // Phai nam TRUOC nhanh dieu kien cua ke truyen moi (loading/error/rong) —
-  // nghia la khong bi mot `&&`/ternary nao cua du lieu truyen bao quanh.
-  assert.ok(at < src.indexOf('id="home-noi-bat"'));
-  const truoc = src.slice(Math.max(0, at - 200), at);
-  assert.ok(!/animationSeries\.length|communityPosts\.length|novels\.length/.test(truoc),
-    "cổng thế giới bị một điều kiện dữ liệu bao quanh");
-});
-
-test("6 diem den (cong chinh + ve tinh) CHI tro toi duong da co that", () => {
-  /*
-    Phuc hoi Storyworld Portal (2026-08-24): `DANH_SACH_TINH_NANG` (mot mang
-    6 muc) tach thanh `DIEM_DEN_CHINH` (3 cong chinh: Truyen/Animation/Audio)
-    + `DIEM_DEN_PHU` (3 ve tinh: Cong dong/Sang tac/Image Studio). Trich
-    RIENG tung mang bang chi so bat dau/ket thuc that su, khong dua vao mot
-    chuoi con tinh co xuat hien trong docstring (bai hoc tu chinh mot ban
-    truoc cua bai test nay: dung `indexOf("DANH_SACH_TINH_NANG")` tinh co
-    khop mot cau chu thich, khien slice tran qua het phan con lai cua tep).
-  */
-  const src = home();
-  const atChinh = src.indexOf("const DIEM_DEN_CHINH");
-  const atPhu = src.indexOf("const DIEM_DEN_PHU");
-  const atHetPhu = src.indexOf("function TheGioiCong");
-  assert.ok(atChinh !== -1 && atPhu !== -1 && atHetPhu !== -1, "thiếu một trong hai mảng điểm đến");
-  const chinhSrc = src.slice(atChinh, atPhu);
-  const phuSrc = src.slice(atPhu, atHetPhu);
-  const hrefsCua = (s) => [...s.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]);
-  const hrefs = [...hrefsCua(chinhSrc), ...hrefsCua(phuSrc)];
-  // Ba cong cu (Audio/Sang tac/Hinh anh) nay la module trong Fanfic Studio,
-  // nen cong tren trang chu tro THANG toi dia chi moi. Duong cu van chay nho
-  // chuyen huong 308, nhung mot cong o trang chu khong nen ton mot vong.
-  assert.deepEqual(hrefs, [
-    "/fanfic", "/animation", "/studio/audio",
-    "/community", "/studio/write", "/studio/image",
-  ]);
-  // Va cac thu muc route nay phai THAT SU ton tai trong web/src/app.
-  for (const href of hrefs) {
-    const dir = new URL(`../src/app${href}`, import.meta.url);
-    assert.ok(existsSync(dir), `route ${href} không tồn tại`);
-  }
+  assert.ok(!src.includes("function TheGioiCong"), "Không còn TheGioiCong trùng lặp điều hướng");
+  assert.ok(!src.includes("portal-primary"), "Không còn portal-primary");
+  assert.ok(!src.includes("portal-satellites"), "Không còn portal-satellites");
+  // Thay vao do la Hero gon va cac ke noi dung that
+  assert.match(src, /<Hero daDangNhap=/);
+  assert.match(src, /id="home-noi-bat"/);
 });
 
 test("ke Animation moi / cong dong TU AN khi rong, khong ve hop rong to", () => {
@@ -250,18 +212,12 @@ test("KeTrongNoiBat van dung ten class RIENG cua no, du The Gioi Cong da phuc ho
   assert.match(than, /display: flex/);
 });
 
-test("The Gioi Cong (Storyworld Portal) da phuc hoi, dung dung 3 cong chinh + 3 ve tinh", () => {
+test("cac tru cot noi dung that co mat tren trang chu", () => {
   const src = home();
-  assert.match(src, /function TheGioiCong/);
-  assert.match(src, /className="portal-primary"/);
-  assert.match(src, /className="portal-card portal-truyen"/);
-  assert.match(src, /className="portal-card portal-animation"/);
-  assert.match(src, /className="portal-card portal-audio"/);
-  assert.match(src, /className="portal-satellites"/);
-  // Anh minh hoa that cho Truyen/Animation, hoa tiet SVG cho Audio (chua co
-  // anh rieng) — dung tinh than Phase 3.5 "Cinematic Homepage Polish".
-  assert.match(src, /\/images\/portals\/truyen-manuscript\.webp/);
-  assert.match(src, /\/images\/portals\/animation-projector\.webp/);
+  assert.match(src, /id="home-noi-bat"/, "thiếu kệ truyện mới");
+  assert.match(src, /id="home-animation"/, "thiếu kệ animation");
+  assert.match(src, /id="home-cong-dong"/, "thiếu kệ cộng đồng");
+  assert.match(src, /id="home-tiep-tuc"/, "thiếu phần tiếp tục");
 });
 
 test("khong bia so lieu backend khong ho tro (luot xem/nghe/theo doi gia)", () => {
@@ -289,7 +245,7 @@ test("khach vang lai KHONG thay dai thanh vien/tiep tuc — chi CTA dang nhap o 
   assert.match(thanHero, /hero-v2-guest-hint/);
 
   const atThanhVien = src.indexOf("function DaiThanhVien(");
-  const thanThanhVien = src.slice(atThanhVien, src.indexOf("interface TinhNang"));
+  const thanThanhVien = src.slice(atThanhVien, src.indexOf("function KeTrongGon"));
   assert.match(thanThanhVien, /if \(!gamification\) return null;/);
 
   // "Tiếp tục của bạn" chỉ dựng bên trong nhánh `daDangNhap ? (`.
@@ -317,7 +273,7 @@ test("ke cong dong dung API cong khai /api/feed, khong bia du lieu", () => {
 test("moi ke co section rieng voi aria-labelledby", () => {
   const src = home();
   for (const id of [
-    "home-hero-title", "home-tiep-tuc", "home-tinh-nang", "home-noi-bat",
+    "home-hero-title", "home-tiep-tuc", "home-noi-bat",
     "home-bang-vang", "home-animation", "home-cong-dong",
     "home-kham-pha-nhanh", "home-tac-gia",
   ]) {

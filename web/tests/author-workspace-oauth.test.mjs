@@ -32,22 +32,21 @@ const codeOnly = (src) =>
 
 /* =========================================================== dieu huong */
 
-test("'Viết truyện' nam trong dieu huong chinh, ngang hang cac muc khac", async () => {
+test("thanh dieu huong chinh tinh gian, Studio la loi vao sang tac", async () => {
   const nav = read("../src/components/NavAuth.tsx");
   const order = [...nav.matchAll(/href: "([^"]+)", label: "([^"]+)"/g)].map(
     (m) => [m[1], m[2]],
   );
-  // Thu tu day du duoc ghim o `ui.test.mjs`. Bai nay chi giu MOT dieu: "Viết
-  // truyện" nam trong thanh chinh, ngang hang cac muc khac — khong phai bi giau
-  // trong menu tai khoan. Ghim ca danh sach o hai cho la hai cho phai sua moi
-  // lan them mot muc.
+  // Thanh chinh danh cho cac khu vuc doc/kham pha; khong lap lai "Viết truyện"
   assert.ok(
-    order.some(([href, label]) => href === "/studio/write" && label === "Viết truyện"),
-    "'Viết truyện' không có trong thanh điều hướng chính",
+    !order.some(([href, label]) => href === "/studio/write" && label === "Viết truyện"),
+    "'Viết truyện' bi trung lap van con trong thanh dieu huong chinh",
   );
   assert.equal(order[0][0], "/", "'Trang chủ' phải đứng đầu");
-  assert.equal(order.at(-1)?.[0], "/studio/write",
-    "'Viết truyện' đứng cuối hàng — nó là điểm đến, không phải điểm ghé qua");
+  assert.equal(order.at(-1)?.[0], "/library", "'Thư viện' là mục đọc cuối hàng");
+  // Studio la loi vao duy nhat cho sang tac o header
+  assert.match(nav, /function StudioLink/);
+  assert.match(nav, /href="\/studio"/);
 });
 
 test("route cu khong doi: /write va /studio deu con", () => {

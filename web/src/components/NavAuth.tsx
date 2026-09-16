@@ -39,7 +39,13 @@ import { Avatar } from "@/components/Avatar";
  * CÔNG CỤ (`/studio`) chứ không phải một khu vực duyệt riêng, còn Animation
  * thì có trang chủ/series/tập của chính nó, xứng một mục điều hướng chính.
  */
-const LINKS = [
+interface NavItem {
+  href: string;
+  label: string;
+  cta?: boolean;
+}
+
+const LINKS: NavItem[] = [
   { href: "/", label: "Trang chủ" },
   { href: "/fanfic", label: "Khám phá" },
   { href: "/animation", label: "Animation" },
@@ -52,7 +58,6 @@ const LINKS = [
     dung cho nguoi lam ra no.
   */
   { href: "/library", label: "Thư viện" },
-  { href: "/studio/write", label: "Viết truyện", cta: true },
 ];
 
 export function NavLinks() {

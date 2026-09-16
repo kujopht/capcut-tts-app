@@ -13,7 +13,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   api,
   type Chapter,
@@ -67,7 +66,6 @@ function parseTags(raw: string): string[] {
 }
 
 export default function WritePage() {
-  const router = useRouter();
   const { profile, loading: sessionLoading } = useSession();
   const toast = useToast();
   /*
@@ -191,25 +189,7 @@ export default function WritePage() {
     load();
   }, [sessionLoading, profile, load]);
 
-  /*
-    Chua dang nhap -> sang thang trang dang nhap, KEM noi can quay lai.
 
-    "Nội dung" la mot muc dieu huong chinh nen khach vang lai VAN thay va
-    VAN bam duoc — no khong bi an di. Cai khac la sau khi dang nhap ho quay
-    lai DUNG the nay, khong bi tha ve trang chu.
-
-    `next` tro toi `/studio/content` (vi tri THAT cua component nay sau khi
-    gop vao Nội dung), khong phai `/studio/write` cu — tro ve duong cu se
-    bat mot vong chuyen huong phia client thu hai qua `ChuyenHuong` truoc khi
-    toi dung noi.
-
-    `router.replace` chu khong phai `push`: nut Back phai dua nguoi dung ve
-    trang truoc do, khong phai ve mot trang se lai day ho sang dang nhap.
-  */
-  useEffect(() => {
-    if (sessionLoading || profile) return;
-    router.replace(loginHref("/studio/content"));
-  }, [sessionLoading, profile, router]);
 
   const loadChapters = useCallback((novelId: string) => {
     if (!novelId) return;
@@ -597,18 +577,17 @@ export default function WritePage() {
   }
 
   if (!profile) {
-    /*
-      Da dieu huong sang `/login?next=/write` o effect ben tren. Man hinh nay
-      chi la thu nguoi dung thay trong khoanh khac chuyen trang.
-
-      KHONG dung `EmptyState` kem nut "Đăng nhập" nhu truoc: sau khi dang nhap
-      no dua nguoi dung ve trang chu, va ho phai tu tim duong quay lai day.
-      "Viết truyện" nay la mot muc dieu huong chinh — bam vao no ma phai di hai
-      chang moi toi noi thi no khong con giong mot khu vuc san pham.
-    */
     return (
       <div className="studio-tool">
-        <Loading label="Đang chuyển tới trang đăng nhập…" />
+        <EmptyState
+          icon="✍️"
+          title="Đăng nhập để bắt đầu viết truyện"
+          action={
+            <Link className="btn btn-primary" href={loginHref("/studio/content")}>
+              Đăng nhập
+            </Link>
+          }
+        />
       </div>
     );
   }

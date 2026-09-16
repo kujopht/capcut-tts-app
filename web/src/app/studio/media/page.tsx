@@ -729,10 +729,16 @@ function MediaStudio() {
       <EmptyState
         icon="🎬"
         title="Đăng nhập để mở Media Studio"
+        hint="Media Studio là nơi ghép video, lời đọc và phụ đề. Bạn cần đăng nhập để tải lên video hoặc chỉnh sửa dự án."
         action={
-          <Link className="btn btn-primary" href={loginHref("/studio/media")} prefetch={false}>
-            Đăng nhập
-          </Link>
+          <div className="row" style={{ gap: "0.5rem", justifyContent: "center", flexWrap: "wrap" }}>
+            <Link className="btn btn-primary" href={loginHref("/studio/media")} prefetch={false}>
+              Đăng nhập
+            </Link>
+            <Link className="btn btn-ghost" href="/studio/audio" prefetch={false}>
+              Quay lại Audio Studio
+            </Link>
+          </div>
         }
       />
     );

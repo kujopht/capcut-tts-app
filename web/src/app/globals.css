@@ -5181,6 +5181,8 @@ body.co-mini { padding-bottom: 74px; }
      no la thu duy nhat cuon duoc ma khong mat gi. */
   .site-header .wrap {
     flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
     padding-top: var(--s2);
     padding-bottom: var(--s2);
     gap: var(--s2);
@@ -5196,6 +5198,8 @@ body.co-mini { padding-bottom: 74px; }
   .nav-links {
     order: 4;
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
     overflow-x: auto;
     padding-bottom: 2px;
     scrollbar-width: none;
@@ -6098,9 +6102,21 @@ body.co-mini { padding-bottom: 74px; }
   max-width: 1440px;
   margin-inline: auto;
   position: relative;
+  overflow-x: clip;
 }
-.studio-dau { margin-bottom: var(--s3); }
-.studio-tieu-de { font-size: var(--t-xl); }
+.studio-dau {
+  margin-bottom: var(--s3);
+  gap: var(--s3);
+  align-items: center;
+}
+.studio-dau > :first-child {
+  min-width: 0;
+}
+.studio-tieu-de {
+  font-size: var(--t-xl);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* Studio la mot khu vuc LAM VIEC, khong phai mot trang hero. Tren desktop,
    `.page` thuong de 48px dau trang + 24px gap cho cac trang noi dung dai.
@@ -6134,7 +6150,11 @@ body.co-mini { padding-bottom: 74px; }
   background: #080a14c4;
 }
 
-.studio-nut-mobile { display: none; }
+.studio-nut-mobile {
+  display: none;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 
 .studio-muc {
   display: flex;
@@ -6452,7 +6472,7 @@ body.co-mini { padding-bottom: 74px; }
      hang cuon ngang tren dien thoai — nguoi dung se khong biet con muc o
      ngoai khung nhin. */
   .studio-khung { grid-template-columns: minmax(0, 1fr); }
-  .studio-nut-mobile { display: inline-flex; }
+  .studio-nut-mobile { display: inline-flex; flex-shrink: 0; white-space: nowrap; }
   .studio-nav {
     display: none;
     position: static;
@@ -8485,7 +8505,7 @@ button.cq-the:hover { background: #ffffff0a; }
   padding: var(--s3);
 }
 .audio-studio { display:grid; grid-template-columns:minmax(0,1fr) clamp(290px,22vw,340px); gap:var(--s3); align-items:start; }
-.audio-studio-intro { grid-column:1 / -1; display:flex; align-items:end; justify-content:space-between; gap:var(--s3); }
+.audio-studio-intro { grid-column:1 / -1; display:flex; align-items:end; justify-content:space-between; gap:var(--s3); flex-wrap:wrap; min-width:0; }
 .audio-studio h2 { margin:0 0 var(--s2); }
 .audio-create-pane,.audio-recent { min-width:0; }
 .audio-create-pane { padding-right: var(--s1); }

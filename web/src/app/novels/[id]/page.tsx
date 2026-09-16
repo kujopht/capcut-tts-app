@@ -16,6 +16,7 @@ import {
 } from "@/components/ui";
 import { NovelCover } from "@/components/NovelCover";
 import { FollowButton } from "@/components/FollowButton";
+import { getReaderTags } from "@/lib/taxonomy";
 
 /**
  * Tien do tac pham -> nhan tieng Viet.
@@ -129,7 +130,7 @@ export default function NovelDetailPage({
             {novel.status ? (
               <span className="badge">{nhanTienDo(novel.status)}</span>
             ) : null}
-            {novel.tags.map((tag) => (
+            {novel.tags && getReaderTags(novel, 6).map((tag) => (
               <span key={tag} className="badge">
                 {tag}
               </span>

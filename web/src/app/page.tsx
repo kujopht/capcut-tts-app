@@ -58,6 +58,7 @@ import {
 } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
+import { getReaderTags } from "@/lib/taxonomy";
 import { Avatar } from "@/components/Avatar";
 import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
 import { NovelCover } from "@/components/NovelCover";
@@ -386,9 +387,9 @@ function TheAnimNoiBat({ series }: { series: AnimationSeries }) {
         <h3 className="story-card-featured-title">
           <Link href={`/animation/${series.series_id}`}>{series.title}</Link>
         </h3>
-        {series.tags.length > 0 ? (
+        {series.tags && getReaderTags(series, 3).length > 0 ? (
           <div className="story-tags">
-            {series.tags.slice(0, 3).map((tag) => (
+            {getReaderTags(series, 3).map((tag) => (
               <span key={tag} className="chip chip-static">
                 {tag}
               </span>
@@ -459,7 +460,7 @@ function HangTruyenMoi({ novel }: { novel: Novel }) {
           <span className="hint clamp-1">{novel.description}</span>
         ) : null}
         <span className="home-story-row-meta">
-          {novel.tags.slice(0, 2).map((tag) => (
+          {getReaderTags(novel, 2).map((tag) => (
             <span key={tag} className="chip chip-static">{tag}</span>
           ))}
           <span className="hint">Xuất bản {dinhDangNgay(novel.created_at)}</span>
@@ -743,33 +744,27 @@ export default function HomePage() {
       </div>
       ) : null}
 
-      {/* Gom loi tat va the that vao mot dai, thay vi hai section xep doc. */}
+      {/* Khám phá theo vũ trụ — danh mục fandom sạch cho người đọc, không lặp lại navbar */}
       <section className="home-discovery-strip stack-2" aria-labelledby="home-kham-pha-nhanh">
         <h2 className="section-title section-title-icon" id="home-kham-pha-nhanh">
-          <IconCompass size={19} /> Khám phá nhanh
+          <IconCompass size={19} /> Khám phá theo vũ trụ
         </h2>
-        <div className="home-discovery-groups">
-          <div className="story-tags">
-            <Link href="/fanfic" className="chip" prefetch={false}>
-              <IconBook size={13} /> Truyện mới
-            </Link>
-            <Link href="/animation" className="chip" prefetch={false}>
-              <IconFilm size={13} /> Animation
-            </Link>
-            <Link href="/community" className="chip" prefetch={false}>
-              <IconUser size={13} /> Cộng đồng
-            </Link>
-          </div>
-          {data && data.tags.length > 0 ? (
-            <div className="story-tags" aria-label="Thẻ truyện">
-              <span className="home-discovery-label"><IconTag size={14} /> Thẻ:</span>
-              {data.tags.slice(0, MAX_TAGS).map((tag) => (
-                <Link key={tag} href={`/fanfic?tag=${encodeURIComponent(tag)}`} className="chip">
-                  {tag}
-                </Link>
-              ))}
-            </div>
-          ) : null}
+        <div className="story-tags" aria-label="Vũ trụ fanfic">
+          <Link href="/fanfic?tag=fandom:One Piece" className="chip" prefetch={false}>
+            One Piece
+          </Link>
+          <Link href="/fanfic?tag=fandom:Naruto" className="chip" prefetch={false}>
+            Naruto
+          </Link>
+          <Link href="/fanfic?q=Conan" className="chip" prefetch={false}>
+            Conan
+          </Link>
+          <Link href="/fanfic?q=Fairy+Tail" className="chip" prefetch={false}>
+            Fairy Tail
+          </Link>
+          <Link href="/fanfic?q=B%C3%B3ng+R%E1%BB%95" className="chip" prefetch={false}>
+            Bóng rổ
+          </Link>
         </div>
       </section>
 

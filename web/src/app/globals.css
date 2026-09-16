@@ -3423,6 +3423,18 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   background: var(--line); border-radius: var(--r-full);
 }
 
+.filter-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.filter-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+}
+
 /* ============================================ mang toi sau khu lam viec */
 
 /*
@@ -3682,6 +3694,9 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--s4);
   align-items: start;
+}
+.home-secondary-grid > :only-child {
+  grid-column: 1 / -1;
 }
 .home-secondary-card { padding: var(--s4); min-width: 0; }
 .home-secondary-card .story-card-featured { max-width: none; }
@@ -7704,6 +7719,52 @@ body.co-mini { padding-bottom: 74px; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Animation compact empty state — khong chiem choan toan bo viewport */
+.animation-empty-compact {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--s2);
+}
+.animation-empty-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s4) var(--s5);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  max-width: 640px;
+  width: 100%;
+}
+.animation-empty-icon {
+  font-size: 28px;
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+.animation-empty-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.animation-empty-content strong {
+  font-size: var(--t-md);
+  color: var(--text);
+}
+.animation-empty-content .hint {
+  font-size: var(--t-sm);
+  line-height: var(--lh-normal);
+}
+@media (max-width: 640px) {
+  .animation-empty-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s3);
+    padding: var(--s4);
+  }
 }
 
 /* -- trinh phat facade YouTube (Phan 5C) ------------------------------------ */

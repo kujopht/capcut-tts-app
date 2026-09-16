@@ -65,13 +65,14 @@ test("L2: goi backend voi q, tag, limit va offset", () => {
   assert.match(a, /params\.set\("offset"/);
 });
 
-test("L2: danh sach the lay tu backend, khong suy ra tu trang dang xem", () => {
+test("L2: danh sach the khong suy tu du lieu da tai va khong giu the chet", () => {
   const src = fanfic();
-  assert.ok(callsApi(src, "novelTags"), "phai goi api.novelTags()");
   // Ban cu gom the bang cach quet toan bo `novels`
   assert.ok(!/novels\.forEach\(/.test(src),
     "khong duoc suy danh sach the tu du lieu da tai");
   assert.match(api(), /novelTags:/);
+  // Khong giu trang thai the chet sau khi chuan hoa taxonomy
+  assert.ok(!src.includes("api.novelTags"), "khong goi api.novelTags() vao state chet");
 });
 
 test("L2: co dieu huong trang, va nut bi vo hieu o hai dau", () => {

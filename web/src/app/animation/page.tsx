@@ -198,19 +198,24 @@ function AnimationBrowser() {
             }
           />
         ) : (
-          <EmptyState
-            icon="🎬"
-            title="Chưa có series animation nào được xuất bản"
-            hint="Hãy là người đầu tiên: tạo series rồi thêm tập từ YouTube."
-            action={
+          <div className="animation-empty-compact" role="status">
+            <div className="animation-empty-card">
+              <span className="animation-empty-icon" aria-hidden="true">🎬</span>
+              <div className="animation-empty-content">
+                <strong>Chưa có series animation nào được xuất bản</strong>
+                <p className="hint">
+                  Xem video trực tiếp từ YouTube. Hãy là người đầu tiên tạo series cho cộng đồng.
+                </p>
+              </div>
               <Link
-                className="btn btn-primary"
-                href={profile ? "/animation/new" : "/login"} prefetch={false}
+                className="btn btn-primary btn-sm"
+                href={profile ? "/animation/new" : "/login"}
+                prefetch={false}
               >
-                Tạo series
+                {profile ? "Tạo series" : "Đăng nhập để tạo"}
               </Link>
-            }
-          />
+            </div>
+          </div>
         )
       ) : (
         <>

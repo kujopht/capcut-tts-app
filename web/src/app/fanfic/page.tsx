@@ -25,6 +25,7 @@ import {
 import { IconCompass } from "@/components/Icons";
 import { MotifCompassArc } from "@/components/Ornaments";
 import { StoryCard } from "@/components/StoryCard";
+import { FANDOM_OPTIONS, type FandomOption } from "@/lib/taxonomy";
 
 /** So truyen moi trang. Backend chan tran tren o 60. */
 const PAGE_SIZE = 12;
@@ -115,8 +116,6 @@ function FanficBrowser() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [tags, setTags] = useState<string[]>([]);
-
   /** Bo qua phan hoi cua request cu neu nguoi dung da go tiep. */
   const latest = useRef(0);
 
@@ -133,10 +132,6 @@ function FanficBrowser() {
         offset: page * PAGE_SIZE,
       });
       if (latest.current !== ticket) return;   // da co request moi hon
-      // `fanficOnly` o day la LOP PHONG VE, khong phai bo loc: kho chua cua
-      // Audio Studio luon la ban nhap nen khong bao gio lot vao danh sach da
-      // xuat ban. Giu lai de bat buoc do thanh hien nhien trong code — no khong
-      // bao gio thuc su bo phan tu nao, nen khong lam lech so dem cua trang.
       setNovels(fanficOnly(r.novels));
       setTotal(r.total);
       setHasMore(r.has_more);
@@ -156,13 +151,28 @@ function FanficBrowser() {
     return () => window.clearTimeout(id);
   }, [fetchPage]);
 
-  // Danh sach the lay mot lan, khong phu thuoc trang dang xem
-  useEffect(() => {
-    api
-      .novelTags()
-      .then((r) => setTags(r.tags))
-      .catch(() => setTags([]));
-  }, []);
+  const activeFandomId = (() => {
+    if (tag === "fandom:One Piece") return "one-piece";
+    if (tag === "fandom:Naruto") return "naruto";
+    const qLower = query.trim().toLowerCase();
+    if (qLower === "conan") return "conan";
+    if (qLower === "fairy tail") return "fairy-tail";
+    if (qLower === "bóng rổ") return "bong-ro";
+    if (!tag && !query.trim()) return "all";
+    return "";
+  })();
+
+  const selectFandom = (item: FandomOption) => {
+    if (item.id === "all" || activeFandomId === item.id) {
+      clearFilters();
+    } else if (item.tag) {
+      datONhap("");
+      changeTag(item.tag);
+    } else if (item.query) {
+      datONhap(item.query);
+      datURL({ q: item.query, tag: "", page: 0 });
+    }
+  };
 
   /*
     Doi bo loc thi ve trang dau — trang 5 cua ket qua cu thuong khong ton tai.
@@ -175,7 +185,7 @@ function FanficBrowser() {
     datONhap(value);
   };
   const changeTag = (value: string) => {
-    datURL({ tag: value, page: 0 });
+    datURL({ q: "", tag: value, page: 0 });
   };
   const clearFilters = () => {
     datONhap("");
@@ -243,42 +253,28 @@ function FanficBrowser() {
             />
           </div>
         </div>
-        {tags.length > 0 ? (
-          <div className="field">
-            <span className="label" id="fanfic-tags-label">
-              Thẻ
-            </span>
-            {/*
-              Cuon NGANG chu khong xuong dong: voi vai chuc the, mot khoi chip
-              nhieu dong cao bang ca man hinh va day het truyen xuong duoi.
-            */}
-            <div
-              className="chip-rail"
-              role="group"
-              aria-labelledby="fanfic-tags-label"
-            >
+        <div className="field">
+          <span className="label" id="fanfic-fandom-label">
+            Vũ trụ & Fandom
+          </span>
+          <div
+            className="filter-chips-wrap"
+            role="group"
+            aria-labelledby="fanfic-fandom-label"
+          >
+            {FANDOM_OPTIONS.map((item) => (
               <button
+                key={item.id}
                 type="button"
                 className="chip"
-                aria-pressed={tag === ""}
-                onClick={() => changeTag("")}
+                aria-pressed={activeFandomId === item.id}
+                onClick={() => selectFandom(item)}
               >
-                Tất cả
+                {item.label}
               </button>
-              {tags.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  className="chip"
-                  aria-pressed={tag === item}
-                  onClick={() => changeTag(tag === item ? "" : item)}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
+            ))}
           </div>
-        ) : null}
+        </div>
       </section>
 
       {loading ? (

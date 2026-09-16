@@ -38,6 +38,7 @@ import {
 } from "@/lib/api";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { Avatar } from "@/components/Avatar";
+import { getReaderTags } from "@/lib/taxonomy";
 import { NovelCover } from "@/components/NovelCover";
 import { IconBook, IconFilm, IconHeadphones, IconMegaphone, IconUser } from "@/components/Icons";
 
@@ -372,7 +373,9 @@ export function SearchOverlay({
                       </span>
                       <span className="tim-chu">
                         <strong>{n.title}</strong>
-                        <span className="hint">{n.tags.slice(0, 3).join(" · ")}</span>
+                        {getReaderTags(n, 3).length > 0 ? (
+                          <span className="hint">{getReaderTags(n, 3).join(" · ")}</span>
+                        ) : null}
                       </span>
                     </Link>
                   ))}
@@ -445,7 +448,9 @@ export function SearchOverlay({
                         </span>
                         <span className="tim-chu">
                           <strong>{s.title}</strong>
-                          <span className="hint">{s.tags.slice(0, 3).join(" · ")}</span>
+                          {getReaderTags(s, 3).length > 0 ? (
+                            <span className="hint">{getReaderTags(s, 3).join(" · ")}</span>
+                          ) : null}
                         </span>
                       </Link>
                     );

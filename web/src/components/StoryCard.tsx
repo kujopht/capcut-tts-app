@@ -20,6 +20,7 @@ import Link from "next/link";
 import type { Novel } from "@/lib/api";
 import { NovelCover } from "@/components/NovelCover";
 import { formatDate } from "@/components/ui";
+import { getReaderTags } from "@/lib/taxonomy";
 
 /** So the toi da hien tren mot the. Nhieu hon thi the truyen thanh dam the. */
 const MAX_TAGS = 3;
@@ -80,9 +81,9 @@ export function StoryCard({
           <h3 className="story-card-featured-title">
             <Link href={`/novels/${novel.novel_id}`}>{novel.title}</Link>
           </h3>
-          {novel.tags.length > 0 ? (
+          {novel.tags && getReaderTags(novel, MAX_TAGS).length > 0 ? (
             <div className="story-tags">
-              {novel.tags.slice(0, MAX_TAGS).map((tag) => (
+              {getReaderTags(novel, MAX_TAGS).map((tag) => (
                 <span key={tag} className="chip chip-static">
                   {tag}
                 </span>
@@ -110,9 +111,9 @@ export function StoryCard({
       />
       <div className="story-body">
         <h3 className="story-title clamp-2">{novel.title}</h3>
-        {novel.tags.length > 0 ? (
+        {novel.tags && getReaderTags(novel, MAX_TAGS).length > 0 ? (
           <div className="story-tags">
-            {novel.tags.slice(0, MAX_TAGS).map((tag) => (
+            {getReaderTags(novel, MAX_TAGS).map((tag) => (
               <span key={tag} className="chip chip-static">
                 {tag}
               </span>

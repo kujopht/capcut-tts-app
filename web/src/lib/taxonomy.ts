@@ -58,19 +58,57 @@ export function formatReaderTag(tag: string): string | null {
 }
 
 /**
- * Suy luận fandom từ tiêu đề nếu truyện chưa có thẻ fandom chính thức hoặc thẻ bị unresolved.
+ * Suy luận fandom từ tiêu đề khi truyện CHƯA có thẻ fandom chuẩn hóa ở backend.
+ *
+ * NGUYÊN TẮC BẢO THỦ:
+ * - Ưu tiên false negative (không gắn thẻ) hơn là gắn sai fandom (false positive).
+ * - Tuyệt đối không dùng từ khóa quá rộng như "ninja", "gin", "hệ thống".
+ * - Chỉ nhận diện tên tác phẩm chính thức hoặc cặp danh xưng đặc trưng không thể nhầm lẫn.
  */
 export function inferFandomFromTitle(title?: string): string | null {
   if (!title) return null;
   const t = title.toLowerCase();
-  if (t.includes("one piece") || t.includes("hải tặc")) return "One Piece";
-  if (t.includes("naruto") || t.includes("làng lá") || t.includes("ninja") || t.includes("uchiha")) return "Naruto";
-  if (t.includes("conan") || t.includes("gin") || t.includes("kisaki")) return "Conan";
-  if (t.includes("fairy tail")) return "Fairy Tail";
-  if (t.includes("bóng rổ") || t.includes("kuroko") || t.includes("slam dunk")) return "Bóng rổ";
-  if (t.includes("dragon ball") || t.includes("7 viên ngọc rồng")) return "Dragon Ball";
-  if (t.includes("jujutsu") || t.includes("kaisen")) return "Jujutsu Kaisen";
-  if (t.includes("bleach")) return "Bleach";
+
+  // One Piece
+  if (t.includes("one piece") || (t.includes("hải tặc") && (t.includes("mũ rơm") || t.includes("luffy")))) {
+    return "One Piece";
+  }
+
+  // Naruto: không dùng từ "ninja" chung chung
+  if (t.includes("naruto") || t.includes("hỏa ảnh") || (t.includes("làng lá") && t.includes("uchiha"))) {
+    return "Naruto";
+  }
+
+  // Conan: không dùng từ "gin" hay "kisaki" đơn độc
+  if (t.includes("conan") || t.includes("thám tử lừng danh") || t.includes("haibara ai") || t.includes("kudo shinichi")) {
+    return "Conan";
+  }
+
+  // Fairy Tail
+  if (t.includes("fairy tail")) {
+    return "Fairy Tail";
+  }
+
+  // Bóng rổ (Slam Dunk / Kuroko no Basket)
+  if (t.includes("slam dunk") || t.includes("kuroko no basket") || t.includes("kuroko") || t.includes("thế giới bóng rổ")) {
+    return "Bóng rổ";
+  }
+
+  // Dragon Ball
+  if (t.includes("dragon ball") || t.includes("7 viên ngọc rồng") || t.includes("bảy viên ngọc rồng") || t.includes("songoku")) {
+    return "Dragon Ball";
+  }
+
+  // Jujutsu Kaisen
+  if (t.includes("jujutsu kaisen") || t.includes("chú thuật hồi chiến")) {
+    return "Jujutsu Kaisen";
+  }
+
+  // Bleach
+  if (t.includes("bleach") && (t.includes("fanfic") || t.includes("shinigami") || t.includes("ichigo"))) {
+    return "Bleach";
+  }
+
   return null;
 }
 

@@ -115,7 +115,6 @@ function FanficBrowser() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
 
   /** Bo qua phan hoi cua request cu neu nguoi dung da go tiep. */
   const latest = useRef(0);
@@ -152,15 +151,6 @@ function FanficBrowser() {
     return () => window.clearTimeout(id);
   }, [fetchPage]);
 
-  // Danh sach the lay mot lan, khong phu thuoc trang dang xem
-  const [tags, setTags] = useState<string[]>([]);
-  useEffect(() => {
-    api
-      .novelTags()
-      .then((r) => setTags(r.tags))
-      .catch(() => setTags([]));
-  }, []);
-
   const activeFandomId = (() => {
     if (tag === "fandom:One Piece") return "one-piece";
     if (tag === "fandom:Naruto") return "naruto";
@@ -173,7 +163,7 @@ function FanficBrowser() {
   })();
 
   const selectFandom = (item: FandomOption) => {
-    if (item.id === "all") {
+    if (item.id === "all" || activeFandomId === item.id) {
       clearFilters();
     } else if (item.tag) {
       datONhap("");
@@ -263,64 +253,26 @@ function FanficBrowser() {
             />
           </div>
         </div>
-        <div className="filter-groups">
-          <div className="field">
-            <span className="label" id="fanfic-fandom-label">
-              Vũ trụ & Fandom
-            </span>
-            <div
-              className="filter-chips-wrap"
-              role="group"
-              aria-labelledby="fanfic-fandom-label"
-            >
-              {FANDOM_OPTIONS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="chip"
-                  aria-pressed={activeFandomId === item.id}
-                  onClick={() => selectFandom(item)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="field">
-            <span className="label" id="fanfic-status-label">
-              Trạng thái
-            </span>
-            <div
-              className="filter-chips-wrap"
-              role="group"
-              aria-labelledby="fanfic-status-label"
-            >
+        <div className="field">
+          <span className="label" id="fanfic-fandom-label">
+            Vũ trụ & Fandom
+          </span>
+          <div
+            className="filter-chips-wrap"
+            role="group"
+            aria-labelledby="fanfic-fandom-label"
+          >
+            {FANDOM_OPTIONS.map((item) => (
               <button
+                key={item.id}
                 type="button"
                 className="chip"
-                aria-pressed={statusFilter === ""}
-                onClick={() => setStatusFilter("")}
+                aria-pressed={activeFandomId === item.id}
+                onClick={() => selectFandom(item)}
               >
-                Tất cả
+                {item.label}
               </button>
-              <button
-                type="button"
-                className="chip"
-                aria-pressed={statusFilter === "ongoing"}
-                onClick={() => setStatusFilter(statusFilter === "ongoing" ? "" : "ongoing")}
-              >
-                Đang ra
-              </button>
-              <button
-                type="button"
-                className="chip"
-                aria-pressed={statusFilter === "completed"}
-                onClick={() => setStatusFilter(statusFilter === "completed" ? "" : "completed")}
-              >
-                Hoàn thành
-              </button>
-            </div>
+            ))}
           </div>
         </div>
       </section>

@@ -31,13 +31,12 @@ test("site header giu floating dock V7 nhung da nen theo phan hoi moi", () => {
   assert.match(rule(".site-header .wrap"), /min-height:\s*52px/);
 });
 
-test("homepage gom hero va cong dieu huong vao mot dai desktop gon", () => {
+test("homepage tinh gian, bo trung lap cong the gioi va tap trung vao noi dung", () => {
   const home = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
-  assert.match(home, /className="home-entry-grid"/);
-  const entry = rule(".home-entry-grid");
-  assert.match(entry, /display:\s*grid/);
-  assert.match(entry, /grid-template-columns:/);
-  assert.match(rule(".home-entry-grid .portal-truyen"), /min-height:\s*224px/);
+  assert.match(home, /className="home-hero-wrap"/);
+  assert.ok(!home.includes("<TheGioiCong"), "Không còn TheGioiCong trùng lặp cổng");
+  const heroWrap = rule(".home-hero-wrap");
+  assert.match(heroWrap, /display:\s*flex/);
   assert.match(rule('.page[data-hero-theme="home"]'), /padding-top:\s*var\(--s4\)/);
 });
 
@@ -94,18 +93,17 @@ test("cum nav ben phai khong vo hai hang tren desktop", () => {
   assert.match(navRight, /flex-shrink:\s*0/);
 });
 
-test("page head va reader head cung ngon ngu glass voi listen player", () => {
-  for (const selector of [".page-head", ".reader-head"]) {
-    const hero = rule(selector);
-    assert.match(hero, /border:\s*1px solid/);
-    assert.match(hero, /border-radius:\s*var\(--r4\)/);
-    assert.match(hero, /radial-gradient/);
-    assert.match(hero, /linear-gradient/);
-    assert.match(hero, /box-shadow:\s*var\(--shadow-2\), var\(--edge\)/);
-  }
+test("page head khong con hop toi dong khung, reader head giu ngon ngu glass", () => {
+  const pageHead = rule(".page-head");
+  assert.ok(!pageHead.includes("border: 1px solid"), "page-head không còn border hộp tối");
+  assert.ok(!pageHead.includes("box-shadow"), "page-head không còn box-shadow hộp tối");
+
+  const readerHead = rule(".reader-head");
+  assert.match(readerHead, /border:\s*1px solid/);
+  assert.match(readerHead, /border-radius:\s*var\(--r4\)/);
+  assert.match(readerHead, /box-shadow:\s*var\(--shadow-2\), var\(--edge\)/);
 
   const sharedGlass = css.slice(css.indexOf(".kinh,"), css.indexOf("{", css.indexOf(".kinh,")));
-  assert.match(sharedGlass, /\.page-head/);
   assert.match(sharedGlass, /\.reader-head/);
-  assert.match(css, /\.page-head::after,\s*\.reader-head::after,\s*\.listen-hero::after/);
+  assert.match(css, /\.reader-head::after,\s*\.listen-hero::after/);
 });

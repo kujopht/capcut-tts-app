@@ -119,14 +119,11 @@ test("header la lop kinh mo va biet trang da cuon chua", () => {
   assert.match(shell, /removeEventListener\("scroll"/, "không gỡ listener");
 });
 
-test("'Viết truyện' noi bat hon muc dieu huong thuong", () => {
+test("thanh dieu huong tinh gian, bo 'Viết truyện' trung lap", () => {
   const nav = read("../src/components/NavAuth.tsx");
-  // Van la muc thu tu trong `LINKS` — thu tu san pham khong doi, va
-  // `ui.test.mjs` cung `author-workspace-oauth.test.mjs` khoa lai dieu do.
-  assert.match(nav, /href: "\/studio\/write", label: "Viết truyện", cta: true/);
-  assert.match(nav, /link\.cta \? "nav-link nav-cta" : "nav-link"/);
-  const cta = rule(".nav-cta");
-  assert.match(cta, /var\(--brand-line\)/, "nút CTA không có viền tím");
+  assert.ok(!nav.includes('label: "Viết truyện"'), "Vẫn còn mục Viết truyện trong thanh điều hướng chính");
+  assert.match(nav, /function StudioLink/);
+  assert.match(nav, /href="\/studio"/);
 });
 
 test("cac muc dieu huong chinh KHONG tu prefetch (2026-08-26, storm do)", () => {
@@ -180,14 +177,8 @@ test("cac lien ket TINH luon-trong-khung-nhin o trang chu KHONG tu prefetch", ()
   const home = read("../src/app/page.tsx");
   const heroCta = home.slice(home.indexOf("hero-v2-cta"), home.indexOf("hero-v2-guest-hint"));
   assert.match(heroCta, /href="\/fanfic" prefetch=\{false\}/);
-  assert.match(heroCta, /href="\/studio\/write" prefetch=\{false\}/);
+  assert.match(heroCta, /href="\/studio" prefetch=\{false\}/);
   assert.match(home, /href="\/login" prefetch=\{false\}/);
-  const viTriCongChinh = home.indexOf('className="portal-primary"');
-  const congChinh = home.slice(viTriCongChinh, home.indexOf("portal-satellites", viTriCongChinh));
-  assert.match(congChinh, /DIEM_DEN_CHINH\[0\]\.href\} className="portal-card portal-truyen" prefetch=\{false\}/);
-  assert.match(congChinh, /DIEM_DEN_CHINH\[1\]\.href\} className="portal-card portal-animation" prefetch=\{false\}/);
-  assert.match(congChinh, /DIEM_DEN_CHINH\[2\]\.href\} className="portal-card portal-audio" prefetch=\{false\}/);
-  assert.match(home, /href=\{d\.href\} className=\{`portal-satellite[^`]*`\} prefetch=\{false\}/);
 });
 
 test("trang chu co hero, va no LUON ve", () => {
@@ -205,7 +196,7 @@ test("hero noi ve TRUYEN, khong phai ve cong cu", () => {
   const at = home.indexOf("function Hero(");
   const than = home.slice(at, home.indexOf("function DaiThanhVien"));
   assert.match(than, /href="\/fanfic"/, "thiếu lối vào khám phá truyện");
-  assert.match(than, /href="\/studio\/write"/, "thiếu lối vào viết truyện");
+  assert.match(than, /href="\/studio"/, "thiếu lối vào Fanfic Studio");
   // Va van khong dan bang logo khong lo — `ui.test.mjs` giu rang buoc do.
   assert.ok(!than.includes("LogoMark"));
 });
@@ -213,7 +204,7 @@ test("hero noi ve TRUYEN, khong phai ve cong cu", () => {
 test("da dang nhap thi co loi tat vao thu vien", () => {
   const home = read("../src/app/page.tsx");
   assert.match(home, /daDangNhap \? \(/);
-  assert.match(home, /href="\/studio\/library"/);
+  assert.match(home, /href="\/library"/);
 });
 
 test("trang chu VAN lay truyen that, khong thanh landing tinh", () => {

@@ -63,22 +63,16 @@ import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
 import { NovelCover } from "@/components/NovelCover";
 import {
   CelestialDivider,
-  CornerRune,
-  MotifFilmFrame,
   MotifManuscript,
-  MotifWaveform,
 } from "@/components/Ornaments";
 import { ErrorState, ProgressBar } from "@/components/ui";
 import {
   IconBook,
   IconCompass,
   IconCrown,
-  IconFeather,
   IconFilm,
   IconFlame,
-  IconHeadphones,
   IconMegaphone,
-  IconSparkles,
   IconTag,
   IconUser,
 } from "@/components/Icons";
@@ -240,8 +234,8 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
         <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
           Khám phá
         </Link>
-        <Link className="btn btn-outline" href="/studio/write" prefetch={false}>
-          Viết truyện
+        <Link className="btn btn-outline" href="/studio" prefetch={false}>
+          Fanfic Studio
         </Link>
       </div>
       {!daDangNhap ? (
@@ -284,159 +278,6 @@ function DaiThanhVien({
         </>
       ) : null}
     </p>
-  );
-}
-
-interface DiemDen {
-  href: string;
-  icon: React.ReactNode;
-  ten: string;
-  mota: string;
-}
-
-/**
- * BA diem den CHINH — moi diem la mot "cong" rieng, khong phai mot the trong
- * mot hang deu nhau (Visual Renaissance Phase 3, thay `DANH_SACH_TINH_NANG`
- * cu). Thu tu ke ca kich thuoc phan anh dung uu tien san pham: Truyen la ly
- * do chinh nguoi ta den, Animation la san pham thu hai manh nhat, Audio la
- * mot cach tieu thu CHINH Truyen (khong phai mot the ngang hang doc lap).
- */
-const DIEM_DEN_CHINH: DiemDen[] = [
-  {
-    href: "/fanfic",
-    icon: <IconBook size={22} />,
-    ten: "Truyện",
-    mota: "Khám phá fanfic do cộng đồng viết",
-  },
-  {
-    href: "/animation",
-    icon: <IconFilm size={19} />,
-    ten: "Animation",
-    mota: "Xem các series và tập mới",
-  },
-  {
-    href: "/studio/audio",
-    icon: <IconHeadphones size={19} />,
-    ten: "Audio",
-    mota: "Nghe truyện bằng giọng đọc",
-  },
-];
-
-/** BA diem den VE TINH — nho hon, mot hang gon duoi ba cong chinh. */
-const DIEM_DEN_PHU: DiemDen[] = [
-  {
-    href: "/community",
-    icon: <IconMegaphone size={17} />,
-    ten: "Cộng đồng",
-    mota: "Thảo luận và chia sẻ",
-  },
-  {
-    href: "/studio/write",
-    icon: <IconFeather size={17} />,
-    ten: "Sáng tác",
-    mota: "Viết và xuất bản truyện",
-  },
-  {
-    href: "/studio/image",
-    icon: <IconSparkles size={17} />,
-    ten: "Image Studio",
-    mota: "Tạo hình ảnh cho thế giới của bạn",
-  },
-];
-
-/**
- * "CHỌN LỐI ĐI CỦA BẠN" — cổng thế giới bất đối xứng (Visual Renaissance
- * Phase 3), thay lưới 6 thẻ đều nhau cũ (`.hub-grid`/`.quick-card`, vẫn còn
- * dùng ở `/account`).
- *
- * Truyện là cổng THỐNG TRỊ (chiếm 2/3 chiều rộng, cao gấp đôi) — đây là lý do
- * chính người dùng đến. Animation/Audio xếp dọc bên phải, nhỏ hơn nhưng vẫn
- * là hai đích đến độc lập. Cộng đồng/Sáng tác/Image Studio là một dải vệ
- * tinh gọn — trên mobile dải này CUỘN NGANG thay vì xếp chồng vô hạn (xem
- * `.portal-satellites` ở `globals.css`).
- *
- * Mỗi cổng có MỘT hoạ tiết SVG nền riêng (`Ornaments.tsx`) để bản sắc đến từ
- * chất liệu/hình ảnh, không chỉ icon+nhãn — đúng yêu cầu "destination art".
- */
-function TheGioiCong() {
-  return (
-    <section className="stack-2 rise rise-1 home-portals" aria-labelledby="home-tinh-nang">
-      <h2 className="section-title" id="home-tinh-nang">
-        Chọn lối đi của bạn
-      </h2>
-      {/*
-        Ca 6 cong (chinh + ve tinh) LUON trong khung nhin dau tien cua trang
-        chu, va deu tro toi trang TINH da prerender — cung ly do tat prefetch
-        nhu Hero/header (xem NavAuth.tsx). `prefetch={false}` dat tren TUNG
-        the ben duoi, khong phai o day.
-      */}
-      <div className="portal-primary">
-        <Link href={DIEM_DEN_CHINH[0].href} className="portal-card portal-truyen" prefetch={false}>
-          <Image
-            src="/images/portals/truyen-manuscript.webp"
-            alt=""
-            fill
-            priority
-            sizes="(max-width: 900px) 100vw, 66vw"
-            className="portal-art"
-          />
-          <span className="portal-overlay" aria-hidden="true" />
-          <CornerRune className="portal-rune" />
-          <MotifManuscript className="portal-motif" />
-          <span className="portal-body">
-            <span className="portal-icon" aria-hidden="true">
-              {DIEM_DEN_CHINH[0].icon}
-            </span>
-            <strong className="portal-title">{DIEM_DEN_CHINH[0].ten}</strong>
-            <span className="hint">{DIEM_DEN_CHINH[0].mota}</span>
-          </span>
-        </Link>
-        <div className="portal-stack">
-          <Link href={DIEM_DEN_CHINH[1].href} className="portal-card portal-animation" prefetch={false}>
-            <Image
-              src="/images/portals/animation-projector.webp"
-              alt=""
-              fill
-              loading="eager"
-              sizes="(max-width: 900px) 50vw, 33vw"
-              className="portal-art"
-            />
-            <span className="portal-overlay" aria-hidden="true" />
-            <MotifFilmFrame className="portal-motif" />
-            <span className="portal-body">
-              <span className="portal-icon" aria-hidden="true">
-                {DIEM_DEN_CHINH[1].icon}
-              </span>
-              <strong className="portal-title">{DIEM_DEN_CHINH[1].ten}</strong>
-              <span className="hint">{DIEM_DEN_CHINH[1].mota}</span>
-            </span>
-          </Link>
-          <Link href={DIEM_DEN_CHINH[2].href} className="portal-card portal-audio" prefetch={false}>
-            <MotifWaveform className="portal-motif" />
-            <span className="portal-body">
-              <span className="portal-icon" aria-hidden="true">
-                {DIEM_DEN_CHINH[2].icon}
-              </span>
-              <strong className="portal-title">{DIEM_DEN_CHINH[2].ten}</strong>
-              <span className="hint">{DIEM_DEN_CHINH[2].mota}</span>
-            </span>
-          </Link>
-        </div>
-      </div>
-      <div className="portal-satellites">
-        {DIEM_DEN_PHU.map((d) => (
-          <Link key={d.href} href={d.href} className={`portal-satellite portal-sat-${d.href.replace(/\//g, "")}`} prefetch={false}>
-            <span className="portal-satellite-icon" aria-hidden="true">
-              {d.icon}
-            </span>
-            <span className="portal-satellite-body">
-              <strong>{d.ten}</strong>
-              <span className="hint">{d.mota}</span>
-            </span>
-          </Link>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -711,20 +552,9 @@ export default function HomePage() {
     // nhan CHINH. Dat o day (khong phai rieng tren .hero-v2) de dong bo voi
     // cach cac trang khac dat theme tren the bao ngoai cung.
     <div className="page" data-hero-theme="home">
-      {/*
-        Desktop: gom loi chao va cac diem den vao CUNG mot dai hai cot. Ban
-        truoc xep doc hai khoi lon, nen rieng phan dieu huong dau trang da an
-        gan tron mot viewport truoc khi nguoi dung thay noi dung that.
-
-        Tablet/mobile tu tro ve mot cot trong CSS; khong doi thu tu DOM, nen
-        doc man hinh va dieu huong ban phim van gap Hero truoc cac diem den.
-      */}
-      <div className="home-entry-grid">
-        <div className="home-entry-copy">
-          <Hero daDangNhap={daDangNhap} />
-          <DaiThanhVien gamification={data?.gamification ?? null} />
-        </div>
-        <TheGioiCong />
+      <div className="home-hero-wrap">
+        <Hero daDangNhap={daDangNhap} />
+        <DaiThanhVien gamification={data?.gamification ?? null} />
       </div>
 
       {/*
@@ -738,7 +568,7 @@ export default function HomePage() {
             <h2 className="section-title" id="home-tiep-tuc">
               Tiếp tục của bạn
             </h2>
-            <Link className="section-more" href="/studio/library" prefetch={false}>
+            <Link className="section-more" href="/library" prefetch={false}>
               Thư viện của bạn <span aria-hidden="true">→</span>
             </Link>
           </div>

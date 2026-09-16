@@ -181,31 +181,35 @@ export default function AudioStudio() {
         />
       </div>
       <section className="audio-recent">
-        <h2>Audio gần đây</h2>
-        <p className="hint">Nghe, tải xuống hoặc mở một bản có sẵn trong Media Editor.</p>
-        {sessionLoading ? (
-          <div className="card stack-2" style={{ padding: "var(--s3)", marginTop: "var(--s2)", textAlign: "center" }}>
-            <p className="hint">Đang tải danh sách audio…</p>
-          </div>
-        ) : !profile ? (
-          <div className="card stack-2" style={{ padding: "var(--s3)", marginTop: "var(--s2)", textAlign: "center" }}>
-            <p className="hint">Đăng nhập để xem và quản lý danh sách audio bạn đã tạo.</p>
-            <Link className="btn btn-sm btn-primary" href={loginHref("/studio/audio")} prefetch={false} style={{ alignSelf: "center" }}>
-              Đăng nhập
-            </Link>
-          </div>
-        ) : recent.length === 0 ? (
-          <p className="hint" style={{ marginTop: "var(--s2)" }}>Chưa có bản audio nào.</p>
-        ) : (
-          recent.map((a) => (
-            <article className="audio-item" key={a.track_id}>
-              <AudioPlayer chapterId={a.chapter_id} title={a.chapter_title} compact />
-              <Link className="btn btn-sm" href={`/studio/media?audio=${encodeURIComponent(a.track_id)}`} prefetch={false}>
-                Chỉnh với video
+        <div className="audio-recent-head">
+          <h2>Audio gần đây</h2>
+          <p className="hint">Nghe, tải xuống hoặc mở một bản có sẵn trong Media Editor.</p>
+        </div>
+        <div className="audio-recent-list">
+          {sessionLoading ? (
+            <div className="card stack-2" style={{ padding: "var(--s3)", marginTop: "var(--s2)", textAlign: "center" }}>
+              <p className="hint">Đang tải danh sách audio…</p>
+            </div>
+          ) : !profile ? (
+            <div className="card stack-2" style={{ padding: "var(--s3)", marginTop: "var(--s2)", textAlign: "center" }}>
+              <p className="hint">Đăng nhập để xem và quản lý danh sách audio bạn đã tạo.</p>
+              <Link className="btn btn-sm btn-primary" href={loginHref("/studio/audio")} prefetch={false} style={{ alignSelf: "center" }}>
+                Đăng nhập
               </Link>
-            </article>
-          ))
-        )}
+            </div>
+          ) : recent.length === 0 ? (
+            <p className="hint" style={{ marginTop: "var(--s2)" }}>Chưa có bản audio nào.</p>
+          ) : (
+            recent.map((a) => (
+              <article className="audio-item" key={a.track_id}>
+                <AudioPlayer chapterId={a.chapter_id} title={a.chapter_title} compact />
+                <Link className="btn btn-sm" href={`/studio/media?audio=${encodeURIComponent(a.track_id)}`} prefetch={false}>
+                  Chỉnh với video
+                </Link>
+              </article>
+            ))
+          )}
+        </div>
       </section>
     </section>
   );

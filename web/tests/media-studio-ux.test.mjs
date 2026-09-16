@@ -95,10 +95,12 @@ test("Studio dung page flow tu nhien, khong khoa chieu cao hay ep scroll noi bo"
   assert.ok(!sach.includes("studio-app-active"));
   assert.ok(!sach.includes("--studio-shell-height"));
   assert.ok(!/\.studio-than\s*\{[^}]*overflow:\s*auto/.test(sach));
-  assert.match(sach, /\.audio-recent\s*\{[^}]*max-height:min\(680px, calc\(100dvh - 170px\)\); overflow-y:auto;/,
-    "Audio gần đây là danh sách dài duy nhất được cuộn nội bộ trên desktop");
-  assert.match(sach, /@media \(max-width: 640px\) \{[\s\S]*\.audio-recent \{ max-height:none; overflow:visible; padding:0; \}/,
-    "mobile trở lại page scroll tự nhiên");
+  assert.match(sach, /\.audio-recent\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?top:\s*86px;/,
+    "Audio gần đây giữ vị trí sticky theo viewport trên desktop");
+  assert.match(sach, /\.audio-recent-list\s*\{[\s\S]*?overflow-y:\s*auto;/,
+    "chỉ danh sách audio cuộn nội bộ khi có nhiều bản audio");
+  assert.match(sach, /@media \(max-width: 1100px\) \{[\s\S]*?\.audio-recent\s*\{[\s\S]*?position:\s*static;[\s\S]*?max-height:\s*none;/,
+    "tablet/mobile trở lại page scroll tự nhiên");
 });
 
 test("desktop uu tien tao audio: sidebar gon, Recent Audio hep va tablet xep doc", () => {

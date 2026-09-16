@@ -105,15 +105,13 @@ test("tao loi doc trong Media Studio KHONG bi gop vao Viet truyen", () => {
   }
 });
 
-test("chua dang nhap vao the Viet truyen thi sang /login?next=/studio/content", () => {
+test("chua dang nhap vao the Viet truyen thi hien EmptyState sang /login?next=/studio/content", () => {
   // The nay nam duoi `/studio/content` sau khi gop vao Nội dung — noi quay
   // lai sau dang nhap phai la duong THAT, khong phai `/studio/write` cu (di
   // qua do se bat mot vong chuyen huong phia client thu hai).
   const write = read("../src/components/studio/VietTruyen.tsx");
-  assert.match(write, /router\.replace\(loginHref\("\/studio\/content"\)\)/);
-  // `replace` chu khong phai `push`: nut Back phai ve trang truoc do, khong
-  // phai ve mot trang se lai day ho sang dang nhap.
-  assert.ok(!/router\.push\(loginHref/.test(write));
+  assert.match(write, /loginHref\("\/studio\/content"\)/);
+  assert.ok(!/router\.(replace|push)\(loginHref/.test(write));
 });
 
 /* ================================================= `next` va open redirect */

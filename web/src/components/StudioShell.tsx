@@ -184,9 +184,13 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
   */
   // Ten bien KHONG duoc la `module`: Next.js cam gan vao dinh danh do
   // (`no-assign-module-variable`) vi no dung voi bien cua he module CommonJS.
+  const isMedia = pathname.startsWith("/studio/media");
   const dangMo = MUC_STUDIO.find((m) => mucDangMo(pathname, m.href));
-  const tieuDe =
-    !dangMo || dangMo.href === "/studio" ? "Xưởng sáng tác" : dangMo.nhan;
+  const tieuDe = isMedia
+    ? "Media"
+    : !dangMo || dangMo.href === "/studio"
+      ? "Xưởng sáng tác"
+      : dangMo.nhan;
 
   return (
     <div className="page studio-page">
@@ -194,9 +198,20 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
           cho các điểm đến Studio khác. */}
       <header className="studio-dau row row-spread">
         <div className="stack-2">
-          <span className="eyebrow eyebrow-icon">
-            <IconSparkles size={17} /> Fanfic Studio
-          </span>
+          {isMedia ? (
+            <Link
+              href="/studio/audio"
+              className="studio-quay-lai eyebrow"
+              prefetch={false}
+              style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
+            >
+              <span aria-hidden="true">←</span> Quay lại Audio Studio
+            </Link>
+          ) : (
+            <span className="eyebrow eyebrow-icon">
+              <IconSparkles size={17} /> Fanfic Studio
+            </span>
+          )}
           <h1 className="page-title studio-tieu-de">{tieuDe}</h1>
         </div>
         <button

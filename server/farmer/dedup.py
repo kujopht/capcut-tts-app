@@ -216,43 +216,78 @@ class DedupIndex:
 
     def finished_tts_output_key(self, novel_id: str,
                                 owner_id: str = FARMER_OWNER) -> Optional[str]:
-        """`output_key` cua job TTS DA XONG, hoac None.
+        """`output_key` cua job TTS DA XONG cho toan bo tac pham (ARTIFACT_AUDIO_VI).
 
-        Tach khoi `novel_has_tts_job` vi hai cau hoi khac nhau: "co can xep
-        khong" va "da co am thanh de gan vao manifest chua". Mot job dang
-        chay tra loi CO cho cau dau va CHUA cho cau sau.
-
-        QUY TAC TAT DINH CHO TRUYEN NHIEU CHUONG:
-        Chi coi la co am thanh de gan vao manifest khi TAT CA cac chuong deu
-        da hoan tat va co output_key. Neu chi chuong 1 xong con cac chuong
-        khac dang chay/that bai, tra ve None — tuyet doi khong gan audio
-        nua voi vao manifest cua truyen nhieu chuong.
+        QUY TAC CHO TOAN BO TAC PHAM:
+        - Chi tra ve output_key khi tac pham co DUNG 1 chuong va chuong do da hoan tat.
+        - Voi tac pham nhieu chuong (chapter_count > 1): chuong 1 KHONG phai la audio
+          toan tap. Khi chua co pipeline gop am thanh (concatenation), khong bao gio
+          gan audio chuong 1 thanh audio toan tap (tra ve None).
         """
         try:
             fn_ch = getattr(self._store, "list_chapters", None)
             if fn_ch is None:
                 return None
             chapters = fn_ch(novel_id)
-            if not chapters:
+            if not chapters or len(chapters) != 1:
+                # Nhieu chuong: khong the dung output_key chuong 1 lam toan bo audio tac pham.
                 return None
             fn_jobs = getattr(self._store, "list_jobs", None)
             if fn_jobs is None:
                 return None
-            output_keys: List[str] = []
-            for ch in chapters:
-                ch_key = None
-                for j in fn_jobs(owner_id, ch.chapter_id):
-                    trang_thai = getattr(j.status, "value", j.status)
-                    if str(trang_thai).lower() == "completed" and getattr(j, "output_key", None):
-                        ch_key = j.output_key
-                        break
-                if not ch_key:
-                    return None
-                output_keys.append(ch_key)
-            return output_keys[0] if output_keys else None
+            for j in fn_jobs(owner_id, chapters[0].chapter_id):
+                trang_thai = getattr(j.status, "value", j.status)
+                if str(trang_thai).lower() == "completed" and getattr(j, "output_key", None):
+                    return j.output_key
+            return None
         except Exception as exc:
             raise DedupError(
                 f"khong doc duoc ket qua TTS cua {novel_id}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
+    def novel_audio_status(self, novel_id: str,
+                           owner_id: str = FARMER_OWNER) -> Tuple[str, List[str]]:
+        """Xac dinh trang thai am thanh va danh sach job TTS cua novel.
+
+        Tra ve (status, job_ids):
+        - status: 'complete' (tat ca chuong deu co job completed co output_key)
+                  'partial'  (it nhat mot chuong completed hoac co job, nhung chua du)
+                  'pending'  (chua chuong nao co audio)
+        """
+        try:
+            fn_ch = getattr(self._store, "list_chapters", None)
+            if fn_ch is None:
+                return "pending", []
+            chapters = fn_ch(novel_id)
+            if not chapters:
+                return "pending", []
+            fn_jobs = getattr(self._store, "list_jobs", None)
+            if fn_jobs is None:
+                return "pending", []
+
+            completed_count = 0
+            job_ids: List[str] = []
+            for ch in chapters:
+                ch_jobs = fn_jobs(owner_id, ch.chapter_id)
+                ch_done = False
+                for j in ch_jobs:
+                    jid = getattr(j, "job_id", "")
+                    if jid and jid not in job_ids:
+                        job_ids.append(jid)
+                    trang_thai = getattr(j.status, "value", j.status)
+                    if str(trang_thai).lower() == "completed" and getattr(j, "output_key", None):
+                        ch_done = True
+                if ch_done:
+                    completed_count += 1
+
+            if completed_count == len(chapters):
+                return "complete", job_ids
+            elif completed_count > 0 or len(job_ids) > 0:
+                return "partial", job_ids
+            return "pending", job_ids
+        except Exception as exc:
+            raise DedupError(
+                f"khong doc duoc trang thai audio cua {novel_id}: "
                 f"{type(exc).__name__}: {exc}") from exc
 
     def existing_text_novel_id(self, canonical_url: str,

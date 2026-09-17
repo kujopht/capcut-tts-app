@@ -190,9 +190,9 @@ class WorkManifest:
     tts_job_id: str = ""
     tts_job_ids: List[str] = field(default_factory=list)
     audio_status: str = "pending"
-    chapter_count: int = 1
-    intended_chapter_count: int = 1
-    served_verified: bool = True
+    chapter_count: int = 0
+    intended_chapter_count: int = 0
+    served_verified: bool = False
     review_model: str = ""
 
     # --- trang thai ---------------------------------------------------------
@@ -212,7 +212,7 @@ class WorkManifest:
         default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    schema_version: int = 1
+    schema_version: int = 2
 
     def missing_required_artwork(self) -> List[str]:
         return [a for a in REQUIRED_ARTWORK if not self.artifacts.get(a)]
@@ -221,19 +221,26 @@ class WorkManifest:
         """READY/PUBLISHABLE can:
         - Quyet dinh duyet (APPROVE)
         - Du bo tranh (cover + background)
-        - Ban phuc vu da duoc xac minh (served_verified)
+        - Co novel_id hop le tren he thong phuc vu
+        - Ban phuc vu da duoc xac minh (served_verified == True)
         - So chuong phuc vu > 0 (chapter_count > 0)
-        - Khong thieu chuong so voi du kien (chapter_count >= intended_chapter_count)
+        - So chuong du kien > 0 (intended_chapter_count > 0)
+        - So chuong phuc vu khop chinh xac so chuong du kien (chapter_count == intended_chapter_count)
+        - Co hien vat van ban chuan hoa (ARTIFACT_TEXT)
         """
         if self.decision != DECISION_APPROVE:
             return False
         if bool(self.missing_required_artwork()):
             return False
+        if not (self.novel_id or "").strip():
+            return False
         if not self.served_verified:
             return False
-        if self.chapter_count <= 0:
+        if self.chapter_count <= 0 or self.intended_chapter_count <= 0:
             return False
-        if self.intended_chapter_count > 0 and self.chapter_count < self.intended_chapter_count:
+        if self.chapter_count != self.intended_chapter_count:
+            return False
+        if not self.artifacts.get(ARTIFACT_TEXT):
             return False
         return True
 
@@ -304,12 +311,21 @@ class WorkManifest:
         else:
             tts_ids = []
 
+        schema = int(data.get("schema_version", 1))
         raw_cc = phuc_vu.get("chapter_count")
-        cc = int(raw_cc) if raw_cc is not None else (1 if phuc_vu.get("novel_id") else 1)
         raw_icc = phuc_vu.get("intended_chapter_count")
-        icc = int(raw_icc) if raw_icc is not None else cc
         raw_sv = phuc_vu.get("served_verified")
-        sv = bool(raw_sv) if raw_sv is not None else True
+        if schema < 2:
+            # Legacy v1 manifests did not have multi-chapter tracking.
+            # Default to 1 verified chapter for backward compatibility with existing stored v1 manifests.
+            cc = int(raw_cc) if raw_cc is not None else 1
+            icc = int(raw_icc) if raw_icc is not None else cc
+            sv = bool(raw_sv) if raw_sv is not None else True
+        else:
+            # Schema v2+: fail closed
+            cc = int(raw_cc) if raw_cc is not None else 0
+            icc = int(raw_icc) if raw_icc is not None else 0
+            sv = bool(raw_sv) if raw_sv is not None else False
         raw_as = str(phuc_vu.get("audio_status", "pending" if single_tts else "none"))
 
         return cls(
@@ -348,4 +364,5 @@ class WorkManifest:
             ready=bool(data.get("ready", False)),
             created_at=str(data.get("created_at", "")),
             updated_at=str(data.get("updated_at", "")),
+            schema_version=schema,
         )

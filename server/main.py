@@ -3011,7 +3011,7 @@ def get_job(job_id: str, profile: Profile = Depends(harvester_or_user_profile)) 
 
 @app.get("/api/jobs")
 def list_jobs(chapter_id: Optional[str] = None,
-              profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+              profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
     items = store.list_jobs(profile.user_id, chapter_id)
     return {"jobs": [j.to_dict() for j in items], "count": len(items)}
 

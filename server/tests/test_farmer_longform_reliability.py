@@ -101,6 +101,12 @@ class _InMemoryStore:
         filtered = [n for n in self.novels if owner_id is None or getattr(n, "owner_id", FARMER_OWNER) == owner_id]
         return list(filtered), len(filtered)
 
+    def get_novel(self, novel_id: str):
+        for n in self.novels:
+            if getattr(n, "novel_id", None) == novel_id:
+                return n
+        return None
+
     def list_chapters(self, novel_id: str):
         return list(self.chapters.get(novel_id, []))
 
@@ -286,6 +292,111 @@ class TestMultiChapterStoryPlan(unittest.TestCase):
             verify_served_novel(valid_novel_data, plan, max_chars=5)
 
 
+class TestServedNovelVerificationP02(unittest.TestCase):
+    """P0-2: Never set served_verified=True without real verification.
+    5 required tests:
+    1. Truncated chapter in served data -> PreflightError / served_verified=False -> NOT READY
+    2. Wrong content in served data -> PreflightError / served_verified=False -> NOT READY
+    3. Wrong order in served data -> PreflightError / served_verified=False -> NOT READY
+    4. Extra unexpected chapter in served data -> PreflightError / served_verified=False -> NOT READY
+    5. Exact match -> served_verified=True -> READY eligible
+    """
+    def setUp(self):
+        self.plan = PreparedStoryPlan(
+            chapters=[
+                PreparedChapter(title="Chương 1", content="Nội dung chương 1 đầy đủ.", order_index=1),
+                PreparedChapter(title="Chương 2", content="Nội dung chương 2 đầy đủ.", order_index=2),
+            ],
+            total_chars=52,
+            review_text="Nội dung chương 1 đầy đủ.\n\nNội dung chương 2 đầy đủ.",
+        )
+
+    def test_1_truncated_chapter_fails_verification(self):
+        # Case 1a: Chapter content truncated
+        data_cut = {
+            "novel": {"novel_id": "nov_123"},
+            "chapters": [
+                {"order_index": 1, "title": "Chương 1", "content": "Nội dung chương 1"},
+                {"order_index": 2, "title": "Chương 2", "content": "Nội dung chương 2 đầy đủ."},
+            ],
+        }
+        ok, msg = verify_served_novel(data_cut, self.plan, max_chars=100, raise_on_error=False)
+        self.assertFalse(ok)
+        self.assertIn("không khớp", msg)
+        with self.assertRaises(PreflightError):
+            verify_served_novel(data_cut, self.plan, max_chars=100, raise_on_error=True)
+
+        # Case 1b: Chapter missing entirely (fewer chapters)
+        data_missing = {
+            "novel": {"novel_id": "nov_123"},
+            "chapters": [
+                {"order_index": 1, "title": "Chương 1", "content": "Nội dung chương 1 đầy đủ."},
+            ],
+        }
+        ok, msg = verify_served_novel(data_missing, self.plan, max_chars=100, raise_on_error=False)
+        self.assertFalse(ok)
+        self.assertIn("Số lượng chương không khớp", msg)
+        with self.assertRaises(PreflightError):
+            verify_served_novel(data_missing, self.plan, max_chars=100, raise_on_error=True)
+
+    def test_2_wrong_content_fails_verification(self):
+        data_wrong = {
+            "novel": {"novel_id": "nov_123"},
+            "chapters": [
+                {"order_index": 1, "title": "Chương 1", "content": "Hoàn toàn sai nội dung chương một."},
+                {"order_index": 2, "title": "Chương 2", "content": "Nội dung chương 2 đầy đủ."},
+            ],
+        }
+        ok, msg = verify_served_novel(data_wrong, self.plan, max_chars=100, raise_on_error=False)
+        self.assertFalse(ok)
+        self.assertIn("không khớp", msg)
+        with self.assertRaises(PreflightError):
+            verify_served_novel(data_wrong, self.plan, max_chars=100, raise_on_error=True)
+
+    def test_3_wrong_order_fails_verification(self):
+        data_wrong_order = {
+            "novel": {"novel_id": "nov_123"},
+            "chapters": [
+                {"order_index": 2, "title": "Chương 2", "content": "Nội dung chương 2 đầy đủ."},
+                {"order_index": 1, "title": "Chương 1", "content": "Nội dung chương 1 đầy đủ."},
+            ],
+        }
+        ok, msg = verify_served_novel(data_wrong_order, self.plan, max_chars=100, raise_on_error=False)
+        self.assertFalse(ok)
+        self.assertIn("Thứ tự chương", msg)
+        with self.assertRaises(PreflightError):
+            verify_served_novel(data_wrong_order, self.plan, max_chars=100, raise_on_error=True)
+
+    def test_4_extra_unexpected_chapter_fails_verification(self):
+        data_extra = {
+            "novel": {"novel_id": "nov_123"},
+            "chapters": [
+                {"order_index": 1, "title": "Chương 1", "content": "Nội dung chương 1 đầy đủ."},
+                {"order_index": 2, "title": "Chương 2", "content": "Nội dung chương 2 đầy đủ."},
+                {"order_index": 3, "title": "Chương 3", "content": "Chương thừa không có trong kế hoạch."},
+            ],
+        }
+        ok, msg = verify_served_novel(data_extra, self.plan, max_chars=100, raise_on_error=False)
+        self.assertFalse(ok)
+        self.assertIn("Số lượng chương không khớp", msg)
+        with self.assertRaises(PreflightError):
+            verify_served_novel(data_extra, self.plan, max_chars=100, raise_on_error=True)
+
+    def test_5_exact_match_passes_verification(self):
+        data_exact = {
+            "novel": {"novel_id": "nov_123"},
+            "chapters": [
+                {"order_index": 1, "title": "Chương 1", "content": "Nội dung chương 1 đầy đủ."},
+                {"order_index": 2, "title": "Chương 2", "content": "Nội dung chương 2 đầy đủ."},
+            ],
+        }
+        ok, msg = verify_served_novel(data_exact, self.plan, max_chars=100, raise_on_error=False)
+        self.assertTrue(ok)
+        self.assertEqual(msg, "")
+        # No error raised
+        verify_served_novel(data_exact, self.plan, max_chars=100, raise_on_error=True)
+
+
 class TestCanonicalManifestInvariants(unittest.TestCase):
     """Kiem thu cac bat bien READY tren WorkManifest."""
 
@@ -295,6 +406,7 @@ class TestCanonicalManifestInvariants(unittest.TestCase):
             "bucket": BUCKET_FANFIC_TTS,
             "canonical_dir": f"{PRODUCTION_ROOT}/{BUCKET_FANFIC_TTS}/slug-w_123",
             "decision": DECISION_APPROVE,
+            "novel_id": "nov_123",
             "artifacts": {
                 ARTIFACT_COVER: "cover.webp",
                 ARTIFACT_BACKGROUND: "bg.webp",
@@ -308,6 +420,19 @@ class TestCanonicalManifestInvariants(unittest.TestCase):
         base.update(kwargs)
         return WorkManifest(**base)
 
+    def test_fail_closed_defaults(self):
+        """P0-3: Manifest defaults must be fail closed (chapter_count=0, intended_chapter_count=0, served_verified=False)."""
+        man = WorkManifest(
+            work_id="w_default",
+            bucket=BUCKET_FANFIC_TTS,
+            canonical_dir="dir",
+            decision=DECISION_APPROVE,
+        )
+        self.assertEqual(man.chapter_count, 0)
+        self.assertEqual(man.intended_chapter_count, 0)
+        self.assertFalse(man.served_verified)
+        self.assertFalse(man.publishable())
+
     def test_approved_with_artwork_and_zero_chapters_is_not_ready(self):
         """APPROVED + ARTWORK + NOVEL WITH ZERO CHAPTERS != READY"""
         man = self._manifest_chuan(chapter_count=0)
@@ -319,7 +444,26 @@ class TestCanonicalManifestInvariants(unittest.TestCase):
         self.assertFalse(man.publishable())
 
     def test_unverified_serving_is_not_ready(self):
+        """P0-3: WorkManifest with APPROVE and artwork but without explicit verification -> publishable() == False."""
         man = self._manifest_chuan(served_verified=False)
+        self.assertFalse(man.publishable())
+
+    def test_missing_artwork_is_not_ready(self):
+        """P0-3: WorkManifest missing required artwork -> publishable() == False."""
+        man = self._manifest_chuan(artifacts={ARTIFACT_TEXT: "text.txt"})
+        self.assertFalse(man.publishable())
+
+    def test_missing_novel_id_is_not_ready(self):
+        """P0-3: WorkManifest with novel_id missing -> publishable() == False."""
+        man = self._manifest_chuan(novel_id="")
+        self.assertFalse(man.publishable())
+
+    def test_missing_text_artifact_is_not_ready(self):
+        """P0-3: WorkManifest missing ARTIFACT_TEXT -> publishable() == False."""
+        man = self._manifest_chuan(artifacts={
+            ARTIFACT_COVER: "cover.webp",
+            ARTIFACT_BACKGROUND: "bg.webp",
+        })
         self.assertFalse(man.publishable())
 
     def test_audio_decoupled_from_text_ready(self):
@@ -396,8 +540,21 @@ class TestDedupAndAudioMultiChapter(unittest.TestCase):
         store.jobs["ch_2"] = [job2]
         self.assertFalse(dedup.novel_needs_tts("nov_mc"))
 
-    def test_finished_tts_output_key_requires_all_chapters(self):
-        """Audio Invariant: Multi-chapter novels must never be marked full audio complete because chapter 1 has a job."""
+    def test_single_chapter_tts_output_key_returned_when_completed(self):
+        """Single-chapter story returns the output_key when completed."""
+        store = _InMemoryStore()
+        dedup = DedupIndex(store)
+        ch1 = mock.Mock(chapter_id="ch_1", order_index=1)
+        store.chapters["nov_sc"] = [ch1]
+        job1 = mock.Mock(job_id="job_1", chapter_id="ch_1", status="completed", output_key="audio/sc.mp3")
+        store.jobs["ch_1"] = [job1]
+        self.assertEqual(dedup.finished_tts_output_key("nov_sc"), "audio/sc.mp3")
+
+    def test_finished_tts_output_key_multi_chapter_returns_none_and_tracks_status(self):
+        """P1-2 Audio Invariant: Multi-chapter novels must never return a single book output key.
+        finished_tts_output_key is None even when all chapters are completed.
+        novel_audio_status returns ('complete', job_ids).
+        """
         store = _InMemoryStore()
         dedup = DedupIndex(store)
 
@@ -405,19 +562,23 @@ class TestDedupAndAudioMultiChapter(unittest.TestCase):
         ch2 = mock.Mock(chapter_id="ch_2", order_index=2)
         store.chapters["nov_mc"] = [ch1, ch2]
 
-        # Chuong 1 completed co output_key, nhung chuong 2 chua xong
         job1 = mock.Mock(job_id="job_1", chapter_id="ch_1", status="completed", output_key="audio/ch1.mp3")
         job2 = mock.Mock(job_id="job_2", chapter_id="ch_2", status="running", output_key=None)
         store.jobs["ch_1"] = [job1]
         store.jobs["ch_2"] = [job2]
 
-        # Phai tra ve None, tuyet doi khong tra ve audio/ch1.mp3!
+        # Partial -> finished_tts_output_key is None, novel_audio_status is ('partial', [...])
         self.assertIsNone(dedup.finished_tts_output_key("nov_mc"))
+        stat, ids = dedup.novel_audio_status("nov_mc")
+        self.assertEqual(stat, "partial")
 
-        # Khi ca 2 deu completed -> tra ve output_key hop le
+        # When all completed -> finished_tts_output_key remains None for multi-chapter!
         job2.status = "completed"
         job2.output_key = "audio/ch2.mp3"
-        self.assertIsNotNone(dedup.finished_tts_output_key("nov_mc"))
+        self.assertIsNone(dedup.finished_tts_output_key("nov_mc"))
+        stat, ids = dedup.novel_audio_status("nov_mc")
+        self.assertEqual(stat, "complete")
+        self.assertEqual(ids, ["job_1", "job_2"])
 
 
 class TestFarmerLongformReliabilityLoop(unittest.TestCase):
@@ -729,8 +890,10 @@ class TestFarmerLongformReliabilityLoop(unittest.TestCase):
             # Novel chi co 1 trong store (khong tao novel moi)
             self.assertEqual(len(store.novels), 1)
 
-    def test_i_existing_novel_with_zero_chapters_is_blocked(self):
-        """Test I: Ban nhap cu ton tai nhung khong co chuong nao thi bi chan, khong duoc dat READY."""
+    def test_i_existing_novel_with_zero_chapters_is_resumed_and_marked_ready(self):
+        """P1-1: Ban nhap cu ton tai nhung co 0 chuong do rot mang thi duoc phuc hoi (resumed):
+        dung lai novel_id cu, xuat ban day du chuong 1..N, khong tao novel trung lap, dat READY.
+        """
         store = _InMemoryStore()
         url = "https://e.com/zero_ch"
         candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyen Khong Chuong")
@@ -741,17 +904,27 @@ class TestFarmerLongformReliabilityLoop(unittest.TestCase):
             )
             farmer._discover_text = lambda n: [candidate]
 
-            # Novel co san nhung chapters rong
+            # Novel co san nhung chapters rong do crash sau khi tao novel
             store.novels.append(mock.Mock(novel_id="nov_rong", external_source_url=url, owner_id=FARMER_OWNER))
             store.chapters["nov_rong"] = []
 
             m = farmer.run_text_lane()
 
-            self.assertEqual(m.failed, 1)
-            self.assertEqual(m.resumed, 0)
-            self.assertEqual(m.published_candidates, 0)
-            self.assertTrue(any("khong co chuong nao" in e for e in m.errors))
-            self.assertFalse(any(k.endswith("manifest.json") for k in objects))
+            self.assertEqual(m.failed, 0)
+            self.assertEqual(m.resumed, 1)
+            self.assertEqual(m.produced, 1)
+            self.assertEqual(m.published_candidates, 1)
+            self.assertEqual(len(store.novels), 1, "Orphan/Idempotency Invariant: khong tao duplicate novel!")
+            self.assertEqual(store.novels[0].novel_id, "nov_rong")
+            self.assertGreater(len(store.chapters["nov_rong"]), 0)
+
+            # Manifest phai hop le, verified, va READY
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            self.assertEqual(len(manifest_keys), 1)
+            man_data = json.loads(objects[manifest_keys[0]])
+            self.assertTrue(man_data["ready"])
+            self.assertTrue(man_data["serving"]["served_verified"])
+            self.assertEqual(man_data["serving"]["novel_id"], "nov_rong")
 
     def test_k_multi_chapter_tts_queues_all_chapters(self):
         """Test K: TTS cho truyen nhieu chuong phai tao job cho TAT CA cac chuong, khong chi chuong 1."""
@@ -775,6 +948,115 @@ class TestFarmerLongformReliabilityLoop(unittest.TestCase):
             for ch in store.chapters[novel_id]:
                 self.assertIn(ch.chapter_id, store.jobs)
                 self.assertEqual(len(store.jobs[ch.chapter_id]), 1)
+
+    def test_publisher_type_error_not_retried(self):
+        """P1-3: Publisher raising TypeError internally is called exactly once and not retried with fallback args."""
+        call_count = 0
+
+        def buggy_publish(c, plan, novel_id=""):
+            nonlocal call_count
+            call_count += 1
+            # Mo phong loi code noi bo trong publisher
+            raise TypeError("int object is not subscriptable inside publisher")
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d),
+            )
+            farmer._publish_text = buggy_publish
+            candidate = Candidate(lane=LANE_TEXT, url="https://e.com/type_error", title="Buggy Publish")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+
+            self.assertEqual(call_count, 1, "Publisher must be called exactly once, no retry fallback!")
+            self.assertEqual(m.failed, 1)
+            self.assertTrue(any("TypeError" in err for err in m.errors))
+
+    def test_multichapter_audio_complete_sets_status_without_single_audio_artifact(self):
+        """P1-2: 3-chapter novel with all 3 chapters TTS completed -> audio_status is 'complete',
+        ARTIFACT_AUDIO_VI is NEVER attached to the whole novel.
+        """
+        from server.farmer.canonical import ARTIFACT_AUDIO_VI
+
+        body = "Doan 1 cho chuong 1.\n\nDoan 2 cho chuong 2.\n\nDoan 3 cho chuong 3."
+        limit = 25
+        url = "https://e.com/multi_audio_done"
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), fetch_func=lambda c: body, max_chars=limit
+            )
+            candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyen 3 Chuong Audio Xong")
+            farmer._discover_text = lambda n: [candidate]
+
+            # Vong 1: xuat ban text -> tao 3 chuong va enqueued 3 TTS jobs
+            m1 = farmer.run_text_lane()
+            self.assertEqual(m1.produced, 1)
+            novel_id = store.novels[0].novel_id
+            self.assertEqual(len(store.chapters[novel_id]), 3)
+
+            # Gia lap ca 3 job TTS deu completed voi file MP3 rieng cua tung chuong
+            for idx, ch in enumerate(store.chapters[novel_id], 1):
+                jobs = store.jobs[ch.chapter_id]
+                self.assertEqual(len(jobs), 1)
+                jobs[0].status = "completed"
+                jobs[0].output_key = f"audio/ch_{idx}.mp3"
+
+            # Vong 2: Farmer chay doi soat am thanh qua _doi_soat_am_thanh
+            m2 = farmer.run_text_lane()
+
+            # audio_attached phai tang, va manifest phai ghi audio_status="complete"
+            self.assertEqual(m2.audio_attached, 1)
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            self.assertEqual(len(manifest_keys), 1)
+            man_data = json.loads(objects[manifest_keys[0]])
+            self.assertEqual(man_data["serving"]["audio_status"], "complete")
+
+            # BAT BIEN: ARTIFACT_AUDIO_VI tuyet doi khong duoc gan cho truyen nhieu chuong
+            self.assertNotIn(ARTIFACT_AUDIO_VI, man_data.get("artifacts", {}))
+
+    def test_served_verification_failure_in_loop_blocks_ready(self):
+        """P0-2: Neu du lieu phuc vu that su khong khop voi plan, served_verified phai la False va tac pham KHONG duoc READY."""
+        store = _InMemoryStore()
+        url = "https://e.com/corrupted_serve"
+        candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyen Loi Phuc Vu")
+
+        def corrupt_publish(c, plan, novel_id=""):
+            novel_id = "nov_corrupted"
+            store.novels.append(mock.Mock(novel_id=novel_id, external_source_url=c.url, owner_id=FARMER_OWNER))
+            # Publish voi noi dung sai lech hoan toan so voi ban goc da duyet
+            store.chapters[novel_id] = [
+                mock.Mock(
+                    chapter_id="ch_1",
+                    novel_id=novel_id,
+                    title="Chương 1",
+                    content="Nội dung bị hỏng hoàn toàn, không khớp với bản gốc đã duyệt.",
+                    order_index=1,
+                )
+            ]
+            return novel_id
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), store=store, fetch_func=lambda c: "Noi dung chuan goc " * 10
+            )
+            farmer._publish_text = corrupt_publish
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+
+            # Tac pham phai bi chan khong duoc READY
+            self.assertEqual(m.published_candidates, 0)
+            self.assertEqual(m.blocked_no_cover, 1)
+            self.assertTrue(any("xac minh phuc vu that bai" in err for err in m.errors))
+
+            # Manifest van duoc ghi nhan de tranh lap lai, nhung ready=False va served_verified=False
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            self.assertEqual(len(manifest_keys), 1)
+            man_data = json.loads(objects[manifest_keys[0]])
+            self.assertFalse(man_data["ready"])
+            self.assertFalse(man_data["serving"]["served_verified"])
 
 
 if __name__ == "__main__":

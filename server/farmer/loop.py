@@ -35,7 +35,12 @@ from server.farmer.metrics import LaneMetrics, MetricsWriter
 from server.farmer.quotas import FarmerQuotas, QuotaExceeded
 from server.farmer.review import QualityReviewer, ReviewUnavailable
 from server.farmer.review_provider import ReviewPending, ReviewProvider
-from server.farmer.story_text import FetchedStoryText, PreflightError, prepare_story_plan
+from server.farmer.story_text import (
+    FetchedStoryText,
+    PreflightError,
+    prepare_story_plan,
+    verify_served_novel,
+)
 from server.story_limits import get_max_chapter_chars
 
 
@@ -134,24 +139,54 @@ class ProductionFarmer:
         #: dong (noi da CHAN duoc neu khong dat). O day chi de bao cao lai.
         self._integrity: Dict[str, Any] = {}
 
-    def _publish_plan(self, c: Candidate, plan: Any, novel_id: str = "") -> str:
-        """Phat hanh hoac tiep tuc xuat ban chuong truyen.
-
-        Ho tro ca publisher nhan plan/novel_id lan publisher mock chi nhan (c, body).
+    def _publish_plan(self, c: Candidate, plan: PreparedStoryPlan, novel_id: str = "") -> str:
+        """Phat hanh hoac tiep tuc xuat ban chuong truyen theo giao thuc:
+        publish(candidate, plan, novel_id="") -> novel_id.
+        Khong catch TypeError de suy doan chu ky ham, tranh trung lap tac dung phu.
         """
-        import inspect
-        sig = inspect.signature(self._publish_text)
-        params = sig.parameters
-        if "novel_id" in params or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
-            try:
-                return self._publish_text(c, plan, novel_id=novel_id)
-            except TypeError:
-                pass
+        return self._publish_text(c, plan, novel_id=novel_id)
+
+    def _get_served_novel(self, novel_id: str) -> Optional[Dict[str, Any]]:
+        """Lay ban ghi phuc vu va danh sach chuong that su tu kho de xac minh."""
         try:
-            return self._publish_text(c, plan)
-        except TypeError:
-            body_str = getattr(plan, "review_text", str(plan))
-            return self._publish_text(c, body_str)
+            fn_c = getattr(self._store, "list_chapters", None)
+            if fn_c is None:
+                return None
+            chapters = fn_c(novel_id)
+            fn_n = getattr(self._store, "get_novel", None)
+            novel = fn_n(novel_id) if fn_n is not None else None
+            n_dict = None
+            if hasattr(novel, "to_dict") and callable(novel.to_dict):
+                res_n = novel.to_dict()
+                if isinstance(res_n, dict):
+                    n_dict = res_n
+            if n_dict is None:
+                n_dict = dict(novel) if isinstance(novel, dict) else {
+                    "novel_id": getattr(novel, "novel_id", novel_id),
+                }
+
+            c_list = []
+            for ch in chapters:
+                d = None
+                if hasattr(ch, "to_dict") and callable(ch.to_dict):
+                    res_c = ch.to_dict()
+                    if isinstance(res_c, dict):
+                        d = res_c
+                if d is None:
+                    if isinstance(ch, dict):
+                        d = ch
+                    else:
+                        d = {
+                            "chapter_id": getattr(ch, "chapter_id", ""),
+                            "novel_id": getattr(ch, "novel_id", ""),
+                            "title": getattr(ch, "title", ""),
+                            "content": getattr(ch, "content", ""),
+                            "order_index": getattr(ch, "order_index", 0),
+                        }
+                c_list.append(d)
+            return {"novel_id": novel_id, "novel": n_dict, "chapters": c_list}
+        except Exception:
+            return None
 
     # -- LAN A: audio co san ------------------------------------------------
     def run_audio_lane(self) -> LaneMetrics:
@@ -340,38 +375,23 @@ class ProductionFarmer:
             #    dieu khu trung lap ton tai de ngan.
             novel_id = ""
             if novel_co_san:
-                # Ban nhap co that KHONG dong nghia ban nhap DUNG DUOC. Mot
-                # novel khong co chuong la mot ban nhap hong: hai loi goi API
-                # rieng biet, va cai thu hai truot duoc rieng.
+                # Ban nhap da ton tai cho cung mot URL goc va thuoc quyen cua farmer.
+                # Neu gian doan o lan truoc (ke ca co 0 chuong do rot mang ngay sau khi tao novel),
+                # tiep tuc phat hanh cac chuong con thieu tren chinh novel nay ma khong tao ban trung.
                 try:
                     chapter_count = self._dedup.novel_chapter_count(novel_co_san)
                 except DedupError as exc:
                     m.note_error(f"bo qua (khong doc duoc chuong): {exc}")
                     m.skipped_quota += 1
                     continue
-                if chapter_count == 0:
-                    # KHONG di tiep toi buoc dat READY. Mot tac pham "san
-                    # sang" ma tren trang khong co gi de doc con te hon mot
-                    # tac pham chua san sang, vi khong ai thay no hong.
-                    m.failed += 1
-                    m.note_error(
-                        f"ban nhap {novel_co_san} khong co chuong nao — "
-                        f"van ban {plan.total_chars:,} ky tu, can {len(plan.chapters)} chuong. "
-                        f"Can cat chuong truoc khi tac pham nay xuat ban duoc: {c.url}")
-                    continue
-                elif chapter_count < len(plan.chapters):
-                    # Thieu chuong do bi gian doan o lan chay truoc -> chay tiep (resume)
-                    try:
-                        novel_id = self._publish_plan(c, plan, novel_id=novel_co_san)
-                        m.resumed += 1
-                    except Exception as exc:                        # noqa: BLE001
-                        m.note_error(f"chay tiep chuong that bai {c.url} ({novel_co_san}): "
-                                     f"{type(exc).__name__}: {exc}")
-                        m.failed += 1
-                        continue
-                else:
-                    novel_id = novel_co_san
+                try:
+                    novel_id = self._publish_plan(c, plan, novel_id=novel_co_san)
                     m.resumed += 1
+                except Exception as exc:                        # noqa: BLE001
+                    m.note_error(f"chay tiep chuong that bai {c.url} ({novel_co_san}): "
+                                 f"{type(exc).__name__}: {exc}")
+                    m.failed += 1
+                    continue
             else:
                 try:
                     novel_id = self._publish_plan(c, plan)
@@ -462,17 +482,31 @@ class ProductionFarmer:
             #    guong Drive. Cong READY nam o day chu khong o buoc 5: mot
             #    tac pham chi la ung vien xuat ban khi bo hien vat cua no day
             #    du, chu khong khi rieng ban ghi novel co anh.
-            if self._writer is None:
-                m.note_error("khong co ProductionWriter — bo qua kho chinh tac")
-                continue
+            # 6. Xac minh phuc vu that su tu kho luu tru (source of truth).
+            # Khong bao gio gia dinh hay tong hop so chuong tu plan.chapters.
+            served_data = self._get_served_novel(novel_id)
+            actual_served_count = 0
+            served_verified = False
+            if served_data is not None:
+                actual_chapters = served_data.get("chapters") or []
+                actual_served_count = len(actual_chapters)
+                ok, ly_do = verify_served_novel(
+                    served_data, plan, max_chars=self._max_chapter_chars, raise_on_error=False)
+                served_verified = ok
+                if not ok:
+                    m.note_error(f"xac minh phuc vu that bai {c.url} ({novel_id}): {ly_do}")
+            else:
+                m.note_error(f"khong doc duoc du lieu phuc vu de xac minh {c.url} ({novel_id})")
+
             try:
                 ket_qua = self._writer.write_approved(
                     bucket=bucket, url=c.url, title=c.title, body=body,
                     verdict=verdict, novel_id=novel_id,
                     tts_job_id=tts_job_id, tts_job_ids=tts_job_ids,
-                    chapter_count=len(plan.chapters),
+                    audio_status="pending" if tts_job_ids else "none",
+                    chapter_count=actual_served_count,
                     intended_chapter_count=len(plan.chapters),
-                    served_verified=True,
+                    served_verified=served_verified,
                     source_meta=c.meta or {})
             except Exception as exc:                            # noqa: BLE001
                 m.failed += 1
@@ -533,6 +567,13 @@ class ProductionFarmer:
         # cua moi tac pham duoc san xuat truoc khi buoc guong am thanh ton
         # tai — chung co mp3 tren duong phuc vu va khong co ban sao ben vung
         # nao. Duong nay la duong sua cho chung.
+        audio_stat = "pending"
+        job_ids: List[str] = []
+        try:
+            audio_stat, job_ids = self._dedup.novel_audio_status(man.novel_id)
+        except DedupError as exc:
+            m.note_error(f"hoan doi soat am thanh {man.novel_id}: {exc}")
+
         khoa = khoa_da_gan
         if not khoa:
             try:
@@ -559,6 +600,15 @@ class ProductionFarmer:
                              f"{man.novel_id} — se thu lai vong sau")
             elif ket_qua == "DA_GAN":
                 m.audio_attached += 1
+            return
+        elif audio_stat == "complete":
+            try:
+                self._writer.set_audio_status(
+                    bucket=bucket, url=c.url, audio_status="complete",
+                    tts_job_ids=job_ids)
+                m.audio_attached += 1
+            except Exception as exc:                            # noqa: BLE001
+                m.note_error(f"cap nhat trang thai audio that bai {man.novel_id}: {exc}")
             return
 
         # Chua co ban mp3. Neu con chuong chua co job thi xep — day la duong

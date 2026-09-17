@@ -109,7 +109,11 @@ class LayoutTest(unittest.TestCase):
 def _manifest(**over) -> c.WorkManifest:
     base = dict(work_id="w_1", bucket=c.BUCKET_FANFIC_TTS,
                 canonical_dir="FanficWorld/production/works/fanfic-tts/a-w_1",
-                decision=c.DECISION_APPROVE)
+                decision=c.DECISION_APPROVE,
+                novel_id="nov_1",
+                chapter_count=1,
+                intended_chapter_count=1,
+                served_verified=True)
     base.update(over)
     return c.WorkManifest(**base)
 
@@ -127,7 +131,7 @@ class ArtworkGateTest(unittest.TestCase):
         self.assertEqual(m.missing_required_artwork(), [c.ARTIFACT_BACKGROUND])
 
     def test_both_artworks_plus_approval_is_publishable(self):
-        m = _manifest(artifacts={c.ARTIFACT_COVER: "a", c.ARTIFACT_BACKGROUND: "b"})
+        m = _manifest(artifacts={c.ARTIFACT_COVER: "a", c.ARTIFACT_BACKGROUND: "b", c.ARTIFACT_TEXT: "text.txt"})
         self.assertTrue(m.publishable())
 
     def test_artwork_without_approval_is_still_not_publishable(self):

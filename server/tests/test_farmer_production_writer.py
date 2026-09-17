@@ -129,7 +129,8 @@ class ArtifactSetTest(unittest.TestCase):
                              archive_file=_luu_ok(ghi))
         ket_qua = w.write_approved(
             bucket=BUCKET_FANFIC_TTS, url=URL, title="T", body="noi dung",
-            verdict=_Verdict(), novel_id="nov_1", tts_job_id="job_1")
+            verdict=_Verdict(), novel_id="nov_1", tts_job_id="job_1",
+            chapter_count=1, intended_chapter_count=1, served_verified=True)
 
         d = ket_qua.canonical_dir
         for ten in (ARTIFACT_TEXT, ARTIFACT_COVER, ARTIFACT_BACKGROUND,
@@ -181,7 +182,9 @@ class FailureModesTest(unittest.TestCase):
         w = ProductionWriter(put_object=a.put, generate_artwork=_tranh,
                              archive_file=_luu_hong)
         r = w.write_approved(bucket=BUCKET_FANFIC_TTS, url=URL, title="T",
-                             body="x", verdict=_Verdict())
+                             body="x", verdict=_Verdict(), novel_id="nov_1",
+                             chapter_count=1, intended_chapter_count=1,
+                             served_verified=True)
         self.assertEqual(r.archive_status, drive_archive.ARCHIVE_PENDING)
         self.assertTrue(r.ready, "Drive hong khong duoc chan READY")
         self.assertIn(f"{r.canonical_dir}/{ARTIFACT_TEXT}", a.objects)

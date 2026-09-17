@@ -278,19 +278,17 @@ def verify_served_novel(
     if not novel_data or not nid:
         return _fail("Novel không tồn tại hoặc dữ liệu rỗng")
 
-    chapters = sorted(
-        novel_data.get("chapters") or [],
-        key=lambda c: c.get("order_index", 0),
-    )
-
+    raw_chapters = list(novel_data.get("chapters") or [])
     expected_count = len(plan.chapters)
-    actual_count = len(chapters)
+    actual_count = len(raw_chapters)
 
     if actual_count != expected_count:
         return _fail(f"Số lượng chương không khớp: mong đợi {expected_count}, thực tế có {actual_count}")
 
     if actual_count == 0:
         return _fail("Novel không có chương nào (zero chapters)")
+
+    chapters = raw_chapters
 
     for idx, (exp, act) in enumerate(zip(plan.chapters, chapters), 1):
         act_order = act.get("order_index")

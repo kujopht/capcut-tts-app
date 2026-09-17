@@ -256,19 +256,18 @@ def make_text_publisher(token: str) -> Callable:
     chi tao cac chuong con thieu.
     Bao dam 100% ky tu goc va xac minh phuc vu qua verify_served_novel.
     """
-    def publish(c: Candidate, plan_or_body: Any, novel_id: str = "") -> str:
+    def publish(c: Candidate, plan: PreparedStoryPlan, novel_id: str = "") -> str:
         api, goi = _api()
         meta = c.meta or {}
 
-        if isinstance(plan_or_body, PreparedStoryPlan):
-            plan = plan_or_body
-        elif isinstance(plan_or_body, FetchedStoryText):
-            plan = prepare_story_plan(plan_or_body, title=c.title or "(khong tieu de)")
-        else:
-            plan = prepare_story_plan(
-                FetchedStoryText.from_plain_text(str(plan_or_body or "")),
-                title=c.title or "(khong tieu de)",
-            )
+        if not isinstance(plan, PreparedStoryPlan):
+            if isinstance(plan, FetchedStoryText):
+                plan = prepare_story_plan(plan, title=c.title or "(khong tieu de)")
+            else:
+                plan = prepare_story_plan(
+                    FetchedStoryText.from_plain_text(str(plan or "")),
+                    title=c.title or "(khong tieu de)",
+                )
 
         # 1. Tao Novel neu chua co
         if not novel_id:
@@ -311,6 +310,12 @@ def make_text_publisher(token: str) -> Callable:
         ma, r = goi(api, "GET", f"/api/novels/{novel_id}", token=token)
         if ma != 200:
             raise RuntimeError(f"GET /api/novels/{novel_id} sau xuat ban -> {ma}: {r}")
+        # Lay noi dung chuong de kiem tra neu GET /api/novels chua co content
+        for ch in (r.get("chapters") or []):
+            if not ch.get("content") and ch.get("chapter_id"):
+                ma_c, r_c = goi(api, "GET", f"/api/chapters/{ch['chapter_id']}", token=token)
+                if ma_c == 200:
+                    ch["content"] = (r_c.get("chapter") or r_c).get("content", "")
         verify_served_novel(r, plan)
 
         return novel_id

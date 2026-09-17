@@ -35,6 +35,8 @@ from server.farmer.metrics import LaneMetrics, MetricsWriter
 from server.farmer.quotas import FarmerQuotas, QuotaExceeded
 from server.farmer.review import QualityReviewer, ReviewUnavailable
 from server.farmer.review_provider import ReviewPending, ReviewProvider
+from server.farmer.story_text import FetchedStoryText, PreflightError, prepare_story_plan
+from server.story_limits import get_max_chapter_chars
 
 
 def _la_provider(obj: Any) -> bool:
@@ -108,7 +110,8 @@ class ProductionFarmer:
                  enqueue_tts: Callable[[str], Optional[str]],
                  enqueue_audio_item: Callable[[Candidate], None],
                  production_writer: Any = None,
-                 batch_per_lane: int = 0):
+                 batch_per_lane: int = 0,
+                 max_chapter_chars: Optional[int] = None):
         self._store = store
         self._quotas = quotas
         self._reviewer = reviewer
@@ -126,9 +129,29 @@ class ProductionFarmer:
         #: `--dry-run` va trong kiem thu; duong san xuat that LUON co.
         self._writer = production_writer
         self._batch = batch_per_lane or _int_env(ENV_BATCH, DEFAULT_BATCH_PER_LANE)
+        self._max_chapter_chars = max_chapter_chars or get_max_chapter_chars()
         #: Bao cao toan ven trinh thong dich — dien boi `__main__` luc khoi
         #: dong (noi da CHAN duoc neu khong dat). O day chi de bao cao lai.
         self._integrity: Dict[str, Any] = {}
+
+    def _publish_plan(self, c: Candidate, plan: Any, novel_id: str = "") -> str:
+        """Phat hanh hoac tiep tuc xuat ban chuong truyen.
+
+        Ho tro ca publisher nhan plan/novel_id lan publisher mock chi nhan (c, body).
+        """
+        import inspect
+        sig = inspect.signature(self._publish_text)
+        params = sig.parameters
+        if "novel_id" in params or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            try:
+                return self._publish_text(c, plan, novel_id=novel_id)
+            except TypeError:
+                pass
+        try:
+            return self._publish_text(c, plan)
+        except TypeError:
+            body_str = getattr(plan, "review_text", str(plan))
+            return self._publish_text(c, body_str)
 
     # -- LAN A: audio co san ------------------------------------------------
     def run_audio_lane(self) -> LaneMetrics:
@@ -247,7 +270,7 @@ class ProductionFarmer:
                 m.skipped_quota += 1
                 continue
             try:
-                body = self._fetch_text(c)
+                raw_fetched = self._fetch_text(c)
             except Exception as exc:                            # noqa: BLE001
                 m.note_error(f"lay noi dung that bai {c.url}: "
                              f"{type(exc).__name__}: {exc}")
@@ -255,6 +278,30 @@ class ProductionFarmer:
                 continue
             finally:
                 khe_tai.__exit__(None, None, None)
+
+            # Chuan bi ke hoach chia chuong va preflight
+            if isinstance(raw_fetched, FetchedStoryText):
+                fetched = raw_fetched
+            else:
+                fetched = FetchedStoryText.from_plain_text(str(raw_fetched or ""))
+
+            try:
+                plan = prepare_story_plan(
+                    fetched,
+                    title=c.title or "(khong tieu de)",
+                    max_chars=self._max_chapter_chars,
+                )
+            except PreflightError as exc:
+                m.note_error(f"preflight that bai {c.url}: {exc.code} — {exc.message}")
+                m.failed += 1
+                continue
+            except Exception as exc:                            # noqa: BLE001
+                m.note_error(f"chuan bi van ban that bai {c.url}: "
+                             f"{type(exc).__name__}: {exc}")
+                m.failed += 1
+                continue
+
+            body = plan.review_text
 
             # 2. Duyet — TRUOC khi tieu bat ky dong nao cho san xuat.
             khe_duyet = self._quotas.try_slot(FarmerQuotas.REVIEW)
@@ -291,32 +338,43 @@ class ProductionFarmer:
             # 3. Ban nhap. DUNG LAI ban da co neu day la mot lan chay tiep —
             #    POST them mot novel thu hai cho cung mot tac pham chinh la
             #    dieu khu trung lap ton tai de ngan.
+            novel_id = ""
             if novel_co_san:
                 # Ban nhap co that KHONG dong nghia ban nhap DUNG DUOC. Mot
                 # novel khong co chuong la mot ban nhap hong: hai loi goi API
                 # rieng biet, va cai thu hai truot duoc rieng.
                 try:
-                    du_dung = self._dedup.novel_has_chapter(novel_co_san)
+                    chapter_count = self._dedup.novel_chapter_count(novel_co_san)
                 except DedupError as exc:
                     m.note_error(f"bo qua (khong doc duoc chuong): {exc}")
                     m.skipped_quota += 1
                     continue
-                if not du_dung:
+                if chapter_count == 0:
                     # KHONG di tiep toi buoc dat READY. Mot tac pham "san
                     # sang" ma tren trang khong co gi de doc con te hon mot
                     # tac pham chua san sang, vi khong ai thay no hong.
                     m.failed += 1
                     m.note_error(
                         f"ban nhap {novel_co_san} khong co chuong nao — "
-                        f"van ban {len(body):,} ky tu, gioi han moi chuong la "
-                        f"100.000 (FAS_MAX_CHAPTER_CHARS). Can cat chuong "
-                        f"truoc khi tac pham nay xuat ban duoc: {c.url}")
+                        f"van ban {plan.total_chars:,} ky tu, can {len(plan.chapters)} chuong. "
+                        f"Can cat chuong truoc khi tac pham nay xuat ban duoc: {c.url}")
                     continue
-                novel_id = novel_co_san
-                m.resumed += 1
+                elif chapter_count < len(plan.chapters):
+                    # Thieu chuong do bi gian doan o lan chay truoc -> chay tiep (resume)
+                    try:
+                        novel_id = self._publish_plan(c, plan, novel_id=novel_co_san)
+                        m.resumed += 1
+                    except Exception as exc:                        # noqa: BLE001
+                        m.note_error(f"chay tiep chuong that bai {c.url} ({novel_co_san}): "
+                                     f"{type(exc).__name__}: {exc}")
+                        m.failed += 1
+                        continue
+                else:
+                    novel_id = novel_co_san
+                    m.resumed += 1
             else:
                 try:
-                    novel_id = self._publish_text(c, body)
+                    novel_id = self._publish_plan(c, plan)
                 except Exception as exc:                        # noqa: BLE001
                     m.note_error(f"tao ban nhap that bai {c.url}: "
                                  f"{type(exc).__name__}: {exc}")
@@ -333,10 +391,11 @@ class ProductionFarmer:
             # nhap ma chua bao gio xep duoc TTS — va no se CAM LANG vinh vien.
             # Da co that: hai tac pham READY o vong truoc khong he co job TTS.
             tts_job_id = ""
+            tts_job_ids: List[str] = []
             can_tts = True
             if novel_co_san:
                 try:
-                    can_tts = not self._dedup.novel_has_tts_job(novel_id)
+                    can_tts = self._dedup.novel_needs_tts(novel_id)
                 except DedupError as exc:
                     # Khong hoi duoc -> bo qua VONG NAY roi thu lai. Su co
                     # Appwrite la tam thoi; job TTS trung thi ton tien that.
@@ -345,13 +404,19 @@ class ProductionFarmer:
                 else:
                     m.note_error(
                         f"chay tiep {novel_id}: "
-                        + ("xep TTS (chua co job nao)" if can_tts
+                        + ("xep TTS (con chuong chua co job)" if can_tts
                            else "khong xep lai TTS (da co job)"))
             khe_tts = (self._quotas.try_slot(FarmerQuotas.TTS) if can_tts
                        else None)
             if khe_tts is not None:
                 try:
-                    tts_job_id = self._enqueue_tts(novel_id) or ""
+                    tts_res = self._enqueue_tts(novel_id)
+                    if isinstance(tts_res, list):
+                        tts_job_ids = [str(j) for j in tts_res if j]
+                        tts_job_id = tts_job_ids[0] if tts_job_ids else ""
+                    elif tts_res:
+                        tts_job_id = str(tts_res)
+                        tts_job_ids = [tts_job_id]
                 except Exception as exc:                        # noqa: BLE001
                     m.note_error(f"xep TTS that bai {novel_id}: "
                                  f"{type(exc).__name__}: {exc}")
@@ -403,7 +468,11 @@ class ProductionFarmer:
             try:
                 ket_qua = self._writer.write_approved(
                     bucket=bucket, url=c.url, title=c.title, body=body,
-                    verdict=verdict, novel_id=novel_id, tts_job_id=tts_job_id,
+                    verdict=verdict, novel_id=novel_id,
+                    tts_job_id=tts_job_id, tts_job_ids=tts_job_ids,
+                    chapter_count=len(plan.chapters),
+                    intended_chapter_count=len(plan.chapters),
+                    served_verified=True,
                     source_meta=c.meta or {})
             except Exception as exc:                            # noqa: BLE001
                 m.failed += 1
@@ -492,11 +561,11 @@ class ProductionFarmer:
                 m.audio_attached += 1
             return
 
-        # Chua co ban mp3. Neu cung chua co job nao thi xep — day la duong
-        # cuu mot tac pham da READY nhung bi bo quen khong co TTS.
+        # Chua co ban mp3. Neu con chuong chua co job thi xep — day la duong
+        # cuu mot tac pham da READY nhung bi bo quen khong co TTS hoac thieu TTS chuong sau.
         try:
-            if self._dedup.novel_has_tts_job(man.novel_id):
-                return                              # dang chay, cho vong sau
+            if not self._dedup.novel_needs_tts(man.novel_id):
+                return                              # dang chay hoac da day du, cho vong sau
         except DedupError as exc:
             m.note_error(f"hoan xep TTS {man.novel_id}: {exc}")
             return

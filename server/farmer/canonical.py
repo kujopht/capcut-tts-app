@@ -188,6 +188,11 @@ class WorkManifest:
     # tru truy nguoc duoc ve ban dang phat, va nguoc lai.
     novel_id: str = ""
     tts_job_id: str = ""
+    tts_job_ids: List[str] = field(default_factory=list)
+    audio_status: str = "pending"
+    chapter_count: int = 1
+    intended_chapter_count: int = 1
+    served_verified: bool = True
     review_model: str = ""
 
     # --- trang thai ---------------------------------------------------------
@@ -213,9 +218,24 @@ class WorkManifest:
         return [a for a in REQUIRED_ARTWORK if not self.artifacts.get(a)]
 
     def publishable(self) -> bool:
-        """READY/PUBLISHABLE can CA quyet dinh duyet LAN du bo tranh."""
-        return (self.decision == DECISION_APPROVE
-                and not self.missing_required_artwork())
+        """READY/PUBLISHABLE can:
+        - Quyet dinh duyet (APPROVE)
+        - Du bo tranh (cover + background)
+        - Ban phuc vu da duoc xac minh (served_verified)
+        - So chuong phuc vu > 0 (chapter_count > 0)
+        - Khong thieu chuong so voi du kien (chapter_count >= intended_chapter_count)
+        """
+        if self.decision != DECISION_APPROVE:
+            return False
+        if bool(self.missing_required_artwork()):
+            return False
+        if not self.served_verified:
+            return False
+        if self.chapter_count <= 0:
+            return False
+        if self.intended_chapter_count > 0 and self.chapter_count < self.intended_chapter_count:
+            return False
+        return True
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -225,6 +245,11 @@ class WorkManifest:
             "serving": {
                 "novel_id": self.novel_id,
                 "tts_job_id": self.tts_job_id,
+                "tts_job_ids": list(self.tts_job_ids),
+                "audio_status": self.audio_status,
+                "chapter_count": self.chapter_count,
+                "intended_chapter_count": self.intended_chapter_count,
+                "served_verified": self.served_verified,
                 "review_model": self.review_model,
             },
             "bucket": self.bucket,
@@ -270,6 +295,23 @@ class WorkManifest:
         chuan = data.get("normalized") or {}
         phuc_vu = data.get("serving") or {}
         luu = data.get("archive") or {}
+        single_tts = str(phuc_vu.get("tts_job_id", ""))
+        raw_tts_ids = phuc_vu.get("tts_job_ids")
+        if raw_tts_ids is not None:
+            tts_ids = [str(j) for j in raw_tts_ids]
+        elif single_tts:
+            tts_ids = [single_tts]
+        else:
+            tts_ids = []
+
+        raw_cc = phuc_vu.get("chapter_count")
+        cc = int(raw_cc) if raw_cc is not None else (1 if phuc_vu.get("novel_id") else 1)
+        raw_icc = phuc_vu.get("intended_chapter_count")
+        icc = int(raw_icc) if raw_icc is not None else cc
+        raw_sv = phuc_vu.get("served_verified")
+        sv = bool(raw_sv) if raw_sv is not None else True
+        raw_as = str(phuc_vu.get("audio_status", "pending" if single_tts else "none"))
+
         return cls(
             work_id=str(data.get("work_id", "")),
             bucket=str(data.get("bucket", "")),
@@ -292,7 +334,12 @@ class WorkManifest:
             quality_score=int(chuan.get("quality_score") or 0),
             tags=[str(t) for t in (chuan.get("tags") or [])],
             novel_id=str(phuc_vu.get("novel_id", "")),
-            tts_job_id=str(phuc_vu.get("tts_job_id", "")),
+            tts_job_id=single_tts,
+            tts_job_ids=tts_ids,
+            audio_status=raw_as,
+            chapter_count=cc,
+            intended_chapter_count=icc,
+            served_verified=sv,
             review_model=str(phuc_vu.get("review_model", "")),
             artifacts=dict(data.get("artifacts") or {}),
             archive_state=str(luu.get("state", "")),

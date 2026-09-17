@@ -135,9 +135,30 @@ class DedupIndex:
         return any(canonicalize_url(n.external_source_url or "") == canon
                    for n in novels if n.external_source_url)
 
+    def novel_chapter_count(self, novel_id: str) -> int:
+        """Dem so chuong hien co cua ban nhap nay."""
+        try:
+            fn = getattr(self._store, "list_chapters", None)
+            if fn is None:
+                return 0
+            return len(fn(novel_id))
+        except Exception as exc:
+            raise DedupError(
+                f"khong dem duoc chuong cua {novel_id}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
+    def novel_has_chapter(self, novel_id: str) -> bool:
+        """Ban nhap nay co chuong nao doc duoc khong.
+
+        Mot `novel` KHONG co chuong la mot ban nhap HONG, khong phai mot ban
+        nhap dung lai duoc: `POST /api/novels` va `POST /api/chapters` la hai
+        loi goi, va loi goi thu hai co the truot rieng.
+        """
+        return self.novel_chapter_count(novel_id) > 0
+
     def novel_has_tts_job(self, novel_id: str,
                           owner_id: str = FARMER_OWNER) -> bool:
-        """Tac pham nay DA co job TTS chua — hoi kho, khong suy dien.
+        """Tac pham nay DA co it nhat mot job TTS chua — hoi kho, khong suy dien.
 
         Can cho lan chay tiep. Suy dien "dang chay tiep tuc la lan truoc da
         xep TTS roi" NGHE hop ly nhung SAI: buoc xuat ban va buoc TTS la hai
@@ -151,8 +172,14 @@ class DedupIndex:
         la tien tinh that cho cung mot ban thu am.
         """
         try:
-            for ch in self._store.list_chapters(novel_id):
-                if self._store.list_jobs(owner_id, ch.chapter_id):
+            fn_ch = getattr(self._store, "list_chapters", None)
+            if fn_ch is None:
+                return False
+            fn_jobs = getattr(self._store, "list_jobs", None)
+            if fn_jobs is None:
+                return False
+            for ch in fn_ch(novel_id):
+                if fn_jobs(owner_id, ch.chapter_id):
                     return True
             return False
         except Exception as exc:
@@ -160,41 +187,69 @@ class DedupIndex:
                 f"khong kiem duoc job TTS cua {novel_id}: "
                 f"{type(exc).__name__}: {exc}") from exc
 
-    def novel_has_chapter(self, novel_id: str) -> bool:
-        """Ban nhap nay co chuong nao doc duoc khong.
+    def novel_needs_tts(self, novel_id: str,
+                        owner_id: str = FARMER_OWNER) -> bool:
+        """Kiem tra xem truyen co chuong nao CHUA co job TTS hay khong.
 
-        Mot `novel` KHONG co chuong la mot ban nhap HONG, khong phai mot ban
-        nhap dung lai duoc: `POST /api/novels` va `POST /api/chapters` la hai
-        loi goi, va loi goi thu hai co the truot rieng.
-
-        Da xay ra that: `MAX_CHAPTER_CHARS` = 100.000 (server/main.py). Hai
-        tac pham 224k va 117k ky tu tao duoc novel roi bi tu choi o buoc
-        chuong. Lan chay tiep dung lai cai novel rong do, bo qua buoc xuat
-        ban, va van dat READY — mot tac pham "san sang" ma tren trang khong
-        co gi de doc.
+        Voi truyen nhieu chuong, chi khi tat ca cac chuong da co job TTS thi moi
+        tra ve False. Neu truyen co chuong chua duoc xep job, tra ve True de
+        xep tiep cho cac chuong con thieu.
         """
         try:
-            return bool(self._store.list_chapters(novel_id))
+            fn_ch = getattr(self._store, "list_chapters", None)
+            if fn_ch is None:
+                return False
+            chapters = fn_ch(novel_id)
+            if not chapters:
+                return False
+            fn_jobs = getattr(self._store, "list_jobs", None)
+            if fn_jobs is None:
+                return True
+            for ch in chapters:
+                if not fn_jobs(owner_id, ch.chapter_id):
+                    return True
+            return False
         except Exception as exc:
             raise DedupError(
-                f"khong doc duoc chuong cua {novel_id}: "
+                f"khong kiem duoc nhu cau TTS cua {novel_id}: "
                 f"{type(exc).__name__}: {exc}") from exc
 
     def finished_tts_output_key(self, novel_id: str,
-                                owner_id: str = FARMER_OWNER):
+                                owner_id: str = FARMER_OWNER) -> Optional[str]:
         """`output_key` cua job TTS DA XONG, hoac None.
 
         Tach khoi `novel_has_tts_job` vi hai cau hoi khac nhau: "co can xep
         khong" va "da co am thanh de gan vao manifest chua". Mot job dang
         chay tra loi CO cho cau dau va CHUA cho cau sau.
+
+        QUY TAC TAT DINH CHO TRUYEN NHIEU CHUONG:
+        Chi coi la co am thanh de gan vao manifest khi TAT CA cac chuong deu
+        da hoan tat va co output_key. Neu chi chuong 1 xong con cac chuong
+        khac dang chay/that bai, tra ve None — tuyet doi khong gan audio
+        nua voi vao manifest cua truyen nhieu chuong.
         """
         try:
-            for ch in self._store.list_chapters(novel_id):
-                for j in self._store.list_jobs(owner_id, ch.chapter_id):
+            fn_ch = getattr(self._store, "list_chapters", None)
+            if fn_ch is None:
+                return None
+            chapters = fn_ch(novel_id)
+            if not chapters:
+                return None
+            fn_jobs = getattr(self._store, "list_jobs", None)
+            if fn_jobs is None:
+                return None
+            output_keys: List[str] = []
+            for ch in chapters:
+                ch_key = None
+                for j in fn_jobs(owner_id, ch.chapter_id):
                     trang_thai = getattr(j.status, "value", j.status)
-                    if str(trang_thai).lower() == "completed" and j.output_key:
-                        return j.output_key
-            return None
+                    if str(trang_thai).lower() == "completed" and getattr(j, "output_key", None):
+                        ch_key = j.output_key
+                        break
+                if not ch_key:
+                    return None
+                output_keys.append(ch_key)
+            return output_keys[0] if output_keys else None
         except Exception as exc:
             raise DedupError(
                 f"khong doc duoc ket qua TTS cua {novel_id}: "

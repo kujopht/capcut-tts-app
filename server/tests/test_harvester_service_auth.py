@@ -218,6 +218,24 @@ class HarvesterApiAllowTest(unittest.TestCase):
         r = self.client.get(f"/api/jobs/{job_id}", headers=_h(TOKEN))
         self.assertEqual(r.status_code, 200, r.text)
 
+    def test_liet_ke_tts_job_theo_chapter_id_duoc_phep(self):
+        """P0-1: Harvester token co the tra cuu danh sach job cua chuong do minh so huu."""
+        novel_id = self._tao_novel().json()["novel"]["novel_id"]
+        chapter_id = self.client.post(
+            "/api/chapters", json={"novel_id": novel_id, "title": "Ch1",
+                                   "content": "noi dung", "order_index": 1},
+            headers=_h(TOKEN)).json()["chapter"]["chapter_id"]
+        job_id = self.client.post(
+            "/api/jobs", json={"chapter_id": chapter_id, "voice_id": "mock:v1"},
+            headers=_h(TOKEN)).json()["job"]["job_id"]
+        r = self.client.get(f"/api/jobs?chapter_id={chapter_id}", headers=_h(TOKEN))
+        self.assertEqual(r.status_code, 200, r.text)
+        data = r.json()
+        self.assertIn("jobs", data)
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["jobs"][0]["job_id"], job_id)
+        self.assertEqual(data["jobs"][0]["chapter_id"], chapter_id)
+
     # ----------------------------------------------------------------------
     # DOC LAI CHUONG cua chinh minh — lo hong that tren san xuat (2026-09-03).
     #
@@ -337,6 +355,23 @@ class HarvesterApiDenyTest(unittest.TestCase):
             r = client.post("/api/novels", json={"title": "x"},
                             headers=_h(canary_token))
             self.assertIn(r.status_code, (401, 403), r.text)
+
+    def test_xoa_tai_khoan_bi_tu_choi(self):
+        """Harvester token khong the xoa tai khoan hay thao tac billing/admin."""
+        r = self.client.delete("/api/account", headers=_h(TOKEN))
+        self.assertIn(r.status_code, (401, 403, 404, 405), r.text)
+
+    def test_tuyen_admin_bi_tu_choi(self):
+        """Harvester token khong the truy cap cac route admin."""
+        r = self.client.post("/api/admin/canary/novels", json={"title": "x"}, headers=_h(TOKEN))
+        self.assertIn(r.status_code, (401, 403), r.text)
+
+    def test_job_lookup_khong_thay_job_cua_nguoi_khac(self):
+        """Harvester token chi tra cuu duoc job cua chuong do minh so huu, khong xem duoc cua user khac."""
+        r = self.client.get("/api/jobs?chapter_id=ch_user_khac", headers=_h(TOKEN))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["jobs"], [])
+        self.assertEqual(r.json()["count"], 0)
 
 
 class HarvesterInvalidTokenTest(unittest.TestCase):

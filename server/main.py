@@ -54,6 +54,7 @@ from server.adapters import (
 from server.account_deletion import AccountDeletionService
 from server.config import get_settings
 from server.r2_adapter import R2StorageAdapter
+from server.story_limits import DEFAULT_MAX_CHAPTER_CHARS
 from server.creator import (
     AuthorStateError,
     NovelKhongTheXuatBan,
@@ -650,7 +651,7 @@ TieuDe = Annotated[str, StringConstraints(
 #: 100.000 ky tu la khoang 53 doan, uoc chung hai tieng ruoi audio — da rong
 #: rai hon mot chuong fanfic dai (60.000 ky tu, 32 doan) kha nhieu. Doi duoc
 #: bang `FAS_MAX_CHAPTER_CHARS` khi co may manh hon.
-MAX_CHAPTER_CHARS = int(os.environ.get("FAS_MAX_CHAPTER_CHARS", "100000"))
+MAX_CHAPTER_CHARS = int(os.environ.get("FAS_MAX_CHAPTER_CHARS", str(DEFAULT_MAX_CHAPTER_CHARS)))
 
 #: Bao nhieu job cua CUNG mot nguoi duoc xep hang cung luc.
 #:
@@ -3010,7 +3011,7 @@ def get_job(job_id: str, profile: Profile = Depends(harvester_or_user_profile)) 
 
 @app.get("/api/jobs")
 def list_jobs(chapter_id: Optional[str] = None,
-              profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+              profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
     items = store.list_jobs(profile.user_id, chapter_id)
     return {"jobs": [j.to_dict() for j in items], "count": len(items)}
 

@@ -156,6 +156,11 @@ class ProductionWriter:
     def write_approved(self, *, bucket: str, url: str, title: str, body: str,
                        verdict: Any, novel_id: str = "",
                        tts_job_id: str = "",
+                       tts_job_ids: Optional[List[str]] = None,
+                       audio_status: str = "pending",
+                       chapter_count: int = 0,
+                       intended_chapter_count: int = 0,
+                       served_verified: bool = False,
                        source_meta: Optional[Dict[str, Any]] = None
                        ) -> WriteOutcome:
         """Ghi mot tac pham DA DUOC DUYET. Nem `ProductionWriteError` khi
@@ -165,7 +170,10 @@ class ProductionWriter:
         man = self._manifest(
             wid=wid, thu_muc=thu_muc, bucket=bucket, url=url, title=title,
             body=body, verdict=verdict, decision=canonical.DECISION_APPROVE,
-            novel_id=novel_id, tts_job_id=tts_job_id, source_meta=source_meta)
+            novel_id=novel_id, tts_job_id=tts_job_id, tts_job_ids=tts_job_ids,
+            audio_status=audio_status, chapter_count=chapter_count,
+            intended_chapter_count=intended_chapter_count,
+            served_verified=served_verified, source_meta=source_meta)
 
         da_ghi: List[str] = []
         cuc_bo: Dict[str, bytes] = {}
@@ -211,7 +219,20 @@ class ProductionWriter:
         da_ghi.append(ARTIFACT_MANIFEST)
 
         if not chan and not san_sang:
-            chan = ("thieu " + ", ".join(man.missing_required_artwork()))
+            ly_do_chan = []
+            if man.missing_required_artwork():
+                ly_do_chan.append("thieu " + ", ".join(man.missing_required_artwork()))
+            if not (man.novel_id or "").strip():
+                ly_do_chan.append("thieu novel_id")
+            if not man.artifacts.get(ARTIFACT_TEXT):
+                ly_do_chan.append(f"thieu hien vat {ARTIFACT_TEXT}")
+            if not man.served_verified:
+                ly_do_chan.append("chua xac minh phuc vu (served_verified=False)")
+            if man.chapter_count <= 0 or man.intended_chapter_count <= 0:
+                ly_do_chan.append(f"so chuong phuc vu khong hop le ({man.chapter_count}/{man.intended_chapter_count})")
+            elif man.chapter_count != man.intended_chapter_count:
+                ly_do_chan.append(f"so chuong khong khop ({man.chapter_count}/{man.intended_chapter_count})")
+            chan = " | ".join(ly_do_chan) if ly_do_chan else "khong du dieu kien xuat ban"
         return WriteOutcome(
             work_id=wid, canonical_dir=thu_muc, manifest=man, ready=san_sang,
             archive_status=ket_qua_luu.status, blocked_reason=chan,
@@ -313,10 +334,28 @@ class ProductionWriter:
             man.archived_artifacts.append(ARTIFACT_AUDIO_VI)
         return True
 
+    def set_audio_status(self, *, bucket: str, url: str, audio_status: str,
+                         tts_job_ids: Optional[List[str]] = None) -> Optional[WorkManifest]:
+        """Cap nhat audio_status cua manifest ma khong gan fake ARTIFACT_AUDIO_VI."""
+        thu_muc = canonical_dir(bucket, url)
+        man = self.read_manifest(thu_muc)
+        if man is None:
+            return None
+        man.audio_status = audio_status
+        if tts_job_ids:
+            man.tts_job_ids = list(tts_job_ids)
+        self._write_manifest(man, thu_muc)
+        return man
+
     # -- ben trong ----------------------------------------------------------
     def _manifest(self, *, wid: str, thu_muc: str, bucket: str, url: str,
                   title: str, body: str, verdict: Any, decision: str,
                   novel_id: str = "", tts_job_id: str = "",
+                  tts_job_ids: Optional[List[str]] = None,
+                  audio_status: str = "pending",
+                  chapter_count: int = 0,
+                  intended_chapter_count: int = 0,
+                  served_verified: bool = False,
                   source_meta: Optional[Dict[str, Any]] = None) -> WorkManifest:
         """Ban goc KHONG bao gio bi ghi de bang ban chuan hoa — xem
         `WorkManifest`."""
@@ -325,6 +364,11 @@ class ProductionWriter:
         # tac pham. Giu lai se lam mot lan doc sau nay hieu nham.
         raw.pop("_disabled", None)
         g = lambda ten, mac_dinh="": getattr(verdict, ten, mac_dinh)  # noqa: E731
+        actual_job_ids = list(tts_job_ids or [])
+        if tts_job_id and tts_job_id not in actual_job_ids:
+            actual_job_ids.insert(0, tts_job_id)
+        primary_job_id = tts_job_id or (actual_job_ids[0] if actual_job_ids else "")
+
         return WorkManifest(
             work_id=wid, bucket=bucket, canonical_dir=thu_muc,
             decision=decision,
@@ -345,7 +389,13 @@ class ProductionWriter:
             quality_score=int(g("score", 0) or 0),
             tags=[str(t) for t in (g("tags", ()) or ())],
             decision_reason=" | ".join(str(r) for r in (g("reasons", ()) or ()))[:500],
-            novel_id=novel_id, tts_job_id=tts_job_id,
+            novel_id=novel_id,
+            tts_job_id=primary_job_id,
+            tts_job_ids=actual_job_ids,
+            audio_status=audio_status,
+            chapter_count=chapter_count,
+            intended_chapter_count=intended_chapter_count,
+            served_verified=served_verified,
             review_model=g("model"),
         )
 

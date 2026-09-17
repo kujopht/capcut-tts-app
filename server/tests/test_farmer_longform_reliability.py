@@ -47,15 +47,20 @@ from server.farmer.review_provider import ReviewPending, ReviewProvider
 from server.llm_gateway.provider import LLMCompletion
 from server.farmer.story_text import (
     FetchedStoryText,
+    ImportChapter,
     PreflightError,
     PreparedChapter,
     PreparedStoryPlan,
     SourceChapter,
+    StoryImportPayload,
+    ingest_story_payload,
     prepare_story_plan,
     split_chapter_content,
     verify_served_novel,
-    PRODUCTION_TEXT_EMPTY,
     PRODUCTION_CHAPTER_LIMIT_INVALID,
+    PRODUCTION_CHAPTER_ORDER_INVALID,
+    PRODUCTION_TEXT_EMPTY,
+    PRODUCTION_TITLE_EMPTY,
 )
 from server.story_limits import DEFAULT_MAX_CHAPTER_CHARS
 
@@ -581,8 +586,8 @@ class TestDedupAndAudioMultiChapter(unittest.TestCase):
         self.assertEqual(ids, ["job_1", "job_2"])
 
 
-class TestFarmerLongformReliabilityLoop(unittest.TestCase):
-    """Kiem thu tich hop loop.py voi cac kich ban Test A toi Test K."""
+class _FarmerLoopHarnessMixin:
+    """Mixin cung cap harness cho ProductionFarmer loop tests."""
 
     def _tao_harness(self, tmp_dir: Path, store: Optional[_InMemoryStore] = None,
                      fetch_func=None, max_chars=1000):
@@ -686,6 +691,10 @@ class TestFarmerLongformReliabilityLoop(unittest.TestCase):
         )
 
         return farmer, store, writer, objects, published_chapters, tts_enqueued
+
+
+class TestFarmerLongformReliabilityLoop(_FarmerLoopHarnessMixin, unittest.TestCase):
+    """Kiem thu tich hop loop.py voi cac kich ban truyen thong."""
 
     def test_a_empty_text_creates_no_novel_and_no_ready(self):
         """Test A: Van ban rong bi chan ngay tu preflight, khong tao novel, khong co manifest."""
@@ -1059,5 +1068,619 @@ class TestFarmerLongformReliabilityLoop(unittest.TestCase):
             self.assertFalse(man_data["serving"]["served_verified"])
 
 
+class TestTtsRetrySemantics(unittest.TestCase):
+    """9 explicit tests cho co che TTS Retry va DedupIndex."""
+
+    def setUp(self):
+        self.store = _InMemoryStore()
+        self.dedup = DedupIndex(self.store)
+
+    def test_1_no_job_needs_tts_true(self):
+        """1. no job -> needs_tts True"""
+        ch1 = mock.Mock(chapter_id="ch_1", order_index=1)
+        self.store.chapters["nov_1"] = [ch1]
+        self.store.jobs["ch_1"] = []
+        self.assertTrue(self.dedup.novel_needs_tts("nov_1"))
+
+    def test_2_failed_only_needs_tts_true(self):
+        """2. failed-only -> needs_tts True"""
+        ch1 = mock.Mock(chapter_id="ch_1", order_index=1)
+        self.store.chapters["nov_1"] = [ch1]
+        job_failed = mock.Mock(job_id="job_f", chapter_id="ch_1", status="failed", output_key="")
+        self.store.jobs["ch_1"] = [job_failed]
+        self.assertTrue(self.dedup.novel_needs_tts("nov_1"))
+
+    def test_3_pending_needs_tts_false(self):
+        """3. pending -> needs_tts False"""
+        ch1 = mock.Mock(chapter_id="ch_1", order_index=1)
+        self.store.chapters["nov_1"] = [ch1]
+        job_pending = mock.Mock(job_id="job_p", chapter_id="ch_1", status="pending", output_key="")
+        self.store.jobs["ch_1"] = [job_pending]
+        self.assertFalse(self.dedup.novel_needs_tts("nov_1"))
+
+    def test_4_running_needs_tts_false(self):
+        """4. running -> needs_tts False"""
+        ch1 = mock.Mock(chapter_id="ch_1", order_index=1)
+        self.store.chapters["nov_1"] = [ch1]
+        job_running = mock.Mock(job_id="job_r", chapter_id="ch_1", status="running", output_key="")
+        self.store.jobs["ch_1"] = [job_running]
+        self.assertFalse(self.dedup.novel_needs_tts("nov_1"))
+
+    def test_5_completed_with_output_needs_tts_false(self):
+        """5. completed + output -> needs_tts False"""
+        ch1 = mock.Mock(chapter_id="ch_1", order_index=1)
+        self.store.chapters["nov_1"] = [ch1]
+        job_completed = mock.Mock(job_id="job_c", chapter_id="ch_1", status="completed", output_key="audio/ch1.mp3")
+        self.store.jobs["ch_1"] = [job_completed]
+        self.assertFalse(self.dedup.novel_needs_tts("nov_1"))
+
+    def test_6_multichapter_with_one_failed_needs_tts_true(self):
+        """6. multi-chapter with 1 failed-only chapter -> needs_tts True"""
+        ch1 = mock.Mock(chapter_id="ch_1", order_index=1)
+        ch2 = mock.Mock(chapter_id="ch_2", order_index=2)
+        self.store.chapters["nov_mc"] = [ch1, ch2]
+        job1 = mock.Mock(job_id="job_1", chapter_id="ch_1", status="completed", output_key="audio/ch1.mp3")
+        job2 = mock.Mock(job_id="job_2", chapter_id="ch_2", status="failed", output_key="")
+        self.store.jobs["ch_1"] = [job1]
+        self.store.jobs["ch_2"] = [job2]
+        self.assertTrue(self.dedup.novel_needs_tts("nov_mc"))
+
+    def test_7_failed_chapter_gets_exactly_one_retry_job(self):
+        """7. failed-only chapter gets exactly one retry job in make_tts_enqueuer"""
+        from server.farmer.adapters import make_tts_enqueuer
+
+        calls = []
+
+        def mock_api_client(method, path, data=None, token=""):
+            if method == "GET" and path == "/api/novels/nov_retry":
+                return 200, {
+                    "novel": {"novel_id": "nov_retry"},
+                    "chapters": [{"chapter_id": "ch_failed", "order_index": 1}],
+                }
+            if method == "GET" and path == "/api/jobs?chapter_id=ch_failed":
+                return 200, {
+                    "jobs": [{"job_id": "job_old_failed", "status": "failed", "output_key": ""}]
+                }
+            if method == "POST" and path == "/api/jobs":
+                calls.append(data)
+                return 201, {"job_id": "job_new_retry"}
+            return 404, {}
+
+        with mock.patch("server.farmer.adapters._api", return_value=(mock.Mock(), lambda api, m, p, d=None, token="": mock_api_client(m, p, d, token))):
+            enqueuer = make_tts_enqueuer(token="test_token")
+            job_ids = enqueuer("nov_retry")
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["chapter_id"], "ch_failed")
+        self.assertEqual(job_ids, ["job_new_retry"])
+
+    def test_8_active_or_completed_chapter_does_not_get_duplicate_job(self):
+        """8. active/completed chapter does not get duplicate job in make_tts_enqueuer"""
+        from server.farmer.adapters import make_tts_enqueuer
+
+        calls = []
+
+        def mock_api_client(method, path, data=None, token=""):
+            if method == "GET" and path == "/api/novels/nov_active":
+                return 200, {
+                    "novel": {"novel_id": "nov_active"},
+                    "chapters": [
+                        {"chapter_id": "ch_pending", "order_index": 1},
+                        {"chapter_id": "ch_completed", "order_index": 2},
+                    ],
+                }
+            if method == "GET" and path == "/api/jobs?chapter_id=ch_pending":
+                return 200, {
+                    "jobs": [{"job_id": "job_active_1", "status": "pending", "output_key": ""}]
+                }
+            if method == "GET" and path == "/api/jobs?chapter_id=ch_completed":
+                return 200, {
+                    "jobs": [{"job_id": "job_done_2", "status": "completed", "output_key": "audio/ch2.mp3"}]
+                }
+            if method == "POST" and path == "/api/jobs":
+                calls.append(data)
+                return 201, {"job_id": "unexpected"}
+            return 404, {}
+
+        with mock.patch("server.farmer.adapters._api", return_value=(mock.Mock(), lambda api, m, p, d=None, token="": mock_api_client(m, p, d, token))):
+            enqueuer = make_tts_enqueuer(token="test_token")
+            job_ids = enqueuer("nov_active")
+
+        self.assertEqual(len(calls), 0, "Active hoac completed chapters khong duoc tao trung job!")
+        self.assertEqual(job_ids, ["job_active_1", "job_done_2"])
+
+    def test_9_retry_completion_allows_novel_audio_status_complete(self):
+        """9. retry completion allows novel_audio_status == complete"""
+        ch1 = mock.Mock(chapter_id="ch_1", order_index=1)
+        ch2 = mock.Mock(chapter_id="ch_2", order_index=2)
+        self.store.chapters["nov_mc"] = [ch1, ch2]
+
+        job1 = mock.Mock(job_id="job_1", chapter_id="ch_1", status="completed", output_key="audio/ch1.mp3")
+        job2_failed = mock.Mock(job_id="job_2_f", chapter_id="ch_2", status="failed", output_key="")
+        self.store.jobs["ch_1"] = [job1]
+        self.store.jobs["ch_2"] = [job2_failed]
+        stat, _ = self.dedup.novel_audio_status("nov_mc")
+        self.assertEqual(stat, "partial")
+
+        job2_retry = mock.Mock(job_id="job_2_retry", chapter_id="ch_2", status="completed", output_key="audio/ch2_retry.mp3")
+        self.store.jobs["ch_2"].append(job2_retry)
+
+        stat, ids = self.dedup.novel_audio_status("nov_mc")
+        self.assertEqual(stat, "complete")
+        self.assertIn("job_1", ids)
+        self.assertIn("job_2_retry", ids)
+
+
+class TestDirectStoryImportPayloadContract(_FarmerLoopHarnessMixin, unittest.TestCase):
+    """11 direct import tests A through K using StoryImportPayload (pure domain contract,
+    zero dependencies on scraping, browser, Selenium, Playwright, or FanFicFare).
+    """
+
+    def test_direct_import_a_one_normal_chapter(self):
+        """Test A: one normal chapter in StoryImportPayload."""
+        from server.farmer.production_writer import normalize_text
+
+        raw_content = "Đoạn văn mở đầu của tác phẩm.\n\nĐoạn văn tiếp nối đầy cuốn hút.\n"
+        payload = StoryImportPayload(
+            source_url="https://external.store/story_a",
+            title="Tác Phẩm Đơn Chương",
+            chapters=[
+                ImportChapter(order_index=1, title="Chương 1: Khởi đầu", content=raw_content),
+            ],
+        )
+        plan = ingest_story_payload(payload, max_chars=1000)
+        self.assertEqual(len(plan.chapters), 1)
+        self.assertEqual(plan.chapters[0].order_index, 1)
+        self.assertEqual(plan.chapters[0].title, "Chương 1: Khởi đầu")
+        self.assertEqual(plan.chapters[0].content, normalize_text(raw_content))
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), fetch_func=lambda c: payload, max_chars=1000
+            )
+            candidate = Candidate(lane=LANE_TEXT, url="https://external.store/story_a", title="Tác Phẩm Đơn Chương")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.produced, 1)
+            self.assertEqual(m.published_candidates, 1)
+            self.assertEqual(len(store.novels), 1)
+            self.assertEqual(len(published_ch), 1)
+            self.assertEqual(published_ch[0]["content"], normalize_text(raw_content))
+
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            self.assertEqual(len(manifest_keys), 1)
+            man = json.loads(objects[manifest_keys[0]])
+            self.assertTrue(man["ready"])
+            self.assertTrue(man["serving"]["served_verified"])
+            self.assertEqual(man["serving"]["chapter_count"], 1)
+
+    def test_direct_import_b_250k_single_chapter_split_without_content_loss(self):
+        """Test B: 250k+ single chapter in StoryImportPayload -> split without content loss."""
+        from server.farmer.production_writer import normalize_text
+
+        paragraph = "Đây là một đoạn văn dài về thế giới fanfic đầy màu sắc và hấp dẫn. " * 15 + "\n\n"
+        raw_text = paragraph * 300  # ~300.000+ ky tu
+        self.assertGreater(len(raw_text), 250_000)
+        limit = 50_000
+
+        payload = StoryImportPayload(
+            source_url="https://external.store/story_b",
+            title="Đại Truyện Đơn Chương 250k",
+            chapters=[
+                ImportChapter(order_index=1, title="Chương Độc Nhất Vô Nhị", content=raw_text),
+            ],
+        )
+
+        plan = ingest_story_payload(payload, max_chars=limit)
+        self.assertGreater(len(plan.chapters), 4)
+        for c in plan.chapters:
+            self.assertLessEqual(len(c.content), limit)
+        self.assertEqual("".join(c.content for c in plan.chapters), normalize_text(raw_text))
+        self.assertEqual([c.order_index for c in plan.chapters], list(range(1, len(plan.chapters) + 1)))
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), fetch_func=lambda c: payload, max_chars=limit
+            )
+            candidate = Candidate(lane=LANE_TEXT, url="https://external.store/story_b", title="Đại Truyện Đơn Chương 250k")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.produced, 1)
+            self.assertEqual(m.published_candidates, 1)
+            self.assertEqual(len(published_ch), len(plan.chapters))
+            self.assertEqual("".join(c["content"] for c in published_ch), normalize_text(raw_text))
+
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            man = json.loads(objects[manifest_keys[0]])
+            self.assertTrue(man["ready"])
+            self.assertEqual(man["serving"]["chapter_count"], len(plan.chapters))
+
+    def test_direct_import_c_existing_multichapter_preserves_boundaries(self):
+        """Test C: existing multi-chapter story in StoryImportPayload -> preserve chapter boundaries."""
+        from server.farmer.production_writer import normalize_text
+
+        chapters = [
+            ImportChapter(order_index=1, title="Hồi 1: Gặp Gỡ", content="Nội dung hồi 1 tuyệt vời.\n"),
+            ImportChapter(order_index=2, title="Hồi 2: Thử Thách", content="Nội dung hồi 2 kịch tính.\n"),
+            ImportChapter(order_index=3, title="Hồi 3: Đại Kết Cục", content="Nội dung hồi 3 lắng đọng.\n"),
+        ]
+        payload = StoryImportPayload(
+            source_url="https://external.store/story_c",
+            title="Bộ Ba Hồi Ký",
+            chapters=chapters,
+        )
+
+        plan = ingest_story_payload(payload, max_chars=10_000)
+        self.assertEqual(len(plan.chapters), 3)
+        self.assertEqual([c.title for c in plan.chapters], ["Hồi 1: Gặp Gỡ", "Hồi 2: Thử Thách", "Hồi 3: Đại Kết Cục"])
+        self.assertEqual([c.order_index for c in plan.chapters], [1, 2, 3])
+        self.assertEqual([c.content for c in plan.chapters], [normalize_text(ch.content) for ch in chapters])
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), fetch_func=lambda c: payload, max_chars=10_000
+            )
+            candidate = Candidate(lane=LANE_TEXT, url="https://external.store/story_c", title="Bộ Ba Hồi Ký")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.produced, 1)
+            self.assertEqual(m.published_candidates, 1)
+            self.assertEqual(len(published_ch), 3)
+            self.assertEqual([c["content"] for c in published_ch], [normalize_text(ch.content) for ch in chapters])
+
+    def test_direct_import_d_one_oversized_chapter_splits_only_that_chapter(self):
+        """Test D: one oversized chapter among multiple chapters -> split only that chapter."""
+        from server.farmer.production_writer import normalize_text
+
+        ch1_text = "Nội dung chương 1 rất ngắn.\n"
+        ch2_text = "Nội dung phần 1 của chương 2 dài dằng dặc.\n\nNội dung phần 2 của chương 2 cũng rất dài dòng.\n"
+        ch3_text = "Nội dung chương 3 ngắn gọn kết thúc.\n"
+
+        chapters = [
+            ImportChapter(order_index=1, title="Chương 1", content=ch1_text),
+            ImportChapter(order_index=2, title="Chương 2", content=ch2_text),
+            ImportChapter(order_index=3, title="Chương 3", content=ch3_text),
+        ]
+        payload = StoryImportPayload(
+            source_url="https://external.store/story_d",
+            title="Truyện Có Chương Dài Đột Biến",
+            chapters=chapters,
+        )
+
+        limit = 50
+        plan = ingest_story_payload(payload, max_chars=limit)
+
+        self.assertEqual(len(plan.chapters), 4)
+        self.assertEqual(plan.chapters[0].title, "Chương 1")
+        self.assertEqual(plan.chapters[0].order_index, 1)
+        self.assertEqual(plan.chapters[0].content, normalize_text(ch1_text))
+
+        self.assertTrue(plan.chapters[1].title.startswith("Chương 2 (1/"))
+        self.assertEqual(plan.chapters[1].order_index, 2)
+        self.assertTrue(plan.chapters[2].title.startswith("Chương 2 (2/"))
+        self.assertEqual(plan.chapters[2].order_index, 3)
+
+        self.assertEqual(plan.chapters[3].title, "Chương 3")
+        self.assertEqual(plan.chapters[3].order_index, 4)
+        self.assertEqual(plan.chapters[3].content, normalize_text(ch3_text))
+
+        self.assertEqual(
+            "".join(c.content for c in plan.chapters),
+            normalize_text(ch1_text) + normalize_text(ch2_text) + normalize_text(ch3_text),
+        )
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), fetch_func=lambda c: payload, max_chars=limit
+            )
+            candidate = Candidate(lane=LANE_TEXT, url="https://external.store/story_d", title="Truyện Có Chương Dài Đột Biến")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.produced, 1)
+            self.assertEqual(m.published_candidates, 1)
+            self.assertEqual(len(published_ch), 4)
+            self.assertEqual(published_ch[0]["order_index"], 1)
+            self.assertEqual(published_ch[1]["order_index"], 2)
+            self.assertEqual(published_ch[2]["order_index"], 3)
+            self.assertEqual(published_ch[3]["order_index"], 4)
+
+    def test_direct_import_e_empty_story_rejected_with_preflight_error_before_novel_creation(self):
+        """Test E: empty story (empty title, empty chapters, or empty content) -> rejected with PreflightError before novel creation."""
+        # 1. Empty title
+        p_empty_title = StoryImportPayload(
+            source_url="https://external.store/empty_title",
+            title="",
+            chapters=[ImportChapter(order_index=1, title="Chương 1", content="Nội dung hợp lệ.")],
+        )
+        with self.assertRaises(PreflightError) as ctx1:
+            ingest_story_payload(p_empty_title)
+        self.assertEqual(ctx1.exception.code, PRODUCTION_TITLE_EMPTY)
+
+        # 2. Empty chapters list
+        p_empty_chapters = StoryImportPayload(
+            source_url="https://external.store/empty_chapters",
+            title="Tiêu Đề",
+            chapters=[],
+        )
+        with self.assertRaises(PreflightError) as ctx2:
+            ingest_story_payload(p_empty_chapters)
+        self.assertEqual(ctx2.exception.code, PRODUCTION_TEXT_EMPTY)
+
+        # 3. Empty chapter content
+        p_empty_content = StoryImportPayload(
+            source_url="https://external.store/empty_content",
+            title="Tiêu Đề",
+            chapters=[ImportChapter(order_index=1, title="Chương 1", content="   \n\t  ")],
+        )
+        with self.assertRaises(PreflightError) as ctx3:
+            ingest_story_payload(p_empty_content)
+        self.assertEqual(ctx3.exception.code, PRODUCTION_TEXT_EMPTY)
+
+        # Chay trong ProductionFarmer: bao dam 0 novel duoc tao tren store (Orphan Invariant)
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), fetch_func=lambda c: p_empty_title
+            )
+            candidate = Candidate(lane=LANE_TEXT, url="https://external.store/empty_title", title="")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.failed, 1)
+            self.assertEqual(len(store.novels), 0, "Preflight rejection must create 0 novel records in store!")
+
+    def test_direct_import_f_interrupted_import_resumes_cleanly(self):
+        """Test F: interrupted import after chapter K -> resumes K+1."""
+        url = "https://external.store/story_f_resume"
+        payload = StoryImportPayload(
+            source_url=url,
+            title="Truyện Chạy Tiếp F",
+            chapters=[
+                ImportChapter(order_index=1, title="Chương 1", content="Nội dung chương 1.\n"),
+                ImportChapter(order_index=2, title="Chương 2", content="Nội dung chương 2.\n"),
+                ImportChapter(order_index=3, title="Chương 3", content="Nội dung chương 3.\n"),
+            ],
+        )
+
+        store = _InMemoryStore()
+        novel_id = "nov_f_partial"
+        store.novels.append(mock.Mock(novel_id=novel_id, external_source_url=url, owner_id=FARMER_OWNER))
+        store.chapters[novel_id] = [
+            mock.Mock(chapter_id="ch_1", novel_id=novel_id, title="Chương 1", content="Nội dung chương 1.\n", order_index=1)
+        ]
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), store=store, fetch_func=lambda c: payload, max_chars=1000
+            )
+            candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyện Chạy Tiếp F")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.resumed, 1)
+            self.assertEqual(m.produced, 1)
+            self.assertEqual(m.published_candidates, 1)
+
+            self.assertEqual(len(store.novels), 1)
+            self.assertEqual(len(store.chapters[novel_id]), 3)
+            self.assertEqual([ch.order_index for ch in store.chapters[novel_id]], [1, 2, 3])
+
+    def test_direct_import_g_zero_chapter_existing_novel_resumes_into_same_novel(self):
+        """Test G: zero-chapter existing novel -> resumes into same novel."""
+        url = "https://external.store/story_g_zero"
+        payload = StoryImportPayload(
+            source_url=url,
+            title="Truyện Không Chương G",
+            chapters=[
+                ImportChapter(order_index=1, title="Chương 1", content="Nội dung chương 1.\n"),
+                ImportChapter(order_index=2, title="Chương 2", content="Nội dung chương 2.\n"),
+            ],
+        )
+
+        store = _InMemoryStore()
+        novel_id = "nov_g_empty"
+        store.novels.append(mock.Mock(novel_id=novel_id, external_source_url=url, owner_id=FARMER_OWNER))
+        store.chapters[novel_id] = []
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), store=store, fetch_func=lambda c: payload, max_chars=1000
+            )
+            candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyện Không Chương G")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.resumed, 1)
+            self.assertEqual(m.produced, 1)
+            self.assertEqual(m.published_candidates, 1)
+
+            self.assertEqual(len(store.novels), 1)
+            self.assertEqual(store.novels[0].novel_id, novel_id)
+            self.assertEqual(len(store.chapters[novel_id]), 2)
+            self.assertEqual([ch.order_index for ch in store.chapters[novel_id]], [1, 2])
+
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            man = json.loads(objects[manifest_keys[0]])
+            self.assertTrue(man["ready"])
+            self.assertTrue(man["serving"]["served_verified"])
+            self.assertEqual(man["serving"]["novel_id"], novel_id)
+
+    def test_direct_import_h_served_text_mismatch_fails_verification_and_blocks_ready(self):
+        """Test H: served text mismatch -> served_verified=False -> NOT READY."""
+        url = "https://external.store/story_h_mismatch"
+        payload = StoryImportPayload(
+            source_url=url,
+            title="Truyện Sai Nội Dung Phục Vụ",
+            chapters=[
+                ImportChapter(order_index=1, title="Chương 1", content="Nội dung gốc chuẩn xác.\n"),
+            ],
+        )
+
+        store = _InMemoryStore()
+
+        def corrupt_publish(c, plan, novel_id=""):
+            novel_id = "nov_corrupt_h"
+            store.novels.append(mock.Mock(novel_id=novel_id, external_source_url=c.url, owner_id=FARMER_OWNER))
+            store.chapters[novel_id] = [
+                mock.Mock(
+                    chapter_id="ch_1",
+                    novel_id=novel_id,
+                    title="Chương 1",
+                    content="Nội dung phục vụ bị sai lệch hoàn toàn so với gốc.",
+                    order_index=1,
+                )
+            ]
+            return novel_id
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), store=store, fetch_func=lambda c: payload
+            )
+            farmer._publish_text = corrupt_publish
+            candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyện Sai Nội Dung Phục Vụ")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.published_candidates, 0)
+            self.assertEqual(m.blocked_no_cover, 1)
+
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            self.assertEqual(len(manifest_keys), 1)
+            man = json.loads(objects[manifest_keys[0]])
+            self.assertFalse(man["ready"])
+            self.assertFalse(man["serving"]["served_verified"])
+
+    def test_direct_import_i_served_chapter_count_mismatch_fails_verification_and_blocks_ready(self):
+        """Test I: served chapter count mismatch -> served_verified=False -> NOT READY."""
+        url = "https://external.store/story_i_count"
+        payload = StoryImportPayload(
+            source_url=url,
+            title="Truyện Sai Số Chương Phục Vụ",
+            chapters=[
+                ImportChapter(order_index=1, title="Chương 1", content="Nội dung 1.\n"),
+                ImportChapter(order_index=2, title="Chương 2", content="Nội dung 2.\n"),
+            ],
+        )
+
+        store = _InMemoryStore()
+
+        def incomplete_publish(c, plan, novel_id=""):
+            novel_id = "nov_incomplete_i"
+            store.novels.append(mock.Mock(novel_id=novel_id, external_source_url=c.url, owner_id=FARMER_OWNER))
+            store.chapters[novel_id] = [
+                mock.Mock(chapter_id="ch_1", novel_id=novel_id, title="Chương 1", content="Nội dung 1.\n", order_index=1)
+            ]
+            return novel_id
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), store=store, fetch_func=lambda c: payload
+            )
+            farmer._publish_text = incomplete_publish
+            candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyện Sai Số Chương Phục Vụ")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.published_candidates, 0)
+            self.assertEqual(m.blocked_no_cover, 1)
+
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            self.assertEqual(len(manifest_keys), 1)
+            man = json.loads(objects[manifest_keys[0]])
+            self.assertFalse(man["ready"])
+            self.assertFalse(man["serving"]["served_verified"])
+
+    def test_direct_import_j_exact_served_match_passes_verification_and_marks_ready(self):
+        """Test J: exact served match -> served_verified=True -> READY."""
+        url = "https://external.store/story_j_exact"
+        payload = StoryImportPayload(
+            source_url=url,
+            title="Truyện Khớp Hoàn Hảo J",
+            chapters=[
+                ImportChapter(order_index=1, title="Chương 1", content="Nội dung chương 1.\n"),
+                ImportChapter(order_index=2, title="Chương 2", content="Nội dung chương 2.\n"),
+            ],
+        )
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), fetch_func=lambda c: payload
+            )
+            candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyện Khớp Hoàn Hảo J")
+            farmer._discover_text = lambda n: [candidate]
+
+            m = farmer.run_text_lane()
+            self.assertEqual(m.produced, 1)
+            self.assertEqual(m.published_candidates, 1)
+
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            self.assertEqual(len(manifest_keys), 1)
+            man = json.loads(objects[manifest_keys[0]])
+            self.assertTrue(man["ready"])
+            self.assertTrue(man["serving"]["served_verified"])
+            self.assertEqual(man["serving"]["chapter_count"], 2)
+
+    def test_direct_import_k_multichapter_tts_does_not_expose_chapter_1_audio_as_full_book(self):
+        """Test K: multi-chapter TTS does not expose chapter-1 audio as full-book audio."""
+        from server.farmer.canonical import ARTIFACT_AUDIO_VI
+
+        url = "https://external.store/story_k_audio"
+        payload = StoryImportPayload(
+            source_url=url,
+            title="Truyện 3 Chương Audio K",
+            chapters=[
+                ImportChapter(order_index=1, title="Chương 1", content="Nội dung 1.\n"),
+                ImportChapter(order_index=2, title="Chương 2", content="Nội dung 2.\n"),
+                ImportChapter(order_index=3, title="Chương 3", content="Nội dung 3.\n"),
+            ],
+        )
+
+        store = _InMemoryStore()
+        dedup = DedupIndex(store)
+
+        with TemporaryDirectory() as d:
+            farmer, store, writer, objects, published_ch, tts = self._tao_harness(
+                Path(d), store=store, fetch_func=lambda c: payload
+            )
+            candidate = Candidate(lane=LANE_TEXT, url=url, title="Truyện 3 Chương Audio K")
+            farmer._discover_text = lambda n: [candidate]
+
+            m1 = farmer.run_text_lane()
+            self.assertEqual(m1.produced, 1)
+            novel_id = store.novels[0].novel_id
+            self.assertEqual(len(store.chapters[novel_id]), 3)
+
+            # Giai doan 1: Chi chuong 1 co audio completed
+            ch1_id = store.chapters[novel_id][0].chapter_id
+            store.jobs[ch1_id][0].status = "completed"
+            store.jobs[ch1_id][0].output_key = "audio/ch1.mp3"
+
+            self.assertIsNone(dedup.finished_tts_output_key(novel_id))
+            status, _ = dedup.novel_audio_status(novel_id)
+            self.assertEqual(status, "partial")
+
+            # Giai doan 2: Ca 3 chuong deu hoan thanh audio
+            for ch in store.chapters[novel_id][1:]:
+                store.jobs[ch.chapter_id][0].status = "completed"
+                store.jobs[ch.chapter_id][0].output_key = f"audio/{ch.chapter_id}.mp3"
+
+            self.assertIsNone(dedup.finished_tts_output_key(novel_id))
+            status, job_ids = dedup.novel_audio_status(novel_id)
+            self.assertEqual(status, "complete")
+            self.assertEqual(len(job_ids), 3)
+
+            m2 = farmer.run_text_lane()
+            self.assertEqual(m2.audio_attached, 1)
+
+            manifest_keys = [k for k in objects if k.endswith("manifest.json") and "manifests/" not in k]
+            man = json.loads(objects[manifest_keys[0]])
+            self.assertEqual(man["serving"]["audio_status"], "complete")
+            self.assertNotIn(ARTIFACT_AUDIO_VI, man.get("artifacts", {}))
+
+
 if __name__ == "__main__":
     unittest.main()
+

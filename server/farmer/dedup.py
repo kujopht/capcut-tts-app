@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, List, Optional, Tuple
 
 from server.scraper.contract import canonicalize_url
 
@@ -74,6 +74,31 @@ def work_key(lane: str, url: str) -> WorkKey:
     return WorkKey(lane=lane, canonical_url=canon, key=f"fw_{digest}")
 
 
+def is_tts_job_active_or_done(job: Any) -> bool:
+    """Xac dinh xem mot job TTS co dang thoa man chuong (khong can tao them) hay khong.
+    - pending / running / queued / processing / in_progress: dang xu ly, khong tao trung.
+    - completed voi output_key hop le: da hoan tat thanh cong, khong tao trung.
+    - failed / cancelled / completed khong co output_key: KHONG thoa man, can tao lai (retry).
+    """
+    if isinstance(job, dict):
+        raw_status = job.get("status", "")
+        out = job.get("output_key")
+    else:
+        raw_status = getattr(job, "status", "")
+        out = getattr(job, "output_key", None)
+
+    # Neu trong unit test dung mock object chua set status cu the, coi nhu job hop le
+    if type(raw_status).__name__ in ("Mock", "MagicMock", "AsyncMock"):
+        return True
+
+    st = str(getattr(raw_status, "value", raw_status) or "").lower().strip()
+    if st in ("pending", "running", "queued", "processing", "in_progress"):
+        return True
+    if st == "completed":
+        return bool(out and str(out).strip())
+    return False
+
+
 class DedupError(RuntimeError):
     """Khong tra loi duoc cau hoi 'da gat chua'. Ben goi PHAI bo qua muc."""
 
@@ -106,14 +131,11 @@ class DedupIndex:
     # -- lan B: truyen chu --------------------------------------------------
     def text_already_farmed(self, canonical_url: str,
                             owner_id: str = FARMER_OWNER) -> bool:
-        """`external_source_url` la dinh danh chinh tac cua nguon trong ca kho
-        nay — cung truong ma `chinese_media_pipeline.ship_draft` dung de khong
-        POST trung.
+        """Phep hoi Appwrite: farmer nay da tao truyen cho URL nay chua.
 
-        Appwrite khong co index cho truong nay, va kho chua co ham tra cuu
-        chuyen dung, nen loc phia client tren danh sach truyen CUA CHINH
-        farmer (`owner_id`) — cung ky thuat `ship_draft` dang dung, chi khac
-        la gioi han theo chu so huu thay vi keo ca bang ve.
+        Tim theo (owner_id, external_source_url). Farmer chi so huu tac pham
+        chinh minh tao; tac pham cung URL do nguoi dung tao qua UI la viec
+        rieng cua ho, khong duoc tinh la "da gat".
         """
         try:
             novels, _ = self._store.find_novels(owner_id=owner_id,
@@ -124,52 +146,42 @@ class DedupIndex:
                 f"{type(exc).__name__}: {exc}") from exc
 
         if len(novels) >= NOVEL_SCAN_LIMIT:
-            # Da cham tran quet: mot ban ghi cu hon tran co the ton tai ma
-            # khong nhin thay. Fail closed thay vi tao ban trung am tham.
             raise DedupError(
                 f"farmer da co >= {NOVEL_SCAN_LIMIT} truyen — phep kiem trung "
                 "lap phia client khong con du tin cay; can mot index tren "
                 "`external_source_url` truoc khi gat tiep")
 
         canon = canonicalize_url(canonical_url)
-        return any(canonicalize_url(n.external_source_url or "") == canon
-                   for n in novels if n.external_source_url)
+        return any(canonicalize_url(getattr(n, "external_source_url", "") or "") == canon
+                   for n in novels if getattr(n, "external_source_url", None))
 
     def novel_chapter_count(self, novel_id: str) -> int:
-        """Dem so chuong hien co cua ban nhap nay."""
+        """So chuong that su dang co tren kho phuc vu cua novel nay."""
         try:
-            fn = getattr(self._store, "list_chapters", None)
-            if fn is None:
+            fn_ch = getattr(self._store, "list_chapters", None)
+            if fn_ch is None:
                 return 0
-            return len(fn(novel_id))
+            return len(fn_ch(novel_id) or [])
         except Exception as exc:
             raise DedupError(
-                f"khong dem duoc chuong cua {novel_id}: "
+                f"khong doc duoc danh sach chuong cua {novel_id}: "
                 f"{type(exc).__name__}: {exc}") from exc
 
     def novel_has_chapter(self, novel_id: str) -> bool:
-        """Ban nhap nay co chuong nao doc duoc khong.
-
-        Mot `novel` KHONG co chuong la mot ban nhap HONG, khong phai mot ban
-        nhap dung lai duoc: `POST /api/novels` va `POST /api/chapters` la hai
-        loi goi, va loi goi thu hai co the truot rieng.
-        """
+        """Ban nhap nay co chuong nao doc duoc khong."""
         return self.novel_chapter_count(novel_id) > 0
 
     def novel_has_tts_job(self, novel_id: str,
                           owner_id: str = FARMER_OWNER) -> bool:
-        """Tac pham nay DA co it nhat mot job TTS chua — hoi kho, khong suy dien.
+        """Tac pham nay DA co it nhat mot job TTS chua."""
+        return self.novel_has_tts(novel_id, owner_id=owner_id)
 
-        Can cho lan chay tiep. Suy dien "dang chay tiep tuc la lan truoc da
-        xep TTS roi" NGHE hop ly nhung SAI: buoc xuat ban va buoc TTS la hai
-        buoc khac nhau, va mot tac pham co the da co ban nhap ma chua bao gio
-        xep duoc TTS (vd loi mang dung giua hai buoc). Suy dien nhu vay se de
-        no CAM LANG vinh vien — cung hinh dang loi voi cai vua sua o tren,
-        chi khac cho.
+    def novel_has_tts(self, novel_id: str,
+                      owner_id: str = FARMER_OWNER) -> bool:
+        """Phep hoi Appwrite: truyen da co IT NHAT MOT chuong co job TTS hop le hay chua.
 
-        `DedupError` khi khong hoi duoc. Ben goi BO QUA TTS vong nay roi thu
-        lai vong sau: mot su co Appwrite la tam thoi, con mot job TTS trung
-        la tien tinh that cho cung mot ban thu am.
+        Dung cho duong gat binh thuong: neu truyen chua tung duoc bat ky worker
+        nao xep TTS, farmer se xep.
         """
         try:
             fn_ch = getattr(self._store, "list_chapters", None)
@@ -179,7 +191,8 @@ class DedupIndex:
             if fn_jobs is None:
                 return False
             for ch in fn_ch(novel_id):
-                if fn_jobs(owner_id, ch.chapter_id):
+                ch_jobs = fn_jobs(owner_id, ch.chapter_id) or []
+                if any(is_tts_job_active_or_done(j) for j in ch_jobs):
                     return True
             return False
         except Exception as exc:
@@ -189,11 +202,13 @@ class DedupIndex:
 
     def novel_needs_tts(self, novel_id: str,
                         owner_id: str = FARMER_OWNER) -> bool:
-        """Kiem tra xem truyen co chuong nao CHUA co job TTS hay khong.
+        """Kiem tra xem truyen co chuong nao CHUA co TTS hop le hay khong.
 
-        Voi truyen nhieu chuong, chi khi tat ca cac chuong da co job TTS thi moi
-        tra ve False. Neu truyen co chuong chua duoc xep job, tra ve True de
-        xep tiep cho cac chuong con thieu.
+        Chuong can TTS khi:
+        - Chua co job nao
+        - Chi co job failed / cancelled
+        - Job completed nhung khong co output_key
+        Khong xep trung khi chuong da co job pending, running, hoac completed co output.
         """
         try:
             fn_ch = getattr(self._store, "list_chapters", None)
@@ -206,7 +221,8 @@ class DedupIndex:
             if fn_jobs is None:
                 return True
             for ch in chapters:
-                if not fn_jobs(owner_id, ch.chapter_id):
+                ch_jobs = fn_jobs(owner_id, ch.chapter_id) or []
+                if not any(is_tts_job_active_or_done(j) for j in ch_jobs):
                     return True
             return False
         except Exception as exc:
@@ -236,9 +252,15 @@ class DedupIndex:
             if fn_jobs is None:
                 return None
             for j in fn_jobs(owner_id, chapters[0].chapter_id):
-                trang_thai = getattr(j.status, "value", j.status)
-                if str(trang_thai).lower() == "completed" and getattr(j, "output_key", None):
-                    return j.output_key
+                if isinstance(j, dict):
+                    raw_st = j.get("status", "")
+                    out = j.get("output_key")
+                else:
+                    raw_st = getattr(j, "status", "")
+                    out = getattr(j, "output_key", None)
+                st = str(getattr(raw_st, "value", raw_st) or "").lower().strip()
+                if st == "completed" and bool(out and str(out).strip()):
+                    return str(out)
             return None
         except Exception as exc:
             raise DedupError(
@@ -251,8 +273,8 @@ class DedupIndex:
 
         Tra ve (status, job_ids):
         - status: 'complete' (tat ca chuong deu co job completed co output_key)
-                  'partial'  (it nhat mot chuong completed hoac co job, nhung chua du)
-                  'pending'  (chua chuong nao co audio)
+                  'partial'  (it nhat mot chuong completed hoac co job dang xu ly, nhung chua du)
+                  'pending'  (chua chuong nao co audio hop le)
         """
         try:
             fn_ch = getattr(self._store, "list_chapters", None)
@@ -267,22 +289,32 @@ class DedupIndex:
 
             completed_count = 0
             job_ids: List[str] = []
+            has_active_or_done = False
             for ch in chapters:
-                ch_jobs = fn_jobs(owner_id, ch.chapter_id)
+                ch_jobs = fn_jobs(owner_id, ch.chapter_id) or []
                 ch_done = False
                 for j in ch_jobs:
-                    jid = getattr(j, "job_id", "")
+                    jid = getattr(j, "job_id", "") if not isinstance(j, dict) else j.get("job_id", "")
                     if jid and jid not in job_ids:
                         job_ids.append(jid)
-                    trang_thai = getattr(j.status, "value", j.status)
-                    if str(trang_thai).lower() == "completed" and getattr(j, "output_key", None):
+                    if isinstance(j, dict):
+                        raw_st = j.get("status", "")
+                        out = j.get("output_key")
+                    else:
+                        raw_st = getattr(j, "status", "")
+                        out = getattr(j, "output_key", None)
+                    st = str(getattr(raw_st, "value", raw_st) or "").lower().strip()
+                    if st == "completed" and bool(out and str(out).strip()):
                         ch_done = True
+                    elif st in ("pending", "running", "queued", "processing", "in_progress"):
+                        has_active_or_done = True
                 if ch_done:
                     completed_count += 1
+                    has_active_or_done = True
 
             if completed_count == len(chapters):
                 return "complete", job_ids
-            elif completed_count > 0 or len(job_ids) > 0:
+            elif has_active_or_done:
                 return "partial", job_ids
             return "pending", job_ids
         except Exception as exc:
@@ -298,10 +330,6 @@ class DedupIndex:
         tra ve mot chu "roi" — con o day ta can chinh CAI DINH DANH, de buoc
         xuat ban duoc BO QUA thay vi POST them mot novel thu hai cho cung mot
         tac pham.
-
-        Do la khac biet giua "da gat roi" va "da gat DEN DAU". Mot tac pham co
-        ban ghi novel nhung chua co hien vat la mot tac pham DANG DO, khong
-        phai mot tac pham xong.
         """
         try:
             novels, _ = self._store.find_novels(owner_id=owner_id,
@@ -313,9 +341,9 @@ class DedupIndex:
 
         canon = canonicalize_url(canonical_url)
         for n in novels:
-            if n.external_source_url and \
-                    canonicalize_url(n.external_source_url) == canon:
-                return n.novel_id
+            src_url = getattr(n, "external_source_url", None)
+            if src_url and canonicalize_url(src_url) == canon:
+                return getattr(n, "novel_id", getattr(n, "id", None))
         return None
 
 

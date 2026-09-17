@@ -26,12 +26,19 @@ if str(REPO_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from server.domain import ChineseMediaQueueItem  # noqa: E402
-from server.farmer.dedup import FARMER_OWNER, LANE_AUDIO, LANE_TEXT  # noqa: E402
+from server.farmer.dedup import (  # noqa: E402
+    FARMER_OWNER,
+    LANE_AUDIO,
+    LANE_TEXT,
+    is_tts_job_active_or_done,
+)
 from server.farmer.loop import Candidate  # noqa: E402
 from server.farmer.story_text import (  # noqa: E402
     FetchedStoryText,
     PreparedStoryPlan,
     SourceChapter,
+    StoryImportPayload,
+    ingest_story_payload,
     prepare_story_plan,
     verify_served_novel,
 )
@@ -181,7 +188,7 @@ def make_audio_enqueuer(store: Any) -> Callable[[Candidate], None]:
 
 # -------------------------------------------------------------- lan text --
 def make_text_fetcher(fetcher: Optional[Any] = None
-                      ) -> Callable[[Candidate], FetchedStoryText]:
+                      ) -> Callable[[Candidate], str]:
     """Lay + lam sach van ban qua duong trich xuat DA CO.
 
     Dung `HttpFetcher` mac dinh chu khong `urlopen` tran: no da mang san ba
@@ -189,35 +196,43 @@ def make_text_fetcher(fetcher: Optional[Any] = None
     `robots.txt`, va gioi han toc do theo host. Tu viet lai mot fetcher o day
     la vut bo ca ba.
     """
-    def fetch(c: Candidate) -> FetchedStoryText:
+    def fetch(c: Candidate) -> str:
         from server.scraper.html_extract import extract
         from server.scraper.http_fetcher import HttpFetcher
 
+        # FanFicFare TRUOC, cho host no ho tro: no hieu phan trang chuong,
+        # sieu du lieu, va cach tung site dung HTML — mot phep trich xuat
+        # tong quat tren mot trang fanfic nhieu chuong se ra mot mo dieu
+        # huong lan van ban.
+        #
+        # `resolve_acquisition_route` la nguoi quyet dinh, khong phai mot danh
+        # sach host viet tay o day: no da biet host nao FanFicFare an duoc,
+        # va no KHONG BAO GIO tra ve mot duong can trinh duyet/cloudscraper.
         if fetcher is None:
             try:
-                story_text = _thu_fanficfare(c.url)
-                if story_text is not None and (story_text.plain_text or "").strip():
-                    return story_text
+                van_ban = _thu_fanficfare(c.url)
+                if van_ban:
+                    return van_ban
             except Exception:
-                # FanFicFare hong -> roi ve HTTP thuong.
+                # FanFicFare hong -> roi ve HTTP thuong. Mot nguon lay duoc
+                # bang duong tong quat van tot hon khong lay duoc gi.
                 pass
 
         client = fetcher or HttpFetcher()
         ket_qua = client.fetch(c.url)
         # 304 tra than RONG theo giao thuc — doc no nhu "trang rong that su"
         # se dua mot chuoi rong vao cong danh gia va tieu mot lan goi co phi.
-        if getattr(ket_qua, "not_modified", False):
+        if ket_qua.not_modified:
             raise RuntimeError(f"nguon tra 304 (khong doi): {c.url}")
-        plain = extract(getattr(ket_qua, "text", str(ket_qua))).visible_text()
-        return FetchedStoryText.from_plain_text(plain)
+        return extract(ket_qua.text).visible_text()
     return fetch
 
 
-def _thu_fanficfare(url: str) -> Optional[FetchedStoryText]:
-    """Lay truyen qua FanFicFare neu host duoc ho tro. None = khong dung duoc.
+def _thu_fanficfare(url: str) -> str:
+    """Lay truyen qua FanFicFare neu host duoc ho tro. Rong = khong dung duoc.
 
-    Giu nguyen cau truc tung chuong goc de phuc vu viec chia chuong chinh xac,
-    tranh gop thanh mot chuong khong lo vuot tran FAS_MAX_CHAPTER_CHARS.
+    Ghep cac chuong thanh MOT van ban de dua qua cong danh gia — cong danh gia
+    cham diem tac pham, khong cham diem tung chuong.
     """
     import tempfile
     from pathlib import Path as _Path
@@ -227,25 +242,14 @@ def _thu_fanficfare(url: str) -> Optional[FetchedStoryText]:
     )
 
     if resolve_acquisition_route(url) != "fanficfare":
-        return None
+        return ""
     with tempfile.TemporaryDirectory(prefix="farmer-fff-") as tmp:
         ket_qua = _run_fanficfare_cli(url, workdir=_Path(tmp))
         if not ket_qua.ok or not ket_qua.epub_path:
-            return None
+            return ""
         acq = parse_fanficfare_epub(ket_qua.epub_path)
-        source_chapters = [
-            SourceChapter(
-                title=ch.title or f"Chương {i}",
-                content=ch.content or "",
-                order_index=i,
-                source_chapter_id=getattr(ch, "chapter_id", "") or f"ch_{i}",
-            )
-            for i, ch in enumerate(acq.chapters or [], 1)
-            if (ch.content or "").strip()
-        ]
-        if not source_chapters:
-            return None
-        return FetchedStoryText.from_source_chapters(source_chapters)
+        return "\n\n".join(
+            ch.content for ch in (acq.chapters or []) if (ch.content or "").strip())
 
 
 def make_text_publisher(token: str) -> Callable:
@@ -261,7 +265,9 @@ def make_text_publisher(token: str) -> Callable:
         meta = c.meta or {}
 
         if not isinstance(plan, PreparedStoryPlan):
-            if isinstance(plan, FetchedStoryText):
+            if isinstance(plan, StoryImportPayload):
+                plan = ingest_story_payload(plan)
+            elif isinstance(plan, FetchedStoryText):
                 plan = prepare_story_plan(plan, title=c.title or "(khong tieu de)")
             else:
                 plan = prepare_story_plan(
@@ -341,13 +347,14 @@ def make_tts_enqueuer(token: str) -> Callable[[str], List[str]]:
         job_ids: List[str] = []
         for ch in chapters:
             ch_id = ch["chapter_id"]
-            # Kiem tra chuong da co job chua de tranh trung lap
+            # Kiem tra chuong da co job active hoac completed hop le chua
             ma_j, r_j = goi(api, "GET", f"/api/jobs?chapter_id={ch_id}", token=token)
-            if ma_j == 200 and r_j.get("jobs"):
+            if ma_j == 200:
                 existing_jobs = r_j.get("jobs") or []
-                if existing_jobs:
-                    job_ids.append(existing_jobs[0].get("job_id", ""))
-                continue
+                active_or_done = [j for j in existing_jobs if is_tts_job_active_or_done(j)]
+                if active_or_done:
+                    job_ids.append(active_or_done[0].get("job_id", ""))
+                    continue
 
             ma_p, r_p = goi(api, "POST", "/api/jobs", {
                 "chapter_id": ch_id, "voice_id": voice,

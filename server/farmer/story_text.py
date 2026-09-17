@@ -23,6 +23,8 @@ from server.story_limits import DEFAULT_MAX_CHAPTER_CHARS, get_max_chapter_chars
 PRODUCTION_TEXT_EMPTY = "PRODUCTION_TEXT_EMPTY"
 PRODUCTION_TEXT_PREPARE_FAILED = "PRODUCTION_TEXT_PREPARE_FAILED"
 PRODUCTION_CHAPTER_LIMIT_INVALID = "PRODUCTION_CHAPTER_LIMIT_INVALID"
+PRODUCTION_TITLE_EMPTY = "PRODUCTION_TITLE_EMPTY"
+PRODUCTION_CHAPTER_ORDER_INVALID = "PRODUCTION_CHAPTER_ORDER_INVALID"
 
 
 class PreflightError(Exception):
@@ -32,6 +34,61 @@ class PreflightError(Exception):
         super().__init__(f"{code}: {message}")
         self.code = code
         self.message = message
+
+
+@dataclass
+class ImportChapter:
+    """Mot chuong tu du lieu nhap ngoai (external ingestion chapter)."""
+    order_index: int
+    title: str
+    content: str
+
+
+@dataclass
+class StoryImportPayload:
+    """Hop dong du lieu nhap ngoai cho mot tac pham (external story ingestion payload).
+
+    Thuan tuy la hop dong mien (domain-level contract), hoan toan doc lap voi
+    bat ky cong cu scraping, trinh duyet, Selenium, Playwright, hay FanFicFare nao.
+    """
+    source_url: str
+    title: str
+    chapters: List[ImportChapter]
+    source_id: Optional[str] = None
+    author: Optional[str] = None
+    description: Optional[str] = None
+    language: str = "vi"
+    tags: List[str] = field(default_factory=list)
+    status: str = "ongoing"
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "StoryImportPayload":
+        raw_chapters = data.get("chapters") or []
+        ch_objs: List[ImportChapter] = []
+        for ch in raw_chapters:
+            if isinstance(ch, ImportChapter):
+                ch_objs.append(ch)
+            elif isinstance(ch, dict):
+                ch_objs.append(
+                    ImportChapter(
+                        order_index=int(ch.get("order_index", 0)),
+                        title=str(ch.get("title", "") or ""),
+                        content=str(ch.get("content", "") or ""),
+                    )
+                )
+            else:
+                raise ValueError(f"Dinh dang chuong khong hop le: {type(ch)}")
+        return cls(
+            source_url=str(data.get("source_url", "") or ""),
+            title=str(data.get("title", "") or ""),
+            chapters=ch_objs,
+            source_id=data.get("source_id"),
+            author=data.get("author"),
+            description=data.get("description"),
+            language=str(data.get("language", "vi") or "vi"),
+            tags=list(data.get("tags") or []),
+            status=str(data.get("status", "ongoing") or "ongoing"),
+        )
 
 
 @dataclass
@@ -175,18 +232,35 @@ def split_chapter_content(content: str, max_chars: int) -> List[str]:
     return chunks
 
 
+def ingest_story_payload(
+    payload: StoryImportPayload,
+    max_chars: Optional[int] = None,
+) -> PreparedStoryPlan:
+    """Nhap du lieu tac pham tu nguon ngoai voi preflight validation chat che.
+
+    Hoan toan khong phu thuoc vao scraping, browser, hay FanFicFare.
+    """
+    if not isinstance(payload, StoryImportPayload):
+        raise TypeError(f"Mong doi StoryImportPayload, nhan duoc: {type(payload)}")
+    return prepare_story_plan(payload, title=payload.title, max_chars=max_chars)
+
+
 def prepare_story_plan(
-    fetched: FetchedStoryText,
+    story_or_payload: Any,
     title: str = "",
     max_chars: Optional[int] = None,
 ) -> PreparedStoryPlan:
     """
     Kiem tra preflight va chuan bi ke hoach xuat ban cac chuong.
+    Chap nhan StoryImportPayload, FetchedStoryText, hoac str.
 
-    Nem PreflightError neu:
-    - Van ban rong (PRODUCTION_TEXT_EMPTY)
-    - Gioi han ky tu <= 0 (PRODUCTION_CHAPTER_LIMIT_INVALID)
-    - Khong chuong nao con lai sau chuan hoa (PRODUCTION_TEXT_PREPARE_FAILED)
+    Quy tac kiem tra Preflight:
+    - Ten tac pham khong duoc rong (PRODUCTION_TITLE_EMPTY)
+    - Gioi han ky tu chuong > 0 (PRODUCTION_CHAPTER_LIMIT_INVALID)
+    - It nhat 1 chuong co noi dung khong rong (PRODUCTION_TEXT_EMPTY)
+    - Thu tu chuong hop le: nguyen duong, duy nhat, lien tuc 1..N (PRODUCTION_CHAPTER_ORDER_INVALID)
+    - Cat chuong vuot FAS_MAX_CHAPTER_CHARS thanh cac subchapters (base_title (1/M))
+      trong khi giu nguyen ranh gioi va noi dung cac chuong binh thuong khac.
     """
     limit = max_chars if max_chars is not None else get_max_chapter_chars()
     if limit <= 0:
@@ -194,6 +268,86 @@ def prepare_story_plan(
             PRODUCTION_CHAPTER_LIMIT_INVALID,
             f"Giới hạn ký tự chương không hợp lệ: {limit}",
         )
+
+    # 1. Xu ly StoryImportPayload (Clean External Ingestion Contract)
+    if isinstance(story_or_payload, StoryImportPayload):
+        story_title = (story_or_payload.title or title or "").strip()
+        if not story_title:
+            raise PreflightError(
+                PRODUCTION_TITLE_EMPTY,
+                "Tên tác phẩm không được để trống",
+            )
+        if not story_or_payload.chapters:
+            raise PreflightError(
+                PRODUCTION_TEXT_EMPTY,
+                "Tác phẩm không có chương nào",
+            )
+
+        orders = [ch.order_index for ch in story_or_payload.chapters]
+        expected_orders = list(range(1, len(story_or_payload.chapters) + 1))
+        if any(idx <= 0 for idx in orders) or len(set(orders)) != len(orders) or orders != expected_orders:
+            raise PreflightError(
+                PRODUCTION_CHAPTER_ORDER_INVALID,
+                f"Thứ tự chương không hợp lệ: mong đợi 1..{len(story_or_payload.chapters)}, thực tế {orders}",
+            )
+
+        for ch in story_or_payload.chapters:
+            if not (ch.content or "").strip():
+                raise PreflightError(
+                    PRODUCTION_TEXT_EMPTY,
+                    f"Nội dung chương {ch.order_index} ({ch.title or 'Không tiêu đề'}) rỗng",
+                )
+
+        prepared: List[PreparedChapter] = []
+        curr_order = 1
+        for ch in story_or_payload.chapters:
+            norm_content = normalize_text(ch.content)
+            if not norm_content.strip():
+                raise PreflightError(
+                    PRODUCTION_TEXT_EMPTY,
+                    f"Nội dung chương {ch.order_index} rỗng sau khi chuẩn hoá",
+                )
+            base_title = (ch.title or f"Chương {curr_order}").strip()
+            if len(norm_content) <= limit:
+                prepared.append(
+                    PreparedChapter(
+                        title=base_title,
+                        content=norm_content,
+                        order_index=curr_order,
+                    )
+                )
+                curr_order += 1
+            else:
+                pieces = split_chapter_content(norm_content, limit)
+                total_pieces = len(pieces)
+                for sub_idx, piece in enumerate(pieces, 1):
+                    sub_title = f"{base_title} ({sub_idx}/{total_pieces})"
+                    prepared.append(
+                        PreparedChapter(
+                            title=sub_title,
+                            content=piece,
+                            order_index=curr_order,
+                        )
+                    )
+                    curr_order += 1
+
+        total_chars = sum(len(p.content) for p in prepared)
+        review_text = "\n\n".join(p.content for p in prepared)
+        return PreparedStoryPlan(
+            chapters=prepared,
+            total_chars=total_chars,
+            review_text=review_text,
+            is_structured=True,
+        )
+
+    # 2. Xu ly FetchedStoryText hoac str truyen thong
+    story_title = (title or "").strip()
+    if isinstance(story_or_payload, str):
+        fetched = FetchedStoryText.from_plain_text(story_or_payload, title=story_title)
+    elif isinstance(story_or_payload, FetchedStoryText):
+        fetched = story_or_payload
+    else:
+        raise TypeError(f"Không hỗ trợ kiểu dữ liệu truyện: {type(story_or_payload)}")
 
     if not fetched or not (fetched.review_text or "").strip():
         raise PreflightError(
@@ -210,7 +364,7 @@ def prepare_story_plan(
             "Không có chương nào có nội dung trong tác phẩm",
         )
 
-    prepared: List[PreparedChapter] = []
+    prepared = []
     order_idx = 1
 
     for src_ch in valid_source_chapters:
@@ -218,7 +372,7 @@ def prepare_story_plan(
         if not norm_content.strip():
             continue
 
-        base_title = (src_ch.title or title or f"Chương {order_idx}").strip()
+        base_title = (src_ch.title or story_title or f"Chương {order_idx}").strip()
 
         if len(norm_content) <= limit:
             prepared.append(

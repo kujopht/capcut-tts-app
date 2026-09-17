@@ -38,6 +38,8 @@ from server.farmer.review_provider import ReviewPending, ReviewProvider
 from server.farmer.story_text import (
     FetchedStoryText,
     PreflightError,
+    StoryImportPayload,
+    ingest_story_payload,
     prepare_story_plan,
     verify_served_novel,
 )
@@ -315,17 +317,19 @@ class ProductionFarmer:
                 khe_tai.__exit__(None, None, None)
 
             # Chuan bi ke hoach chia chuong va preflight
-            if isinstance(raw_fetched, FetchedStoryText):
-                fetched = raw_fetched
-            else:
-                fetched = FetchedStoryText.from_plain_text(str(raw_fetched or ""))
-
             try:
-                plan = prepare_story_plan(
-                    fetched,
-                    title=c.title or "(khong tieu de)",
-                    max_chars=self._max_chapter_chars,
-                )
+                if isinstance(raw_fetched, StoryImportPayload):
+                    plan = ingest_story_payload(raw_fetched, max_chars=self._max_chapter_chars)
+                else:
+                    if isinstance(raw_fetched, FetchedStoryText):
+                        fetched = raw_fetched
+                    else:
+                        fetched = FetchedStoryText.from_plain_text(str(raw_fetched or ""))
+                    plan = prepare_story_plan(
+                        fetched,
+                        title=c.title or "(khong tieu de)",
+                        max_chars=self._max_chapter_chars,
+                    )
             except PreflightError as exc:
                 m.note_error(f"preflight that bai {c.url}: {exc.code} — {exc.message}")
                 m.failed += 1

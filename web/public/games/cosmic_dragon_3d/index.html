@@ -1,0 +1,2743 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ASTRAL DRAGON 3D - No Man's Sky Solar Odyssey</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #00f0ff;
+      --primary-glow: rgba(0, 240, 255, 0.55);
+      --secondary: #ff0055;
+      --accent: #ffe600;
+      --purple: #bf00ff;
+      --purple-glow: rgba(191, 0, 255, 0.45);
+      --emerald: #00ff88;
+      --bg-dark: #020208;
+      --panel-bg: rgba(6, 10, 24, 0.84);
+      --panel-border: rgba(0, 240, 255, 0.35);
+      --font-display: 'Orbitron', -apple-system, sans-serif;
+      --font-body: 'Rajdhani', -apple-system, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      color: #fff;
+      font-family: var(--font-body);
+    }
+
+    #webgl-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      cursor: crosshair;
+    }
+
+    /* Screen Edge Cinematic Vignette */
+    #cinematic-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      box-shadow: inset 0 0 100px rgba(2, 2, 8, 0.85);
+      background: radial-gradient(circle at center, transparent 65%, rgba(2, 2, 8, 0.7) 100%);
+    }
+
+    /* Crosshair Center Reticle */
+    #flight-reticle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 56px;
+      height: 56px;
+      pointer-events: none;
+      z-index: 10;
+      opacity: 0.85;
+      transition: transform 0.05s ease-out, opacity 0.2s;
+    }
+    #flight-reticle::before, #flight-reticle::after {
+      content: '';
+      position: absolute;
+      background: var(--primary);
+      box-shadow: 0 0 10px var(--primary);
+    }
+    #flight-reticle::before { top: 50%; left: 0; width: 100%; height: 1.5px; transform: translateY(-50%); }
+    #flight-reticle::after { left: 50%; top: 0; height: 100%; width: 1.5px; transform: translateX(-50%); }
+    .reticle-ring {
+      position: absolute;
+      inset: 6px;
+      border: 1.5px dashed rgba(0, 240, 255, 0.75);
+      border-radius: 50%;
+      animation: ringSpin 12s linear infinite;
+    }
+    .reticle-attitude {
+      position: absolute;
+      inset: 0;
+      border: 1px solid rgba(0, 240, 255, 0.2);
+      border-radius: 50%;
+    }
+    @keyframes ringSpin { 100% { transform: rotate(360deg); } }
+
+    /* --- NMS WAYPOINT MARKERS LAYER --- */
+    #waypoint-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 8;
+      overflow: hidden;
+    }
+
+    .nms-waypoint {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform: translate(-50%, -50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: opacity 0.2s;
+      will-change: transform, opacity;
+    }
+
+    .wp-diamond {
+      width: 14px;
+      height: 14px;
+      border: 1.5px solid var(--primary);
+      transform: rotate(45deg);
+      box-shadow: 0 0 10px var(--primary);
+      background: rgba(0, 240, 255, 0.15);
+      animation: wpPulse 2.5s infinite alternate ease-in-out;
+    }
+    @keyframes wpPulse {
+      0% { transform: rotate(45deg) scale(0.9); opacity: 0.75; }
+      100% { transform: rotate(45deg) scale(1.15); opacity: 1.0; }
+    }
+
+    .wp-card {
+      margin-top: 8px;
+      background: rgba(4, 8, 20, 0.82);
+      border: 1px solid rgba(0, 240, 255, 0.4);
+      border-radius: 6px;
+      padding: 3px 8px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
+      white-space: nowrap;
+    }
+
+    .wp-name {
+      font-family: var(--font-display);
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .wp-dist {
+      font-family: var(--font-body);
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: #ffe600;
+      letter-spacing: 0.8px;
+    }
+
+    /* --- NMS PULSE DRIVE TELEMETRY HUD --- */
+    #pulse-drive-hud {
+      position: absolute;
+      bottom: 125px;
+      left: 50%;
+      transform: translateX(-50%) scale(0.9);
+      z-index: 15;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    #pulse-drive-hud.active {
+      opacity: 1;
+      transform: translateX(-50%) scale(1);
+    }
+
+    .pd-bracket {
+      width: 14px;
+      height: 48px;
+      border: 2px solid var(--primary);
+      box-shadow: 0 0 12px var(--primary);
+    }
+    .pd-bracket.left { border-right: none; }
+    .pd-bracket.right { border-left: none; }
+
+    .pd-content {
+      background: rgba(4, 12, 28, 0.85);
+      border: 1px solid var(--primary);
+      border-radius: 8px;
+      padding: 8px 20px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 0 25px rgba(0, 240, 255, 0.4), inset 0 0 15px rgba(0, 240, 255, 0.15);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pd-status {
+      font-family: var(--font-display);
+      font-size: 0.72rem;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: var(--primary);
+      text-shadow: 0 0 10px var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pd-speed {
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 15px rgba(255, 255, 255, 0.8);
+    }
+    .pd-speed .unit {
+      font-size: 0.75rem;
+      color: #729bff;
+      font-weight: 600;
+    }
+
+    .pd-bars {
+      display: flex;
+      gap: 4px;
+      width: 100%;
+      margin-top: 2px;
+    }
+    .pd-bar {
+      flex: 1;
+      height: 4px;
+      background: var(--primary);
+      box-shadow: 0 0 8px var(--primary);
+      border-radius: 2px;
+      animation: barPulse 0.6s infinite alternate;
+    }
+    .pd-bar:nth-child(2) { animation-delay: 0.1s; }
+    .pd-bar:nth-child(3) { animation-delay: 0.2s; }
+    .pd-bar:nth-child(4) { animation-delay: 0.3s; }
+    .pd-bar:nth-child(5) { animation-delay: 0.4s; }
+    @keyframes barPulse {
+      0% { opacity: 0.4; }
+      100% { opacity: 1.0; }
+    }
+
+    /* --- HUD OVERLAY --- */
+    #hud {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 16px 20px;
+    }
+
+    /* Top HUD */
+    .hud-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      width: 100%;
+    }
+
+    .brand-cluster {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      pointer-events: auto;
+    }
+
+    .brand-logo {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 8px 16px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7), inset 0 0 15px rgba(0, 240, 255, 0.15);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-logo h1 {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 900;
+      letter-spacing: 2px;
+      background: linear-gradient(90deg, #00f0ff, #bf00ff, #ff0055);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 25px rgba(191, 0, 255, 0.5);
+    }
+
+    .brand-logo p {
+      font-size: 0.65rem;
+      color: #7997d9;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .stats-board {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .stat-pill {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 8px 14px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      min-width: 85px;
+    }
+
+    .stat-pill .label {
+      font-size: 0.65rem;
+      color: #7284b3;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      font-weight: 600;
+    }
+
+    .stat-pill .val {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .stat-pill.score .val { color: var(--primary); text-shadow: 0 0 12px var(--primary-glow); }
+    .stat-pill.highscore .val { color: var(--accent); text-shadow: 0 0 12px rgba(255, 230, 0, 0.5); }
+
+    .combo-pill {
+      background: linear-gradient(135deg, rgba(191, 0, 255, 0.35), rgba(255, 0, 85, 0.25));
+      border: 1px solid var(--purple);
+      border-radius: 12px;
+      padding: 6px 14px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 0 20px rgba(191, 0, 255, 0.4);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      opacity: 0;
+      transform: scale(0.85);
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .combo-pill.active { opacity: 1; transform: scale(1); }
+    .combo-pill .val {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 10px #bf00ff;
+    }
+
+    /* Top-Right HUD Controls */
+    .hud-actions {
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .btn-icon {
+      width: 42px;
+      height: 42px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      color: #9ab0de;
+      font-size: 1.1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s;
+    }
+    .btn-icon:hover {
+      color: var(--primary);
+      border-color: var(--primary);
+      box-shadow: 0 0 15px var(--primary-glow);
+      transform: translateY(-2px);
+    }
+
+    /* Center Meters (Boss & Warp Stamina) */
+    .hud-center-meters {
+      position: absolute;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    /* Boss HP Bar */
+    .boss-hud-bar {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      animation: bossPulse 1s infinite alternate;
+    }
+    .boss-hud-bar.active { display: flex; }
+    @keyframes bossPulse {
+      0% { filter: drop-shadow(0 0 6px rgba(255, 0, 85, 0.6)); }
+      100% { filter: drop-shadow(0 0 16px rgba(255, 0, 85, 0.9)); }
+    }
+
+    .boss-info {
+      display: flex;
+      justify-content: space-between;
+      width: 320px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #ff5588;
+    }
+
+    .boss-hp-track {
+      width: 320px;
+      height: 10px;
+      background: rgba(10, 0, 5, 0.75);
+      border: 1px solid var(--secondary);
+      border-radius: 6px;
+      overflow: hidden;
+      padding: 1px;
+    }
+
+    .boss-hp-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #ff0055, #ff5500);
+      border-radius: 4px;
+      box-shadow: 0 0 12px rgba(255, 0, 85, 0.8);
+      transition: width 0.2s ease-out;
+    }
+
+    /* Bottom HUD */
+    .hud-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      width: 100%;
+    }
+
+    .telemetry-cluster {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      padding: 12px 18px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 260px;
+    }
+
+    .telemetry-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+    .telemetry-row .k { color: #8397c4; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; font-size: 0.72rem; }
+    .telemetry-row .v { font-family: var(--font-display); font-weight: 700; color: #fff; }
+
+    .stamina-meter {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .stamina-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      color: #7284b3;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .stamina-track {
+      width: 100%;
+      height: 7px;
+      background: rgba(2, 6, 18, 0.8);
+      border: 1px solid rgba(0, 240, 255, 0.4);
+      border-radius: 4px;
+      overflow: hidden;
+      padding: 1px;
+    }
+    .stamina-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #00f0ff, #bf00ff);
+      box-shadow: 0 0 10px var(--primary);
+      border-radius: 3px;
+      transition: width 0.05s linear;
+    }
+
+    /* Camera Switcher Badge */
+    .cam-mode-badge {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 8px 14px;
+      backdrop-filter: blur(16px);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #79a1e0;
+      letter-spacing: 1px;
+      pointer-events: auto;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .cam-mode-badge:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+      box-shadow: 0 0 15px var(--primary-glow);
+    }
+    .cam-key {
+      background: rgba(0, 240, 255, 0.2);
+      border: 1px solid var(--primary);
+      color: #fff;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--font-display);
+      font-size: 0.68rem;
+    }
+
+    /* Controls cluster for touch / quick click */
+    .touch-controls {
+      display: flex;
+      gap: 12px;
+      pointer-events: auto;
+    }
+
+    .control-orb-btn {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: var(--panel-bg);
+      border: 1.5px solid var(--panel-border);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .control-orb-btn.fire { border-color: var(--primary); box-shadow: 0 0 18px var(--primary-glow); }
+    .control-orb-btn.fire:active { transform: scale(0.92); background: rgba(0, 240, 255, 0.35); }
+    .control-orb-btn.warp { border-color: var(--secondary); box-shadow: 0 0 18px rgba(255, 0, 85, 0.5); }
+    .control-orb-btn.warp:active { transform: scale(0.92); background: rgba(255, 0, 85, 0.35); }
+
+    /* --- OVERLAYS & MODALS --- */
+    .screen-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(2, 4, 12, 0.88);
+      backdrop-filter: blur(20px);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      transition: opacity 0.3s, visibility 0.3s;
+    }
+    .screen-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .modal-card {
+      background: linear-gradient(135deg, rgba(8, 16, 40, 0.92), rgba(4, 8, 20, 0.96));
+      border: 1.5px solid var(--panel-border);
+      border-radius: 20px;
+      padding: 36px 40px;
+      max-width: 580px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 35px rgba(0, 240, 255, 0.2);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      animation: modalDrop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes modalDrop {
+      0% { transform: translateY(30px) scale(0.95); opacity: 0; }
+      100% { transform: translateY(0) scale(1); opacity: 1; }
+    }
+
+    .modal-title {
+      font-family: var(--font-display);
+      font-size: 2.2rem;
+      font-weight: 900;
+      letter-spacing: 3px;
+      background: linear-gradient(90deg, #00f0ff, #bf00ff, #ff0055);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 30px rgba(0, 240, 255, 0.5);
+    }
+    .modal-title.gameover {
+      background: linear-gradient(90deg, #ff0055, #ff5500);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .modal-sub {
+      font-size: 1.05rem;
+      color: #9cb5e8;
+      line-height: 1.6;
+    }
+
+    .btn-cyber-primary {
+      background: linear-gradient(90deg, #00f0ff, #bf00ff);
+      border: none;
+      border-radius: 12px;
+      padding: 14px 38px;
+      color: #020208;
+      font-family: var(--font-display);
+      font-size: 1.05rem;
+      font-weight: 900;
+      letter-spacing: 2px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 0 25px rgba(0, 240, 255, 0.6);
+      transition: all 0.25s;
+    }
+    .btn-cyber-primary:hover {
+      transform: translateY(-3px) scale(1.03);
+      box-shadow: 0 0 40px rgba(0, 240, 255, 0.9);
+      color: #000;
+    }
+
+    .control-tips {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: #7997d9;
+      text-align: left;
+      width: 100%;
+      background: rgba(0, 0, 0, 0.35);
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 240, 255, 0.15);
+    }
+    .key-badge {
+      display: inline-block;
+      background: rgba(0, 240, 255, 0.15);
+      border: 1px solid var(--primary);
+      color: #fff;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .gameover-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      width: 100%;
+    }
+    .summary-box {
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 12px 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .summary-box .val { font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; }
+    .summary-box .lbl { font-size: 0.7rem; color: #7284b3; text-transform: uppercase; }
+
+    /* Boss Announcement Banner */
+    #boss-alert {
+      position: absolute;
+      top: 130px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-20px);
+      background: linear-gradient(90deg, rgba(255, 0, 85, 0.85), rgba(191, 0, 255, 0.85));
+      border: 1.5px solid #fff;
+      border-radius: 30px;
+      padding: 10px 28px;
+      font-family: var(--font-display);
+      font-weight: 900;
+      font-size: 0.95rem;
+      letter-spacing: 2px;
+      color: #fff;
+      box-shadow: 0 0 30px rgba(255, 0, 85, 0.8);
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    #boss-alert.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Achievement Toast */
+    #achievement-toast {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      background: linear-gradient(135deg, rgba(0, 240, 255, 0.25), rgba(191, 0, 255, 0.35));
+      border: 1.5px solid var(--primary);
+      border-radius: 14px;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7), 0 0 20px var(--primary-glow);
+      z-index: 50;
+      transform: translateX(120%);
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    #achievement-toast.show { transform: translateX(0); }
+    .toast-icon { font-size: 1.6rem; }
+    .toast-title { font-family: var(--font-display); font-size: 0.85rem; font-weight: 800; color: #fff; }
+    .toast-desc { font-size: 0.75rem; color: #8eb3ff; }
+
+    @media (max-width: 768px) {
+      .brand-logo h1 { font-size: 0.95rem; }
+      .brand-logo p { display: none; }
+      .telemetry-cluster { min-width: 190px; padding: 8px 12px; }
+      .modal-card { padding: 24px 20px; }
+      .modal-title { font-size: 1.6rem; }
+      #pulse-drive-hud { bottom: 95px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Three.js Container -->
+  <div id="webgl-container"></div>
+
+  <!-- Cinematic Screen Edge Vignette -->
+  <div id="cinematic-vignette"></div>
+
+  <!-- NMS Waypoint Markers Layer -->
+  <div id="waypoint-layer"></div>
+
+  <!-- Flight Aim Reticle -->
+  <div id="flight-reticle">
+    <div class="reticle-ring"></div>
+    <div class="reticle-attitude"></div>
+  </div>
+
+  <!-- NMS Pulse Drive Warp Telemetry HUD -->
+  <div id="pulse-drive-hud">
+    <div class="pd-bracket left"></div>
+    <div class="pd-content">
+      <div class="pd-status"><span class="pd-icon">⚡</span> PULSE DRIVE ENGAGED</div>
+      <div class="pd-speed"><span id="pd-speed-val">4.6</span> <span class="unit">AU/s</span></div>
+      <div class="pd-bars">
+        <div class="pd-bar"></div>
+        <div class="pd-bar"></div>
+        <div class="pd-bar"></div>
+        <div class="pd-bar"></div>
+        <div class="pd-bar"></div>
+      </div>
+    </div>
+    <div class="pd-bracket right"></div>
+  </div>
+
+  <!-- Offline Local Three.js & Postprocessing Modules -->
+  <script src="three.min.js"></script>
+  <script src="postprocessing.min.js"></script>
+
+  <!-- HUD Layer -->
+  <div id="hud">
+    <!-- Top HUD -->
+    <header class="hud-top">
+      <div class="brand-cluster">
+        <div class="brand-logo">
+          <div style="font-size: 1.4rem;">🐉</div>
+          <div>
+            <h1>ASTRAL DRAGON 3D</h1>
+            <p>No Man's Sky Solar Odyssey</p>
+          </div>
+        </div>
+
+        <div class="stats-board">
+          <div class="stat-pill score">
+            <span class="label">ĐIỂM ASTRAL</span>
+            <span class="val" id="hud-score">0</span>
+          </div>
+          <div class="stat-pill highscore">
+            <span class="label">KỶ LỤC</span>
+            <span class="val" id="hud-highscore">0</span>
+          </div>
+          <div class="combo-pill" id="hud-combo">
+            <span style="font-size: 1.1rem;">⚡</span>
+            <span class="val" id="hud-combo-val">x2</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud-actions">
+        <button class="btn-icon" id="btn-sound" title="Bật/Tắt Âm Thanh">🔊</button>
+        <button class="btn-icon" id="btn-music" title="Bật/Tắt Nhạc Tinh Vân">🎵</button>
+        <button class="btn-icon" id="btn-cam-toggle" title="Đổi Camera [C]">🎥</button>
+        <button class="btn-icon" id="btn-pause" title="Tạm Dừng [P/ESC]">⏸️</button>
+      </div>
+    </header>
+
+    <!-- Center Boss Bar -->
+    <div class="hud-center-meters">
+      <div class="boss-hud-bar" id="boss-hud-bar">
+        <div class="boss-info">
+          <span>⚠️ VOID LEVIATHAN (SIÊU QUÁI THÚ)</span>
+          <span id="boss-hp-text">6 / 6 HP</span>
+        </div>
+        <div class="boss-hp-track">
+          <div class="boss-hp-fill" id="boss-hp-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Boss Alert Toast -->
+    <div id="boss-alert">
+      <span id="boss-alert-text">CẢNH BÁO: VOID LEVIATHAN ĐANG RÌNH RẬP!</span>
+    </div>
+
+    <!-- Bottom HUD -->
+    <footer class="hud-bottom">
+      <div class="telemetry-cluster">
+        <div class="telemetry-row">
+          <span class="k">CHIỀU DÀI THẦN RỒNG</span>
+          <span class="v" id="dragon-len">28 m</span>
+        </div>
+        <div class="telemetry-row">
+          <span class="k">HỆ ĐIỀU PHỐI GÓC NHÌN</span>
+          <span class="v" id="cam-name" style="color: var(--primary);">ASTRAL CHASE (3RD)</span>
+        </div>
+        <div class="stamina-meter">
+          <div class="stamina-label">
+            <span>NĂNG LƯỢNG WARP [SPACE / GIỮ CHUỘT TRÁI]</span>
+          </div>
+          <div class="stamina-track">
+            <div class="stamina-fill" id="stamina-fill"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cam-mode-badge" id="camera-badge-btn">
+        <span class="cam-key">C</span>
+        <span>GÓC QUANH HỆ MẶT TRỜI</span>
+      </div>
+
+      <!-- Quick Action Touch/Mouse Orbs -->
+      <div class="touch-controls">
+        <div class="control-orb-btn fire" id="btn-fire" title="Phóng Hơi Thở Rồng Plasma [F / Chuột Phải]">
+          <span>FIRE</span>
+          <span style="font-size: 0.55rem; opacity: 0.8;">PLASMA</span>
+        </div>
+        <div class="control-orb-btn warp" id="btn-warp" title="Warp Glide Bứt Tốc [SPACE / Chuột Trái]">
+          <span>WARP</span>
+          <span style="font-size: 0.55rem; opacity: 0.8;">HYPER</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Achievement Toast -->
+  <div id="achievement-toast">
+    <div class="toast-icon">🏆</div>
+    <div>
+      <div class="toast-title" id="toast-title">DANH HIỆU MỚI!</div>
+      <div class="toast-desc" id="toast-desc">Bạn vừa mở khóa một thành tích.</div>
+    </div>
+  </div>
+
+  <!-- START MENU MODAL -->
+  <div id="modal-start" class="screen-overlay">
+    <div class="modal-card">
+      <h2 class="modal-title">ASTRAL DRAGON 3D</h2>
+      <p class="modal-sub">Hóa thân thành **Rồng Thần Không Gian (Astral Dragon)** tự do phiêu bạt trong hệ mặt trời siêu thực lấy cảm hứng từ *No Man's Sky*. Rê chuột để lượn 3D mượt mà, bay xuyên vành đai hành tinh khí khổng lồ Aurelia, ngắm nhìn đại dương Terra Nova và chiến đấu chống lại siêu trùm **Void Leviathan**!</p>
+
+      <button id="btn-start-game" class="btn-cyber-primary">
+        <span>THỨC TỈNH RỒNG THẦN VŨ TRỤ</span>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+
+      <div class="control-tips">
+        <span>Đổi hướng bay 3D: <span class="key-badge">Rê Chuột</span> (Trỏ chuột đến đâu Rồng bay đến đó)</span>
+        <span>Bứt tốc Warp: <span class="key-badge">SPACE</span> / <span class="key-badge">Giữ Chuột Trái</span></span>
+        <span>Hơi thở Rồng Plasma: <span class="key-badge">F</span> / <span class="key-badge">Chuột Phải</span></span>
+        <span>Đổi Camera 3D: <span class="key-badge">C</span> (Góc nhìn thứ 3, Cưỡi trên gáy Rồng, Toàn cảnh Thái Dương hệ)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAUSE MODAL -->
+  <div id="modal-pause" class="screen-overlay hidden">
+    <div class="modal-card">
+      <h2 class="modal-title">TẠM DỪNG VŨ TRỤ</h2>
+      <p class="modal-sub">Thời gian vũ trụ đang đóng băng. Sẵn sàng tiếp tục hải trình!</p>
+      <button id="btn-resume" class="btn-cyber-primary"><span>TIẾP TỤC BAY</span></button>
+      <button id="btn-restart-pause" class="btn-cyber-primary" style="background: rgba(255, 0, 85, 0.85); color: #fff;"><span>TÁI SINH TỪ ĐẦU</span></button>
+    </div>
+  </div>
+
+  <!-- GAME OVER MODAL -->
+  <div id="modal-gameover" class="screen-overlay hidden">
+    <div class="modal-card">
+      <h2 class="modal-title gameover">STARLIGHT FADED</h2>
+      <p id="gameover-reason" class="modal-sub" style="color: #ff88a8;">Rồng Thần đã tan biến vào tinh vân!</p>
+      <div class="gameover-summary">
+        <div class="summary-box"><span id="final-score" class="val" style="color: var(--primary);">0</span><span class="lbl">Điểm Đạt</span></div>
+        <div class="summary-box"><span id="final-length" class="val" style="color: var(--emerald);">0</span><span class="lbl">Chiều Dài Rồng</span></div>
+        <div class="summary-box"><span id="final-kills" class="val" style="color: var(--accent);">0</span><span class="lbl">Hạ Quái Thú</span></div>
+      </div>
+      <button id="btn-restart" class="btn-cyber-primary"><span>TÁI SINH RỒNG THẦN</span></button>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * ASTRAL DRAGON 3D: NO MAN'S SKY SOLAR ODYSSEY (AAA GRAPHICS UPGRADE)
+     * - Offline HDR UnrealBloomPass Post-Processing
+     * - GLSL Rayleigh/Mie Atmospheric Scattering Limb Shaders
+     * - Multi-layered Planetary Systems with Dynamic Rotating Cloud Decks
+     * - 2,400 Particle Space Dust System with Pulse Drive Hyperspace Streaks
+     * - Astral Celestial Dragon with Iridescent Scales & Stardust Ribbon Trail
+     * - Holographic No Man's Sky Waypoint HUD Navigation & Pulse Telemetry
+     */
+
+    // --- 1. PROCEDURAL AUDIO SYNTHESIZER ---
+    class CosmicSoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.soundOn = true;
+        this.musicOn = true;
+        this.bgmTimer = null;
+        this.bgmStep = 0;
+        this.masterGain = null;
+        this.musicGain = null;
+        this.sfxGain = null;
+        this.chords = [
+          [146.83, 220.00, 261.63, 329.63],
+          [116.54, 174.61, 220.00, 261.63],
+          [87.31, 130.81, 174.61, 220.00],
+          [130.81, 196.00, 246.94, 293.66]
+        ];
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+
+          this.masterGain = this.ctx.createGain();
+          this.masterGain.gain.setValueAtTime(0.75, this.ctx.currentTime);
+          this.masterGain.connect(this.ctx.destination);
+
+          this.musicGain = this.ctx.createGain();
+          this.musicGain.gain.setValueAtTime(0.32, this.ctx.currentTime);
+          this.musicGain.connect(this.masterGain);
+
+          this.sfxGain = this.ctx.createGain();
+          this.sfxGain.gain.setValueAtTime(0.65, this.ctx.currentTime);
+          this.sfxGain.connect(this.masterGain);
+        }
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+        if (this.musicOn && !this.bgmTimer) this.startBGM();
+      }
+
+      startBGM() {
+        if (!this.ctx || this.bgmTimer) return;
+        const tick = () => {
+          if (!this.musicOn || !this.ctx) return;
+          const now = this.ctx.currentTime;
+          const bar = Math.floor((this.bgmStep / 8) % 4);
+          const beat = this.bgmStep % 8;
+          const chord = this.chords[bar];
+
+          if (beat === 0 || beat === 4) {
+            chord.forEach((freq) => {
+              const osc = this.ctx.createOscillator();
+              const gain = this.ctx.createGain();
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(freq * 1.5, now);
+              gain.gain.setValueAtTime(0.04, now);
+              gain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+              osc.connect(gain);
+              gain.connect(this.musicGain);
+              osc.start(now);
+              osc.stop(now + 1.8);
+            });
+          }
+
+          const arpNote = chord[beat % chord.length] * 2;
+          const arpOsc = this.ctx.createOscillator();
+          const arpGain = this.ctx.createGain();
+          arpOsc.type = 'triangle';
+          arpOsc.frequency.setValueAtTime(arpNote, now);
+          arpGain.gain.setValueAtTime(0.05, now);
+          arpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+          arpOsc.connect(arpGain);
+          arpGain.connect(this.musicGain);
+          arpOsc.start(now);
+          arpOsc.stop(now + 0.3);
+
+          this.bgmStep++;
+          this.bgmTimer = setTimeout(tick, 180);
+        };
+        tick();
+      }
+
+      stopBGM() {
+        if (this.bgmTimer) { clearTimeout(this.bgmTimer); this.bgmTimer = null; }
+      }
+
+      playCollect(combo = 1) {
+        if (!this.soundOn || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const baseFreq = 523.25 + Math.min(combo * 65, 800);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(baseFreq, now);
+        osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.5, now + 0.12);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      }
+
+      playDragonBreath() {
+        if (!this.soundOn || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(480, now);
+        osc.frequency.exponentialRampToValueAtTime(80, now + 0.35);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      }
+
+      playExplosion() {
+        if (!this.soundOn || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(20, now + 0.7);
+        gain.gain.setValueAtTime(0.55, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(now);
+        osc.stop(now + 0.7);
+      }
+
+      playRoar() {
+        if (!this.soundOn || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.linearRampToValueAtTime(320, now + 0.3);
+        osc.frequency.linearRampToValueAtTime(90, now + 0.8);
+        gain.gain.setValueAtTime(0.6, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(now);
+        osc.stop(now + 0.85);
+      }
+    }
+
+    const sound = new CosmicSoundEngine();
+
+    // --- 2. PROCEDURAL TEXTURE GENERATORS ---
+
+    // A. Cosmic Nebula Skybox Texture (High Contrast No Man's Sky Palette)
+    function createNebulaSkyTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d');
+
+      const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      bg.addColorStop(0, '#020108');
+      bg.addColorStop(0.3, '#070214');
+      bg.addColorStop(0.7, '#020b1c');
+      bg.addColorStop(1, '#010106');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Glowing Multi-Color Nebula Nodes (Additive Layering)
+      ctx.globalCompositeOperation = 'screen';
+      const clouds = [
+        { x: 420, y: 300, r: 480, col: 'rgba(191, 0, 255, 0.32)' },
+        { x: 640, y: 460, r: 400, col: 'rgba(0, 240, 255, 0.28)' },
+        { x: 1480, y: 520, r: 540, col: 'rgba(255, 0, 95, 0.24)' },
+        { x: 1720, y: 360, r: 440, col: 'rgba(0, 180, 255, 0.30)' },
+        { x: 1040, y: 160, r: 420, col: 'rgba(255, 150, 0, 0.22)' },
+        { x: 200, y: 840, r: 480, col: 'rgba(140, 0, 255, 0.26)' },
+        { x: 1100, y: 780, r: 380, col: 'rgba(0, 255, 170, 0.22)' }
+      ];
+
+      clouds.forEach(c => {
+        const rad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r);
+        rad.addColorStop(0, c.col);
+        rad.addColorStop(0.5, c.col.replace(/[\d\.]+\)$/, '0.12)'));
+        rad.addColorStop(1, 'transparent');
+        ctx.fillStyle = rad;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      });
+
+      // Luminous Cosmic Dust Currents (Filaments)
+      ctx.lineWidth = 14;
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.08)';
+      ctx.beginPath();
+      ctx.moveTo(0, 400);
+      ctx.bezierCurveTo(500, 200, 1200, 700, 2048, 350);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(255, 0, 120, 0.06)';
+      ctx.beginPath();
+      ctx.moveTo(0, 650);
+      ctx.bezierCurveTo(600, 850, 1300, 250, 2048, 600);
+      ctx.stroke();
+
+      // Dense Stardust & Sparkling Cross Stars
+      ctx.globalCompositeOperation = 'source-over';
+      for (let i = 0; i < 1200; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const r = Math.random() * 1.8 + 0.3;
+        const isBright = Math.random() < 0.08;
+
+        ctx.fillStyle = Math.random() < 0.4 ? '#00f0ff' : (Math.random() < 0.7 ? '#ffc2eb' : '#ffffff');
+        ctx.globalAlpha = Math.random() * 0.85 + 0.15;
+        ctx.beginPath();
+        ctx.arc(x, y, isBright ? r * 1.6 : r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Cross diffraction flare on brightest stars
+        if (isBright) {
+          ctx.strokeStyle = ctx.fillStyle;
+          ctx.lineWidth = 0.7;
+          ctx.beginPath();
+          ctx.moveTo(x - 5, y); ctx.lineTo(x + 5, y);
+          ctx.moveTo(x, y - 5); ctx.lineTo(x, y + 5);
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1.0;
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      return tex;
+    }
+
+    // B. Solaris Sun Plasma Texture
+    function createSunTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      bg.addColorStop(0, '#ffc400');
+      bg.addColorStop(0.5, '#ff3700');
+      bg.addColorStop(1, '#ff9100');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let i = 0; i < 260; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const r = Math.random() * 60 + 15;
+        const f = ctx.createRadialGradient(x, y, 0, x, y, r);
+        f.addColorStop(0, 'rgba(255, 255, 230, 0.55)');
+        f.addColorStop(0.5, 'rgba(255, 80, 0, 0.28)');
+        f.addColorStop(1, 'transparent');
+        ctx.fillStyle = f;
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      return tex;
+    }
+
+    // C. Gas Giant Aurelia Banded Atmospheric Texture
+    function createGasGiantTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      const bands = [
+        '#061830', '#0a3650', '#0090b8', '#143c60', '#096377',
+        '#0c1e3d', '#1a5f5b', '#00f0ff', '#163354', '#0e1a36',
+        '#009dc4', '#005b9e', '#020340', '#38b8db', '#72d1e8'
+      ];
+      const bh = canvas.height / bands.length;
+      for (let i = 0; i < bands.length; i++) {
+        ctx.fillStyle = bands[i];
+        ctx.fillRect(0, i * bh, canvas.width, bh + 2);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+        for (let x = 0; x < canvas.width; x += 22) {
+          const yOff = Math.sin(x * 0.022 + i) * 7;
+          ctx.fillRect(x, i * bh + yOff, 16, bh * 0.55);
+        }
+      }
+
+      // Great Azure Storm Eye
+      const spot = ctx.createRadialGradient(380, 240, 5, 380, 240, 75);
+      spot.addColorStop(0, 'rgba(0, 240, 255, 0.95)');
+      spot.addColorStop(0.5, 'rgba(191, 0, 255, 0.65)');
+      spot.addColorStop(1, 'transparent');
+      ctx.fillStyle = spot;
+      ctx.beginPath();
+      ctx.ellipse(380, 240, 75, 40, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // D. Aurelia Planetary Ring Texture
+    function createRingTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+
+      const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
+      grad.addColorStop(0, 'rgba(0, 240, 255, 0)');
+      grad.addColorStop(0.12, 'rgba(0, 240, 255, 0.75)');
+      grad.addColorStop(0.35, 'rgba(0, 180, 255, 0.92)');
+      grad.addColorStop(0.48, 'rgba(0, 110, 220, 0.8)');
+      grad.addColorStop(0.52, 'rgba(0, 0, 0, 0)'); // Cassini Gap
+      grad.addColorStop(0.58, 'rgba(191, 0, 255, 0.85)');
+      grad.addColorStop(0.85, 'rgba(0, 240, 255, 0.6)');
+      grad.addColorStop(1, 'rgba(0, 240, 255, 0)');
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let x = 120; x < 900; x += 4) {
+        if (Math.abs(x - 530) < 30) continue;
+        ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255, 255, 255, 0.22)' : 'rgba(0, 0, 0, 0.3)';
+        ctx.fillRect(x, 0, 2, canvas.height);
+      }
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // E. Terra Nova Continents & Ocean
+    function createTerraTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#041528';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Turquoise Shallows
+      ctx.fillStyle = '#104d6e';
+      for (let i = 0; i < 20; i++) {
+        const cx = (i * 54 + 35) % canvas.width;
+        const cy = 120 + Math.sin(i * 1.5) * 140;
+        ctx.beginPath(); ctx.ellipse(cx, cy, 78, 56, Math.sin(i), 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Lush Continents
+      ctx.fillStyle = '#1c8868';
+      for (let i = 0; i < 18; i++) {
+        const cx = (i * 60 + 25) % canvas.width;
+        const cy = 130 + Math.sin(i * 1.5) * 130;
+        ctx.beginPath(); ctx.ellipse(cx, cy, 54, 40, Math.cos(i), 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Mountainous Highlands
+      ctx.fillStyle = '#658d70';
+      for (let i = 0; i < 14; i++) {
+        const cx = (i * 75 + 45) % canvas.width;
+        const cy = 140 + Math.sin(i * 1.8) * 100;
+        ctx.beginPath(); ctx.ellipse(cx, cy, 28, 20, 0.3, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Polar Ice Caps
+      ctx.fillStyle = '#ebf6f6';
+      ctx.fillRect(0, 0, canvas.width, 36);
+      ctx.fillRect(0, canvas.height - 36, canvas.width, 36);
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // F. Terra Nova Rotating Cloud Texture
+    function createCloudTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+      for (let i = 0; i < 45; i++) {
+        const x = Math.random() * canvas.width;
+        const y = 60 + Math.random() * (canvas.height - 120);
+        const rx = Math.random() * 110 + 40;
+        const ry = Math.random() * 32 + 14;
+        const rot = (Math.random() - 0.5) * 0.4;
+        ctx.beginPath();
+        ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse((x + 50) % canvas.width, y + 8, rx * 0.65, ry * 0.7, rot, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      return tex;
+    }
+
+    // G. Ignis Prime (Volcanic Lava World)
+    function createLavaTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#0a0302';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = '#ff3300';
+      ctx.shadowColor = '#ff6600';
+      ctx.shadowBlur = 15;
+
+      for (let i = 0; i < 35; i++) {
+        ctx.beginPath();
+        let x = Math.random() * canvas.width;
+        let y = Math.random() * canvas.height;
+        ctx.moveTo(x, y);
+        for (let s = 0; s < 8; s++) {
+          x += (Math.random() - 0.5) * 60;
+          y += (Math.random() - 0.5) * 60;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = '#ffbb00';
+      ctx.shadowColor = '#ffcc00';
+      ctx.shadowBlur = 18;
+      for (let i = 0; i < 20; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        ctx.beginPath(); ctx.arc(x, y, Math.random() * 14 + 5, 0, Math.PI * 2); ctx.fill();
+      }
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // H. Caelum (Ice Moon)
+    function createIceTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#bce0f8';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = '#0088cc';
+      ctx.lineWidth = 2.5;
+      for (let i = 0; i < 40; i++) {
+        ctx.beginPath();
+        let x = Math.random() * canvas.width;
+        let y = Math.random() * canvas.height;
+        ctx.moveTo(x, y);
+        for (let s = 0; s < 6; s++) {
+          x += (Math.random() - 0.5) * 75;
+          y += (Math.random() - 0.5) * 75;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // --- 3. GLSL ATMOSPHERIC SCATTERING SHADER MATERIAL ---
+    function createAtmosphereShaderMaterial(glowColorHex, power = 3.2, coefficient = 1.0) {
+      return new THREE.ShaderMaterial({
+        uniforms: {
+          glowColor: { value: new THREE.Color(glowColorHex) },
+          power: { value: power },
+          coefficient: { value: coefficient }
+        },
+        vertexShader: `
+          varying vec3 vNormal;
+          varying vec3 vViewPosition;
+          void main() {
+            vNormal = normalize(normalMatrix * normal);
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            vViewPosition = -mvPosition.xyz;
+            gl_Position = projectionMatrix * mvPosition;
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 glowColor;
+          uniform float power;
+          uniform float coefficient;
+          varying vec3 vNormal;
+          varying vec3 vViewPosition;
+          void main() {
+            vec3 normal = normalize(vNormal);
+            vec3 viewDir = normalize(vViewPosition);
+            float intensity = pow(max(0.0, coefficient - dot(normal, viewDir)), power);
+            intensity = clamp(intensity, 0.0, 1.0);
+            gl_FragColor = vec4(glowColor, intensity * 0.92);
+          }
+        `,
+        side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false
+      });
+    }
+
+    // --- 4. SPACE DUST & WARP HYPERSPACE STREAKS ENGINE ---
+    class SpaceDustEngine {
+      constructor(count = 2400, radius = 170) {
+        this.count = count;
+        this.radius = radius;
+        this.positions = new Float32Array(count * 6);
+        this.colors = new Float32Array(count * 6);
+        this.points = [];
+        this.streakLength = 1.0;
+
+        for (let i = 0; i < count; i++) {
+          const u = Math.random();
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          const r = Math.cbrt(u) * radius;
+
+          const x = r * Math.sin(phi) * Math.cos(theta);
+          const y = r * Math.sin(phi) * Math.sin(theta);
+          const z = r * Math.cos(phi);
+
+          this.points.push(new THREE.Vector3(x, y, z));
+
+          const isCyan = Math.random() < 0.65;
+          const rCol = isCyan ? 0.1 : 0.9;
+          const gCol = isCyan ? 0.95 : 0.3;
+          const bCol = 1.0;
+
+          // Vertex 0 (head)
+          this.colors[i * 6 + 0] = rCol;
+          this.colors[i * 6 + 1] = gCol;
+          this.colors[i * 6 + 2] = bCol;
+          // Vertex 1 (tail)
+          this.colors[i * 6 + 3] = rCol * 0.4;
+          this.colors[i * 6 + 4] = gCol * 0.4;
+          this.colors[i * 6 + 5] = bCol * 0.4;
+        }
+
+        this.geo = new THREE.BufferGeometry();
+        this.geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+        this.geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+
+        this.mat = new THREE.LineBasicMaterial({
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.85,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        });
+
+        this.mesh = new THREE.LineSegments(this.geo, this.mat);
+        scene.add(this.mesh);
+      }
+
+      update(dt, dragonPos, dragonDir, isWarping) {
+        const targetLen = isWarping ? 26.0 : 1.2;
+        this.streakLength = THREE.MathUtils.lerp(this.streakLength, targetLen, dt * 8.0);
+
+        const tailVec = dragonDir.clone().multiplyScalar(-this.streakLength);
+        const posAttr = this.geo.attributes.position;
+        const array = posAttr.array;
+
+        for (let i = 0; i < this.count; i++) {
+          const p = this.points[i];
+          const dist = p.distanceTo(dragonPos);
+          if (dist > this.radius) {
+            const angle = Math.random() * Math.PI * 2;
+            const rad = Math.random() * (this.radius * 0.8);
+            const perp1 = new THREE.Vector3(-dragonDir.z, 0, dragonDir.x).normalize();
+            const perp2 = new THREE.Vector3().crossVectors(dragonDir, perp1).normalize();
+            p.copy(dragonPos)
+              .add(dragonDir.clone().multiplyScalar(this.radius * 0.85))
+              .add(perp1.multiplyScalar(Math.cos(angle) * rad))
+              .add(perp2.multiplyScalar(Math.sin(angle) * rad));
+          }
+
+          const idx = i * 6;
+          array[idx + 0] = p.x;
+          array[idx + 1] = p.y;
+          array[idx + 2] = p.z;
+          array[idx + 3] = p.x + tailVec.x;
+          array[idx + 4] = p.y + tailVec.y;
+          array[idx + 5] = p.z + tailVec.z;
+        }
+
+        posAttr.needsUpdate = true;
+      }
+    }
+
+    // --- 5. STARDUST RIBBON PARTICLE TRAIL (DRAGON WINGS & TAIL) ---
+    class StardustTrailEngine {
+      constructor(maxParticles = 180) {
+        this.max = maxParticles;
+        this.particles = [];
+        this.positions = new Float32Array(maxParticles * 3);
+        this.colors = new Float32Array(maxParticles * 3);
+
+        this.geo = new THREE.BufferGeometry();
+        this.geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+        this.geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+
+        // Soft Radial Canvas Particle Texture
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        grad.addColorStop(0.3, 'rgba(0, 240, 255, 0.85)');
+        grad.addColorStop(0.7, 'rgba(191, 0, 255, 0.35)');
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 64, 64);
+        const particleTex = new THREE.CanvasTexture(canvas);
+
+        this.mat = new THREE.PointsMaterial({
+          size: 3.8,
+          map: particleTex,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.92,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        });
+
+        this.mesh = new THREE.Points(this.geo, this.mat);
+        scene.add(this.mesh);
+      }
+
+      emit(pos, colHex = 0x00f0ff) {
+        if (this.particles.length >= this.max) {
+          this.particles.shift();
+        }
+        const c = new THREE.Color(colHex);
+        this.particles.push({
+          pos: pos.clone(),
+          r: c.r,
+          g: c.g,
+          b: c.b,
+          life: 1.0,
+          decay: Math.random() * 0.8 + 1.1
+        });
+      }
+
+      update(dt) {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          const p = this.particles[i];
+          p.life -= dt * p.decay;
+          if (p.life <= 0) {
+            this.particles.splice(i, 1);
+          }
+        }
+
+        const posAttr = this.geo.attributes.position;
+        const colAttr = this.geo.attributes.color;
+        const pArr = posAttr.array;
+        const cArr = colAttr.array;
+
+        for (let i = 0; i < this.max; i++) {
+          const idx = i * 3;
+          if (i < this.particles.length) {
+            const p = this.particles[i];
+            pArr[idx + 0] = p.pos.x;
+            pArr[idx + 1] = p.pos.y;
+            pArr[idx + 2] = p.pos.z;
+
+            const fade = Math.max(0, p.life);
+            cArr[idx + 0] = p.r * fade;
+            cArr[idx + 1] = p.g * fade;
+            cArr[idx + 2] = p.b * fade;
+          } else {
+            pArr[idx + 0] = 0;
+            pArr[idx + 1] = -99999;
+            pArr[idx + 2] = 0;
+          }
+        }
+
+        posAttr.needsUpdate = true;
+        colAttr.needsUpdate = true;
+      }
+    }
+
+    // --- 6. THREE.JS SYSTEM GLOBALS ---
+    let scene, camera, renderer, composer, bloomPass;
+    let sunMesh, sunLight, skyDomeMesh;
+    let spaceDust = null;
+    let stardustTrail = null;
+    let planets = [];
+    let asteroids = [];
+    let blackHole = null;
+
+    let cameraMode = 0;
+    const CAM_NAMES = ["ASTRAL CHASE (3RD)", "DRAGON RIDER (NECK)", "SOLAR OVERVIEW"];
+
+    let dragon = {
+      pos: new THREE.Vector3(0, 10, 180),
+      dir: new THREE.Vector3(0, 0, -1),
+      up: new THREE.Vector3(0, 1, 0),
+      speed: 26.0,
+      baseSpeed: 26.0,
+      warpSpeed: 62.0,
+      isWarping: false,
+      stamina: 100,
+      length: 28,
+      segmentDist: 2.3,
+      radius: 1.6,
+      roll: 0,
+      wingFlapAngle: 0,
+      segments: [],
+      leftWingMesh: null,
+      rightWingMesh: null,
+      headMesh: null,
+      score: 0,
+      kills: 0,
+      combo: 0,
+      comboTimer: 0,
+      fireCooldown: 0
+    };
+
+    let fireballs = [];
+    let boss = null;
+    let starCores = [];
+    let highScore = parseInt(localStorage.getItem('astral_dragon_high') || '0');
+    document.getElementById('hud-highscore').innerText = highScore;
+
+    let isPlaying = false;
+    let isPaused = false;
+    let clock = new THREE.Clock();
+    let shakeIntensity = 0;
+    let mouse = { x: 0, y: 0 };
+
+    // Waypoint Registry for Screen-Space Projector
+    const WAYPOINT_TARGETS = [
+      { id: 'sun', name: 'SOLARIS PRIME', getPos: () => sunMesh ? sunMesh.position : null, col: '#ffe600' },
+      { id: 'aurelia', name: 'AURELIA', getPos: () => planets[0] ? planets[0].mesh.position : null, col: '#00f0ff' },
+      { id: 'terra', name: 'TERRA NOVA', getPos: () => planets[1] ? planets[1].mesh.position : null, col: '#00ff88' },
+      { id: 'ignis', name: 'IGNIS PRIME', getPos: () => planets[2] ? planets[2].mesh.position : null, col: '#ff5500' },
+      { id: 'caelum', name: 'CAELUM', getPos: () => planets[3] ? planets[3].mesh.position : null, col: '#80d4ff' },
+      { id: 'singularity', name: 'SINGULARITY', getPos: () => blackHole ? blackHole.pos : null, col: '#bf00ff' }
+    ];
+
+    // --- 7. INIT SOLAR SYSTEM & POST-PROCESSING ---
+    function initSolarSystem() {
+      const container = document.getElementById('webgl-container');
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x020208);
+
+      camera = new THREE.PerspectiveCamera(65, width / height, 0.1, 3500);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.35;
+      container.appendChild(renderer.domElement);
+
+      // Setup Offline HDR UnrealBloomPass Post-Processing
+      try {
+        composer = new THREE.EffectComposer(renderer);
+        const renderPass = new THREE.RenderPass(scene, camera);
+        composer.addPass(renderPass);
+
+        bloomPass = new THREE.UnrealBloomPass(
+          new THREE.Vector2(width, height),
+          1.30, // strength
+          0.45, // radius
+          0.26  // threshold
+        );
+        composer.addPass(bloomPass);
+      } catch (err) {
+        console.warn("Post-processing init failed, using standard renderer fallback:", err);
+        composer = null;
+      }
+
+      // Deep Space Ambient Lighting
+      const ambient = new THREE.AmbientLight(0x1a264a, 1.8);
+      scene.add(ambient);
+
+      // 1. Procedural Inverted Nebula Sky Dome
+      const skyGeo = new THREE.SphereGeometry(1600, 48, 32);
+      const skyMat = new THREE.MeshBasicMaterial({
+        map: createNebulaSkyTexture(),
+        side: THREE.BackSide,
+        depthWrite: false
+      });
+      skyDomeMesh = new THREE.Mesh(skyGeo, skyMat);
+      scene.add(skyDomeMesh);
+
+      // 2. Central Solaris Sun with Corona & Anamorphic Flares
+      buildLivingSun();
+
+      // 3. Multi-layer Realistic Planets with Atmospheres
+      buildPlanets();
+
+      // 4. Asteroid Belt
+      buildAsteroids();
+
+      // 5. Singularity Black Hole
+      buildBlackHole();
+
+      // 6. Real-time Space Dust & Hyperspace Warp Streaks
+      spaceDust = new SpaceDustEngine(2400, 170);
+
+      // 7. Stardust Ribbon Tail Trail
+      stardustTrail = new StardustTrailEngine(180);
+
+      window.addEventListener('resize', onResize);
+    }
+
+    function buildLivingSun() {
+      const sunGeo = new THREE.SphereGeometry(28, 48, 48);
+      const sunMat = new THREE.MeshBasicMaterial({
+        map: createSunTexture(),
+        color: 0xffe680
+      });
+      sunMesh = new THREE.Mesh(sunGeo, sunMat);
+      sunMesh.position.set(0, 0, 0);
+      scene.add(sunMesh);
+
+      // Sun Corona Mesh (Triggers HDR Bloom)
+      const coronaGeo = new THREE.SphereGeometry(36, 32, 32);
+      const coronaMat = new THREE.MeshBasicMaterial({
+        color: 0xff7700,
+        transparent: true,
+        opacity: 0.42,
+        blending: THREE.AdditiveBlending,
+        side: THREE.BackSide
+      });
+      const corona = new THREE.Mesh(coronaGeo, coronaMat);
+      sunMesh.add(corona);
+
+      // Anamorphic Horizontal Flare Beam
+      const flareGeo = new THREE.PlaneGeometry(180, 9);
+      const flareMat = new THREE.MeshBasicMaterial({
+        color: 0xffaa00,
+        transparent: true,
+        opacity: 0.5,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+      });
+      const flareMesh = new THREE.Mesh(flareGeo, flareMat);
+      sunMesh.add(flareMesh);
+
+      sunLight = new THREE.PointLight(0xfffaed, 4.0, 1400);
+      sunMesh.add(sunLight);
+    }
+
+    function buildPlanets() {
+      // Planet 1: Aurelia (Gas Giant with Saturn Ring System & GLSL Limb Glow)
+      const aureliaGroup = new THREE.Group();
+      const aureliaGeo = new THREE.SphereGeometry(24, 48, 48);
+      const aureliaMat = new THREE.MeshStandardMaterial({
+        map: createGasGiantTexture(),
+        roughness: 0.35,
+        metalness: 0.15
+      });
+      const aurelia = new THREE.Mesh(aureliaGeo, aureliaMat);
+      aureliaGroup.add(aurelia);
+
+      // GLSL Atmospheric Limb Scattering Shader
+      const aureliaAtmoMat = createAtmosphereShaderMaterial(0x6e2cf4, 3.2, 1.05);
+      const aureliaHalo = new THREE.Mesh(new THREE.SphereGeometry(26.5, 32, 32), aureliaAtmoMat);
+      aureliaGroup.add(aureliaHalo);
+
+      // Concentric Saturn Rings with Cassini Gap
+      const ringGeo = new THREE.RingGeometry(30, 58, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        map: createRingTexture(),
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.rotation.x = Math.PI / 2.3;
+      aureliaGroup.add(ringMesh);
+
+      aureliaGroup.position.set(240, 30, 260);
+      scene.add(aureliaGroup);
+      planets.push({ mesh: aureliaGroup, body: aurelia, rotSpeed: 0.003 });
+
+      // Planet 2: Terra Nova (Ocean World with Rotating Cloud Deck & Rayleigh Glow)
+      const terraGroup = new THREE.Group();
+      const terraGeo = new THREE.SphereGeometry(18, 48, 48);
+      const terraMat = new THREE.MeshStandardMaterial({
+        map: createTerraTexture(),
+        roughness: 0.4,
+        metalness: 0.2
+      });
+      const terra = new THREE.Mesh(terraGeo, terraMat);
+      terraGroup.add(terra);
+
+      // Dynamic Rotating Cloud Deck
+      const cloudGeo = new THREE.SphereGeometry(18.35, 40, 40);
+      const cloudMat = new THREE.MeshStandardMaterial({
+        map: createCloudTexture(),
+        transparent: true,
+        opacity: 0.65,
+        roughness: 0.9,
+        blending: THREE.NormalBlending
+      });
+      const terraClouds = new THREE.Mesh(cloudGeo, cloudMat);
+      terraGroup.add(terraClouds);
+
+      // GLSL Rayleigh Atmospheric Limb Glow
+      const terraAtmoMat = createAtmosphereShaderMaterial(0x00d4ff, 3.5, 1.0);
+      const terraHalo = new THREE.Mesh(new THREE.SphereGeometry(20.2, 32, 32), terraAtmoMat);
+      terraGroup.add(terraHalo);
+
+      terraGroup.position.set(-280, 50, -200);
+      scene.add(terraGroup);
+      planets.push({ mesh: terraGroup, body: terra, clouds: terraClouds, rotSpeed: 0.005 });
+
+      // Planet 3: Ignis Prime (Volcanic Lava World with Incandescent Magma Fissures)
+      const ignisGroup = new THREE.Group();
+      const ignisGeo = new THREE.SphereGeometry(15, 48, 48);
+      const ignisMat = new THREE.MeshStandardMaterial({
+        map: createLavaTexture(),
+        emissive: 0xff3300,
+        emissiveIntensity: 0.6,
+        roughness: 0.7
+      });
+      const ignis = new THREE.Mesh(ignisGeo, ignisMat);
+      ignisGroup.add(ignis);
+
+      // Orange Heat Shimmer Atmosphere
+      const ignisAtmoMat = createAtmosphereShaderMaterial(0xff5500, 3.2, 1.0);
+      const ignisHalo = new THREE.Mesh(new THREE.SphereGeometry(16.5, 32, 32), ignisAtmoMat);
+      ignisGroup.add(ignisHalo);
+
+      ignisGroup.position.set(160, -90, -300);
+      scene.add(ignisGroup);
+      planets.push({ mesh: ignisGroup, body: ignis, rotSpeed: 0.004 });
+
+      // Planet 4: Caelum (Ice Moon with Glacial Cryo Fractures)
+      const iceGeo = new THREE.SphereGeometry(12, 32, 32);
+      const iceMat = new THREE.MeshStandardMaterial({
+        map: createIceTexture(),
+        roughness: 0.18,
+        metalness: 0.5
+      });
+      const ice = new THREE.Mesh(iceGeo, iceMat);
+      ice.position.set(-210, -40, 260);
+      scene.add(ice);
+      planets.push({ mesh: ice, body: ice, rotSpeed: 0.002 });
+    }
+
+    function buildAsteroids() {
+      const count = 50;
+      for (let i = 0; i < count; i++) {
+        const size = Math.random() * 3.5 + 2.0;
+        const geo = new THREE.DodecahedronGeometry(size, 1);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x3d4452, roughness: 0.85, metalness: 0.25 });
+        const mesh = new THREE.Mesh(geo, mat);
+
+        const angle = Math.random() * Math.PI * 2;
+        const rad = Math.random() * 300 + 110;
+        const y = (Math.random() - 0.5) * 90;
+        mesh.position.set(Math.cos(angle) * rad, y, Math.sin(angle) * rad);
+        scene.add(mesh);
+
+        asteroids.push({
+          mesh: mesh,
+          radius: size * 1.1,
+          rotX: (Math.random() - 0.5) * 0.02,
+          rotY: (Math.random() - 0.5) * 0.02
+        });
+      }
+    }
+
+    function buildBlackHole() {
+      const bhGroup = new THREE.Group();
+      const holeGeo = new THREE.SphereGeometry(18, 32, 32);
+      const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+      const hole = new THREE.Mesh(holeGeo, holeMat);
+      bhGroup.add(hole);
+
+      // Swirling Accretion Disk (Triggers HDR Bloom)
+      const diskGeo = new THREE.RingGeometry(22, 54, 64);
+      const diskMat = new THREE.MeshBasicMaterial({
+        color: 0xbf00ff,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending
+      });
+      const disk = new THREE.Mesh(diskGeo, diskMat);
+      disk.rotation.x = Math.PI / 2.2;
+      bhGroup.add(disk);
+
+      bhGroup.position.set(0, 180, -460);
+      scene.add(bhGroup);
+      blackHole = { mesh: bhGroup, disk: disk, pos: bhGroup.position, radius: 20 };
+    }
+
+    function onResize() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+      if (composer) {
+        composer.setSize(width, height);
+        if (bloomPass) bloomPass.setSize(width, height);
+      }
+    }
+
+    // --- 8. ASTRAL CELESTIAL DRAGON MODEL & FLIGHT ENGINE ---
+    function buildAstralDragon() {
+      dragon.segments.forEach(s => scene.remove(s.mesh));
+      dragon.segments = [];
+
+      dragon.pos.set(0, 10, 180);
+      dragon.dir.set(0, 0, -1);
+      dragon.up.set(0, 1, 0);
+
+      // Dragon Head Group
+      const headGroup = new THREE.Group();
+
+      // Skull & Snout (Iridescent Material)
+      const skullGeo = new THREE.ConeGeometry(1.6, 4.0, 7);
+      const skullMat = new THREE.MeshStandardMaterial({
+        color: 0x00f0ff,
+        emissive: 0x0088cc,
+        emissiveIntensity: 0.7,
+        metalness: 0.85,
+        roughness: 0.2
+      });
+      const skull = new THREE.Mesh(skullGeo, skullMat);
+      skull.rotation.x = -Math.PI / 2;
+      skull.position.z = -1.2;
+      headGroup.add(skull);
+
+      // Curved Glowing Antler Horns (HDR Bloom Emissive)
+      const hornGeo = new THREE.ConeGeometry(0.35, 3.4, 6);
+      const hornMat = new THREE.MeshStandardMaterial({
+        color: 0xffe600,
+        emissive: 0xffaa00,
+        emissiveIntensity: 2.2
+      });
+
+      const lHorn = new THREE.Mesh(hornGeo, hornMat);
+      lHorn.position.set(-1.0, 1.3, 0.4);
+      lHorn.rotation.z = Math.PI / 4;
+      lHorn.rotation.x = -Math.PI / 4;
+      headGroup.add(lHorn);
+
+      const rHorn = new THREE.Mesh(hornGeo, hornMat);
+      rHorn.position.set(1.0, 1.3, 0.4);
+      rHorn.rotation.z = -Math.PI / 4;
+      rHorn.rotation.x = -Math.PI / 4;
+      headGroup.add(rHorn);
+
+      // Dorsal Energy Crest
+      const crestGeo = new THREE.ConeGeometry(0.3, 2.0, 4);
+      const crestMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+      const crest = new THREE.Mesh(crestGeo, crestMat);
+      crest.position.set(0, 1.6, -0.6);
+      crest.rotation.x = -0.3;
+      headGroup.add(crest);
+
+      // Piercing Predator Eyes (High Bloom)
+      const eyeGeo = new THREE.SphereGeometry(0.32, 8, 8);
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const lEye = new THREE.Mesh(eyeGeo, eyeMat); lEye.position.set(-0.72, 0.42, -1.3); headGroup.add(lEye);
+      const rEye = new THREE.Mesh(eyeGeo, eyeMat); rEye.position.set(0.72, 0.42, -1.3); headGroup.add(rEye);
+
+      scene.add(headGroup);
+      dragon.headMesh = headGroup;
+
+      // Articulated Crystal Energy Wings
+      const wingMat = new THREE.MeshStandardMaterial({
+        color: 0x00f0ff,
+        emissive: 0xbf00ff,
+        emissiveIntensity: 0.75,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.9
+      });
+      const wingShape = new THREE.BufferGeometry();
+      const wingVerts = new Float32Array([
+        0, 0, 0,   -8, 1.5, -2,   -13, 0.5, 4,
+        0, 0, 0,   -13, 0.5, 4,   -4, -0.5, 6
+      ]);
+      wingShape.setAttribute('position', new THREE.BufferAttribute(wingVerts, 3));
+      dragon.leftWingMesh = new THREE.Mesh(wingShape, wingMat);
+      headGroup.add(dragon.leftWingMesh);
+
+      const rWingShape = new THREE.BufferGeometry();
+      const rWingVerts = new Float32Array([
+        0, 0, 0,   8, 1.5, -2,   13, 0.5, 4,
+        0, 0, 0,   13, 0.5, 4,   4, -0.5, 6
+      ]);
+      rWingShape.setAttribute('position', new THREE.BufferAttribute(rWingVerts, 3));
+      dragon.rightWingMesh = new THREE.Mesh(rWingShape, wingMat);
+      headGroup.add(dragon.rightWingMesh);
+
+      // Body Segments with Crystalline Dorsal Fins
+      for (let i = 0; i < dragon.length; i++) {
+        const segGroup = new THREE.Group();
+        const progress = i / dragon.length;
+        const scale = Math.max(0.6, 1.6 * (1 - progress * 0.45));
+
+        const segGeo = new THREE.DodecahedronGeometry(scale, 1);
+        const col = new THREE.Color().setHSL(0.52 + progress * 0.35, 1.0, 0.5);
+        const segMat = new THREE.MeshStandardMaterial({
+          color: col,
+          emissive: col,
+          emissiveIntensity: 0.5,
+          metalness: 0.8,
+          roughness: 0.25
+        });
+        const seg = new THREE.Mesh(segGeo, segMat);
+        segGroup.add(seg);
+
+        const finGeo = new THREE.ConeGeometry(0.25 * scale, 1.5 * scale, 4);
+        const finMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const fin = new THREE.Mesh(finGeo, finMat);
+        fin.position.set(0, scale * 1.25, 0);
+        segGroup.add(fin);
+
+        segGroup.position.set(dragon.pos.x, dragon.pos.y, dragon.pos.z + i * dragon.segmentDist);
+        scene.add(segGroup);
+
+        dragon.segments.push({
+          pos: segGroup.position.clone(),
+          mesh: segGroup
+        });
+      }
+    }
+
+    // --- 9. COLLECTIBLES & BOSS ---
+    function spawnStarCore(x, y, z) {
+      const group = new THREE.Group();
+      const geo = new THREE.OctahedronGeometry(1.3, 0);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xffe600, emissive: 0xff9900, emissiveIntensity: 1.4 });
+      const core = new THREE.Mesh(geo, mat);
+      group.add(core);
+
+      const ringGeo = new THREE.TorusGeometry(2.1, 0.06, 8, 24);
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = Math.PI / 3;
+      group.add(ring);
+
+      group.position.set(x, y, z);
+      scene.add(group);
+
+      starCores.push({ mesh: group, ring: ring, pos: group.position, pulse: Math.random() * Math.PI * 2 });
+    }
+
+    function initStarCores(count = 70) {
+      starCores.forEach(c => scene.remove(c.mesh));
+      starCores = [];
+      for (let i = 0; i < count; i++) {
+        const u = Math.random() * Math.PI * 2;
+        const rad = Math.random() * 260 + 70;
+        const y = (Math.random() - 0.5) * 120;
+        spawnStarCore(Math.cos(u) * rad, y, Math.sin(u) * rad);
+      }
+    }
+
+    function spawnVoidLeviathan() {
+      const len = 45;
+      const segments = [];
+      const startPos = new THREE.Vector3(140, 60, -220);
+
+      for (let i = 0; i < len; i++) {
+        const group = new THREE.Group();
+        const scale = 2.4;
+        const geo = new THREE.DodecahedronGeometry(scale, 1);
+        const mat = new THREE.MeshStandardMaterial({
+          color: 0x1a0208,
+          emissive: 0xff0044,
+          emissiveIntensity: 0.75,
+          metalness: 0.9
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        group.add(mesh);
+
+        group.position.set(startPos.x, startPos.y, startPos.z + i * 3.0);
+        scene.add(group);
+        segments.push({ pos: group.position.clone(), mesh: group });
+      }
+
+      sound.playRoar();
+      showBossAlert("⚠️ CẢNH BÁO: VOID LEVIATHAN ĐANG RÌNH RẬP!");
+      document.getElementById('boss-hud-bar').classList.add('active');
+      document.getElementById('boss-hp-fill').style.width = '100%';
+      document.getElementById('boss-hp-text').innerText = '6 / 6 HP';
+
+      return {
+        hp: 6,
+        maxHp: 6,
+        pos: startPos,
+        dir: new THREE.Vector3(-1, 0, 0).normalize(),
+        speed: 20.0,
+        enrageSpeed: 42.0,
+        isEnraged: false,
+        enrageTimer: 18,
+        enrageDuration: 0,
+        segments: segments,
+        radius: 3.2
+      };
+    }
+
+    // --- 10. CONTROLS & EVENT LISTENERS ---
+    const keys = {};
+
+    window.addEventListener('keydown', e => {
+      keys[e.key.toLowerCase()] = true;
+      if (e.key === ' ' || e.code === 'Space') dragon.isWarping = true;
+      if (e.key === 'f' || e.key === 'F') shootStarfire();
+      if (e.key === 'c' || e.key === 'C') cycleCamera();
+      if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') togglePause();
+    });
+
+    window.addEventListener('keyup', e => {
+      keys[e.key.toLowerCase()] = false;
+      if (e.key === ' ' || e.code === 'Space') dragon.isWarping = false;
+    });
+
+    window.addEventListener('mousemove', e => {
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+      const ret = document.getElementById('flight-reticle');
+      ret.style.transform = `translate(calc(-50% + ${mouse.x * 60}px), calc(-50% - ${mouse.y * 60}px))`;
+    });
+
+    window.addEventListener('mousedown', e => {
+      if (e.button === 0) dragon.isWarping = true;
+      if (e.button === 2) { e.preventDefault(); shootStarfire(); }
+    });
+
+    window.addEventListener('mouseup', e => {
+      if (e.button === 0) dragon.isWarping = false;
+    });
+
+    window.addEventListener('contextmenu', e => e.preventDefault());
+
+    document.getElementById('btn-warp').addEventListener('touchstart', e => { e.preventDefault(); dragon.isWarping = true; });
+    document.getElementById('btn-warp').addEventListener('touchend', e => { e.preventDefault(); dragon.isWarping = false; });
+    document.getElementById('btn-fire').addEventListener('touchstart', e => { e.preventDefault(); shootStarfire(); });
+
+    function cycleCamera() {
+      cameraMode = (cameraMode + 1) % 3;
+      document.getElementById('cam-name').innerText = CAM_NAMES[cameraMode];
+    }
+    document.getElementById('btn-cam-toggle').onclick = cycleCamera;
+    document.getElementById('camera-badge-btn').onclick = cycleCamera;
+
+    function shootStarfire() {
+      if (!isPlaying || isPaused || dragon.fireCooldown > 0) return;
+      dragon.fireCooldown = 0.22;
+      sound.playDragonBreath();
+
+      const fireballGeo = new THREE.SphereGeometry(1.4, 12, 12);
+      const fireballMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+      const mesh = new THREE.Mesh(fireballGeo, fireballMat);
+
+      const spawnPos = dragon.pos.clone().add(dragon.dir.clone().multiplyScalar(3.5));
+      mesh.position.copy(spawnPos);
+      scene.add(mesh);
+
+      fireballs.push({
+        mesh: mesh,
+        pos: spawnPos,
+        dir: dragon.dir.clone(),
+        speed: 110.0,
+        life: 2.2
+      });
+    }
+
+    // --- 11. FLIGHT ENGINE & SIMULATION ---
+    function updateGame(dt) {
+      if (!isPlaying || isPaused) return;
+
+      if (dragon.fireCooldown > 0) dragon.fireCooldown -= dt;
+
+      if (dragon.comboTimer > 0) {
+        dragon.comboTimer -= dt;
+        if (dragon.comboTimer <= 0) {
+          dragon.combo = 0;
+          document.getElementById('hud-combo').classList.remove('active');
+        }
+      }
+
+      // Rotate Sky Dome slowly for mesmerizing cosmic motion
+      if (skyDomeMesh) skyDomeMesh.rotation.y += dt * 0.0018;
+
+      // Mouse 3D Steering (Pitch, Yaw & Banking Roll)
+      const yawSpeed = -mouse.x * 2.2;
+      const pitchSpeed = mouse.y * 2.0;
+      const targetRoll = -mouse.x * 1.4;
+      dragon.roll = THREE.MathUtils.lerp(dragon.roll, targetRoll, 0.12);
+
+      const right = new THREE.Vector3().crossVectors(dragon.dir, dragon.up).normalize();
+      const qPitch = new THREE.Quaternion().setFromAxisAngle(right, pitchSpeed * dt);
+      const qYaw = new THREE.Quaternion().setFromAxisAngle(dragon.up, yawSpeed * dt);
+      dragon.dir.applyQuaternion(qPitch).applyQuaternion(qYaw).normalize();
+
+      const baseUp = new THREE.Vector3(0, 1, 0);
+      const newRight = new THREE.Vector3().crossVectors(dragon.dir, baseUp).normalize();
+      dragon.up = new THREE.Vector3().crossVectors(newRight, dragon.dir).normalize();
+      dragon.up.applyAxisAngle(dragon.dir, dragon.roll);
+
+      // Speed & Warp Hyperdrive
+      let spd = dragon.baseSpeed;
+      if (dragon.isWarping && dragon.stamina > 0) {
+        spd = dragon.warpSpeed;
+        dragon.stamina = Math.max(0, dragon.stamina - dt * 26);
+        shakeIntensity = 0.25;
+        if (dragon.stamina === 0) dragon.isWarping = false;
+      } else {
+        dragon.stamina = Math.min(100, dragon.stamina + dt * 15);
+      }
+
+      document.getElementById('stamina-fill').style.width = `${dragon.stamina}%`;
+
+      // NMS Pulse Drive HUD & Telemetry
+      const pdHud = document.getElementById('pulse-drive-hud');
+      const pdSpeedVal = document.getElementById('pd-speed-val');
+      if (dragon.isWarping) {
+        if (pdHud) pdHud.classList.add('active');
+        if (pdSpeedVal) pdSpeedVal.innerText = (spd * 0.075).toFixed(1);
+      } else {
+        if (pdHud) pdHud.classList.remove('active');
+      }
+
+      // Move Dragon in 3D Space
+      dragon.pos.add(dragon.dir.clone().multiplyScalar(spd * dt));
+
+      if (dragon.headMesh) {
+        dragon.headMesh.position.copy(dragon.pos);
+        const lookTarget = dragon.pos.clone().add(dragon.dir);
+        dragon.headMesh.lookAt(lookTarget);
+        dragon.headMesh.rotateZ(dragon.roll);
+
+        dragon.wingFlapAngle += dt * (dragon.isWarping ? 3.0 : 8.0);
+        const flap = dragon.isWarping ? -0.45 : Math.sin(dragon.wingFlapAngle) * 0.45;
+        if (dragon.leftWingMesh) dragon.leftWingMesh.rotation.z = flap;
+        if (dragon.rightWingMesh) dragon.rightWingMesh.rotation.z = -flap;
+      }
+
+      // Inverse Kinematics Serpentine Spine
+      let prevPos = dragon.pos;
+      for (let i = 0; i < dragon.segments.length; i++) {
+        const seg = dragon.segments[i];
+        const offset = seg.pos.clone().sub(prevPos);
+        const dist = offset.length();
+
+        if (dist > dragon.segmentDist) {
+          offset.normalize().multiplyScalar(dragon.segmentDist);
+          seg.pos.copy(prevPos.clone().add(offset));
+        }
+
+        seg.mesh.position.copy(seg.pos);
+        seg.mesh.lookAt(prevPos);
+        seg.mesh.rotateZ(dragon.roll * Math.max(0, 1.0 - i * 0.04));
+        prevPos = seg.pos;
+      }
+
+      // Emit Stardust Ribbon Trail from Tail and Wingtips
+      if (stardustTrail) {
+        if (dragon.segments.length > 0) {
+          const tail = dragon.segments[dragon.segments.length - 1];
+          stardustTrail.emit(tail.pos, dragon.isWarping ? 0xff0055 : 0x00f0ff);
+        }
+        if (dragon.headMesh) {
+          const lTip = new THREE.Vector3(-12, 1, 4).applyQuaternion(dragon.headMesh.quaternion).add(dragon.pos);
+          const rTip = new THREE.Vector3(12, 1, 4).applyQuaternion(dragon.headMesh.quaternion).add(dragon.pos);
+          stardustTrail.emit(lTip, 0x00f0ff);
+          stardustTrail.emit(rTip, 0xbf00ff);
+        }
+        stardustTrail.update(dt);
+      }
+
+      // Update Space Dust & Hyperspace Streaks
+      if (spaceDust) {
+        spaceDust.update(dt, dragon.pos, dragon.dir, dragon.isWarping);
+      }
+
+      // Update Fireballs
+      updateFireballs(dt);
+
+      // Update Boss
+      if (boss) updateBoss(dt);
+
+      // Update Planets & Clouds
+      planets.forEach(p => {
+        p.body.rotation.y += p.rotSpeed;
+        if (p.clouds) p.clouds.rotation.y += p.rotSpeed * 0.45;
+      });
+
+      if (blackHole) {
+        blackHole.disk.rotation.z += dt * 1.5;
+        const distToBH = dragon.pos.distanceTo(blackHole.pos);
+        if (distToBH < 130) {
+          const pull = blackHole.pos.clone().sub(dragon.pos).normalize().multiplyScalar(16.0 * dt);
+          dragon.pos.add(pull);
+          if (distToBH < blackHole.radius) {
+            triggerGameOver("Bị hút vào lỗ đen Vô Cực Singularity!");
+          }
+        }
+      }
+
+      // Asteroid collision
+      asteroids.forEach(a => {
+        a.mesh.rotation.x += a.rotX;
+        a.mesh.rotation.y += a.rotY;
+        if (dragon.pos.distanceTo(a.mesh.position) < dragon.radius + a.radius) {
+          triggerGameOver("Va chạm tan vỡ với Thiên Thạch Không Gian!");
+        }
+      });
+
+      // Collect Star Cores
+      for (let i = starCores.length - 1; i >= 0; i--) {
+        const c = starCores[i];
+        c.pulse += dt * 3;
+        c.mesh.rotation.y += dt * 2.0;
+        c.ring.rotation.x += dt * 2.5;
+
+        if (dragon.pos.distanceTo(c.pos) < dragon.radius + 3.0) {
+          sound.playCollect(dragon.combo);
+          dragon.combo++;
+          dragon.comboTimer = 2.8;
+          dragon.score += 30 * Math.min(dragon.combo, 6);
+          dragon.length += 0.5;
+
+          document.getElementById('hud-combo-val').innerText = `x${dragon.combo}`;
+          document.getElementById('hud-combo').classList.add('active');
+
+          scene.remove(c.mesh);
+          starCores.splice(i, 1);
+
+          while (dragon.segments.length < Math.floor(dragon.length)) {
+            const last = dragon.segments[dragon.segments.length - 1] || dragon;
+            const segGroup = new THREE.Group();
+            const scale = 1.0;
+            const segGeo = new THREE.DodecahedronGeometry(scale, 1);
+            const segMat = new THREE.MeshStandardMaterial({ color: 0x00f0ff, emissive: 0xbf00ff, emissiveIntensity: 0.5 });
+            segGroup.add(new THREE.Mesh(segGeo, segMat));
+            segGroup.position.copy(last.pos);
+            scene.add(segGroup);
+            dragon.segments.push({ pos: last.pos.clone(), mesh: segGroup });
+          }
+
+          const u = Math.random() * Math.PI * 2;
+          const rad = Math.random() * 260 + 70;
+          spawnStarCore(Math.cos(u) * rad, (Math.random() - 0.5) * 120, Math.sin(u) * rad);
+          updateHUD();
+        }
+      }
+
+      updateCamera(dt);
+      updateWaypoints();
+    }
+
+    function updateFireballs(dt) {
+      for (let i = fireballs.length - 1; i >= 0; i--) {
+        const fb = fireballs[i];
+        fb.life -= dt;
+        fb.pos.add(fb.dir.clone().multiplyScalar(fb.speed * dt));
+        fb.mesh.position.copy(fb.pos);
+
+        if (boss && fb.pos.distanceTo(boss.pos) < boss.radius + 2.5) {
+          damageBoss(1);
+          scene.remove(fb.mesh);
+          fireballs.splice(i, 1);
+          continue;
+        }
+
+        for (let j = asteroids.length - 1; j >= 0; j--) {
+          const ast = asteroids[j];
+          if (fb.pos.distanceTo(ast.mesh.position) < ast.radius + 1.2) {
+            sound.playExplosion();
+            shakeIntensity = 0.35;
+            scene.remove(ast.mesh);
+            asteroids.splice(j, 1);
+            dragon.score += 80;
+            updateHUD();
+
+            scene.remove(fb.mesh);
+            fireballs.splice(i, 1);
+            break;
+          }
+        }
+
+        if (fb.life <= 0) {
+          scene.remove(fb.mesh);
+          fireballs.splice(i, 1);
+        }
+      }
+    }
+
+    function updateBoss(dt) {
+      boss.enrageTimer -= dt;
+      if (boss.enrageTimer <= 0 && !boss.isEnraged) {
+        boss.isEnraged = true;
+        boss.enrageDuration = 4.5;
+        boss.enrageTimer = 18;
+        showBossAlert("⚡ VOID LEVIATHAN ĐANG CUỒNG NỘ LAO TỚI!");
+      }
+
+      let spd = boss.isEnraged ? boss.enrageSpeed : boss.speed;
+      const toDragon = dragon.pos.clone().sub(boss.pos).normalize();
+      boss.dir.lerp(toDragon, boss.isEnraged ? 0.08 : 0.03).normalize();
+      boss.pos.add(boss.dir.clone().multiplyScalar(spd * dt));
+
+      boss.segments[0].pos.copy(boss.pos);
+      boss.segments[0].mesh.position.copy(boss.pos);
+
+      let prev = boss.pos;
+      for (let i = 1; i < boss.segments.length; i++) {
+        const seg = boss.segments[i];
+        const offset = seg.pos.clone().sub(prev);
+        if (offset.length() > 3.0) {
+          offset.normalize().multiplyScalar(3.0);
+          seg.pos.copy(prev.clone().add(offset));
+        }
+        seg.mesh.position.copy(seg.pos);
+        seg.mesh.lookAt(prev);
+        prev = seg.pos;
+      }
+
+      if (dragon.pos.distanceTo(boss.pos) < dragon.radius + boss.radius) {
+        triggerGameOver("Bị nuốt chửng bởi Siêu Quái Thú Void Leviathan!");
+      }
+    }
+
+    function damageBoss(amount = 1) {
+      if (!boss) return;
+      boss.hp -= amount;
+      sound.playExplosion();
+      shakeIntensity = 0.5;
+
+      const pct = Math.max(0, (boss.hp / boss.maxHp) * 100);
+      document.getElementById('boss-hp-fill').style.width = `${pct}%`;
+      document.getElementById('boss-hp-text').innerText = `${boss.hp} / ${boss.maxHp} HP`;
+
+      if (boss.hp <= 0) destroyBoss();
+    }
+
+    function destroyBoss() {
+      sound.playExplosion();
+      shakeIntensity = 0.8;
+      boss.segments.forEach(s => {
+        spawnStarCore(s.pos.x, s.pos.y, s.pos.z);
+        scene.remove(s.mesh);
+      });
+      boss = null;
+      document.getElementById('boss-hud-bar').classList.remove('active');
+      dragon.score += 2000;
+      dragon.kills++;
+      updateHUD();
+      unlockAchievement('slayer_3d', 'Kẻ Diệt Void Leviathan', 'Hạ gục thành công Rồng Hư Không Không Gian!');
+    }
+
+    // --- 12. DYNAMIC CAMERA ---
+    function updateCamera(dt) {
+      const targetFov = dragon.isWarping ? 88 : 65;
+      camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 0.09);
+      camera.updateProjectionMatrix();
+
+      if (shakeIntensity > 0) {
+        camera.position.add(new THREE.Vector3((Math.random()-0.5)*shakeIntensity, (Math.random()-0.5)*shakeIntensity, (Math.random()-0.5)*shakeIntensity));
+        shakeIntensity = Math.max(0, shakeIntensity - dt * 1.5);
+      }
+
+      if (cameraMode === 0) {
+        const camDist = 26.0;
+        const camHeight = 7.0;
+        const targetCamPos = dragon.pos.clone()
+          .sub(dragon.dir.clone().multiplyScalar(camDist))
+          .add(dragon.up.clone().multiplyScalar(camHeight));
+
+        camera.position.lerp(targetCamPos, 0.1);
+        const lookTarget = dragon.pos.clone().add(dragon.dir.clone().multiplyScalar(15));
+        camera.lookAt(lookTarget);
+      } else if (cameraMode === 1) {
+        const neckPos = dragon.pos.clone().add(dragon.up.clone().multiplyScalar(1.8));
+        camera.position.copy(neckPos);
+        const lookTarget = dragon.pos.clone().add(dragon.dir.clone().multiplyScalar(40));
+        camera.lookAt(lookTarget);
+      } else {
+        const solarView = dragon.pos.clone().add(new THREE.Vector3(0, 70, 70));
+        camera.position.lerp(solarView, 0.08);
+        camera.lookAt(dragon.pos);
+      }
+    }
+
+    // --- 13. SCREEN-SPACE WAYPOINT PROJECTOR ---
+    function updateWaypoints() {
+      const container = document.getElementById('waypoint-layer');
+      if (!container || !camera) return;
+
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      WAYPOINT_TARGETS.forEach(target => {
+        const pos = target.getPos();
+        if (!pos) return;
+
+        let el = document.getElementById(`wp-${target.id}`);
+        if (!el) {
+          el = document.createElement('div');
+          el.id = `wp-${target.id}`;
+          el.className = 'nms-waypoint';
+          el.innerHTML = `
+            <div class="wp-diamond" style="border-color: ${target.col}; box-shadow: 0 0 10px ${target.col};"></div>
+            <div class="wp-card">
+              <span class="wp-name" style="color: ${target.col};">${target.name}</span>
+              <span class="wp-dist">0u</span>
+            </div>
+          `;
+          container.appendChild(el);
+        }
+
+        const tempV = pos.clone();
+        tempV.project(camera);
+
+        const isBehind = tempV.z > 1.0;
+        const dist = Math.round(dragon.pos.distanceTo(pos));
+
+        if (isBehind) {
+          el.style.opacity = '0';
+        } else {
+          const x = (tempV.x * 0.5 + 0.5) * w;
+          const y = (-tempV.y * 0.5 + 0.5) * h;
+
+          if (x >= -60 && x <= w + 60 && y >= -60 && y <= h + 60) {
+            el.style.opacity = '1';
+            el.style.transform = `translate(${x}px, ${y}px)`;
+            const distEl = el.querySelector('.wp-dist');
+            if (distEl) distEl.innerText = `${dist}u`;
+          } else {
+            el.style.opacity = '0';
+          }
+        }
+      });
+    }
+
+    function updateHUD() {
+      document.getElementById('hud-score').innerText = dragon.score;
+      document.getElementById('dragon-len').innerText = Math.floor(dragon.length) + ' m';
+      if (dragon.score > highScore) {
+        highScore = dragon.score;
+        localStorage.setItem('astral_dragon_high', highScore);
+        document.getElementById('hud-highscore').innerText = highScore;
+      }
+    }
+
+    function showBossAlert(text) {
+      const toast = document.getElementById('boss-alert');
+      document.getElementById('boss-alert-text').innerText = text;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3500);
+    }
+
+    function unlockAchievement(id, title, desc) {
+      const toast = document.getElementById('achievement-toast');
+      document.getElementById('toast-title').innerText = `🏆 ${title}`;
+      document.getElementById('toast-desc').innerText = desc;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 4500);
+    }
+
+    function triggerGameOver(reason) {
+      isPlaying = false;
+      sound.playExplosion();
+      document.getElementById('gameover-reason').innerText = reason;
+      document.getElementById('final-score').innerText = dragon.score;
+      document.getElementById('final-length').innerText = Math.floor(dragon.length) + ' m';
+      document.getElementById('final-kills').innerText = dragon.kills;
+      document.getElementById('modal-gameover').classList.remove('hidden');
+    }
+
+    function togglePause() {
+      if (!isPlaying) return;
+      isPaused = !isPaused;
+      document.getElementById('modal-pause').classList.toggle('hidden', !isPaused);
+    }
+
+    function resetAstralGame() {
+      dragon.score = 0;
+      dragon.kills = 0;
+      dragon.combo = 0;
+      dragon.length = 28;
+      dragon.stamina = 100;
+      buildAstralDragon();
+      initStarCores(70);
+
+      if (boss) {
+        boss.segments.forEach(s => scene.remove(s.mesh));
+        boss = null;
+      }
+      setTimeout(() => {
+        if (isPlaying && !boss) boss = spawnVoidLeviathan();
+      }, 16000);
+
+      updateHUD();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.1);
+      updateGame(dt);
+
+      if (composer) {
+        composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
+    }
+
+    initSolarSystem();
+    animate();
+
+    // UI Click Handlers
+    document.getElementById('btn-start-game').onclick = () => {
+      sound.init();
+      document.getElementById('modal-start').classList.add('hidden');
+      resetAstralGame();
+      isPlaying = true;
+      isPaused = false;
+    };
+
+    document.getElementById('btn-restart').onclick = () => {
+      document.getElementById('modal-gameover').classList.add('hidden');
+      resetAstralGame();
+      isPlaying = true;
+      isPaused = false;
+    };
+
+    document.getElementById('btn-pause').onclick = togglePause;
+    document.getElementById('btn-resume').onclick = togglePause;
+    document.getElementById('btn-restart-pause').onclick = () => {
+      document.getElementById('modal-pause').classList.add('hidden');
+      resetAstralGame();
+      isPlaying = true;
+      isPaused = false;
+    };
+
+    const soundBtn = document.getElementById('btn-sound');
+    soundBtn.onclick = () => {
+      sound.init();
+      sound.soundOn = !sound.soundOn;
+      soundBtn.innerText = sound.soundOn ? '🔊' : '🔇';
+    };
+
+    const musicBtn = document.getElementById('btn-music');
+    musicBtn.onclick = () => {
+      sound.init();
+      sound.musicOn = !sound.musicOn;
+      musicBtn.innerText = sound.musicOn ? '🎵' : '🎼';
+      if (sound.musicOn) sound.startBGM();
+      else sound.stopBGM();
+    };
+  </script>
+</body>
+</html>

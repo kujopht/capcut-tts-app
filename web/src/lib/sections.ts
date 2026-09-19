@@ -68,6 +68,7 @@ const BANG: ReadonlyArray<readonly [RegExp, ViTri]> = [
   [/^\/fanfic/, "explore"],
   [/^\/animation/, "animation"],
   [/^\/community/, "community"],
+  [/^\/entertainment/, "animation"],
   [/^\/library/, "library"],
   [/^\/write/, "write"],
   [/^\/studio/, "studio"],

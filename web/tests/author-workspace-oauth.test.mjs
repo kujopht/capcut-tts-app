@@ -43,7 +43,7 @@ test("thanh dieu huong chinh tinh gian, Studio la loi vao sang tac", async () =>
     "'Viết truyện' bi trung lap van con trong thanh dieu huong chinh",
   );
   assert.equal(order[0][0], "/", "'Trang chủ' phải đứng đầu");
-  assert.equal(order.at(-1)?.[0], "/library", "'Thư viện' là mục đọc cuối hàng");
+  assert.equal(order.at(-1)?.[0], "/entertainment", "'Giải trí' là mục cuối hàng");
   // Studio la loi vao duy nhat cho sang tac o header
   assert.match(nav, /function StudioLink/);
   assert.match(nav, /href="\/studio"/);

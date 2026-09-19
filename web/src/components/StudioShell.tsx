@@ -38,6 +38,7 @@ import {
   IconMic,
   IconSparkles,
 } from "@/components/Icons";
+import { MotifNebulaOrbit } from "@/components/Ornaments";
 
 export interface MucStudio {
   href: string;
@@ -193,11 +194,11 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
       : dangMo.nhan;
 
   return (
-    <div className="page studio-page">
+    <div className="page studio-page rise" data-hero-theme="studio">
       {/* Tiêu đề và nút menu luôn hiện: trên mobile, đây là lối vào duy nhất
           cho các điểm đến Studio khác. */}
-      <header className="studio-dau row row-spread">
-        <div className="stack-2">
+      <header className="studio-dau row row-spread rise rise-1" style={{ position: "relative" }}>
+        <div className="stack-2 hero-copy">
           {isMedia ? (
             <Link
               href="/studio/audio"
@@ -214,6 +215,13 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
           )}
           <h1 className="page-title studio-tieu-de">{tieuDe}</h1>
         </div>
+        <span
+          className="page-head-motif"
+          aria-hidden="true"
+          style={{ position: "absolute", top: -12, right: 120, width: 140, pointerEvents: "none", color: "var(--hero-motif-color, #8b5cf6)", opacity: "var(--hero-motif-opacity, 0.18)" }}
+        >
+          <MotifNebulaOrbit />
+        </span>
         <button
           type="button"
           className="btn btn-ghost studio-nut-mobile"
@@ -225,7 +233,7 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
         </button>
       </header>
 
-      <div className="studio-khung">
+      <div className="studio-khung rise rise-2">
         <nav
           id="studio-dieu-huong"
           className={`studio-nav${moMobile ? " studio-nav-mo" : ""}`}

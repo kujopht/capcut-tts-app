@@ -31,8 +31,14 @@ const THE = MUC_STUDIO.filter((m) => m.href !== "/studio");
 
 export default function StudioOverview() {
   return (
-    <section className="stack-5">
+    <section className="stack-5 rise rise-3">
       <DuAnCuaToi />
+
+      <div className="studio-divider" aria-hidden="true">
+        <span className="studio-divider-line" />
+        <span className="studio-divider-diamond">✦</span>
+        <span className="studio-divider-line" />
+      </div>
 
       <div className="stack-2">
         <h2 className="section-title">Hoặc mở thẳng một công cụ</h2>

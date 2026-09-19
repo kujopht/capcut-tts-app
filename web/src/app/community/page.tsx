@@ -102,8 +102,7 @@ export default function CommunityPage() {
   }, [trang]);
 
   return (
-    <div className="cong-dong-luoi" data-hero-theme="community">
-      <div className="stack cong-dong-chinh">
+    <div className="page" data-hero-theme="community">
       <PageHeader
         eyebrow="Quảng trường"
         title="Cộng đồng"
@@ -114,6 +113,9 @@ export default function CommunityPage() {
         }
         motif={<MotifConstellation />}
       />
+
+      <div className="cong-dong-luoi">
+        <div className="stack cong-dong-chinh">
 
       {profile ? (
         <PostComposer
@@ -222,6 +224,7 @@ export default function CommunityPage() {
       <aside className="cong-dong-phai" aria-label="Khám phá thêm">
         <TacGiaNoiBat />
       </aside>
+      </div>
     </div>
   );
 }

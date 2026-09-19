@@ -18,6 +18,8 @@
 const NEN: Array<[RegExp, string]> = [
   [/^\/$/, "home"],
   [/^\/fanfic/, "explore"],
+  [/^\/entertainment/, "explore"],
+  [/^\/community/, "account"],
   // Trang truyen dung CUNG tam voi trang kham pha: ca hai deu la buoc DUYET,
   // chua phai buoc doc. Trang doc chuong moi doi sang den trang mieu.
   [/^\/novels\//, "explore"],

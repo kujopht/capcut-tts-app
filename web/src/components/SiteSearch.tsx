@@ -61,7 +61,23 @@ export function SiteSearch() {
         className="site-search tim-nut"
         onClick={() => setMo(true)}
         aria-haspopup="dialog"
+        aria-label="Tìm kiếm truyện, tác giả, animation"
       >
+        <svg
+          className="tim-nut-icon"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
         <span className="tim-nut-chu">Tìm truyện, tác giả, Animation…</span>
         <kbd className="tim-phim" aria-hidden="true">
           /

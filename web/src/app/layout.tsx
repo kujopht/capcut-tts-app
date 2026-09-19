@@ -9,6 +9,7 @@ import { RouteTransitionVeil } from "@/components/RouteTransitionVeil";
 import { ContentAtmosphere } from "@/components/ContentAtmosphere";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
+import { LiveLyricTicker } from "@/components/LiveLyricTicker";
 import { Logo } from "@/components/Logo";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
@@ -65,8 +66,8 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="vi">
-      <body>
+    <html lang="vi" suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <SessionProvider>
           <ToastProvider>
           {/*
@@ -107,6 +108,8 @@ export default function RootLayout({
                   <Logo size={30} />
                 </Link>
                 <NavLinks />
+                <span className="spacer nav-spacer-left" />
+                <LiveLyricTicker />
                 <span className="spacer" />
                 <SiteSearch />
                 <NavAuth />

@@ -25,17 +25,16 @@ test("du cac route cua hai khu vuc san pham", () => {
   }
 });
 
-test("thanh dieu huong chinh dung NAM muc, theo dung thu tu", () => {
+test("thanh dieu huong chinh dung BON muc theo yeu cau nguoi dung, theo dung thu tu", () => {
   const nav = read("../src/components/NavAuth.tsx");
   const order = [...nav.matchAll(/href: "([^"]+)", label: "([^"]+)"/g)].map(
     (m) => [m[1], m[2]],
   );
   assert.deepEqual(order, [
     ["/", "Trang chủ"],
-    ["/fanfic", "Khám phá"],
-    ["/animation", "Animation"],
     ["/community", "Cộng đồng"],
     ["/library", "Thư viện"],
+    ["/entertainment", "Giải trí"],
   ]);
 });
 

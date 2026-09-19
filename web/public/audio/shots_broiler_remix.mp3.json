@@ -1,0 +1,1787 @@
+[
+  {
+    "start": 8.14,
+    "end": 12.46,
+    "text": "I'm a little touched and I'm out of my veins",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 8.14,
+        "end": 8.9
+      },
+      {
+        "word": "a",
+        "start": 8.9,
+        "end": 9.28
+      },
+      {
+        "word": "little",
+        "start": 9.28,
+        "end": 9.72
+      },
+      {
+        "word": "touched",
+        "start": 9.72,
+        "end": 10.36
+      },
+      {
+        "word": "and",
+        "start": 10.36,
+        "end": 11.0
+      },
+      {
+        "word": "I'm",
+        "start": 11.0,
+        "end": 11.64
+      },
+      {
+        "word": "out",
+        "start": 11.64,
+        "end": 11.64
+      },
+      {
+        "word": "of",
+        "start": 11.64,
+        "end": 11.74
+      },
+      {
+        "word": "my",
+        "start": 11.74,
+        "end": 12.06
+      },
+      {
+        "word": "veins",
+        "start": 12.06,
+        "end": 12.46
+      }
+    ]
+  },
+  {
+    "start": 12.46,
+    "end": 15.1,
+    "text": "And I keep seeing they don't look different",
+    "words": [
+      {
+        "word": "And",
+        "start": 12.46,
+        "end": 12.84
+      },
+      {
+        "word": "I",
+        "start": 12.84,
+        "end": 12.9
+      },
+      {
+        "word": "keep",
+        "start": 12.9,
+        "end": 13.14
+      },
+      {
+        "word": "seeing",
+        "start": 13.14,
+        "end": 13.72
+      },
+      {
+        "word": "they",
+        "start": 13.72,
+        "end": 13.96
+      },
+      {
+        "word": "don't",
+        "start": 13.96,
+        "end": 14.18
+      },
+      {
+        "word": "look",
+        "start": 14.18,
+        "end": 14.52
+      },
+      {
+        "word": "different",
+        "start": 14.52,
+        "end": 15.1
+      }
+    ]
+  },
+  {
+    "start": 15.1,
+    "end": 17.4,
+    "text": "And these things are so amazing",
+    "words": [
+      {
+        "word": "And",
+        "start": 15.1,
+        "end": 15.78
+      },
+      {
+        "word": "these",
+        "start": 15.78,
+        "end": 15.92
+      },
+      {
+        "word": "things",
+        "start": 15.92,
+        "end": 16.32
+      },
+      {
+        "word": "are",
+        "start": 16.32,
+        "end": 16.98
+      },
+      {
+        "word": "so",
+        "start": 16.98,
+        "end": 17.02
+      },
+      {
+        "word": "amazing",
+        "start": 17.02,
+        "end": 17.4
+      }
+    ]
+  },
+  {
+    "start": 17.4,
+    "end": 20.0,
+    "text": "But I'm wishing you don't",
+    "words": [
+      {
+        "word": "But",
+        "start": 17.4,
+        "end": 18.9
+      },
+      {
+        "word": "I'm",
+        "start": 18.9,
+        "end": 19.22
+      },
+      {
+        "word": "wishing",
+        "start": 19.22,
+        "end": 19.54
+      },
+      {
+        "word": "you",
+        "start": 19.54,
+        "end": 19.94
+      },
+      {
+        "word": "don't",
+        "start": 19.94,
+        "end": 20.32
+      }
+    ]
+  },
+  {
+    "start": 20.54,
+    "end": 22.62,
+    "text": "I can't help you in the moment",
+    "words": [
+      {
+        "word": "I",
+        "start": 20.54,
+        "end": 20.92
+      },
+      {
+        "word": "can't",
+        "start": 20.92,
+        "end": 21.26
+      },
+      {
+        "word": "help",
+        "start": 21.26,
+        "end": 21.56
+      },
+      {
+        "word": "you",
+        "start": 21.56,
+        "end": 21.78
+      },
+      {
+        "word": "in",
+        "start": 21.78,
+        "end": 22.0
+      },
+      {
+        "word": "the",
+        "start": 22.0,
+        "end": 22.24
+      },
+      {
+        "word": "moment",
+        "start": 22.24,
+        "end": 22.62
+      }
+    ]
+  },
+  {
+    "start": 22.62,
+    "end": 24.44,
+    "text": "Got it, you know",
+    "words": [
+      {
+        "word": "Got",
+        "start": 22.62,
+        "end": 23.02
+      },
+      {
+        "word": "it,",
+        "start": 23.02,
+        "end": 23.58
+      },
+      {
+        "word": "you",
+        "start": 23.6,
+        "end": 23.88
+      },
+      {
+        "word": "know",
+        "start": 23.88,
+        "end": 24.44
+      }
+    ]
+  },
+  {
+    "start": 24.44,
+    "end": 26.38,
+    "text": "I'm gonna mess this up",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 24.44,
+        "end": 25.06
+      },
+      {
+        "word": "gonna",
+        "start": 25.06,
+        "end": 25.16
+      },
+      {
+        "word": "mess",
+        "start": 25.16,
+        "end": 25.4
+      },
+      {
+        "word": "this",
+        "start": 25.4,
+        "end": 25.86
+      },
+      {
+        "word": "up",
+        "start": 25.86,
+        "end": 26.38
+      }
+    ]
+  },
+  {
+    "start": 26.38,
+    "end": 28.22,
+    "text": "I'll need this as a scholar",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 26.38,
+        "end": 26.8
+      },
+      {
+        "word": "need",
+        "start": 26.8,
+        "end": 26.98
+      },
+      {
+        "word": "this",
+        "start": 26.98,
+        "end": 27.18
+      },
+      {
+        "word": "as",
+        "start": 27.18,
+        "end": 27.44
+      },
+      {
+        "word": "a",
+        "start": 27.44,
+        "end": 27.64
+      },
+      {
+        "word": "scholar",
+        "start": 27.64,
+        "end": 28.22
+      }
+    ]
+  },
+  {
+    "start": 28.22,
+    "end": 31.86,
+    "text": "Over and over and over again",
+    "words": [
+      {
+        "word": "Over",
+        "start": 28.22,
+        "end": 29.0
+      },
+      {
+        "word": "and",
+        "start": 29.0,
+        "end": 29.36
+      },
+      {
+        "word": "over",
+        "start": 29.36,
+        "end": 29.66
+      },
+      {
+        "word": "and",
+        "start": 29.66,
+        "end": 30.06
+      },
+      {
+        "word": "over",
+        "start": 30.06,
+        "end": 30.64
+      },
+      {
+        "word": "again",
+        "start": 30.64,
+        "end": 31.86
+      }
+    ]
+  },
+  {
+    "start": 31.86,
+    "end": 33.9,
+    "text": "Time, let it go",
+    "words": [
+      {
+        "word": "Time,",
+        "start": 31.86,
+        "end": 32.9
+      },
+      {
+        "word": "let",
+        "start": 33.22,
+        "end": 33.36
+      },
+      {
+        "word": "it",
+        "start": 33.36,
+        "end": 33.62
+      },
+      {
+        "word": "go",
+        "start": 33.62,
+        "end": 33.9
+      }
+    ]
+  },
+  {
+    "start": 33.9,
+    "end": 35.9,
+    "text": "At the bottom side we used to know",
+    "words": [
+      {
+        "word": "At",
+        "start": 33.9,
+        "end": 34.14
+      },
+      {
+        "word": "the",
+        "start": 34.14,
+        "end": 34.28
+      },
+      {
+        "word": "bottom",
+        "start": 34.28,
+        "end": 34.6
+      },
+      {
+        "word": "side",
+        "start": 34.6,
+        "end": 34.92
+      },
+      {
+        "word": "we",
+        "start": 34.92,
+        "end": 35.18
+      },
+      {
+        "word": "used",
+        "start": 35.18,
+        "end": 35.42
+      },
+      {
+        "word": "to",
+        "start": 35.42,
+        "end": 35.72
+      },
+      {
+        "word": "know",
+        "start": 35.72,
+        "end": 35.9
+      }
+    ]
+  },
+  {
+    "start": 35.9,
+    "end": 37.0,
+    "text": "We could play this",
+    "words": [
+      {
+        "word": "We",
+        "start": 35.9,
+        "end": 36.08
+      },
+      {
+        "word": "could",
+        "start": 36.08,
+        "end": 36.26
+      },
+      {
+        "word": "play",
+        "start": 36.26,
+        "end": 36.54
+      },
+      {
+        "word": "this",
+        "start": 36.54,
+        "end": 37.0
+      }
+    ]
+  },
+  {
+    "start": 37.0,
+    "end": 39.64,
+    "text": "I'll be late, busy, busy",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 37.0,
+        "end": 38.14
+      },
+      {
+        "word": "be",
+        "start": 38.14,
+        "end": 38.24
+      },
+      {
+        "word": "late,",
+        "start": 38.24,
+        "end": 38.62
+      },
+      {
+        "word": "busy,",
+        "start": 38.76,
+        "end": 39.14
+      },
+      {
+        "word": "busy",
+        "start": 39.4,
+        "end": 39.64
+      }
+    ]
+  },
+  {
+    "start": 39.64,
+    "end": 41.3,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 39.64,
+        "end": 40.48
+      },
+      {
+        "word": "be",
+        "start": 40.48,
+        "end": 40.62
+      },
+      {
+        "word": "strong,",
+        "start": 40.62,
+        "end": 40.9
+      },
+      {
+        "word": "I'll",
+        "start": 41.22,
+        "end": 41.22
+      },
+      {
+        "word": "be",
+        "start": 41.22,
+        "end": 41.3
+      },
+      {
+        "word": "strong",
+        "start": 41.3,
+        "end": 41.3
+      }
+    ]
+  },
+  {
+    "start": 41.3,
+    "end": 42.48,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 41.3,
+        "end": 41.6
+      },
+      {
+        "word": "be",
+        "start": 41.6,
+        "end": 41.6
+      },
+      {
+        "word": "strong,",
+        "start": 41.6,
+        "end": 41.6
+      },
+      {
+        "word": "I'll",
+        "start": 42.48,
+        "end": 42.48
+      },
+      {
+        "word": "be",
+        "start": 42.48,
+        "end": 42.48
+      },
+      {
+        "word": "strong",
+        "start": 42.48,
+        "end": 42.48
+      }
+    ]
+  },
+  {
+    "start": 42.48,
+    "end": 43.16,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 42.48,
+        "end": 42.98
+      },
+      {
+        "word": "be",
+        "start": 42.98,
+        "end": 42.98
+      },
+      {
+        "word": "strong,",
+        "start": 42.98,
+        "end": 42.98
+      },
+      {
+        "word": "I'll",
+        "start": 43.16,
+        "end": 43.16
+      },
+      {
+        "word": "be",
+        "start": 43.16,
+        "end": 43.16
+      },
+      {
+        "word": "strong",
+        "start": 43.16,
+        "end": 43.16
+      }
+    ]
+  },
+  {
+    "start": 56.42,
+    "end": 57.06,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 56.42,
+        "end": 57.02
+      },
+      {
+        "word": "be",
+        "start": 57.02,
+        "end": 57.02
+      },
+      {
+        "word": "strong,",
+        "start": 57.02,
+        "end": 57.02
+      },
+      {
+        "word": "I'll",
+        "start": 57.02,
+        "end": 57.02
+      },
+      {
+        "word": "be",
+        "start": 57.02,
+        "end": 57.06
+      },
+      {
+        "word": "strong",
+        "start": 57.06,
+        "end": 57.06
+      }
+    ]
+  },
+  {
+    "start": 63.86,
+    "end": 66.0,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 63.86,
+        "end": 64.76
+      },
+      {
+        "word": "be",
+        "start": 64.76,
+        "end": 65.0
+      },
+      {
+        "word": "strong,",
+        "start": 65.0,
+        "end": 65.0
+      },
+      {
+        "word": "I'll",
+        "start": 65.14,
+        "end": 65.44
+      },
+      {
+        "word": "be",
+        "start": 65.44,
+        "end": 65.56
+      },
+      {
+        "word": "strong",
+        "start": 65.56,
+        "end": 66.0
+      }
+    ]
+  },
+  {
+    "start": 66.0,
+    "end": 67.36,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 66.0,
+        "end": 66.46
+      },
+      {
+        "word": "be",
+        "start": 66.46,
+        "end": 66.46
+      },
+      {
+        "word": "strong,",
+        "start": 66.46,
+        "end": 66.46
+      },
+      {
+        "word": "I'll",
+        "start": 66.46,
+        "end": 66.46
+      },
+      {
+        "word": "be",
+        "start": 66.46,
+        "end": 66.46
+      },
+      {
+        "word": "strong",
+        "start": 66.46,
+        "end": 67.36
+      }
+    ]
+  },
+  {
+    "start": 67.36,
+    "end": 70.58,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 67.36,
+        "end": 68.6
+      },
+      {
+        "word": "be",
+        "start": 68.6,
+        "end": 68.64
+      },
+      {
+        "word": "strong,",
+        "start": 68.64,
+        "end": 68.9
+      },
+      {
+        "word": "I'll",
+        "start": 69.88,
+        "end": 69.88
+      },
+      {
+        "word": "be",
+        "start": 69.88,
+        "end": 69.88
+      },
+      {
+        "word": "strong",
+        "start": 69.88,
+        "end": 70.58
+      }
+    ]
+  },
+  {
+    "start": 70.58,
+    "end": 72.68,
+    "text": "We could play this as a scholar",
+    "words": [
+      {
+        "word": "We",
+        "start": 70.58,
+        "end": 71.06
+      },
+      {
+        "word": "could",
+        "start": 71.06,
+        "end": 71.28
+      },
+      {
+        "word": "play",
+        "start": 71.28,
+        "end": 72.24
+      },
+      {
+        "word": "this",
+        "start": 72.24,
+        "end": 72.24
+      },
+      {
+        "word": "as",
+        "start": 72.24,
+        "end": 72.24
+      },
+      {
+        "word": "a",
+        "start": 72.24,
+        "end": 72.68
+      },
+      {
+        "word": "scholar",
+        "start": 72.68,
+        "end": 72.68
+      }
+    ]
+  },
+  {
+    "start": 72.68,
+    "end": 75.62,
+    "text": "Over and over again",
+    "words": [
+      {
+        "word": "Over",
+        "start": 72.68,
+        "end": 73.96
+      },
+      {
+        "word": "and",
+        "start": 73.96,
+        "end": 74.54
+      },
+      {
+        "word": "over",
+        "start": 74.54,
+        "end": 74.6
+      },
+      {
+        "word": "again",
+        "start": 74.6,
+        "end": 75.62
+      }
+    ]
+  },
+  {
+    "start": 75.62,
+    "end": 76.08,
+    "text": "Time, let it go",
+    "words": [
+      {
+        "word": "Time,",
+        "start": 75.62,
+        "end": 76.08
+      },
+      {
+        "word": "let",
+        "start": 76.08,
+        "end": 76.08
+      },
+      {
+        "word": "it",
+        "start": 76.08,
+        "end": 76.08
+      },
+      {
+        "word": "go",
+        "start": 76.08,
+        "end": 76.08
+      }
+    ]
+  },
+  {
+    "start": 76.08,
+    "end": 76.16,
+    "text": "Time, let it go",
+    "words": [
+      {
+        "word": "Time,",
+        "start": 76.08,
+        "end": 76.16
+      },
+      {
+        "word": "let",
+        "start": 76.16,
+        "end": 76.16
+      },
+      {
+        "word": "it",
+        "start": 76.16,
+        "end": 76.16
+      },
+      {
+        "word": "go",
+        "start": 76.16,
+        "end": 76.16
+      }
+    ]
+  },
+  {
+    "start": 76.16,
+    "end": 81.0,
+    "text": "And I keep seeing they don't look different",
+    "words": [
+      {
+        "word": "And",
+        "start": 76.16,
+        "end": 76.16
+      },
+      {
+        "word": "I",
+        "start": 76.16,
+        "end": 76.18
+      },
+      {
+        "word": "keep",
+        "start": 76.18,
+        "end": 76.7
+      },
+      {
+        "word": "seeing",
+        "start": 76.7,
+        "end": 76.84
+      },
+      {
+        "word": "they",
+        "start": 76.84,
+        "end": 79.0
+      },
+      {
+        "word": "don't",
+        "start": 79.0,
+        "end": 79.2
+      },
+      {
+        "word": "look",
+        "start": 79.2,
+        "end": 79.2
+      },
+      {
+        "word": "different",
+        "start": 79.2,
+        "end": 81.0
+      }
+    ]
+  },
+  {
+    "start": 84.1,
+    "end": 86.4,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 84.1,
+        "end": 85.0
+      },
+      {
+        "word": "be",
+        "start": 85.0,
+        "end": 85.2
+      },
+      {
+        "word": "strong,",
+        "start": 85.2,
+        "end": 86.04
+      },
+      {
+        "word": "I'll",
+        "start": 86.24,
+        "end": 86.36
+      },
+      {
+        "word": "be",
+        "start": 86.36,
+        "end": 86.36
+      },
+      {
+        "word": "strong",
+        "start": 86.36,
+        "end": 86.4
+      }
+    ]
+  },
+  {
+    "start": 86.4,
+    "end": 86.86,
+    "text": "I'll be strong, I'll be strong",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 86.4,
+        "end": 86.4
+      },
+      {
+        "word": "be",
+        "start": 86.4,
+        "end": 86.4
+      },
+      {
+        "word": "strong,",
+        "start": 86.4,
+        "end": 86.4
+      },
+      {
+        "word": "I'll",
+        "start": 86.86,
+        "end": 86.86
+      },
+      {
+        "word": "be",
+        "start": 86.86,
+        "end": 86.86
+      },
+      {
+        "word": "strong",
+        "start": 86.86,
+        "end": 86.86
+      }
+    ]
+  },
+  {
+    "start": 88.22,
+    "end": 104.38,
+    "text": "I'm looking for a way to escape.",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 88.22,
+        "end": 88.22
+      },
+      {
+        "word": "looking",
+        "start": 88.22,
+        "end": 98.22
+      },
+      {
+        "word": "for",
+        "start": 98.22,
+        "end": 100.26
+      },
+      {
+        "word": "a",
+        "start": 100.26,
+        "end": 102.1
+      },
+      {
+        "word": "way",
+        "start": 102.1,
+        "end": 103.4
+      },
+      {
+        "word": "to",
+        "start": 103.4,
+        "end": 103.76
+      },
+      {
+        "word": "escape.",
+        "start": 103.76,
+        "end": 104.38
+      }
+    ]
+  },
+  {
+    "start": 105.22,
+    "end": 107.02,
+    "text": "Oh, I should know how to go.",
+    "words": [
+      {
+        "word": "Oh,",
+        "start": 105.22,
+        "end": 105.22
+      },
+      {
+        "word": "I",
+        "start": 105.22,
+        "end": 105.44
+      },
+      {
+        "word": "should",
+        "start": 105.44,
+        "end": 105.64
+      },
+      {
+        "word": "know",
+        "start": 105.64,
+        "end": 105.98
+      },
+      {
+        "word": "how",
+        "start": 105.98,
+        "end": 106.26
+      },
+      {
+        "word": "to",
+        "start": 106.26,
+        "end": 106.62
+      },
+      {
+        "word": "go.",
+        "start": 106.62,
+        "end": 107.02
+      }
+    ]
+  },
+  {
+    "start": 111.58,
+    "end": 114.24,
+    "text": "I'm gonna mess this up.",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 111.58,
+        "end": 112.32
+      },
+      {
+        "word": "gonna",
+        "start": 112.32,
+        "end": 113.06
+      },
+      {
+        "word": "mess",
+        "start": 113.06,
+        "end": 113.4
+      },
+      {
+        "word": "this",
+        "start": 113.4,
+        "end": 113.86
+      },
+      {
+        "word": "up.",
+        "start": 113.86,
+        "end": 114.24
+      }
+    ]
+  },
+  {
+    "start": 114.84,
+    "end": 116.28,
+    "text": "Oh, this is just my luck.",
+    "words": [
+      {
+        "word": "Oh,",
+        "start": 114.84,
+        "end": 114.86
+      },
+      {
+        "word": "this",
+        "start": 114.86,
+        "end": 115.12
+      },
+      {
+        "word": "is",
+        "start": 115.12,
+        "end": 115.28
+      },
+      {
+        "word": "just",
+        "start": 115.28,
+        "end": 115.52
+      },
+      {
+        "word": "my",
+        "start": 115.52,
+        "end": 115.8
+      },
+      {
+        "word": "luck.",
+        "start": 115.8,
+        "end": 116.28
+      }
+    ]
+  },
+  {
+    "start": 116.56,
+    "end": 118.2,
+    "text": "Over and over and over and over and over and over.",
+    "words": [
+      {
+        "word": "Over",
+        "start": 116.56,
+        "end": 116.9
+      },
+      {
+        "word": "and",
+        "start": 116.9,
+        "end": 117.3
+      },
+      {
+        "word": "over",
+        "start": 117.3,
+        "end": 117.58
+      },
+      {
+        "word": "and",
+        "start": 117.58,
+        "end": 118.08
+      },
+      {
+        "word": "over",
+        "start": 118.08,
+        "end": 118.08
+      },
+      {
+        "word": "and",
+        "start": 118.08,
+        "end": 118.08
+      },
+      {
+        "word": "over",
+        "start": 118.08,
+        "end": 118.2
+      },
+      {
+        "word": "and",
+        "start": 118.2,
+        "end": 118.2
+      },
+      {
+        "word": "over",
+        "start": 118.2,
+        "end": 118.2
+      },
+      {
+        "word": "and",
+        "start": 118.2,
+        "end": 118.2
+      },
+      {
+        "word": "over.",
+        "start": 118.2,
+        "end": 118.2
+      }
+    ]
+  },
+  {
+    "start": 119.7,
+    "end": 120.3,
+    "text": "Again.",
+    "words": [
+      {
+        "word": "Again.",
+        "start": 119.7,
+        "end": 120.3
+      }
+    ]
+  },
+  {
+    "start": 120.3,
+    "end": 122.34,
+    "text": "Not, not, not anymore.",
+    "words": [
+      {
+        "word": "Not,",
+        "start": 120.3,
+        "end": 120.88
+      },
+      {
+        "word": "not,",
+        "start": 121.2,
+        "end": 121.36
+      },
+      {
+        "word": "not",
+        "start": 121.56,
+        "end": 121.56
+      },
+      {
+        "word": "anymore.",
+        "start": 121.56,
+        "end": 122.34
+      }
+    ]
+  },
+  {
+    "start": 122.72,
+    "end": 123.8,
+    "text": "Sidefoot's used enough.",
+    "words": [
+      {
+        "word": "Sidefoot's",
+        "start": 122.72,
+        "end": 123.22
+      },
+      {
+        "word": "used",
+        "start": 123.22,
+        "end": 123.42
+      },
+      {
+        "word": "enough.",
+        "start": 123.42,
+        "end": 123.8
+      }
+    ]
+  },
+  {
+    "start": 124.04,
+    "end": 125.6,
+    "text": "I can let this shoot.",
+    "words": [
+      {
+        "word": "I",
+        "start": 124.04,
+        "end": 124.06
+      },
+      {
+        "word": "can",
+        "start": 124.06,
+        "end": 124.2
+      },
+      {
+        "word": "let",
+        "start": 124.2,
+        "end": 124.5
+      },
+      {
+        "word": "this",
+        "start": 124.5,
+        "end": 125.06
+      },
+      {
+        "word": "shoot.",
+        "start": 125.06,
+        "end": 125.6
+      }
+    ]
+  },
+  {
+    "start": 126.0,
+    "end": 127.46,
+    "text": "I'll be late, this shoot.",
+    "words": [
+      {
+        "word": "I'll",
+        "start": 126.0,
+        "end": 126.1
+      },
+      {
+        "word": "be",
+        "start": 126.1,
+        "end": 126.24
+      },
+      {
+        "word": "late,",
+        "start": 126.24,
+        "end": 126.64
+      },
+      {
+        "word": "this",
+        "start": 126.74,
+        "end": 127.02
+      },
+      {
+        "word": "shoot.",
+        "start": 127.02,
+        "end": 127.46
+      }
+    ]
+  },
+  {
+    "start": 127.96,
+    "end": 129.82,
+    "text": "I know all this I've just got to take it back.",
+    "words": [
+      {
+        "word": "I",
+        "start": 127.96,
+        "end": 128.18
+      },
+      {
+        "word": "know",
+        "start": 128.18,
+        "end": 128.18
+      },
+      {
+        "word": "all",
+        "start": 128.18,
+        "end": 128.48
+      },
+      {
+        "word": "this",
+        "start": 128.48,
+        "end": 128.72
+      },
+      {
+        "word": "I've",
+        "start": 128.72,
+        "end": 129.04
+      },
+      {
+        "word": "just",
+        "start": 129.04,
+        "end": 129.2
+      },
+      {
+        "word": "got",
+        "start": 129.2,
+        "end": 129.2
+      },
+      {
+        "word": "to",
+        "start": 129.2,
+        "end": 129.2
+      },
+      {
+        "word": "take",
+        "start": 129.2,
+        "end": 129.44
+      },
+      {
+        "word": "it",
+        "start": 129.44,
+        "end": 129.76
+      },
+      {
+        "word": "back.",
+        "start": 129.76,
+        "end": 129.82
+      }
+    ]
+  },
+  {
+    "start": 130.04,
+    "end": 135.08,
+    "text": "And the song has stopped, I know all this I've just got to take back.",
+    "words": [
+      {
+        "word": "And",
+        "start": 130.04,
+        "end": 130.06
+      },
+      {
+        "word": "the",
+        "start": 130.06,
+        "end": 130.14
+      },
+      {
+        "word": "song",
+        "start": 130.14,
+        "end": 130.48
+      },
+      {
+        "word": "has",
+        "start": 130.48,
+        "end": 130.74
+      },
+      {
+        "word": "stopped,",
+        "start": 130.74,
+        "end": 130.98
+      },
+      {
+        "word": "I",
+        "start": 131.16,
+        "end": 131.24
+      },
+      {
+        "word": "know",
+        "start": 131.24,
+        "end": 131.3
+      },
+      {
+        "word": "all",
+        "start": 131.3,
+        "end": 131.6
+      },
+      {
+        "word": "this",
+        "start": 131.6,
+        "end": 132.08
+      },
+      {
+        "word": "I've",
+        "start": 132.08,
+        "end": 132.5
+      },
+      {
+        "word": "just",
+        "start": 132.5,
+        "end": 133.28
+      },
+      {
+        "word": "got",
+        "start": 133.28,
+        "end": 133.88
+      },
+      {
+        "word": "to",
+        "start": 133.88,
+        "end": 135.08
+      },
+      {
+        "word": "take",
+        "start": 135.08,
+        "end": 135.08
+      },
+      {
+        "word": "back.",
+        "start": 135.08,
+        "end": 135.08
+      }
+    ]
+  },
+  {
+    "start": 135.08,
+    "end": 136.68,
+    "text": "I can't leave it.",
+    "words": [
+      {
+        "word": "I",
+        "start": 135.08,
+        "end": 135.7
+      },
+      {
+        "word": "can't",
+        "start": 135.7,
+        "end": 135.9
+      },
+      {
+        "word": "leave",
+        "start": 135.9,
+        "end": 135.9
+      },
+      {
+        "word": "it.",
+        "start": 135.9,
+        "end": 136.68
+      }
+    ]
+  },
+  {
+    "start": 152.16,
+    "end": 155.2,
+    "text": "I'm sorry for everything, no, I'm getting back up",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 152.16,
+        "end": 152.76
+      },
+      {
+        "word": "sorry",
+        "start": 152.76,
+        "end": 152.96
+      },
+      {
+        "word": "for",
+        "start": 152.96,
+        "end": 153.3
+      },
+      {
+        "word": "everything,",
+        "start": 153.3,
+        "end": 153.7
+      },
+      {
+        "word": "no,",
+        "start": 153.98,
+        "end": 154.3
+      },
+      {
+        "word": "I'm",
+        "start": 154.38,
+        "end": 154.56
+      },
+      {
+        "word": "getting",
+        "start": 154.56,
+        "end": 154.76
+      },
+      {
+        "word": "back",
+        "start": 154.76,
+        "end": 155.1
+      },
+      {
+        "word": "up",
+        "start": 155.1,
+        "end": 155.4
+      }
+    ]
+  },
+  {
+    "start": 155.8,
+    "end": 160.36,
+    "text": "I'm sick of it, I'm gonna think about it, I'm gonna start",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 155.8,
+        "end": 156.26
+      },
+      {
+        "word": "sick",
+        "start": 156.26,
+        "end": 156.4
+      },
+      {
+        "word": "of",
+        "start": 156.4,
+        "end": 156.58
+      },
+      {
+        "word": "it,",
+        "start": 156.58,
+        "end": 156.9
+      },
+      {
+        "word": "I'm",
+        "start": 156.9,
+        "end": 157.18
+      },
+      {
+        "word": "gonna",
+        "start": 157.18,
+        "end": 157.5
+      },
+      {
+        "word": "think",
+        "start": 157.5,
+        "end": 157.92
+      },
+      {
+        "word": "about",
+        "start": 157.92,
+        "end": 158.46
+      },
+      {
+        "word": "it,",
+        "start": 158.46,
+        "end": 158.68
+      },
+      {
+        "word": "I'm",
+        "start": 158.68,
+        "end": 159.54
+      },
+      {
+        "word": "gonna",
+        "start": 159.54,
+        "end": 159.54
+      },
+      {
+        "word": "start",
+        "start": 159.54,
+        "end": 160.36
+      }
+    ]
+  },
+  {
+    "start": 161.14,
+    "end": 164.46,
+    "text": "I'm so good, I'm so good, I'm so good",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 161.14,
+        "end": 161.74
+      },
+      {
+        "word": "so",
+        "start": 161.74,
+        "end": 161.9
+      },
+      {
+        "word": "good,",
+        "start": 161.9,
+        "end": 162.28
+      },
+      {
+        "word": "I'm",
+        "start": 162.54,
+        "end": 163.68
+      },
+      {
+        "word": "so",
+        "start": 163.68,
+        "end": 163.88
+      },
+      {
+        "word": "good,",
+        "start": 163.88,
+        "end": 163.88
+      },
+      {
+        "word": "I'm",
+        "start": 164.14,
+        "end": 164.34
+      },
+      {
+        "word": "so",
+        "start": 164.34,
+        "end": 164.34
+      },
+      {
+        "word": "good",
+        "start": 164.34,
+        "end": 164.46
+      }
+    ]
+  },
+  {
+    "start": 164.46,
+    "end": 167.28,
+    "text": "I'm so good, I'm so good, I'm so good",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 164.46,
+        "end": 164.46
+      },
+      {
+        "word": "so",
+        "start": 164.46,
+        "end": 164.46
+      },
+      {
+        "word": "good,",
+        "start": 164.46,
+        "end": 165.2
+      },
+      {
+        "word": "I'm",
+        "start": 165.42,
+        "end": 165.72
+      },
+      {
+        "word": "so",
+        "start": 165.72,
+        "end": 165.72
+      },
+      {
+        "word": "good,",
+        "start": 165.72,
+        "end": 166.02
+      },
+      {
+        "word": "I'm",
+        "start": 166.16,
+        "end": 166.6
+      },
+      {
+        "word": "so",
+        "start": 166.6,
+        "end": 167.2
+      },
+      {
+        "word": "good",
+        "start": 167.2,
+        "end": 167.28
+      }
+    ]
+  },
+  {
+    "start": 178.2,
+    "end": 184.44,
+    "text": "I'm so good, I'm so good, I'm so good, I'm so good",
+    "words": [
+      {
+        "word": "I'm",
+        "start": 178.2,
+        "end": 178.94
+      },
+      {
+        "word": "so",
+        "start": 178.94,
+        "end": 178.94
+      },
+      {
+        "word": "good,",
+        "start": 178.94,
+        "end": 178.94
+      },
+      {
+        "word": "I'm",
+        "start": 178.94,
+        "end": 181.3
+      },
+      {
+        "word": "so",
+        "start": 181.3,
+        "end": 181.3
+      },
+      {
+        "word": "good,",
+        "start": 181.3,
+        "end": 181.3
+      },
+      {
+        "word": "I'm",
+        "start": 181.94,
+        "end": 181.94
+      },
+      {
+        "word": "so",
+        "start": 181.94,
+        "end": 181.98
+      },
+      {
+        "word": "good,",
+        "start": 181.98,
+        "end": 182.04
+      },
+      {
+        "word": "I'm",
+        "start": 182.16,
+        "end": 183.86
+      },
+      {
+        "word": "so",
+        "start": 183.86,
+        "end": 183.86
+      },
+      {
+        "word": "good",
+        "start": 183.86,
+        "end": 184.44
+      }
+    ]
+  }
+]

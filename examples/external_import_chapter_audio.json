@@ -1,0 +1,47 @@
+{
+  "content_type": "novel",
+  "source_id": "audiobook_suoi_nguon_v1",
+  "source_url": "https://audiobooks.example.com/works/suoi-nguon",
+  "title": "Suối Nguồn (Audiobook Edition)",
+  "author": "Ayn Rand",
+  "description": "Bản phát hành đặc biệt có tích hợp sẵn file âm thanh lồng tiếng chất lượng cao cho từng chương sách.",
+  "language": "vi",
+  "status": "ongoing",
+  "tags": [
+    "Tiểu thuyết",
+    "Triết học",
+    "Kiến trúc",
+    "Audiobook",
+    "work:audio_pipeline_v4"
+  ],
+  "cover": {
+    "url": "https://images.unsplash.com/photo-1512820790803-83ca734da794?w=600",
+    "mime": "image/jpeg"
+  },
+  "chapters": [
+    {
+      "order": 1,
+      "title": "Chương 1: Howard Roark Đứng Trên Đỉnh Đá",
+      "content": "Howard Roark đứng trần truồng bên mép vách đá. Từng ngọn gió lạnh từ mặt hồ quét qua làn da rắn rỏi của chàng kiến trúc sư trẻ. Chàng nhìn xuống vực sâu, nơi lòng hồ phẳng lặng như gương soi bóng bầu trời. Thế giới trải dài trước mắt chàng không phải là một chuỗi ngày thỏa hiệp, mà là một khối vật chất vĩ đại đang chờ đợi bàn tay của một con người đến để định hình và xây dựng nên những công trình vĩnh cửu.",
+      "source_chapter_id": "suoi_nguon_c1",
+      "audio": {
+        "url": "https://audio-cdn.example.com/books/suoi_nguon/chapter_01.mp3",
+        "duration_seconds": 245.5,
+        "size_bytes": 3928120,
+        "voice_name": "Ngọc Huyền Studio HD"
+      }
+    },
+    {
+      "order": 2,
+      "title": "Chương 2: Quyết Định Tại Trường Kiến Trúc Stanton",
+      "content": "Hội đồng kỷ luật của Học viện Công nghệ Stanton ngồi im phăng phắc phía sau chiếc bàn dài bằng gỗ sồi đánh bóng. Vị hiệu trưởng đẩy cặp kính lão lên sóng mũi, thở dài nhìn chàng sinh viên tài năng nhất nhưng cũng ngạo nghễ nhất khóa học. 'Anh Roark, anh từ chối vẽ theo những quy chuẩn Phục Hưng hay Gothic đã tồn tại hàng thế kỷ?'. Roark ngẩng cao đầu trả lời: 'Tôi không xây nhà để có được danh tiếng. Tôi tìm kiếm danh tiếng để có thể xây những ngôi nhà do chính tôi thiết kế.'",
+      "source_chapter_id": "suoi_nguon_c2",
+      "audio": {
+        "url": "https://audio-cdn.example.com/books/suoi_nguon/chapter_02.mp3",
+        "duration_seconds": 312.0,
+        "size_bytes": 4992000,
+        "voice_name": "Ngọc Huyền Studio HD"
+      }
+    }
+  ]
+}

@@ -108,6 +108,8 @@ from server.bulk_import_domain import (
     parse_input,
     validate_chapters,
 )
+from server.external_import_contract import ExternalWorkImport, clean_reader_tags
+from server.external_import_service import ExternalImportService
 from server.bulk_import_service import (
     IMPORT_SWEEP_SECONDS,
     BulkImportService,
@@ -3514,6 +3516,78 @@ def retry_chapter_import_item(novel_id: str, batch_id: str, item_id: str,
     return _nhap_hang_loat(bulk_import_service().retry,
                            profile.user_id, novel_id, batch_id,
                            item_id=item_id)
+
+
+
+# -----------------------------------------------------------------------------
+# External Content Import Contract v1
+# -----------------------------------------------------------------------------
+
+@app.post("/api/external-import/validate")
+def validate_external_import_payload(
+    payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Validate an external work payload against External Content Import Contract v1
+    without touching the database or storage.
+    """
+    try:
+        work = ExternalWorkImport.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Dữ liệu không khớp hợp đồng External Content Import v1: {exc}"
+        ) from exc
+
+    return {
+        "valid": True,
+        "content_type": work.content_type.value,
+        "title": work.title,
+        "fingerprint": work.get_fingerprint(),
+        "total_chapters": len(work.chapters),
+        "sanitized_tags": work.tags,
+        "rejected_technical_tags": work.rejected_tags,
+    }
+
+
+@app.post("/api/external-import/preview")
+def preview_external_import(
+    payload: ExternalWorkImport,
+    profile: Profile = Depends(harvester_or_user_profile),
+) -> Dict[str, Any]:
+    """
+    Dry-run preview of an external work import against the database.
+    Checks duplicate existence, chapter count, audio attachments, and reports planned actions.
+    GUARANTEES ZERO DATABASE MUTATIONS.
+    """
+    svc = ExternalImportService(
+        store=store,
+        storage=storage,
+        fandom_reg=fandom_registry,
+        default_owner_id=profile.user_id
+    )
+    res = svc.preview(payload)
+    return res.to_dict()
+
+
+@app.post("/api/external-import", status_code=status.HTTP_201_CREATED)
+def execute_external_import(
+    payload: ExternalWorkImport,
+    dry_run: bool = Query(default=False),
+    profile: Profile = Depends(harvester_or_user_profile),
+) -> Dict[str, Any]:
+    """
+    Import an external work (Fanfic, Book, or Novel) with chapters and optional audio.
+    Deterministic, idempotent, and resumable.
+    """
+    svc = ExternalImportService(
+        store=store,
+        storage=storage,
+        fandom_reg=fandom_registry,
+        default_owner_id=profile.user_id
+    )
+    res = svc.execute(payload, owner_id=profile.user_id, dry_run=dry_run)
+    return res.to_dict()
 
 
 # -----------------------------------------------------------------------------

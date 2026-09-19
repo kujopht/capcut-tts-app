@@ -1,0 +1,40 @@
+{
+  "content_type": "fanfic",
+  "source_id": "ffn_13530962",
+  "source_url": "https://www.fanfiction.net/s/13530962/1/Ninja-s-Hero-Academia",
+  "title": "Học Viện Anh Hùng Của Ninja Làng Lá",
+  "author": "ShinobiWriter",
+  "description": "Sau đại chiến ninja lần thứ tư, một sự cố không-thời gian đã đưa Naruto đến thế giới nơi 80% dân số sở hữu siêu năng lực Quirk. Liệu con đường nhẫn giả có thể tồn tại giữa những siêu anh hùng?",
+  "language": "vi",
+  "status": "ongoing",
+  "fandom": "Naruto",
+  "fandoms": ["Naruto", "My Hero Academia"],
+  "characters": ["Uzumaki Naruto", "Midoriya Izuku", "All Might"],
+  "pairings": [],
+  "tags": [
+    "Hành động",
+    "Phiêu lưu",
+    "Xuyên không",
+    "work:internal_crawler_98",
+    "imported",
+    "long_form_audio"
+  ],
+  "cover": {
+    "url": "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600",
+    "mime": "image/jpeg"
+  },
+  "chapters": [
+    {
+      "order": 1,
+      "title": "Chương 1: Cơn Lốc Bất Ngờ Đến Chiều Không Gian Khác",
+      "content": "Bầu trời rực sáng với những tia sét màu đỏ thẩm. Naruto hít một hơi thật sâu, cảm nhận lượng chakra vĩ thú đang cuộn trào trong từng đường kinh mạch. Khi cánh cổng thứ nguyên mở toác ra trước mắt, cậu chỉ kịp nắm chặt chiếc băng trán làng Lá trước khi bị hút vào khoảng không vô tận. Khi mở mắt ra lần nữa, những tòa cao ốc chọc trời xa lạ hiện ra trước mắt cậu, hoàn toàn khác biệt với bất kỳ ngôi làng nhẫn giả nào từng biết.",
+      "source_chapter_id": "chp_1"
+    },
+    {
+      "order": 2,
+      "title": "Chương 2: Cuộc Gặp Gỡ Với Thiếu Niên Tóc Xanh",
+      "content": "Một tiếng nổ lớn vang lên từ con hẻm bên cạnh. Khói đen bốc lên cuồn cuộn giữa đám đông đang hoảng loạn tháo chạy. Ở trung tâm vụ hỗn loạn, một thiếu niên tóc xanh đang liều mình lao tới cứu bạn học bất chấp nguy hiểm. Naruto mỉm cười khẽ: 'Ánh mắt kiên định đó... giống hệt mình ngày trước'. Cậu bật người nhảy vọt qua hàng rào, phong độn xoáy tròn nơi lòng bàn tay.",
+      "source_chapter_id": "chp_2"
+    }
+  ]
+}

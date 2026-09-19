@@ -1,0 +1,31 @@
+{
+  "title": "Fanfic Factory Master Control - Desktop Monitor",
+  "geometry": "1260x760",
+  "tabs": [
+    "📑 PIPELINE NỘI DUNG",
+    "👥 TÀI KHOẢN POOL (14 ACC)",
+    "🌐 DANH MỤC PRODUCTION",
+    "📚 KHO LƯU TRỮ (176)"
+  ],
+  "runner_status": "💤 Tool đang dừng",
+  "ram_status": "RAM: 14.8 / 15.4 GB (96%)",
+  "account_cards_count": 14,
+  "account_names": [
+    "acc1",
+    "acc2",
+    "acc3",
+    "acc4",
+    "acc5",
+    "acc6",
+    "acc7",
+    "acc8",
+    "acc9",
+    "acc10",
+    "acc11",
+    "acc12",
+    "acc13",
+    "acc14"
+  ],
+  "published_catalog_rows": 5,
+  "pipeline_table_rows": 5
+}

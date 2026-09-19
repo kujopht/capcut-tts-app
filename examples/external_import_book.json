@@ -1,0 +1,36 @@
+{
+  "content_type": "book",
+  "source_id": "book_dac_nhan_tam_classic",
+  "source_url": "https://books.example.com/library/dac-nhan-tam",
+  "title": "Đắc Nhân Tâm",
+  "author": "Dale Carnegie",
+  "description": "Tác phẩm kinh điển về nghệ thuật đối nhân xử thế, thu phục lòng người và xây dựng mối quan hệ chân thành trong cuộc sống cũng như sự nghiệp.",
+  "language": "vi",
+  "status": "completed",
+  "tags": [
+    "Kỹ năng sống",
+    "Tâm lý học",
+    "Phát triển bản thân",
+    "Giao tiếp",
+    "work:batch_crawler_2026",
+    "unresolved_archive"
+  ],
+  "cover": {
+    "url": "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600",
+    "mime": "image/jpeg"
+  },
+  "chapters": [
+    {
+      "order": 1,
+      "title": "Phần 1 - Chương 1: Muốn Lấy Mật Đừng Phá Tổ Ong",
+      "content": "Chỉ trích là vô bổ, bởi vì nó khiến cho đối phương phải tự vệ và tìm mọi cách để biện hộ cho mình. Chỉ trích là nguy hiểm, bởi vì nó làm tổn thương lòng tự tôn vốn rất mong manh của con người, gây ra sự oán giận và làm giảm động lực. Khi đối xử với con người, chúng ta cần nhớ rằng mình không phải đang đối xử với những sinh vật thuần túy lý trí, mà là những sinh vật đầy cảm xúc và định kiến.",
+      "source_chapter_id": "part1_ch1"
+    },
+    {
+      "order": 2,
+      "title": "Phần 1 - Chương 2: Bí Mật Lớn Nhất Trong Phép Xử Thế",
+      "content": "Chỉ có một cách duy nhất dưới ánh mặt trời để khiến bất kỳ ai làm một điều gì đó: đó là làm cho họ muốn làm điều đó. Tiến sĩ Sigmund Freud từng khẳng định rằng mọi hành vi của con người đều bắt nguồn từ hai động cơ sâu xa: ham muốn tình dục và khát vọng trở thành người vĩ đại. Lòng khao khát được công nhận là một trong những động lực mạnh mẽ nhất thúc đẩy nền văn minh nhân loại.",
+      "source_chapter_id": "part1_ch2"
+    }
+  ]
+}

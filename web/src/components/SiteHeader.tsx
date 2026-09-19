@@ -15,13 +15,20 @@
  * tai khoan deu o nguyen cho cu. Tep nay khong quyet dinh thu tu cua chung.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { DockSoundwaveFrame } from "@/components/DockSoundwaveFrame";
+import { musicStore } from "@/lib/musicStore";
 
 /** Cuon qua bay nhieu pixel thi coi la "da roi dinh trang". */
 const NGUONG = 8;
 
 export function SiteHeader({ children }: { children: React.ReactNode }) {
   const [daCuon, setDaCuon] = useState(false);
+  const { isPlaying, currentTrack } = useSyncExternalStore(
+    musicStore.subscribe,
+    musicStore.getSnapshot,
+    () => musicStore.getSnapshot(),
+  );
 
   useEffect(() => {
     // `passive`: cho trinh duyet biet ham nay khong goi `preventDefault`, nen
@@ -29,11 +36,24 @@ export function SiteHeader({ children }: { children: React.ReactNode }) {
     const doc = () => setDaCuon(window.scrollY > NGUONG);
     doc();
     window.addEventListener("scroll", doc, { passive: true });
+    if (typeof window !== "undefined") {
+      (window as unknown as { __musicStore: unknown }).__musicStore = musicStore;
+    }
     return () => window.removeEventListener("scroll", doc);
   }, []);
 
+  const headerStyle = isPlaying
+    ? ({ "--music-wave-color": currentTrack?.color || "rgba(56, 189, 248, 1)" } as React.CSSProperties)
+    : undefined;
+
   return (
-    <header className="site-header" data-scrolled={daCuon ? "true" : undefined}>
+    <header
+      className="site-header"
+      data-scrolled={daCuon ? "true" : undefined}
+      data-music-playing={isPlaying ? "true" : undefined}
+      style={headerStyle}
+    >
+      <DockSoundwaveFrame />
       {children}
     </header>
   );

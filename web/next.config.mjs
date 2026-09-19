@@ -28,6 +28,8 @@ const nextConfig = {
       { source: "/tools/subtitles", destination: "/studio/subtitle", permanent: true },
       { source: "/write", destination: "/studio/write", permanent: true },
       { source: "/write/import", destination: "/studio/write/import", permanent: true },
+      { source: "/animation", destination: "/entertainment", permanent: true },
+      { source: "/animation/:path*", destination: "/entertainment", permanent: true },
       /*
         `/library` KHONG con o day, va day la mot lan sua co y.
 
@@ -43,6 +45,18 @@ const nextConfig = {
         nho mot 308 tro di. Sua truoc khi phat hanh thi khong phai go mot
         chuyen huong vinh vien da nam trong bo nho dem cua nguoi dung.
       */
+    ];
+  },
+
+  async headers() {
+    return [
+      {
+        source: "/audio/:path*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Access-Control-Allow-Methods", value: "GET, HEAD, OPTIONS" },
+        ],
+      },
     ];
   },
 };

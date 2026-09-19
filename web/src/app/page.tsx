@@ -43,7 +43,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   api,
   social,
@@ -73,7 +73,10 @@ import {
   IconCrown,
   IconFilm,
   IconFlame,
+  IconHeadphones,
+  IconLibrary,
   IconMegaphone,
+  IconSparkles,
   IconTag,
   IconUser,
 } from "@/components/Icons";
@@ -233,7 +236,7 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
           prefetch khong lam cham dieu huong that su.
         */}
         <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
-          Khám phá
+          Khám phá truyện
         </Link>
         <Link className="btn btn-outline" href="/studio" prefetch={false}>
           Fanfic Studio
@@ -245,6 +248,232 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
         </p>
       ) : null}
     </section>
+  );
+}
+
+const TEST_NOVELS: any[] = [
+  {
+    novel_id: "test-n-1",
+    title: "Vương Giả Trở Lại: Kiếm Thần Xuất Thế",
+    author_name: "Nam Phong",
+    has_audio: true,
+    chapters_count: 42,
+    cover_url: "",
+    synopsis: "Thiếu niên thiên tài thức tỉnh thần kiếm cổ đại, tái chiến cửu thiên.",
+    tags: ["Huyền Huyễn", "Kiếm Hiệp"],
+    status: "ongoing",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    novel_id: "test-n-2",
+    title: "One Piece: Huyết Tộc Thợ Săn Hải Tặc",
+    author_name: "ZoroFan",
+    has_audio: true,
+    chapters_count: 18,
+    cover_url: "",
+    synopsis: "Xuyên không vào Đại Hải Trình với năng lực huyết tộc huyền bí.",
+    tags: ["Đồng Nhân", "Hải Tặc"],
+    status: "ongoing",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    novel_id: "test-n-3",
+    title: "Naruto: Vô Hạn Luân Hồi Giới",
+    author_name: "UchihaX",
+    has_audio: false,
+    chapters_count: 35,
+    cover_url: "",
+    synopsis: "Mở khóa Mangekyo Sharingan thức thứ tám, thay đổi vận mệnh Làng Lá.",
+    tags: ["Đồng Nhân", "Ninja"],
+    status: "ongoing",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    novel_id: "test-n-4",
+    title: "Học Viện Pháp Thuật & Khế Ước Cổ Đại",
+    author_name: "Lyna",
+    has_audio: true,
+    chapters_count: 24,
+    cover_url: "",
+    synopsis: "Phù thủy trẻ khám phá thư viện cấm kỵ và đánh thức linh hồn ngàn năm.",
+    tags: ["Fantasy", "Phép Thuật"],
+    status: "ongoing",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    novel_id: "test-n-5",
+    title: "Fairy Tail: Long Vương Thức Tỉnh",
+    author_name: "GrayFull",
+    has_audio: false,
+    chapters_count: 15,
+    cover_url: "",
+    synopsis: "Sức mạnh nguyên tố rồng kết hợp giữa băng và sấm sét.",
+    tags: ["Đồng Nhân", "Ma Pháp"],
+    status: "ongoing",
+    created_at: "",
+    updated_at: "",
+  },
+  {
+    novel_id: "test-n-6",
+    title: "Đấu La: Tinh Thần Chi Kiếm",
+    author_name: "Đường Môn",
+    has_audio: true,
+    chapters_count: 56,
+    cover_url: "",
+    synopsis: "Võ hồn song sinh, kiếm ý xé rách không gian thần giới.",
+    tags: ["Đồng Nhân", "Dị Giới"],
+    status: "ongoing",
+    created_at: "",
+    updated_at: "",
+  },
+];
+
+const TEST_POSTS: any[] = [
+  {
+    post_id: "test-p-1",
+    text: "🎉 Cập nhật hệ thống: Ra mắt tính năng Studio tạo Audio giọng đọc AI đa cảm xúc cực mượt!",
+    created_at: "1 giờ trước",
+    author: { user_id: "admin-1", display_name: "Ban Quản Trị", avatar_url: "", role: "admin" },
+    likes_count: 48,
+    comments_count: 12,
+  },
+  {
+    post_id: "test-p-2",
+    text: "🔥 Sự kiện độc giả: Đọc truyện tích lũy chuỗi ngày để nhận huy hiệu Ma Pháp Sư tuần này.",
+    created_at: "3 giờ trước",
+    author: { user_id: "admin-2", display_name: "Hệ Thống", avatar_url: "", role: "admin" },
+    likes_count: 35,
+    comments_count: 9,
+  },
+  {
+    post_id: "test-p-3",
+    text: "Mọi người nghe thử giọng đọc Audio bộ Kiếm Thần chưa? Ngữ điệu nhân vật nữ nghe rất tự nhiên.",
+    created_at: "5 giờ trước",
+    author: { user_id: "u-1", display_name: "kujo", avatar_url: "" },
+    likes_count: 19,
+    comments_count: 7,
+  },
+  {
+    post_id: "test-p-4",
+    text: "Vừa ra mắt chương 42 bộ Vương Giả Trở Lại, mời anh em ghé đọc và góp ý phần kết nhé!",
+    created_at: "Hôm qua",
+    author: { user_id: "u-2", display_name: "Nam Phong", avatar_url: "" },
+    likes_count: 24,
+    comments_count: 15,
+  },
+  {
+    post_id: "test-p-5",
+    text: "⚡ Video Animation tập mới vừa được đồng bộ phụ đề tiếng Việt chuẩn, xem mượt mà trên di động.",
+    created_at: "Hôm qua",
+    author: { user_id: "u-3", display_name: "AnimeHub", avatar_url: "" },
+    likes_count: 31,
+    comments_count: 4,
+  },
+  {
+    post_id: "test-p-6",
+    text: "Có bạn nào đang viết fanfic One Piece không? Cần tìm đồng đội cùng xây dựng kịch bản đảo Egghead.",
+    created_at: "2 ngày trước",
+    author: { user_id: "u-4", display_name: "LuffyKing", avatar_url: "" },
+    likes_count: 15,
+    comments_count: 8,
+  },
+];
+
+/**
+ * Khung kính nổi bật đầu trang (Khai thác vùng phải còn trống trên desktop)
+ * Hiển thị CÙNG LÚC 2 cột: Truyện mới & Thông báo/Tiêu điểm Cộng đồng kèm thanh cuộn dọc
+ */
+function HomeHeroShowcase({
+  novels,
+  posts,
+}: {
+  novels: Novel[];
+  posts: Post[];
+}) {
+  const danhSachTruyen = (novels.length > 0 ? [...novels, ...TEST_NOVELS.slice(novels.length)] : TEST_NOVELS).slice(0, 3);
+  const danhSachBaiViet = (posts.length > 0 ? [...posts, ...TEST_POSTS.slice(posts.length)] : TEST_POSTS).slice(0, 3);
+
+  return (
+    <div className="home-hero-showcase rise rise-1" aria-label="Tiêu điểm trên Fanfic World">
+      <div className="showcase-header">
+        <span className="eyebrow">BẢNG TIN & TIÊU ĐIỂM</span>
+        <span className="hint">Cập nhật trực tiếp</span>
+      </div>
+
+      <div className="showcase-dual-cols">
+        {/* Cột 1: Truyện mới & Cập nhật */}
+        <div className="showcase-col">
+          <div className="showcase-col-head">
+            <div className="showcase-col-title">
+              <IconFlame size={16} />
+              <strong>Truyện mới</strong>
+            </div>
+            <Link href="/fanfic" className="showcase-more" prefetch={false}>
+              Tất cả →
+            </Link>
+          </div>
+          <div className="showcase-scroll-list">
+            {danhSachTruyen.map((n: any) => (
+              <Link key={n.novel_id} href={`/novels/${n.novel_id}`} className="showcase-item">
+                <div className="showcase-item-cover">
+                  <NovelCover novelId={n.novel_id} title={n.title} coverUrl={n.cover_url} size="thumb" />
+                </div>
+                <div className="showcase-item-info">
+                  <div className="showcase-item-title clamp-1">{n.title}</div>
+                  <div className="showcase-item-meta">
+                    <span className="author">{n.author_name || "Tác giả"}</span>
+                    {n.has_audio ? <span className="badge badge-brand badge-sm">Audio</span> : null}
+                    <span className="chapters">{n.chapters_count} chương</span>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        {/* Vách ngăn ma pháp phân tách 2 cột */}
+        <div className="showcase-vertical-divider" aria-hidden="true">
+          <span className="showcase-divider-gem" />
+        </div>
+
+        {/* Cột 2: Thông báo & Tiêu điểm Cộng đồng */}
+        <div className="showcase-col">
+          <div className="showcase-col-head">
+            <div className="showcase-col-title">
+              <IconMegaphone size={16} />
+              <strong>Thông báo & Bài viết</strong>
+            </div>
+            <Link href="/community" className="showcase-more" prefetch={false}>
+              Cộng đồng →
+            </Link>
+          </div>
+          <div className="showcase-scroll-list">
+            {danhSachBaiViet.map((p) => (
+              <Link key={p.post_id} href={`/posts/${p.post_id}`} className="showcase-item showcase-post-item">
+                <Avatar
+                  name={p.author?.display_name || "Thành viên"}
+                  avatarUrl={p.author?.avatar_url}
+                  className="showcase-avatar"
+                />
+                <div className="showcase-item-info">
+                  <div className="showcase-post-author">
+                    <strong className="clamp-1">{p.author?.display_name || "Thành viên"}</strong>
+                    {(p.author as any)?.role === "admin" ? (
+                      <span className="badge badge-brand badge-sm">Admin</span>
+                    ) : null}
+                  </div>
+                  <p className="showcase-post-snippet clamp-2">{p.text}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -265,20 +494,29 @@ function DaiThanhVien({
 }) {
   if (!gamification) return null;
   return (
-    <p className="hint home-gamification-line rise rise-1">
-      Lv. {gamification.progress.level} · {gamification.progress.xp}
-      {gamification.progress.next_level_xp
-        ? `/${gamification.progress.next_level_xp}`
-        : ""}{" "}
-      XP · {gamification.progress.equipped_title}
+    <div className="home-gamification-line rise rise-1">
+      <span className="home-gamification-badge">
+        <IconCrown size={14} className="home-gamification-icon" />
+        <strong>Lv. {gamification.progress.level}</strong>
+      </span>
+      <span className="home-gamification-xp">
+        {gamification.progress.xp}
+        {gamification.progress.next_level_xp
+          ? `/${gamification.progress.next_level_xp}`
+          : ""}{" "}
+        XP
+      </span>
+      <span className="home-gamification-sep" aria-hidden="true">·</span>
+      <span className="home-gamification-title">{gamification.progress.equipped_title}</span>
       {gamification.thanhTuuMoiNhat ? (
         <>
-          {" "}
-          · Thành tựu mới nhất: {gamification.thanhTuuMoiNhat.icon}{" "}
-          {gamification.thanhTuuMoiNhat.name}
+          <span className="home-gamification-sep" aria-hidden="true">·</span>
+          <span className="home-gamification-achievement">
+            Thành tựu: {gamification.thanhTuuMoiNhat.icon} {gamification.thanhTuuMoiNhat.name}
+          </span>
         </>
       ) : null}
-    </p>
+    </div>
   );
 }
 
@@ -548,14 +786,26 @@ export default function HomePage() {
   /* Cung nguyen tac voi `coKeThuHai`: khong dat cho cho mot cot rong. */
   const coBangVang = !loading && bangVangTuan.length > 0;
 
+  /**
+   * Tối giản trang chủ: Ẩn khối truyện trùng lặp ở dưới vì Showcase trên Hero đã hiển thị tab "Truyện mới"
+   */
+  const HIEN_KE_TRUYEN_DUOI = false;
+  /**
+   * Tối giản trang chủ: Ẩn phần Tiếp tục theo phản hồi người dùng
+   */
+  const HIEN_TIEP_TUC = false;
+
   return (
     // Themed Page Hero — "Ocean Sky": bien+troi+phieu luu, cyan troi la
     // nhan CHINH. Dat o day (khong phai rieng tren .hero-v2) de dong bo voi
     // cach cac trang khac dat theme tren the bao ngoai cung.
     <div className="page" data-hero-theme="home">
       <div className="home-hero-wrap">
-        <Hero daDangNhap={daDangNhap} />
-        <DaiThanhVien gamification={data?.gamification ?? null} />
+        <div className="home-hero-left">
+          <Hero daDangNhap={daDangNhap} />
+          <DaiThanhVien gamification={data?.gamification ?? null} />
+        </div>
+        <HomeHeroShowcase novels={novels} posts={communityPosts} />
       </div>
 
       {/*
@@ -564,9 +814,9 @@ export default function HomePage() {
         Khách vãng lai không thấy mục này (CTA đăng nhập đã ở Hero).
       */}
       {daDangNhap ? (
-        <section className="stack-2 rise rise-1" aria-labelledby="home-tiep-tuc">
+        <section className={HIEN_TIEP_TUC ? "stack-2 rise rise-1" : "home-hidden-shelf"} aria-labelledby="home-tiep-tuc">
           <div className="section-head">
-            <h2 className="section-title" id="home-tiep-tuc">
+            <h2 id="home-tiep-tuc" className="section-title">
               Tiếp tục của bạn
             </h2>
             <Link className="section-more" href="/library" prefetch={false}>
@@ -588,92 +838,79 @@ export default function HomePage() {
         </section>
       ) : null}
 
-      <div className="home-divider" aria-hidden="true">
-        <CelestialDivider />
-      </div>
+      {HIEN_KE_TRUYEN_DUOI ? (
+        <div className="home-divider" aria-hidden="true">
+          <CelestialDivider />
+        </div>
+      ) : null}
 
       {/*
         Bang bien tap hai cot. DOM dat truyen truoc de mobile/doc man hinh gap
         noi dung chinh truoc; CSS dua thanh vien sang cot trai tren desktop.
       */}
-      {/*
-        MOT cot hay HAI, tuy co thu de bay hay khong.
-
-        Truoc day cot "Thành viên nổi bật" LUON duoc dat cho, ke ca khi tuan
-        do khong ai ghi XP — va o mot san pham chua dong nguoi thi do la
-        trang thai THUONG XUYEN, khong phai ngoai le. Ket qua: mot phan ba be
-        ngang man hinh danh cho dong chu "Chưa có thành viên ghi XP trong
-        tuần này", ngay canh ke truyen that.
-
-        Cai gia khong chi la cho trong. No noi rang hai thu do ngang hang
-        nhau, trong khi mot ben la noi dung nguoi ta den de doc con ben kia
-        la mot chi so phu.
-      */}
-      <div
-        className={`home-editorial-grid rise rise-2${
-          coBangVang ? "" : " home-editorial-grid-mot-cot"
-        }`}
-      >
-        <section className="home-editorial-stories stack-2" aria-labelledby="home-noi-bat">
-          <div className="section-head">
-            <div className="stack-1">
-              <h2 className="section-title section-title-icon" id="home-noi-bat">
-                <IconFlame size={20} /> Truyện mới đáng chú ý
-              </h2>
-              <p className="hint">Sáu truyện vừa xuất bản để bạn chọn nhanh.</p>
-            </div>
-            <Link href="/fanfic" className="section-more" prefetch={false}>
-              Xem tất cả <span aria-hidden="true">→</span>
-            </Link>
-          </div>
-          {loading ? (
-            <KhungChoDanhSach />
-          ) : error ? (
-            <ErrorState message={error} onRetry={reload} />
-          ) : novels.length === 0 ? (
-            <KeTrongNoiBat />
-          ) : (
-            <div className="home-story-list">
-              {novels.map((novel) => (
-                <HangTruyenMoi key={novel.novel_id} novel={novel} />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {coBangVang ? (
-          <aside className="home-editorial-members stack-2" aria-labelledby="home-bang-vang">
+      {HIEN_KE_TRUYEN_DUOI ? (
+        <div
+          className={`home-editorial-grid rise rise-2${
+            coBangVang ? "" : " home-editorial-grid-mot-cot"
+          }`}
+        >
+          <section className="home-editorial-stories stack-2" aria-labelledby="home-noi-bat">
             <div className="section-head">
               <div className="stack-1">
-                <h2 className="section-title section-title-icon" id="home-bang-vang">
-                  <IconCrown size={20} /> Thành viên nổi bật
+                <h2 className="section-title section-title-icon" id="home-noi-bat">
+                  <IconFlame size={20} /> Truyện mới đáng chú ý
                 </h2>
-                <p className="hint">Dẫn đầu XP trong tuần này.</p>
+                <p className="hint">Sáu truyện vừa xuất bản để bạn chọn nhanh.</p>
               </div>
-              <Link href="/leaderboard" className="section-more" aria-label="Xem bảng xếp hạng" prefetch={false}>
-                Xem hết <span aria-hidden="true">→</span>
+              <Link href="/fanfic" className="section-more" prefetch={false}>
+                Xem tất cả <span aria-hidden="true">→</span>
               </Link>
             </div>
-            <ol className="lb-list home-lb-list">
-              {bangVangTuan.map((it) => (
-                <HangBangVang key={it.user_id} it={it} />
-              ))}
-            </ol>
-          </aside>
-        ) : loading ? (
-          /*
-            Trong lúc tải thì VẪN giữ chỗ: nếu tuần này có người, cột sẽ hiện
-            ra, và bỏ trống rồi chèn vào sau làm cả trang nhảy một nhịp.
-          */
-          <aside className="home-editorial-members stack-2" aria-hidden="true">
-            <div className="home-member-loading" role="status" aria-label="Đang tải thành viên">
-              {Array.from({ length: 5 }, (_, i) => (
-                <span key={i} className="sk" aria-hidden="true" />
-              ))}
-            </div>
-          </aside>
-        ) : null}
-      </div>
+            {loading ? (
+            <KhungChoDanhSach />
+            ) : error ? (
+              <ErrorState message={error} onRetry={reload} />
+            ) : novels.length === 0 ? (
+              <KeTrongNoiBat />
+            ) : (
+              <div className="home-story-list">
+                {novels.map((novel) => (
+                  <HangTruyenMoi key={novel.novel_id} novel={novel} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {coBangVang ? (
+            <aside className="home-editorial-members stack-2" aria-labelledby="home-bang-vang">
+              <div className="section-head">
+                <div className="stack-1">
+                  <h2 className="section-title section-title-icon" id="home-bang-vang">
+                    <IconCrown size={20} /> Thành viên nổi bật
+                  </h2>
+                  <p className="hint">Dẫn đầu XP trong tuần này.</p>
+                </div>
+                <Link href="/leaderboard" className="section-more" aria-label="Xem bảng xếp hạng" prefetch={false}>
+                  Xem hết <span aria-hidden="true">→</span>
+                </Link>
+              </div>
+              <ol className="lb-list home-lb-list">
+                {bangVangTuan.map((it) => (
+                  <HangBangVang key={it.user_id} it={it} />
+                ))}
+              </ol>
+            </aside>
+          ) : loading ? (
+            <aside className="home-editorial-members stack-2" aria-hidden="true">
+              <div className="home-member-loading" role="status" aria-label="Đang tải thành viên">
+                {Array.from({ length: 5 }, (_, i) => (
+                  <span key={i} className="sk" aria-hidden="true" />
+                ))}
+              </div>
+            </aside>
+          ) : null}
+        </div>
+      ) : null}
 
       {/*
         Ke "Animation mới" (Phan 8) — DOC LAP voi ke truyen tren: rong thi tu
@@ -744,9 +981,63 @@ export default function HomePage() {
       </div>
       ) : null}
 
-      {/* Khám phá theo vũ trụ — danh mục fandom sạch cho người đọc, không lặp lại navbar */}
+      {/* Lối tắt — Trung tâm chuyển hướng Truyện, Sách, Âm Nhạc, Studio, Cộng đồng */}
       <section className="home-discovery-strip stack-2" aria-labelledby="home-kham-pha-nhanh">
         <h2 className="section-title section-title-icon" id="home-kham-pha-nhanh">
+          <IconCompass size={19} /> Lối tắt
+        </h2>
+        <div className="home-util-grid" aria-label="Tiện ích nhanh">
+          <Link href="/fanfic" className="home-util-card" prefetch={false}>
+            <div className="home-util-icon home-util-icon-book">
+              <IconBook size={20} />
+            </div>
+            <div className="home-util-text">
+              <strong className="home-util-name">Truyện</strong>
+              <span className="home-util-desc">Kho fanfic &amp; chương mới</span>
+            </div>
+          </Link>
+          <Link href="/library?tab=books" className="home-util-card" prefetch={false}>
+            <div className="home-util-icon home-util-icon-shelf">
+              <IconLibrary size={20} />
+            </div>
+            <div className="home-util-text">
+              <strong className="home-util-name">Sách</strong>
+              <span className="home-util-desc">Tủ sách &amp; tuyển tập</span>
+            </div>
+          </Link>
+          <Link href="/entertainment" className="home-util-card" prefetch={false}>
+            <div className="home-util-icon home-util-icon-audio">
+              <IconHeadphones size={20} />
+            </div>
+            <div className="home-util-text">
+              <strong className="home-util-name">Âm Nhạc</strong>
+              <span className="home-util-desc">Fantasy ambient &amp; bài hát</span>
+            </div>
+          </Link>
+          <Link href="/studio" className="home-util-card" prefetch={false}>
+            <div className="home-util-icon home-util-icon-studio">
+              <IconSparkles size={20} />
+            </div>
+            <div className="home-util-text">
+              <strong className="home-util-name">Studio</strong>
+              <span className="home-util-desc">Sáng tác &amp; xuất bản AI</span>
+            </div>
+          </Link>
+          <Link href="/community" className="home-util-card" prefetch={false}>
+            <div className="home-util-icon home-util-icon-community">
+              <IconUser size={20} />
+            </div>
+            <div className="home-util-text">
+              <strong className="home-util-name">Cộng đồng</strong>
+              <span className="home-util-desc">Thảo luận &amp; giao lưu</span>
+            </div>
+          </Link>
+        </div>
+      </section>
+
+      {/* Khám phá theo vũ trụ — danh mục fandom sạch cho người đọc, không lặp lại navbar */}
+      <section className="home-discovery-strip stack-2" aria-labelledby="home-kham-pha-vu-tru">
+        <h2 className="section-title section-title-icon" id="home-kham-pha-vu-tru">
           <IconCompass size={19} /> Khám phá theo vũ trụ
         </h2>
         <div className="story-tags" aria-label="Vũ trụ fanfic">
@@ -773,37 +1064,66 @@ export default function HomePage() {
         thanh ra bao nguoi vua vao rang hay di lam viec — trong khi ho den
         de doc/xem/nghe.
       */}
-      <section className="cta-band" aria-labelledby="home-tac-gia">
-        <Image
-          src="/images/portals/creator-worldbuilding.webp"
-          alt=""
-          fill
-          loading="lazy"
-          sizes="100vw"
-          className="cta-band-art"
-        />
-        <span className="cta-band-overlay" aria-hidden="true" />
-        <div className="cta-band-body">
-          <h2 className="section-title" id="home-tac-gia">
-            Dựng nên thế giới của riêng bạn
-          </h2>
-          <p className="hint">
-            Viết truyện, thêm chương, rồi biến chữ thành giọng đọc và hình
-            ảnh. Truyện để ở bản nháp cho tới khi bạn tự xuất bản.
-          </p>
+      <section className="cta-band creator-sanctum-band" aria-labelledby="home-tac-gia">
+        <div className="creator-sanctum-hero">
+          <div className="creator-sanctum-avatar" aria-hidden="true">
+            <IconSparkles size={28} />
+          </div>
+          <div className="creator-sanctum-body">
+            <span className="eyebrow">SÁNG TÁC</span>
+            <h2 className="section-title" id="home-tac-gia">
+              Dựng nên thế giới của riêng bạn
+            </h2>
+            <p className="hint">
+              Viết truyện, thêm chương, rồi biến câu chữ thành giọng đọc sống động
+              và hình ảnh hoạt họa. Tự do kiến tạo vũ trụ fanfic của riêng bạn.
+            </p>
+            <div className="row creator-sanctum-actions">
+              <Link className="btn btn-primary btn-sm" href="/studio/write" prefetch={false}>
+                Bắt đầu viết
+              </Link>
+              <Link className="btn btn-outline btn-sm" href="/studio" prefetch={false}>
+                Mở Fanfic Studio
+              </Link>
+            </div>
+          </div>
+          <div className="creator-sanctum-plan">
+            <span className="badge badge-brand">Khu tác giả</span>
+            <span className="hint">
+              Bản MVP riêng tư — tự do sáng tác và lưu trữ đám mây.
+            </span>
+          </div>
         </div>
-        <div className="row">
-          <Link className="btn btn-primary" href="/studio/write" prefetch={false}>
-            Bắt đầu viết
+
+        <div className="creator-sanctum-grid">
+          <Link href="/studio/write" className="creator-feature-card" prefetch={false}>
+            <div className="creator-feature-icon-wrap icon-tome">
+              <IconBook size={20} />
+            </div>
+            <div className="creator-feature-text">
+              <strong>Soạn thảo & Chương truyện</strong>
+              <span>Trình viết mượt mà, lưu nháp đám mây tự động</span>
+            </div>
           </Link>
-          {/*
-            "Mở Studio" chu khong "Thử Audio Studio": tu #197, Audio la MOT
-            module trong Studio, va dat ten mot module canh nut "Bắt đầu
-            viết" lam nguoi doc tuong day la hai san pham khac nhau. Dua ho
-            toi cua chinh, roi ho tu chon module.
-          */}
-          <Link className="btn" href="/studio" prefetch={false}>
-            Mở Fanfic Studio
+
+          <Link href="/studio" className="creator-feature-card" prefetch={false}>
+            <div className="creator-feature-icon-wrap icon-audio">
+              <IconHeadphones size={20} />
+            </div>
+            <div className="creator-feature-text">
+              <strong>Biến chữ thành Giọng đọc</strong>
+              <span>Giọng đọc tự nhiên, đa ngữ điệu và cảm xúc</span>
+            </div>
+          </Link>
+
+          <Link href="/entertainment" className="creator-feature-card" prefetch={false}>
+            <div className="creator-feature-icon-wrap icon-anim">
+              <IconFilm size={20} />
+            </div>
+            <div className="creator-feature-text">
+              <strong>Hoạt họa & Xuất bản</strong>
+              <span>Gắn phụ đề, tạo animation và chia sẻ độc quyền</span>
+            </div>
           </Link>
         </div>
       </section>

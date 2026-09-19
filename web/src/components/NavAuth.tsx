@@ -11,6 +11,7 @@ import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 import { NotificationBell } from "@/components/NotificationBell";
 import { StreakBadge } from "@/components/StreakBadge";
 import { Avatar } from "@/components/Avatar";
+import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -47,17 +48,9 @@ interface NavItem {
 
 const LINKS: NavItem[] = [
   { href: "/", label: "Trang chủ" },
-  { href: "/fanfic", label: "Khám phá" },
-  { href: "/animation", label: "Animation" },
   { href: "/community", label: "Cộng đồng" },
-  /*
-    "Thư viện" la khu vuc cua NGUOI DOC (`/library`): truyen dang theo doi va
-    cho doc do. No TUNG tro toi `/studio/library` — nhung do la thu vien AUDIO
-    cua nguoi sang tac (danh sach job TTS), nen mot doc gia bam "Thư viện" lai
-    roi thang vao mot cong cu san xuat. Thu vien audio van con, o trong Studio,
-    dung cho nguoi lam ra no.
-  */
   { href: "/library", label: "Thư viện" },
+  { href: "/entertainment", label: "Giải trí" },
 ];
 
 export function NavLinks() {
@@ -140,7 +133,10 @@ export function NavLinks() {
                 : undefined
             }
           >
-            {link.label}
+            <span style={{ display: "inline-flex", alignItems: "center" }}>
+              {link.label}
+              {link.href === "/entertainment" ? <SoundwaveMini /> : null}
+            </span>
           </Link>
         );
       })}
@@ -210,9 +206,17 @@ function useMenu() {
  * tung cong cu tu xu ly truong hop chua dang nhap theo cach cua no.
  */
 function StudioLink() {
+  const pathname = usePathname();
+  const active = pathname.startsWith("/studio");
   return (
-    <Link href="/studio" className="btn btn-ghost btn-sm" prefetch={false}>
-      Studio
+    <Link
+      href="/studio"
+      className={`btn btn-sm studio-nav-btn ${active ? "studio-nav-btn-active" : "btn-ghost"}`}
+      aria-current={active ? "page" : undefined}
+      prefetch={false}
+    >
+      <span className="studio-nav-dot" aria-hidden="true" />
+      <span>Studio</span>
     </Link>
   );
 }

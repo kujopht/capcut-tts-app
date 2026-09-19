@@ -37,16 +37,18 @@ export function StreakBadge() {
     };
   }, [profile, pathname]);
 
-  if (!profile || chuoi <= 0) return null;
+  if (!profile) return null;
+
+  const soNgay = chuoi > 0 ? chuoi : 1;
 
   return (
     <span
       className="streak-badge"
-      title={`Chuỗi ${chuoi} ngày đọc liên tiếp`}
-      aria-label={`Chuỗi đọc: ${chuoi} ngày`}
+      title={`Chuỗi ${soNgay} ngày đọc liên tiếp`}
+      aria-label={`Chuỗi đọc: ${soNgay} ngày`}
     >
       <IconFlame size={16} />
-      {chuoi}
+      {soNgay}
     </span>
   );
 }

@@ -371,7 +371,7 @@ class CapCutClient:
             query_tasks = (query_res.get("data") or {}).get("tasks") or []
             if query_tasks:
                 status = query_tasks[0].get("status")
-                if status == "success":
+                if status in ("success", "succeed"):
                     return query_res
                 elif status == "failed":
                     raise CapCutTaskError(f"TTS Task failed: {query_res}")

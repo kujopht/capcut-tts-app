@@ -29,10 +29,12 @@ USER_AGENT = (
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
 
-def _fetch_html(url: str, timeout: int = 15) -> str:
-    """Fetches HTML with curl using desktop browser user-agent."""
+def _fetch_html(url: str, timeout: int = 25, connect_timeout: int = 10) -> str:
+    """Fetches HTML with curl.exe using desktop browser user-agent and mandatory timeouts."""
     cmd = [
-        "curl.exe", "-s", "-L", "--max-time", str(timeout),
+        "curl.exe", "-s", "-L",
+        "--connect-timeout", str(connect_timeout),
+        "--max-time", str(timeout),
         "-A", USER_AGENT,
         url,
     ]
@@ -154,28 +156,41 @@ class RoyalRoadAdapter(BaseCrawlerAdapter):
             soup = BeautifulSoup(html, "html.parser")
 
         chapters: List[Dict[str, Any]] = []
-        seen = set()
+        seen_cids = set()
         order = 1
 
-        # Look for chapter table / links
-        for a in soup.find_all("a"):
-            href = a.get("href")
-            if href and "/chapter/" in href and href not in seen:
-                seen.add(href)
-                ch_name = a.text.strip()
-                full_url = urljoin("https://www.royalroad.com", href)
-                
-                # Extract chapter ID from URL
-                m_cid = re.search(r"/chapter/(\d+)", href)
-                cid = m_cid.group(1) if m_cid else f"c{order:04d}"
+        # Prefer Royal Road's explicit chapter table
+        container = soup.find("table", id="chapters") or soup.find("tbody") or soup
 
-                chapters.append({
-                    "order": order,
-                    "source_chapter_id": cid,
-                    "title": ch_name or f"Chapter {order}",
-                    "url": full_url,
-                })
-                order += 1
+        for a in container.find_all("a"):
+            href = a.get("href")
+            if not href or "/chapter/" not in href:
+                continue
+
+            # Extract chapter ID from URL
+            m_cid = re.search(r"/chapter/(\d+)", href)
+            cid = m_cid.group(1) if m_cid else None
+            if cid and cid in seen_cids:
+                continue
+            if cid:
+                seen_cids.add(cid)
+
+            ch_name = a.text.strip()
+            if not ch_name or ch_name.lower() in (
+                "read", "edit", "report", "comment", "comments",
+                "review", "reviews", "reply", "next", "previous",
+                "start reading", "continue reading"
+            ):
+                continue
+
+            full_url = urljoin("https://www.royalroad.com", href)
+            chapters.append({
+                "order": order,
+                "source_chapter_id": cid or f"c{order:04d}",
+                "title": ch_name or f"Chapter {order}",
+                "url": full_url,
+            })
+            order += 1
 
         return chapters
 

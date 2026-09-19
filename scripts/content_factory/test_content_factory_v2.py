@@ -79,6 +79,43 @@ class TestContentFactoryV2(unittest.TestCase):
         expected_hash = compute_source_text_hash(first_ch.source_text)
         self.assertEqual(first_ch.source_text_hash, expected_hash)
 
+    def test_royalroad_adapter_false_anchor_filtering(self):
+        """Regression test reproducing false-anchor case: sidebar, comments, duplicate CIDs."""
+        from bs4 import BeautifulSoup
+        html_fixture = """
+        <html>
+          <body>
+            <div class="sidebar">
+              <a href="/fiction/156690/chapter/3354888">Read</a>
+              <a href="/profile/1234">Author</a>
+              <a href="/fiction/chapter/9999999">Report</a>
+            </div>
+            <table id="chapters">
+              <tbody>
+                <tr><td><a href="/fiction/156690/naruto-si/chapter/1001/chapter-1">Chapter 1: The Awakening</a></td></tr>
+                <tr><td><a href="/fiction/156690/naruto-si/chapter/1002/chapter-2">Chapter 2: Training</a></td></tr>
+              </tbody>
+            </table>
+            <div class="comments">
+              <a href="/fiction/156690/naruto-si/chapter/1001/chapter-1#comments">Comments (12)</a>
+              <a href="/fiction/chapter/1002">Reply to Chapter 2</a>
+            </div>
+          </body>
+        </html>
+        """
+        adapter = RoyalRoadAdapter()
+        soup = BeautifulSoup(html_fixture, "html.parser")
+        chapters = adapter.list_chapters("156690", soup=soup)
+
+        # Must find exactly 2 chapters from table, ignoring sidebar, comments, duplicates
+        self.assertEqual(len(chapters), 2)
+        self.assertEqual(chapters[0]["order"], 1)
+        self.assertEqual(chapters[0]["source_chapter_id"], "1001")
+        self.assertEqual(chapters[0]["title"], "Chapter 1: The Awakening")
+        self.assertEqual(chapters[1]["order"], 2)
+        self.assertEqual(chapters[1]["source_chapter_id"], "1002")
+        self.assertEqual(chapters[1]["title"], "Chapter 2: Training")
+
     # -------------------------------------------------------------------------
     # 2. Provenance Models Tests
     # -------------------------------------------------------------------------
@@ -247,11 +284,12 @@ class TestContentFactoryV2(unittest.TestCase):
                 "source_text_hash": shash,
             })
 
-        # Append synthetic Chapter 13
+        # Append synthetic next chapter
+        next_order = len(rows) + 1
         candidate_chapters.append({
-            "order": 13,
-            "title": "Chapter 13: Synthetic Test Chapter",
-            "source_text_hash": "hash_synthetic_chapter_13_never_published",
+            "order": next_order,
+            "title": f"Chapter {next_order}: Synthetic Test Chapter",
+            "source_text_hash": f"hash_synthetic_chapter_{next_order}_never_published",
         })
 
         diff_engine = ProductionDiffEngine(db_path=db_path)
@@ -264,7 +302,7 @@ class TestContentFactoryV2(unittest.TestCase):
 
         # Verify exact counts
         self.assertEqual(report.unchanged_count, len(rows), "All existing chapters must be UNCHANGED")
-        self.assertEqual(report.new_count, 1, "Only synthetic Ch 13 should be NEW_CHAPTER")
+        self.assertEqual(report.new_count, 1, "Only synthetic next chapter should be NEW_CHAPTER")
         self.assertEqual(report.estimated_llm_calls, 1, "Only 1 LLM call projected")
         self.assertEqual(report.estimated_tts_jobs, 1, "Only 1 TTS job projected")
 
@@ -273,11 +311,11 @@ class TestContentFactoryV2(unittest.TestCase):
             self.assertEqual(report.chapter_diffs[i].status, DiffStatus.UNCHANGED)
             self.assertIn("SKIP (0 LLM, 0 TTS)", report.chapter_diffs[i].action_preview)
 
-        # Verify status of Chapter 13
-        ch13_diff = report.chapter_diffs[-1]
-        self.assertEqual(ch13_diff.order, 13)
-        self.assertEqual(ch13_diff.status, DiffStatus.NEW_CHAPTER)
-        self.assertIn("TRANSLATE & PUBLISH", ch13_diff.action_preview)
+        # Verify status of next chapter
+        next_diff = report.chapter_diffs[-1]
+        self.assertEqual(next_diff.order, next_order)
+        self.assertEqual(next_diff.status, DiffStatus.NEW_CHAPTER)
+        self.assertIn("TRANSLATE & PUBLISH", next_diff.action_preview)
 
         # Verify ZERO WRITES guarantee
         with sqlite3.connect(db_path) as conn:

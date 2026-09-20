@@ -38,6 +38,8 @@ from scripts.content_factory.crawler_adapters.adapter_registry import get_adapte
 from scripts.content_factory.glossary_manager import GlossaryManager, NovelGlossary
 from scripts.content_factory.release_packager import ReleasePackager, PackagedChapter, ReleaseManifest
 from scripts.content_factory.production_diff_engine import ProductionDiffEngine, NovelDiffReport, DiffStatus, find_active_registry_db
+from scripts.content_factory.content_classifier import ContentClassifier, EntryClassification
+from scripts.content_factory.publish_quality_gate import PublishQualityGate, QualityGateResult
 from server.crawler_intake_contract import RawCrawlerWork, RawCrawlerChapter, compute_source_text_hash
 
 logger = logging.getLogger("ContentFactoryV2")
@@ -53,11 +55,14 @@ class ContentFactoryV2Orchestrator:
         self,
         base_spool_dir: Optional[Path] = None,
         registry_db_path: Optional[Path] = None,
+        classification_overrides_file: Optional[Path] = None,
     ):
         self.spool_dir = base_spool_dir or (PROJECT_ROOT / "raw_spool")
         self.cache_dir = self.spool_dir / "translation_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
+        self.classifier = ContentClassifier(classification_overrides_file or (PROJECT_ROOT / "scratch" / "hatake_upstream_classification.json"))
+        self.quality_gate = PublishQualityGate()
         self.glossary_mgr = GlossaryManager(self.spool_dir / "glossaries")
         self.packager = ReleasePackager(self.spool_dir / "release_packages")
         self.diff_engine = ProductionDiffEngine(registry_db_path or find_active_registry_db())
@@ -145,17 +150,40 @@ class ContentFactoryV2Orchestrator:
             source_status="ongoing",
         )
 
+        # 1. Classification MUST happen BEFORE translation
+        classified_entries = []
+        for ch in raw_work.chapters:
+            decision = self.classifier.classify_entry(
+                title=ch.source_title,
+                content=ch.source_text,
+                source_order=ch.source_order,
+                work_id=work_key,
+            )
+            classified_entries.append((ch, decision))
+
         # Check production diff first to avoid translating UNCHANGED chapters
         diff_report = self.diff_engine.diff(raw_work, platform_hint=provenance.source_platform)
         unchanged_orders = {d.order for d in diff_report.chapter_diffs if d.status == DiffStatus.UNCHANGED}
 
         packaged_chapters: List[PackagedChapter] = []
-        for ch in raw_work.chapters:
+        current_display_order = 1
+
+        for ch, decision in classified_entries:
+            # Never spend LLM or TTS resources on announcements by default
+            if decision.entry_type in (EntryClassification.ANNOUNCEMENT, EntryClassification.AUTHOR_NOTE):
+                logger.info(f"Entry {ch.source_order} is {decision.entry_type.value} ('{ch.source_title}') -> Skipping LLM/TTS translation (archived).")
+                continue
+
+            if decision.entry_type == EntryClassification.UNKNOWN:
+                logger.warning(f"Entry {ch.source_order} has UNKNOWN classification -> Requires manual review.")
+
+            display_order = current_display_order
+            current_display_order += 1
+
             if ch.source_order in unchanged_orders:
                 logger.info(f"Chapter {ch.source_order} is UNCHANGED in production -> skipping LLM translation.")
-                # We can reuse cached translation or placeholder if strictly unchanged
                 packaged_chapters.append(PackagedChapter(
-                    order=ch.source_order,
+                    order=display_order,
                     title=ch.source_title,
                     content=ch.source_text,
                     source_chapter_id=ch.source_chapter_id,
@@ -167,10 +195,32 @@ class ContentFactoryV2Orchestrator:
                     chapter=ch,
                     fandom_hint=raw_work.fandom or (raw_work.fandoms[0] if raw_work.fandoms else "")
                 )
+                vi_content = translated["content_vi"] or ch.source_text
+                vi_title = translated["title_vi"] or ch.source_title
+
+                # Format Extra label if classified as EXTRA
+                if decision.entry_type == EntryClassification.EXTRA:
+                    ex_num = decision.extra_number or 1
+                    vi_title = f"Chương {display_order} (Ngoại Truyện {ex_num}): {vi_title}"
+
+                # Run Permanent Publish Quality Gate Audit
+                qg_result = self.quality_gate.audit_chapter(
+                    chapter_id=f"chp_{work_key}_{ch.source_order:04d}",
+                    source_order=ch.source_order,
+                    display_order=display_order,
+                    source_text=ch.source_text,
+                    translated_text=vi_content,
+                    classification=decision.entry_type,
+                    source_chunks=[{"chunk_id": "c1", "text": ch.source_text}],
+                    translated_chunks=[{"chunk_id": "c1", "text": vi_content}],
+                )
+                if not qg_result.publish_allowed:
+                    logger.warning(f"Ch {ch.source_order} Quality Gate WARNING: {qg_result.blocking_reasons}")
+
                 packaged_chapters.append(PackagedChapter(
-                    order=ch.source_order,
-                    title=translated["title_vi"] or ch.source_title,
-                    content=translated["content_vi"] or ch.source_text,
+                    order=display_order,
+                    title=vi_title,
+                    content=vi_content,
                     source_chapter_id=ch.source_chapter_id,
                     source_text_hash=ch.source_text_hash,
                 ))

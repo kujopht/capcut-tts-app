@@ -109,11 +109,23 @@ class LivingNovelRegistry:
                     sync_status TEXT NOT NULL DEFAULT 'SYNCED',
                     synced_at TEXT NOT NULL,
                     last_edited_at TEXT,
+                    display_order INTEGER,
+                    entry_type TEXT DEFAULT 'STORY_CHAPTER',
                     PRIMARY KEY (source_platform, source_work_id, source_chapter_id),
                     FOREIGN KEY (source_platform, source_work_id) 
                         REFERENCES source_novel_registry(source_platform, source_work_id)
                 );
             """)
+            # Auto-migrate existing databases
+            try:
+                conn.execute("ALTER TABLE source_chapter_registry ADD COLUMN display_order INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE source_chapter_registry ADD COLUMN entry_type TEXT DEFAULT 'STORY_CHAPTER'")
+            except sqlite3.OperationalError:
+                pass
+
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_source_novel_next_check 
                     ON source_novel_registry(sync_state, next_check_at);
@@ -182,7 +194,9 @@ class LivingNovelRegistry:
         order: int,
         appwrite_chapter_id: str,
         source_text_hash: str,
-        audio_track_id: Optional[str] = None
+        audio_track_id: Optional[str] = None,
+        display_order: Optional[int] = None,
+        entry_type: str = "STORY_CHAPTER",
     ):
         now = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.db_path) as conn:
@@ -190,16 +204,47 @@ class LivingNovelRegistry:
                 INSERT INTO source_chapter_registry (
                     source_platform, source_work_id, source_chapter_id, chapter_order,
                     appwrite_chapter_id, source_text_hash, audio_track_id, sync_status,
-                    synced_at, last_edited_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?)
+                    synced_at, last_edited_at, display_order, entry_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?, ?)
                 ON CONFLICT(source_platform, source_work_id, source_chapter_id) DO UPDATE SET
                     chapter_order = excluded.chapter_order,
                     appwrite_chapter_id = excluded.appwrite_chapter_id,
                     source_text_hash = excluded.source_text_hash,
                     audio_track_id = COALESCE(excluded.audio_track_id, source_chapter_registry.audio_track_id),
                     sync_status = 'SYNCED',
-                    last_edited_at = excluded.last_edited_at
-            """, (platform, work_id, chapter_id, order, appwrite_chapter_id, source_text_hash, audio_track_id, now, now))
+                    synced_at = excluded.synced_at,
+                    last_edited_at = excluded.last_edited_at,
+                    display_order = excluded.display_order,
+                    entry_type = excluded.entry_type
+            """, (platform, work_id, chapter_id, order, appwrite_chapter_id, source_text_hash, audio_track_id, now, now, display_order, entry_type))
+            conn.commit()
+
+    def record_announcement_archived(
+        self,
+        platform: str,
+        work_id: str,
+        chapter_id: str,
+        order: int,
+        appwrite_chapter_id: str,
+        source_text_hash: str = "",
+    ):
+        now = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO source_chapter_registry (
+                    source_platform, source_work_id, source_chapter_id, chapter_order,
+                    appwrite_chapter_id, source_text_hash, audio_track_id, sync_status,
+                    synced_at, last_edited_at, display_order, entry_type
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, 'ARCHIVED', ?, ?, NULL, 'ANNOUNCEMENT')
+                ON CONFLICT(source_platform, source_work_id, source_chapter_id) DO UPDATE SET
+                    chapter_order = excluded.chapter_order,
+                    appwrite_chapter_id = excluded.appwrite_chapter_id,
+                    sync_status = 'ARCHIVED',
+                    synced_at = excluded.synced_at,
+                    last_edited_at = excluded.last_edited_at,
+                    display_order = NULL,
+                    entry_type = 'ANNOUNCEMENT'
+            """, (platform, work_id, chapter_id, order, appwrite_chapter_id, source_text_hash, now, now))
             conn.commit()
 
 

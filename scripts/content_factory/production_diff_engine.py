@@ -36,14 +36,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 def find_active_registry_db() -> Path:
     """Finds the active living novel SQLite database."""
     candidates = [
+        PROJECT_ROOT / "raw_spool" / "living_novel_registry.sqlite",
         PROJECT_ROOT / "scratch" / "living_novel_sync_prod.sqlite",
         PROJECT_ROOT / "raw_spool" / "pipeline_state" / "living_novel_sync.sqlite",
     ]
     for c in candidates:
         if c.exists():
             return c
-    # Fallback to default scratch path
-    fallback = PROJECT_ROOT / "scratch" / "living_novel_sync_prod.sqlite"
+    fallback = PROJECT_ROOT / "raw_spool" / "living_novel_registry.sqlite"
     fallback.parent.mkdir(parents=True, exist_ok=True)
     return fallback
 
@@ -267,7 +267,7 @@ class ProductionDiffEngine:
         )
 
     def get_published_catalog(self) -> List[Dict[str, Any]]:
-        """Returns list of all published novels in the local production registry."""
+        """Returns list of all published novels in the local production registry with Update Center metrics."""
         if not self.db_path.exists():
             return []
         catalog = []
@@ -278,10 +278,46 @@ class ProductionDiffEngine:
                 work_dict = dict(n)
                 work_id = work_dict["source_work_id"]
                 platform = work_dict["source_platform"]
-                ch_count = conn.execute(
+
+                cols = [col[1] for col in conn.execute("PRAGMA table_info(source_chapter_registry)").fetchall()]
+                has_disp = "display_order" in cols
+                has_type = "entry_type" in cols
+
+                upstream_count = conn.execute(
                     "SELECT count(*) FROM source_chapter_registry WHERE source_platform = ? AND source_work_id = ?",
                     (platform, work_id)
                 ).fetchone()[0]
-                work_dict["registered_chapter_count"] = ch_count
+                work_dict["upstream_entries"] = upstream_count
+                work_dict["registered_chapter_count"] = upstream_count
+
+                if has_disp:
+                    reader_count = conn.execute(
+                        "SELECT count(*) FROM source_chapter_registry WHERE source_platform = ? AND source_work_id = ? AND display_order IS NOT NULL",
+                        (platform, work_id)
+                    ).fetchone()[0]
+                else:
+                    reader_count = upstream_count
+                work_dict["reader_content_count"] = reader_count
+
+                if has_type:
+                    ignored_ann = conn.execute(
+                        "SELECT count(*) FROM source_chapter_registry WHERE source_platform = ? AND source_work_id = ? AND entry_type = 'ANNOUNCEMENT'",
+                        (platform, work_id)
+                    ).fetchone()[0]
+                    extras = conn.execute(
+                        "SELECT count(*) FROM source_chapter_registry WHERE source_platform = ? AND source_work_id = ? AND entry_type = 'EXTRA'",
+                        (platform, work_id)
+                    ).fetchone()[0]
+                else:
+                    ignored_ann = 0
+                    extras = 0
+                work_dict["ignored_announcements"] = ignored_ann
+                work_dict["extras_count"] = extras
+
+                work_dict["new_story_chapters"] = 0
+                work_dict["updated_chapters"] = 0
+                work_dict["translation_pending"] = 0
+                work_dict["tts_pending"] = 0
+                work_dict["latest_source_check"] = work_dict.get("last_synced_at") or "Vừa kiểm tra"
                 catalog.append(work_dict)
         return catalog

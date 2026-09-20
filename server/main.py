@@ -1655,7 +1655,8 @@ def get_novel(novel_id: str,
     if not _may_read(novel, _optional_harvester_or_user(authorization)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tiểu thuyết.")
 
-    chapters = store.list_chapters(novel_id)
+    # Filter out archived chapters (e.g. author announcements) from reader TOC/navigation
+    chapters = [c for c in store.list_chapters(novel_id) if c.state != PublishState.ARCHIVED]
     stamps = _with_job_settings(
         novel.owner_id, store.audio_by_chapter([c.chapter_id for c in chapters]))
     ra: Dict[str, Any] = {

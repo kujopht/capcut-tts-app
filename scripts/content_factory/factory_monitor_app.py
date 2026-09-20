@@ -75,6 +75,7 @@ from scripts.content_factory.pipeline_ui_components import (
     QAReportDialog,
     ImportWorkDialog,
 )
+from scripts.content_factory.discovery_ui import DiscoveryWidget
 
 USAGE_FILE = PROJECT_ROOT / "raw_spool" / "agy_accounts_usage.json"
 SERVER_LIMITS_FILE = PROJECT_ROOT / "raw_spool" / "agy_server_limits.json"
@@ -1638,23 +1639,32 @@ class FactoryMonitorMainWindow(QMainWindow):
         title_lbl.setStyleSheet("font-size: 13px; font-weight: 900; color: #ffffff; letter-spacing: 0.5px;")
         top_bar.addWidget(title_lbl)
 
-        # View Mode Switcher: 3 Core Tabs + 1 Archive Gallery
+        # View Mode Switcher: 5 Core Tabs (Discovery -> Pipeline -> Catalog -> Accounts -> Archive)
+        self.btn_view_discovery = QPushButton("🔍 KHÁM PHÁ (DISCOVERY)")
         self.btn_view_pipeline = QPushButton("📑 PIPELINE NỘI DUNG")
+        self.btn_view_catalog = QPushButton("🌐 DANH MỤC / UPDATE CENTER")
         self.btn_view_accounts = QPushButton("👥 TÀI KHOẢN POOL (14 ACC)")
-        self.btn_view_catalog = QPushButton("🌐 DANH MỤC PRODUCTION")
         self.btn_view_gallery = QPushButton("📚 KHO LƯU TRỮ (0)")
         self.view_btn_group = QButtonGroup(self)
-        for idx, btn in enumerate([self.btn_view_pipeline, self.btn_view_accounts, self.btn_view_catalog, self.btn_view_gallery]):
+        self.view_buttons = [
+            self.btn_view_discovery,
+            self.btn_view_pipeline,
+            self.btn_view_catalog,
+            self.btn_view_accounts,
+            self.btn_view_gallery,
+        ]
+        for idx, btn in enumerate(self.view_buttons):
             btn.setCheckable(True)
             self.view_btn_group.addButton(btn)
             btn.clicked.connect(lambda checked=False, i=idx: self._switch_view(i))
 
-        self.btn_view_pipeline.setChecked(True)
+        self.btn_view_discovery.setChecked(True)
         self._update_view_switch_styles()
 
+        top_bar.addWidget(self.btn_view_discovery)
         top_bar.addWidget(self.btn_view_pipeline)
-        top_bar.addWidget(self.btn_view_accounts)
         top_bar.addWidget(self.btn_view_catalog)
+        top_bar.addWidget(self.btn_view_accounts)
         top_bar.addWidget(self.btn_view_gallery)
 
         # Runner Start / Pause Controller
@@ -1686,24 +1696,28 @@ class FactoryMonitorMainWindow(QMainWindow):
 
         main_layout.addLayout(top_bar)
 
-        # 2. Main Stacked Widget (Tab 1: Pipeline, Tab 2: Accounts, Tab 3: Catalog, Tab 4: Archive)
+        # 2. Main Stacked Widget (Tab 0: Discovery, Tab 1: Pipeline, Tab 2: Catalog, Tab 3: Accounts, Tab 4: Archive)
         self.stack = QStackedWidget()
+
+        # --- TAB 0: DISCOVERY MODE (READ-ONLY CANDIDATE DISCOVERY) ---
+        self.page_discovery = DiscoveryWidget(self)
+        self.stack.addWidget(self.page_discovery)
 
         # --- TAB 1: CONTENT PIPELINE ---
         self.page_pipeline = ContentPipelineWidget(self)
         self.page_pipeline.action_requested.connect(self._handle_pipeline_action)
         self.stack.addWidget(self.page_pipeline)
 
-        # --- TAB 2: ACCOUNT POOL (DYNAMIC ALL CONFIGURED ACCOUNTS) ---
+        # --- TAB 2: PUBLISHED CATALOG / UPDATE CENTER (LIVING NOVEL PRODUCTION) ---
+        self.page_catalog = PublishedCatalogWidget(self)
+        self.page_catalog.refresh_requested.connect(self._refresh_catalog)
+        self.stack.addWidget(self.page_catalog)
+
+        # --- TAB 3: ACCOUNT POOL (DYNAMIC ALL CONFIGURED ACCOUNTS) ---
         self.page_accounts = AccountPoolWidget(self)
         self.page_accounts.sync_requested.connect(self.action_sync_quota)
         self.page_accounts.ram_cleanup_requested.connect(self.action_free_memory)
         self.stack.addWidget(self.page_accounts)
-
-        # --- TAB 3: PUBLISHED CATALOG (LIVING NOVEL PRODUCTION) ---
-        self.page_catalog = PublishedCatalogWidget(self)
-        self.page_catalog.refresh_requested.connect(self._refresh_catalog)
-        self.stack.addWidget(self.page_catalog)
 
         # --- TAB 4: COMPLETED GALLERY (HISTORICAL ARCHIVE) ---
         self.gallery_page = CompletedGalleryWidget(self)
@@ -1810,15 +1824,13 @@ class FactoryMonitorMainWindow(QMainWindow):
                 background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8;
             }
         """
-        for btn in [self.btn_view_pipeline, self.btn_view_accounts, self.btn_view_catalog, self.btn_view_gallery]:
+        for btn in self.view_buttons:
             btn.setStyleSheet(style)
 
     def _switch_view(self, index: int):
         self.stack.setCurrentIndex(index)
-        self.btn_view_pipeline.setChecked(index == 0)
-        self.btn_view_accounts.setChecked(index == 1)
-        self.btn_view_catalog.setChecked(index == 2)
-        self.btn_view_gallery.setChecked(index == 3)
+        for i, btn in enumerate(self.view_buttons):
+            btn.setChecked(i == index)
         self._update_view_switch_styles()
 
     def _handle_pipeline_action(self, action: str, target: str):

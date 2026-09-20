@@ -31,11 +31,14 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from scripts.content_factory.candidate_qualifier import CandidateQualifier, load_qualification_report
+from scripts.content_factory.qualification_models import CandidateQualificationReport
 from scripts.content_factory.discovery_engine import DiscoveryEngine
 from scripts.content_factory.discovery_models import (
     CandidateState,
@@ -95,25 +98,26 @@ class SampleChapterDialog(QDialog):
 
 
 class CandidateDetailDialog(QDialog):
-    """Detailed candidate inspection dialog with metadata, Gemini scores, and economics."""
+    """Detailed candidate inspection dialog with metadata, Gemini scores, economics, and Qualification v1."""
 
     def __init__(self, candidate: DiscoveredCandidate, engine: DiscoveryEngine, parent=None):
         super().__init__(parent)
         self.candidate = candidate
         self.engine = engine
         self.setWindowTitle(f"🔍 Chi Tiết Ứng Viên: {candidate.title}")
-        self.resize(920, 720)
+        self.resize(1060, 780)
         self.setStyleSheet("background-color: #0f172a; color: #f8fafc;")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
 
         # 1. Header Card
         header = QFrame()
-        header.setStyleSheet("background-color: #1e293b; border-radius: 8px; padding: 12px; border: 1px solid #334155;")
+        header.setStyleSheet("background-color: #1e293b; border-radius: 8px; padding: 10px; border: 1px solid #334155;")
         h_layout = QVBoxLayout(header)
-        h_layout.setContentsMargins(10, 10, 10, 10)
+        h_layout.setContentsMargins(8, 8, 8, 8)
+        h_layout.setSpacing(4)
 
         title_lbl = QLabel(f"📖 {candidate.title}")
         title_lbl.setStyleSheet("font-size: 15px; font-weight: 900; color: #38bdf8;")
@@ -130,7 +134,20 @@ class CandidateDetailDialog(QDialog):
 
         layout.addWidget(header)
 
-        # 2. Main Tabbed or Split Details
+        # 2. Main Tabbed Layout
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #334155; background: #0f172a; border-radius: 6px; }
+            QTabBar::tab { background: #1e293b; color: #94a3b8; padding: 8px 18px; font-weight: bold; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 4px; font-size: 12px; }
+            QTabBar::tab:selected { background: #2563eb; color: #ffffff; }
+            QTabBar::tab:hover:!selected { background: #334155; color: #e2e8f0; }
+        """)
+
+        # Tab 1: Overview & Gemini Evaluation
+        tab1_widget = QWidget()
+        t1_layout = QVBoxLayout(tab1_widget)
+        t1_layout.setContentsMargins(4, 4, 4, 4)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Left Column: Synopsis & Metadata
@@ -213,7 +230,7 @@ class CandidateDetailDialog(QDialog):
                 rec_lbl.setStyleSheet("color: #4ade80; background-color: #064e3b; padding: 6px; border-radius: 4px; font-weight: bold; text-align: center;")
                 ec_layout.addWidget(rec_lbl)
         else:
-            ec_layout.addWidget(QLabel("Chưa thực hiện đánh giá ngữ nghĩa với Gemini. Bấm 'Đánh Giá Gemini' để chấm điểm."))
+            ec_layout.addWidget(QLabel("Chưa thực hiện đánh giá ngữ nghĩa với Gemini. Bấm 'Đánh Giá Lại Gemini' để chấm điểm."))
 
         right_layout.addWidget(eval_card)
 
@@ -233,29 +250,54 @@ class CandidateDetailDialog(QDialog):
         right_layout.addWidget(econ_card)
 
         splitter.addWidget(right_col)
-        splitter.setSizes([450, 450])
-        layout.addWidget(splitter, stretch=1)
+        splitter.setSizes([480, 480])
+        t1_layout.addWidget(splitter)
+        self.tabs.addTab(tab1_widget, "📋 Tổng Quan & Đánh Giá Tiềm Năng")
+
+        # Tab 2: Deep Qualification (Qualification v1)
+        self.qual_tab_scroll = QScrollArea()
+        self.qual_tab_scroll.setWidgetResizable(True)
+        self.qual_tab_scroll.setStyleSheet("border: none; background: transparent;")
+        self.qual_content_widget = QWidget()
+        self.qual_content_layout = QVBoxLayout(self.qual_content_widget)
+        self.qual_content_layout.setContentsMargins(6, 6, 6, 6)
+        self.qual_content_layout.setSpacing(10)
+        self.qual_tab_scroll.setWidget(self.qual_content_widget)
+
+        self.tabs.addTab(self.qual_tab_scroll, "🎖️ Thẩm Định Chi Tiết (Qualification v1)")
+        layout.addWidget(self.tabs, stretch=1)
+
+        # Render qualification content
+        self._populate_qualification_tab()
 
         # 3. Action Bar
         action_bar = QHBoxLayout()
         action_bar.setContentsMargins(0, 4, 0, 0)
         action_bar.setSpacing(10)
 
-        self.btn_sample = QPushButton("📖 Xem Thử Chương 1 (Sample Chapter)")
+        self.btn_sample = QPushButton("📖 Xem Thử Chương 1 (Sample)")
         self.btn_sample.setStyleSheet("""
-            QPushButton { background-color: #1e3a8a; color: #93c5fd; border: 1px solid #3b82f6; padding: 8px 16px; font-weight: bold; border-radius: 4px; }
+            QPushButton { background-color: #1e3a8a; color: #93c5fd; border: 1px solid #3b82f6; padding: 8px 14px; font-weight: bold; border-radius: 4px; }
             QPushButton:hover { background-color: #1d4ed8; color: #ffffff; }
         """)
         self.btn_sample.clicked.connect(self._fetch_sample)
         action_bar.addWidget(self.btn_sample)
 
-        self.btn_eval = QPushButton("🤖 Đánh Giá Lại Bằng Gemini")
+        self.btn_eval = QPushButton("🤖 Đánh Giá Lại Gemini")
         self.btn_eval.setStyleSheet("""
-            QPushButton { background-color: #854d0e; color: #fef08a; border: 1px solid #eab308; padding: 8px 16px; font-weight: bold; border-radius: 4px; }
+            QPushButton { background-color: #854d0e; color: #fef08a; border: 1px solid #eab308; padding: 8px 14px; font-weight: bold; border-radius: 4px; }
             QPushButton:hover { background-color: #a16207; color: #ffffff; }
         """)
         self.btn_eval.clicked.connect(self._run_eval)
         action_bar.addWidget(self.btn_eval)
+
+        self.btn_qualify = QPushButton("🎖️ Chạy Thẩm Định (Qualification)")
+        self.btn_qualify.setStyleSheet("""
+            QPushButton { background-color: #047857; color: #a7f3d0; border: 1px solid #10b981; padding: 8px 16px; font-weight: bold; border-radius: 4px; }
+            QPushButton:hover { background-color: #059669; color: #ffffff; }
+        """)
+        self.btn_qualify.clicked.connect(self._run_qualification)
+        action_bar.addWidget(self.btn_qualify)
 
         action_bar.addStretch()
 
@@ -269,6 +311,216 @@ class CandidateDetailDialog(QDialog):
 
         layout.addLayout(action_bar)
 
+    def _populate_qualification_tab(self):
+        """Builds or refreshes the detailed qualification report view inside Tab 2."""
+        while self.qual_content_layout.count():
+            item = self.qual_content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        report = load_qualification_report(self.candidate.source_work_id)
+        if not report:
+            empty_frame = QFrame()
+            empty_frame.setStyleSheet("background-color: #1e293b; border-radius: 8px; padding: 30px; border: 1px dashed #475569;")
+            ef_layout = QVBoxLayout(empty_frame)
+            ef_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            lbl_icon = QLabel("🛡️")
+            lbl_icon.setStyleSheet("font-size: 36px;")
+            lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            ef_layout.addWidget(lbl_icon)
+
+            lbl_msg = QLabel(
+                "<b>Chưa có báo cáo thẩm định chuyên sâu cho tác phẩm này.</b><br><br>"
+                "Bấm nút <b>'🎖️ Chạy Thẩm Định (Qualification)'</b> bên dưới để:<br>"
+                "• Lấy 3 chương mẫu độc lập (Chương đầu, Chương giữa, Chương mới nhất).<br>"
+                "• Kiểm tra chất lượng văn phong, phân đoạn, lời thoại, hiện tượng lặp AI.<br>"
+                "• Xác thực độ sạch bộ bóc tách crawler (loại trừ 100% comment, footer, navigation).<br>"
+                "• Dịch thử 600–1000 từ với từ điển Naruto chuyên biệt.<br>"
+                "• Tính toán kích thước, thời lượng TTS và thời gian sản xuất thực tế."
+            )
+            lbl_msg.setStyleSheet("font-size: 12px; color: #cbd5e1; line-height: 1.6;")
+            lbl_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            ef_layout.addWidget(lbl_msg)
+
+            self.qual_content_layout.addWidget(empty_frame)
+            return
+
+        # 1. Flag Badges Banner
+        flags_card = QFrame()
+        flags_card.setStyleSheet("background-color: #1e293b; border-radius: 8px; padding: 12px; border: 1px solid #334155;")
+        fc_layout = QVBoxLayout(flags_card)
+        fc_layout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        flags = report.factual_flags
+
+        crawler_badge = QLabel("✅ CRAWLER COMPATIBLE" if flags.get("CRAWLER_COMPATIBLE") else "❌ CRAWLER DEFECT")
+        crawler_badge.setStyleSheet(
+            "background-color: #064e3b; color: #34d399; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+            if flags.get("CRAWLER_COMPATIBLE") else "background-color: #7f1d1d; color: #f87171; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+        )
+        top_row.addWidget(crawler_badge)
+
+        trans_badge = QLabel("✅ TRANSLATION OK" if flags.get("TRANSLATION_QUALITY_OK") else "⚠️ TRANSLATION NEEDS EDIT")
+        trans_badge.setStyleSheet(
+            "background-color: #064e3b; color: #34d399; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+            if flags.get("TRANSLATION_QUALITY_OK") else "background-color: #78350f; color: #fde047; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+        )
+        top_row.addWidget(trans_badge)
+
+        gloss_badge = QLabel(f"GLOSSARY: {flags.get('GLOSSARY_COMPLEXITY', 'HIGH')}")
+        gloss_badge.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-weight: bold; padding: 4px 8px; border-radius: 4px;")
+        top_row.addWidget(gloss_badge)
+
+        notes_badge = QLabel(f"AUTHOR NOTES: {flags.get('AUTHOR_NOTE_DENSITY', 'LOW')}")
+        notes_badge.setStyleSheet("background-color: #312e81; color: #c7d2fe; font-weight: bold; padding: 4px 8px; border-radius: 4px;")
+        top_row.addWidget(notes_badge)
+
+        format_badge = QLabel(f"FORMAT: {flags.get('FORMAT_COMPLEXITY', 'LOW')}")
+        format_badge.setStyleSheet("background-color: #1e293b; color: #94a3b8; font-weight: bold; padding: 4px 8px; border-radius: 4px; border: 1px solid #475569;")
+        top_row.addWidget(format_badge)
+
+        scale_badge = QLabel(f"SCALE: {flags.get('PRODUCTION_SCALE', 'MEDIUM')}")
+        scale_badge.setStyleSheet("background-color: #701a75; color: #f0abfc; font-weight: bold; padding: 4px 8px; border-radius: 4px;")
+        top_row.addWidget(scale_badge)
+
+        top_row.addStretch()
+
+        time_lbl = QLabel(f"Thẩm định: {report.qualified_at[:19] if report.qualified_at else 'Hoàn tất'}")
+        time_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        top_row.addWidget(time_lbl)
+
+        fc_layout.addLayout(top_row)
+        self.qual_content_layout.addWidget(flags_card)
+
+        # 2. Inspected 3 Sample Chapters Table
+        tbl_lbl = QLabel("📚 KẾT QUẢ KIỂM TRA 3 CHƯƠNG MẪU (ĐẦU - GIỮA - MỚI NHẤT)")
+        tbl_lbl.setStyleSheet("font-size: 11px; font-weight: bold; color: #38bdf8; margin-top: 4px;")
+        self.qual_content_layout.addWidget(tbl_lbl)
+
+        table = QTableWidget()
+        table.setColumnCount(7)
+        table.setHorizontalHeaderLabels([
+            "Thứ Tự", "Tiêu Đề Chương", "Số Từ", "Số Đoạn", "Từ/Đoạn", "Thoại %", "Crawler QA"
+        ])
+        table.setRowCount(len(report.inspected_chapters))
+        table.setStyleSheet("""
+            QTableWidget { background-color: #111827; border: 1px solid #374151; border-radius: 6px; }
+            QHeaderView::section { background-color: #1e293b; color: #94a3b8; font-weight: bold; padding: 6px; border: none; }
+        """)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.verticalHeader().setVisible(False)
+        table.setMinimumHeight(130)
+
+        for row, ch in enumerate(report.inspected_chapters):
+            table.setItem(row, 0, QTableWidgetItem(f"#{ch.order}"))
+            table.setItem(row, 1, QTableWidgetItem(ch.title))
+            table.setItem(row, 2, QTableWidgetItem(f"{ch.word_count:,}"))
+            table.setItem(row, 3, QTableWidgetItem(str(ch.paragraph_count)))
+            table.setItem(row, 4, QTableWidgetItem(f"{ch.avg_paragraph_words:.1f}"))
+            table.setItem(row, 5, QTableWidgetItem(f"{ch.dialogue_ratio:.1f}%"))
+            qa_str = "✅ Sạch (Không rác)" if ch.crawler_clean else "❌ Phát hiện rác"
+            table.setItem(row, 6, QTableWidgetItem(qa_str))
+
+        self.qual_content_layout.addWidget(table)
+
+        # 3. Writing Quality & Realistic Scale
+        mid_row = QHBoxLayout()
+        mid_row.setSpacing(10)
+
+        # Writing Quality Card
+        wq_card = QFrame()
+        wq_card.setStyleSheet("background-color: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;")
+        wq_layout = QVBoxLayout(wq_card)
+        wq_layout.setSpacing(5)
+
+        lbl_wq = QLabel("✍️ PHÂN TÍCH CHẤT LƯỢNG VĂN PHONG")
+        lbl_wq.setStyleSheet("font-size: 11px; font-weight: bold; color: #facc15;")
+        wq_layout.addWidget(lbl_wq)
+
+        wq = report.writing_quality
+        wq_layout.addWidget(QLabel(f"• Nhịp điệu văn phong: <b>{wq.prose_coherence}</b>"))
+        wq_layout.addWidget(QLabel(f"• Tự nhiên lời thoại: <b>{wq.dialogue_quality}</b>"))
+        wq_layout.addWidget(QLabel(f"• Trình độ ngữ pháp: <b>{wq.grammar_level}</b>"))
+        wq_layout.addWidget(QLabel(f"• Lặp từ/cấu trúc AI: <b>{'Không' if not wq.ai_repetition_detected else 'Có'}</b>"))
+        wq_layout.addWidget(QLabel(f"• Nhất quán ngôi kể: <b>{wq.pov_consistency}</b>"))
+        wq_layout.addWidget(QLabel(f"• Đánh giá tóm tắt: <i>{wq.summary_observations}</i>"))
+        mid_row.addWidget(wq_card, stretch=1)
+
+        # Realistic Production Scale Card
+        scale_card = QFrame()
+        scale_card.setStyleSheet("background-color: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;")
+        sc_layout = QVBoxLayout(scale_card)
+        sc_layout.setSpacing(5)
+
+        lbl_sc = QLabel("🏭 ƯỚC TÍNH QUY MÔ SẢN XUẤT THỰC TẾ")
+        lbl_sc.setStyleSheet("font-size: 11px; font-weight: bold; color: #38bdf8;")
+        sc_layout.addWidget(lbl_sc)
+
+        sc = report.scale_estimate
+        sc_layout.addWidget(QLabel(f"• Trung bình đo từ 3 mẫu: <b>{sc.sampled_avg_words_per_chapter:,} từ/chương</b>"))
+        sc_layout.addWidget(QLabel(f"• Tổng từ tiếng Anh: <b>~{sc.estimated_total_source_words:,} từ</b> ({sc.total_chapters} chương)"))
+        sc_layout.addWidget(QLabel(f"• Ước tính từ tiếng Việt (x1.25): <b>~{sc.estimated_vietnamese_words:,} từ</b>"))
+        sc_layout.addWidget(QLabel(f"• Thời lượng Audio TTS: <b>~{sc.estimated_tts_hours:.1f} giờ</b> (150 wpm)"))
+        sc_layout.addWidget(QLabel(f"• Dung lượng Audio (64k MP3): <b>~{sc.estimated_storage_mb:.1f} MB</b>"))
+        sc_layout.addWidget(QLabel(f"• Tiến độ nhà máy (~60 ch/ngày): <b>~{sc.approximate_processing_days:.1f} ngày làm việc</b>"))
+        mid_row.addWidget(scale_card, stretch=1)
+
+        self.qual_content_layout.addLayout(mid_row)
+
+        # 4. Translation Trial Excerpt & Result
+        if report.translation_trial:
+            tt = report.translation_trial
+            tt_frame = QFrame()
+            tt_frame.setStyleSheet("background-color: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;")
+            tt_layout = QVBoxLayout(tt_frame)
+            tt_layout.setSpacing(6)
+
+            tt_header = QHBoxLayout()
+            lbl_tt_title = QLabel(f"🧪 DỊCH THỬ NGHIỆM ĐỘC LẬP: {tt.source_chapter_title} ({tt.source_excerpt_words} từ mẫu)")
+            lbl_tt_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #a7f3d0;")
+            tt_header.addWidget(lbl_tt_title)
+
+            tt_badge1 = QLabel(f"Tự nhiên: {tt.vietnamese_naturalness}/10")
+            tt_badge1.setStyleSheet("background-color: #064e3b; color: #34d399; font-weight: bold; padding: 2px 6px; border-radius: 4px;")
+            tt_header.addWidget(tt_badge1)
+
+            tt_badge2 = QLabel(f"Yêu cầu hiệu đính: {tt.manual_editing_requirement}")
+            tt_badge2.setStyleSheet("background-color: #1e3a8a; color: #93c5fd; font-weight: bold; padding: 2px 6px; border-radius: 4px;")
+            tt_header.addWidget(tt_badge2)
+
+            tt_header.addStretch()
+            tt_layout.addLayout(tt_header)
+
+            trial_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+            txt_en = QTextEdit()
+            txt_en.setReadOnly(True)
+            txt_en.setPlainText(tt.source_excerpt)
+            txt_en.setStyleSheet("background-color: #111827; color: #cbd5e1; font-size: 11px; border: 1px solid #374151; border-radius: 4px; padding: 6px;")
+            trial_splitter.addWidget(txt_en)
+
+            txt_vi = QTextEdit()
+            txt_vi.setReadOnly(True)
+            txt_vi.setPlainText(tt.translated_vietnamese)
+            txt_vi.setStyleSheet("background-color: #111827; color: #e2e8f0; font-size: 11px; border: 1px solid #374151; border-radius: 4px; padding: 6px;")
+            trial_splitter.addWidget(txt_vi)
+
+            trial_splitter.setSizes([450, 450])
+            trial_splitter.setMinimumHeight(240)
+            tt_layout.addWidget(trial_splitter)
+
+            # Glossary used
+            if tt.isolated_glossary:
+                sample_terms = list(tt.isolated_glossary.items())[:12]
+                terms_str = " | ".join([f"{k} → {v}" for k, v in sample_terms])
+                lbl_gloss = QLabel(f"📖 <b>Từ điển mẫu ({len(tt.isolated_glossary)} thuật ngữ):</b> {terms_str}...")
+                lbl_gloss.setStyleSheet("font-size: 10px; color: #94a3b8;")
+                tt_layout.addWidget(lbl_gloss)
+
+            self.qual_content_layout.addWidget(tt_frame)
+
     def _fetch_sample(self):
         self.btn_sample.setEnabled(False)
         self.btn_sample.setText("Đang tải chương 1...")
@@ -281,7 +533,7 @@ class CandidateDetailDialog(QDialog):
             QMessageBox.warning(self, "Lỗi", f"Không thể lấy chương mẫu: {e}")
         finally:
             self.btn_sample.setEnabled(True)
-            self.btn_sample.setText("📖 Xem Thử Chương 1 (Sample Chapter)")
+            self.btn_sample.setText("📖 Xem Thử Chương 1 (Sample)")
 
     def _run_eval(self):
         self.btn_eval.setEnabled(False)
@@ -296,7 +548,44 @@ class CandidateDetailDialog(QDialog):
             QMessageBox.warning(self, "Lỗi", f"Không thể đánh giá: {e}")
         finally:
             self.btn_eval.setEnabled(True)
-            self.btn_eval.setText("🤖 Đánh Giá Lại Bằng Gemini")
+            self.btn_eval.setText("🤖 Đánh Giá Lại Gemini")
+
+    def _run_qualification(self):
+        reply = QMessageBox.question(
+            self,
+            "Xác nhận thẩm định",
+            f"Chạy thẩm định chuyên sâu (Qualification v1) cho '{self.candidate.title}'?\n\n"
+            "Hệ thống sẽ lấy 3 chương mẫu (đầu, giữa, cuối), kiểm tra độ sạch bóc tách crawler, "
+            "dịch thử một trích đoạn 600–1000 từ với từ điển Naruto độc lập, và đo đạc quy mô thực tế.\n\n"
+            "Chế độ READ-ONLY: Không crawl toàn bộ truyện, không ghi cơ sở dữ liệu production, không tạo TTS.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.btn_qualify.setEnabled(False)
+        self.btn_qualify.setText("Đang thẩm định...")
+        QApplication.processEvents()
+
+        try:
+            qualifier = CandidateQualifier()
+            report = qualifier.qualify(self.candidate.source_work_id, self.candidate.source_platform)
+            self._populate_qualification_tab()
+            self.tabs.setCurrentIndex(1)
+            QMessageBox.information(
+                self,
+                "Thẩm Định Hoàn Tất",
+                f"Thẩm định thành công cho tác phẩm {self.candidate.title}!\n\n"
+                f"• Kết quả crawler: {'✅ Sạch' if report.factual_flags.get('CRAWLER_COMPATIBLE') else '❌ Lỗi'}\n"
+                f"• Dịch thử nghiệm: {report.translation_trial.source_excerpt_words if report.translation_trial else 0} từ (Đạt)\n"
+                f"• Quy mô sản xuất: {report.factual_flags.get('PRODUCTION_SCALE')}",
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi thẩm định", f"Không thể hoàn tất thẩm định: {e}")
+        finally:
+            self.btn_qualify.setEnabled(True)
+            self.btn_qualify.setText("🎖️ Chạy Thẩm Định (Qualification)")
+
 
 
 class FilterConfigDialog(QDialog):

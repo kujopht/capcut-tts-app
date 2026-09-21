@@ -301,10 +301,8 @@ const EDITORIAL_UPDATES: EditorialUpdate[] = [
  */
 function HomeHeroShowcase({
   novels,
-  posts,
 }: {
   novels: Novel[];
-  posts: Post[];
 }) {
   const danhSachTruyen = novels.slice(0, 4);
 
@@ -381,65 +379,39 @@ function HomeHeroShowcase({
           <span className="showcase-divider-gem" />
         </div>
 
-        {/* Cột 2: Cập nhật mới & Tiêu điểm nội dung (Công khai, trung thực) */}
+        {/* Cột 2: Cập nhật mới — Thông báo biên tập & Điểm tin hệ thống công khai (không mượn bài viết cộng đồng) */}
         <div className="showcase-col">
           <div className="showcase-col-head">
             <div className="showcase-col-title">
               <IconSparkles size={16} />
               <strong>Cập nhật mới</strong>
             </div>
-            <Link href="/community" className="showcase-more" prefetch={false}>
-              Cộng đồng →
+            <Link href="/library" className="showcase-more" prefetch={false}>
+              Khám phá →
             </Link>
           </div>
           <div className="showcase-scroll-list">
-            {posts.length > 0 ? (
-              posts.slice(0, 3).map((p) => (
-                <Link
-                  key={p.post_id}
-                  href={`/posts/${p.post_id}`}
-                  className="showcase-item showcase-post-item"
-                  prefetch={false}
-                >
-                  <Avatar
-                    name={p.author?.display_name || "Thành viên"}
-                    avatarUrl={p.author?.avatar_url}
-                    className="showcase-avatar"
-                  />
-                  <div className="showcase-item-info">
-                    <div className="showcase-post-author">
-                      <strong className="clamp-1">{p.author?.display_name || "Thành viên"}</strong>
-                      {(p.author as any)?.role === "admin" ? (
-                        <span className="badge badge-brand badge-sm">Admin</span>
-                      ) : null}
-                    </div>
-                    <p className="showcase-post-snippet clamp-2">{p.text}</p>
+            {EDITORIAL_UPDATES.map((u) => (
+              <Link
+                key={u.id}
+                href={u.href}
+                className="showcase-item showcase-post-item"
+                prefetch={false}
+              >
+                <span className="showcase-icon-box" aria-hidden="true">
+                  {u.icon}
+                </span>
+                <div className="showcase-item-info">
+                  <div className="showcase-post-author">
+                    <strong className="clamp-1 showcase-update-title">
+                      {u.title}
+                    </strong>
+                    <span className="badge badge-brand badge-sm">{u.tag}</span>
                   </div>
-                </Link>
-              ))
-            ) : (
-              EDITORIAL_UPDATES.map((u) => (
-                <Link
-                  key={u.id}
-                  href={u.href}
-                  className="showcase-item showcase-post-item"
-                  prefetch={false}
-                >
-                  <span className="showcase-icon-box" aria-hidden="true">
-                    {u.icon}
-                  </span>
-                  <div className="showcase-item-info">
-                    <div className="showcase-post-author">
-                      <strong className="clamp-1 showcase-update-title">
-                        {u.title}
-                      </strong>
-                      <span className="badge badge-brand badge-sm">{u.tag}</span>
-                    </div>
-                    <p className="showcase-post-snippet clamp-2">{u.snippet}</p>
-                  </div>
-                </Link>
-              ))
-            )}
+                  <p className="showcase-post-snippet clamp-2">{u.snippet}</p>
+                </div>
+              </Link>
+            ))}
           </div>
         </div>
       </div>
@@ -752,7 +724,7 @@ export default function HomePage() {
     ma trang nay tu dat ra la KHONG duoc lam (xem dau tep). Phai an CA khoi
     bao ngoai khi khong co gi de hien, khong chi tung ke ben trong.
   */
-  const coKeThuHai = !loading && (animationSeries.length > 0 || communityPosts.length > 0);
+  const coKeThuHai = !loading;
   /* Cung nguyen tac voi `coKeThuHai`: khong dat cho cho mot cot rong. */
   const coBangVang = !loading && bangVangTuan.length > 0;
 
@@ -775,7 +747,7 @@ export default function HomePage() {
           <Hero daDangNhap={daDangNhap} />
           <DaiThanhVien gamification={data?.gamification ?? null} />
         </div>
-        <HomeHeroShowcase novels={novels} posts={communityPosts} />
+        <HomeHeroShowcase novels={novels} />
       </div>
 
       {/*
@@ -928,10 +900,10 @@ export default function HomePage() {
       ) : null}
 
       {/*
-        Ke "Cộng đồng đang nói gì" (Phan 10) — `/api/feed` cong khai that,
-        khong doi dang nhap. Rong thi AN het, khong bia noi dung.
+        Ke "Cộng đồng đang nói gì" — thảo luận cộng đồng công khai.
+        Nếu trống: hiển thị trạng thái rỗng trung thực, không mượn nội dung hệ thống.
       */}
-      {!loading && communityPosts.length > 0 ? (
+      {!loading ? (
         <section className="home-secondary-card stack-2" aria-labelledby="home-cong-dong">
           <div className="section-head">
             <h2 className="section-title section-title-icon" id="home-cong-dong">
@@ -941,11 +913,23 @@ export default function HomePage() {
               Xem cộng đồng <span aria-hidden="true">→</span>
             </Link>
           </div>
-          <div className="community-preview-grid">
-            {communityPosts.map((bai) => (
-              <TheCongDong key={bai.post_id} bai={bai} />
-            ))}
-          </div>
+          {communityPosts.length > 0 ? (
+            <div className="community-preview-grid">
+              {communityPosts.map((bai) => (
+                <TheCongDong key={bai.post_id} bai={bai} />
+              ))}
+            </div>
+          ) : (
+            <KeTrongGon
+              icon="💬"
+              text="Chưa có thảo luận mới từ cộng đồng."
+              action={
+                <Link href="/community" className="btn btn-sm btn-secondary" prefetch={false}>
+                  Mở chủ đề đầu tiên →
+                </Link>
+              }
+            />
+          )}
         </section>
       ) : null}
       </div>

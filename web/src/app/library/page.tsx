@@ -484,7 +484,7 @@ function LibraryContent() {
                             novelId={n.novel_id}
                             title={n.title}
                             coverUrl={n.cover_url}
-                            size="card"
+                            size="portrait"
                           />
                           <span className={`lib-card-status-badge status-${n.status}`}>
                             {NHAN_TRANG_THAI[n.status] ?? n.status}
@@ -772,7 +772,7 @@ function LibraryContent() {
                                 novelId={n.novel_id}
                                 title={n.title}
                                 coverUrl={n.cover_url}
-                                size="card"
+                                size="portrait"
                               />
                               <span className={`lib-card-status-badge status-${n.status}`}>
                                 {NHAN_TRANG_THAI[n.status] ?? n.status}

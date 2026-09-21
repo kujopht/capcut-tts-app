@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -46,6 +46,22 @@ from scripts.content_factory.production_diff_engine import ProductionDiffEngine,
 from scripts.content_factory.release_packager import ReleasePackager, ReleaseManifest
 from scripts.content_factory.glossary_manager import GlossaryManager
 from scripts.content_factory.publish_quality_gate import QualityGateResult, CheckResult, EntryClassification
+from scripts.content_factory.cover_resolver import (
+    stage_beam_cover,
+    stage_source_cover,
+    approve_cover,
+    reject_cover,
+    get_cover_state,
+    build_cover_prompt,
+    STATUS_APPROVED,
+    STATUS_STAGED,
+    STATUS_PENDING,
+    STATUS_REJECTED,
+    PROVIDER_BEAM,
+    PROVIDER_SOURCE,
+    PROVIDER_PROCEDURAL,
+)
+from scripts.beam_credential import resolve_beam_token
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -381,6 +397,345 @@ class QualityGateDialog(QDialog):
         layout.addLayout(b_bar)
 
 
+class CoverManagerDialog(QDialog):
+    """Cover Management Dialog for Content Factory v2.
+
+    Features:
+    - Side-by-side 2:3 portrait preview (Approved vs Staged Candidate).
+    - Provider indicator: Source / Beam Cloud Animagine XL / Procedural Fallback.
+    - Generation status: Pending / Generating / Staged / Approved / Rejected.
+    - Prompt preview and seed info with tweakable prompt editor.
+    - Actions: [Generate Cover], [Regenerate], [Use Source Cover], [Approve Cover], [Reject Generated Cover].
+    - Guardrails: Never leaks credentials/tokens; confirms before replacing an approved cover.
+    """
+
+    def __init__(
+        self,
+        work_id: str,
+        title: str = "",
+        fandom: str = "",
+        genres: Optional[List[str]] = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.work_id = str(work_id).strip()
+        self.title = title or f"Tác phẩm {self.work_id}"
+        self.fandom = fandom or "Fanfic"
+        self.genres = genres or []
+
+        self.setWindowTitle(f"🎨 Quản Lý Bìa Truyện — {self.title} ({self.work_id})")
+        self.resize(800, 680)
+        self.setStyleSheet("background-color: #0b1120; color: #f8fafc;")
+
+        self._init_ui()
+        self._refresh_state()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        # 1. Header Card
+        hdr = QFrame()
+        hdr.setStyleSheet("background-color: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 10px;")
+        hdr_layout = QVBoxLayout(hdr)
+        hdr_layout.setSpacing(4)
+
+        lbl_top = QLabel(f"📖 <b>{self.title}</b> <span style='color: #94a3b8;'>(Work ID: {self.work_id} | Fandom: {self.fandom})</span>")
+        lbl_top.setStyleSheet("font-size: 13px; color: #38bdf8;")
+        hdr_layout.addWidget(lbl_top)
+
+        # Token status indicator (WITHOUT leaking token)
+        has_token = bool(resolve_beam_token())
+        token_txt = (
+            "<span style='color: #4ade80; font-weight: bold;'>🔑 Beam Cloud Token: Đã kết nối (Credential Broker)</span>"
+            if has_token
+            else "<span style='color: #facc15; font-weight: bold;'>⚠️ Beam Cloud Token: Chưa cấu hình (Dùng Procedural Fallback)</span>"
+        )
+        self.lbl_token_status = QLabel(token_txt)
+        self.lbl_token_status.setStyleSheet("font-size: 11px;")
+        hdr_layout.addWidget(self.lbl_token_status)
+
+        self.lbl_meta_bar = QLabel("Đang nạp trạng thái bìa...")
+        self.lbl_meta_bar.setStyleSheet("font-size: 11px; color: #cbd5e1;")
+        hdr_layout.addWidget(self.lbl_meta_bar)
+
+        layout.addWidget(hdr)
+
+        # 2. Dual-Column Cover Preview (Canonical 2:3 Portrait - 160x240)
+        preview_frame = QFrame()
+        preview_frame.setStyleSheet("background-color: #0f172a; border: 1px solid #1e293b; border-radius: 6px; padding: 10px;")
+        prev_layout = QHBoxLayout(preview_frame)
+        prev_layout.setSpacing(20)
+
+        # Left: Current Approved Cover
+        col_appr = QVBoxLayout()
+        col_appr.setAlignment(Qt.AlignCenter)
+        lbl_appr_head = QLabel("<b>Bìa Hiện Tại (Approved)</b>")
+        lbl_appr_head.setStyleSheet("color: #4ade80; font-size: 11px; margin-bottom: 4px;")
+        lbl_appr_head.setAlignment(Qt.AlignCenter)
+        col_appr.addWidget(lbl_appr_head)
+
+        self.img_approved = QLabel()
+        self.img_approved.setFixedSize(160, 240)
+        self.img_approved.setAlignment(Qt.AlignCenter)
+        self.img_approved.setStyleSheet("background-color: #070a12; border: 2px dashed #334155; border-radius: 6px; color: #64748b; font-size: 11px;")
+        self.img_approved.setText("Chưa có bìa duyệt")
+        col_appr.addWidget(self.img_approved)
+
+        self.lbl_approved_desc = QLabel("Chưa được phê duyệt")
+        self.lbl_approved_desc.setStyleSheet("color: #94a3b8; font-size: 10px; margin-top: 4px;")
+        self.lbl_approved_desc.setAlignment(Qt.AlignCenter)
+        col_appr.addWidget(self.lbl_approved_desc)
+        prev_layout.addLayout(col_appr)
+
+        # Right: Staged Candidate Cover
+        col_staged = QVBoxLayout()
+        col_staged.setAlignment(Qt.AlignCenter)
+        lbl_staged_head = QLabel("<b>Bìa Đang Chờ (Staged Candidate)</b>")
+        lbl_staged_head.setStyleSheet("color: #38bdf8; font-size: 11px; margin-bottom: 4px;")
+        lbl_staged_head.setAlignment(Qt.AlignCenter)
+        col_staged.addWidget(lbl_staged_head)
+
+        self.img_staged = QLabel()
+        self.img_staged.setFixedSize(160, 240)
+        self.img_staged.setAlignment(Qt.AlignCenter)
+        self.img_staged.setStyleSheet("background-color: #070a12; border: 2px solid #0284c7; border-radius: 6px; color: #64748b; font-size: 11px;")
+        self.img_staged.setText("Chưa có ứng viên")
+        col_staged.addWidget(self.img_staged)
+
+        self.lbl_staged_desc = QLabel("Sẵn sàng tạo mới")
+        self.lbl_staged_desc.setStyleSheet("color: #94a3b8; font-size: 10px; margin-top: 4px;")
+        self.lbl_staged_desc.setAlignment(Qt.AlignCenter)
+        col_staged.addWidget(self.lbl_staged_desc)
+        prev_layout.addLayout(col_staged)
+
+        layout.addWidget(preview_frame)
+
+        # 3. Prompt Preview & Customization
+        prompt_frame = QFrame()
+        prompt_frame.setStyleSheet("background-color: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 10px;")
+        p_layout = QVBoxLayout(prompt_frame)
+        p_layout.setSpacing(6)
+
+        lbl_p_title = QLabel("📝 <b>Prompt Sinh Ảnh (Animagine XL 4.0 / Procedural Fallback):</b>")
+        lbl_p_title.setStyleSheet("font-size: 11px; color: #facc15;")
+        p_layout.addWidget(lbl_p_title)
+
+        pos_prompt, _ = build_cover_prompt(self.title, self.fandom, self.genres)
+        self.txt_prompt = QTextEdit()
+        self.txt_prompt.setPlainText(pos_prompt)
+        self.txt_prompt.setFixedHeight(65)
+        self.txt_prompt.setStyleSheet("background-color: #090d16; border: 1px solid #475569; border-radius: 4px; color: #f8fafc; font-size: 10.5px;")
+        p_layout.addWidget(self.txt_prompt)
+
+        # Seed & options row
+        opt_row = QHBoxLayout()
+        opt_row.addWidget(QLabel("Seed:"))
+        self.input_seed = QLineEdit("42")
+        self.input_seed.setFixedWidth(100)
+        self.input_seed.setStyleSheet("background-color: #090d16; border: 1px solid #475569; border-radius: 4px; color: #f8fafc; font-size: 10.5px; padding: 3px 6px;")
+        opt_row.addWidget(self.input_seed)
+
+        lbl_ratio = QLabel("Tỷ lệ: <b>2:3 Portrait (832x1216)</b> | Chuẩn: <b>Không text, Không watermark</b>")
+        lbl_ratio.setStyleSheet("color: #94a3b8; font-size: 10px; margin-left: 10px;")
+        opt_row.addWidget(lbl_ratio)
+        opt_row.addStretch()
+
+        p_layout.addLayout(opt_row)
+        layout.addWidget(prompt_frame)
+
+        # 4. Action Buttons Bar
+        act_box = QHBoxLayout()
+        act_box.setSpacing(8)
+
+        self.btn_gen = QPushButton("🎨 Tạo Bìa (Generate)")
+        self.btn_gen.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; padding: 7px 14px; border-radius: 4px; font-size: 11px;")
+        self.btn_gen.clicked.connect(self._on_generate)
+        act_box.addWidget(self.btn_gen)
+
+        self.btn_regen = QPushButton("🔄 Tạo Lại (Regenerate)")
+        self.btn_regen.setStyleSheet("background-color: #4f46e5; color: white; font-weight: bold; padding: 7px 12px; border-radius: 4px; font-size: 11px;")
+        self.btn_regen.clicked.connect(self._on_regenerate)
+        act_box.addWidget(self.btn_regen)
+
+        self.btn_source = QPushButton("📥 Dùng Bìa Gốc (Source)")
+        self.btn_source.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-weight: bold; padding: 7px 12px; border-radius: 4px; font-size: 11px; border: 1px solid #334155;")
+        self.btn_source.clicked.connect(self._on_use_source)
+        act_box.addWidget(self.btn_source)
+
+        self.btn_approve = QPushButton("✅ Phê Duyệt (Approve)")
+        self.btn_approve.setStyleSheet("background-color: #047857; color: white; font-weight: bold; padding: 7px 14px; border-radius: 4px; font-size: 11px;")
+        self.btn_approve.clicked.connect(self._on_approve)
+        act_box.addWidget(self.btn_approve)
+
+        self.btn_reject = QPushButton("❌ Từ Chối (Reject)")
+        self.btn_reject.setStyleSheet("background-color: #b91c1c; color: white; font-weight: bold; padding: 7px 12px; border-radius: 4px; font-size: 11px;")
+        self.btn_reject.clicked.connect(self._on_reject)
+        act_box.addWidget(self.btn_reject)
+
+        act_box.addStretch()
+
+        btn_close = QPushButton("Đóng")
+        btn_close.setStyleSheet("background-color: #334155; color: white; padding: 7px 16px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        btn_close.clicked.connect(self.accept)
+        act_box.addWidget(btn_close)
+
+        layout.addLayout(act_box)
+
+    def _refresh_state(self):
+        state = get_cover_state(self.work_id)
+
+        # Update approved preview
+        if state["has_approved"] and state.get("approved_path"):
+            pix = QPixmap(state["approved_path"])
+            if not pix.isNull():
+                self.img_approved.setPixmap(pix.scaled(160, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                self.lbl_approved_desc.setText(f"Đã duyệt (cover.jpg)")
+                self.lbl_approved_desc.setStyleSheet("color: #4ade80; font-size: 10px; margin-top: 4px;")
+        else:
+            self.img_approved.clear()
+            self.img_approved.setText("Chưa có bìa duyệt")
+            self.lbl_approved_desc.setText("Chưa được phê duyệt")
+            self.lbl_approved_desc.setStyleSheet("color: #94a3b8; font-size: 10px; margin-top: 4px;")
+
+        # Update staged preview
+        if state["has_staged"] and state.get("staged_path"):
+            pix = QPixmap(state["staged_path"])
+            if not pix.isNull():
+                self.img_staged.setPixmap(pix.scaled(160, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                prov = state.get("provider") or "Unknown"
+                seed_val = state.get("seed") or "N/A"
+                self.lbl_staged_desc.setText(f"{prov} | Seed: {seed_val}")
+                self.lbl_staged_desc.setStyleSheet("color: #38bdf8; font-size: 10px; margin-top: 4px;")
+        else:
+            self.img_staged.clear()
+            self.img_staged.setText("Chưa có ứng viên")
+            self.lbl_staged_desc.setText("Sẵn sàng tạo mới")
+            self.lbl_staged_desc.setStyleSheet("color: #94a3b8; font-size: 10px; margin-top: 4px;")
+
+        # Update metadata bar
+        status = state.get("status", STATUS_PENDING).upper()
+        prov_lbl = (
+            "Beam Cloud Animagine XL"
+            if state.get("provider") == PROVIDER_BEAM
+            else "Procedural Fallback"
+            if state.get("provider") == PROVIDER_PROCEDURAL
+            else "Original Source Cover"
+            if state.get("provider") == PROVIDER_SOURCE
+            else "Chưa xác định"
+        )
+        rollback_txt = " | <span style='color: #a78bfa;'>Rollback: Sẵn sàng</span>" if state.get("has_rollback") else ""
+        self.lbl_meta_bar.setText(
+            f"Trạng thái: <b>{status}</b> | Mô hình: <b>{prov_lbl}</b>{rollback_txt}"
+        )
+
+        if state.get("prompt"):
+            self.txt_prompt.setPlainText(state["prompt"])
+        if state.get("seed"):
+            self.input_seed.setText(str(state["seed"]))
+
+        self.btn_approve.setEnabled(state["has_staged"])
+        self.btn_reject.setEnabled(state["has_staged"])
+
+    def _on_generate(self):
+        try:
+            seed = int(self.input_seed.text().strip())
+        except Exception:
+            seed = random.randint(100000, 9999999)
+
+        self.btn_gen.setEnabled(False)
+        self.btn_gen.setText("⏳ Đang sinh bìa...")
+        try:
+            ok, meta, msg = stage_beam_cover(
+                work_id=self.work_id,
+                title=self.title,
+                fandom=self.fandom,
+                genres=self.genres,
+                synopsis=self.txt_prompt.toPlainText().strip(),
+                seed=seed,
+                aspect_ratio="2:3",
+            )
+            self._refresh_state()
+            if ok:
+                QMessageBox.information(self, "Tạo Bìa Thành Công", msg)
+            else:
+                QMessageBox.warning(self, "Tạo Bìa Thất Bại", msg)
+        finally:
+            self.btn_gen.setEnabled(True)
+            self.btn_gen.setText("🎨 Tạo Bìa (Generate)")
+
+    def _on_regenerate(self):
+        new_seed = random.randint(100000, 9999999)
+        self.input_seed.setText(str(new_seed))
+        self._on_generate()
+
+    def _on_use_source(self):
+        # Default RoyalRoad fiction cover URL pattern
+        default_url = f"https://www.royalroad.com/fiction/{self.work_id}"
+        from PySide6.QtWidgets import QInputDialog
+        url, ok = QInputDialog.getText(
+            self,
+            "Nhập URL Bìa Nguồn",
+            f"Nhập liên kết ảnh bìa trực tiếp của tác phẩm {self.work_id}:",
+            text=""
+        )
+        if ok and url.strip():
+            ok_stage, meta, msg = stage_source_cover(
+                work_id=self.work_id,
+                source_url=url.strip(),
+                title=self.title,
+                fandom=self.fandom,
+                attribution=f"Source cover ({url.strip()})",
+            )
+            self._refresh_state()
+            if ok_stage:
+                QMessageBox.information(self, "Tải Bìa Gốc Thành Công", msg)
+            else:
+                QMessageBox.warning(self, "Lỗi Tải Bìa", msg)
+
+    def _on_approve(self):
+        state = get_cover_state(self.work_id)
+        confirm_replace = False
+        if state["has_approved"]:
+            reply = QMessageBox.question(
+                self,
+                "Xác Nhận Thay Thế Bìa",
+                f"Tác phẩm {self.work_id} đã có một bìa được phê duyệt trước đó.\n"
+                "Bạn có chắc chắn muốn thay thế bằng ứng viên đang chọn?\n"
+                "(Bìa cũ sẽ được lưu trữ tự động trong metadata để có thể rollback khi cần).",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+            confirm_replace = True
+
+        ok, msg, meta = approve_cover(
+            work_id=self.work_id,
+            confirm_replace=confirm_replace,
+            operator="operator",
+        )
+        self._refresh_state()
+        if ok:
+            QMessageBox.information(self, "Phê Duyệt Thành Công", f"Đã phê duyệt bìa cho {self.work_id}.\nBìa đã sẵn sàng để phát hành.")
+        else:
+            QMessageBox.warning(self, "Lỗi Phê Duyệt", msg)
+
+    def _on_reject(self):
+        from PySide6.QtWidgets import QInputDialog
+        reason, ok = QInputDialog.getText(
+            self,
+            "Từ Chối Bìa",
+            "Lý do từ chối bìa ứng viên hiện tại:",
+            text="Hình ảnh không phù hợp tóm tắt"
+        )
+        if ok:
+            ok_rej, msg = reject_cover(self.work_id, reason=reason)
+            self._refresh_state()
+            QMessageBox.information(self, "Từ Chối Bìa", msg)
+
+
 # -----------------------------------------------------------------------------
 # TAB 1: CONTENT PIPELINE WIDGET
 # -----------------------------------------------------------------------------
@@ -426,6 +781,11 @@ class ContentPipelineWidget(QWidget):
         self.btn_publish.setStyleSheet("background-color: #b91c1c; color: white; font-weight: bold; padding: 5px 12px; border-radius: 4px; font-size: 10.5px;")
         self.btn_publish.clicked.connect(self._on_publish_clicked)
         toolbar.addWidget(self.btn_publish)
+
+        self.btn_cover = QPushButton("🎨 Bìa Truyện (Cover)")
+        self.btn_cover.setStyleSheet("background-color: #6366f1; color: white; font-weight: bold; padding: 5px 12px; border-radius: 4px; font-size: 10.5px;")
+        self.btn_cover.clicked.connect(self._on_cover_clicked)
+        toolbar.addWidget(self.btn_cover)
 
         self.btn_check_source = QPushButton("🔄 Kiểm Tra Nguồn Mới")
         self.btn_check_source.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-weight: bold; padding: 5px 10px; border-radius: 4px; font-size: 10.5px;")
@@ -544,8 +904,33 @@ class ContentPipelineWidget(QWidget):
         if reply == QMessageBox.Yes:
             self.action_requested.emit("publish", wid)
 
+    def _on_cover_clicked(self):
+        wid = self._get_selected_work_id()
+        if not wid:
+            QMessageBox.information(self, "Chưa chọn tác phẩm", "Vui lòng chọn một tác phẩm trong bảng trước khi mở quản lý ảnh bìa.")
+            return
+
+        w_info = getattr(self, "_current_works", {}).get(wid, {})
+        title = w_info.get("title", "")
+        fandom = w_info.get("fandom", "Fanfic")
+        genres = w_info.get("genres", [])
+
+        # Fallback to crawl manifest if available
+        if not title:
+            crawl_manifest = PROJECT_ROOT / "raw_spool" / "crawled_chapters" / wid / "crawl_manifest.json"
+            if crawl_manifest.exists():
+                try:
+                    c_data = json.loads(crawl_manifest.read_text(encoding="utf-8"))
+                    title = c_data.get("title", "")
+                except Exception:
+                    pass
+
+        dlg = CoverManagerDialog(work_id=wid, title=title, fandom=fandom, genres=genres, parent=self)
+        dlg.exec()
+
     def update_pipeline_data(self, works: List[Dict[str, Any]], logs: List[str]):
         """Updates table rows and log stream smoothly."""
+        self._current_works = {w.get("work_id", ""): w for w in works}
         self.table.setRowCount(len(works))
         total_chs = sum(w.get("total_chapters", 0) for w in works)
         self.lbl_pipeline_summary.setText(f"Tác phẩm đang xử lý: {len(works)} | Tổng số chương: {total_chs}")

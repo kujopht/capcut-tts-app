@@ -34,8 +34,8 @@ export function NovelCover({
   novelId: string;
   title: string;
   coverUrl?: string | null;
-  /** `card` cho luoi truyen, `wide` cho dau trang, `thumb` cho luong nghe. */
-  size?: "card" | "wide" | "thumb";
+  /** `card` cho luoi truyen (3:2), `portrait` cho bia doc chuan (2:3), `wide` cho dau trang, `thumb` cho luong nghe. */
+  size?: "card" | "wide" | "thumb" | "portrait";
 }) {
   const [from, to] = paletteFor(novelId || title);
 

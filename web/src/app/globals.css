@@ -2957,8 +2957,9 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   background: var(--bg-2);
   border-bottom: 1px solid var(--line-soft);
 }
-.cover-card  { aspect-ratio: 3 / 2; }
-.cover-wide  { aspect-ratio: 16 / 6; border-radius: var(--r3); border-bottom: 0; }
+.cover-card     { aspect-ratio: 3 / 2; }
+.cover-portrait { aspect-ratio: 2 / 3; }
+.cover-wide     { aspect-ratio: 16 / 6; border-radius: var(--r3); border-bottom: 0; }
 .cover-thumb {
   width: 56px; height: 56px; flex: 0 0 auto;
   border-radius: var(--r2); border-bottom: 0;
@@ -5322,7 +5323,7 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 */
 .novel-head {
   display: grid;
-  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
   gap: var(--s5);
   align-items: start;
   padding: var(--s5);
@@ -5333,7 +5334,13 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
     linear-gradient(160deg, #0a0d1aa3, #070910a8);
   box-shadow: var(--shadow-1), var(--edge);
 }
+.novel-head-cover {
+  width: 100%;
+  max-width: 200px;
+}
 .novel-head-cover .cover {
+  width: 100%;
+  aspect-ratio: 2 / 3;
   border-radius: var(--r3);
   border-bottom: 0;
   box-shadow: var(--shadow-2);
@@ -6435,7 +6442,7 @@ body.co-mini { padding-bottom: 74px; }
   .novel-head { grid-template-columns: minmax(0, 1fr); }
   /* Bia khong duoc chiem tron be rong khi da xuong dong: mot bia 3:2 rong ca
      man hinh cao hon ca khung nhin. */
-  .novel-head-cover { max-width: 280px; }
+  .novel-head-cover { max-width: 200px; }
 
   .account-hero { grid-template-columns: auto minmax(0, 1fr); }
   /* Goi cuoc xuong dong rieng va can TRAI — can phai o mot hang rieng trong
@@ -6718,7 +6725,7 @@ body.co-mini { padding-bottom: 74px; }
   .account-avatar { width: 52px; height: 52px; font-size: 18px; }
 
   .novel-head { padding: var(--s4); }
-  .novel-head-cover { max-width: none; }
+  .novel-head-cover { max-width: 160px; margin: 0 auto; }
   .novel-head-actions .btn { flex: 1 1 auto; }
 
   /* Doc chuong: cot chu da bi khung mang hep lai roi, chi bo bot khoang. */
@@ -8052,12 +8059,13 @@ body.co-mini { padding-bottom: 74px; }
   width: 100%;
   border-radius: var(--r2);
   overflow: hidden;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 2 / 3;
   background: rgba(0, 0, 0, 0.25);
 }
 .lib-card-cover-wrap .cover {
   width: 100%;
   height: 100%;
+  aspect-ratio: 2 / 3;
 }
 .lib-card-status-badge {
   position: absolute;

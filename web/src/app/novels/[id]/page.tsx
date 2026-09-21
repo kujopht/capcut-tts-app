@@ -112,7 +112,7 @@ export default function NovelDetailPage({
             novelId={novel.novel_id}
             title={novel.title}
             coverUrl={novel.cover_url}
-            size="card"
+            size="portrait"
           />
         </div>
 

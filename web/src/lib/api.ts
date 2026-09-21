@@ -2957,6 +2957,7 @@ export interface FollowedStory {
   title: string;
   description: string;
   cover_key: string | null;
+  cover_url?: string | null;
   tags: string[];
   status: string;
   external_author_name: string;

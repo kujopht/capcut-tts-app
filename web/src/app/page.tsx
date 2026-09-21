@@ -59,6 +59,12 @@ import {
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { getReaderTags } from "@/lib/taxonomy";
+import {
+  novelHasAudio,
+  novelFandom,
+  formatAuthor,
+  formatChapterCount,
+} from "@/lib/catalog";
 import { Avatar } from "@/components/Avatar";
 import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
 import { NovelCover } from "@/components/NovelCover";
@@ -251,141 +257,47 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
   );
 }
 
-const TEST_NOVELS: any[] = [
-  {
-    novel_id: "test-n-1",
-    title: "Vương Giả Trở Lại: Kiếm Thần Xuất Thế",
-    author_name: "Nam Phong",
-    has_audio: true,
-    chapters_count: 42,
-    cover_url: "",
-    synopsis: "Thiếu niên thiên tài thức tỉnh thần kiếm cổ đại, tái chiến cửu thiên.",
-    tags: ["Huyền Huyễn", "Kiếm Hiệp"],
-    status: "ongoing",
-    created_at: "",
-    updated_at: "",
-  },
-  {
-    novel_id: "test-n-2",
-    title: "One Piece: Huyết Tộc Thợ Săn Hải Tặc",
-    author_name: "ZoroFan",
-    has_audio: true,
-    chapters_count: 18,
-    cover_url: "",
-    synopsis: "Xuyên không vào Đại Hải Trình với năng lực huyết tộc huyền bí.",
-    tags: ["Đồng Nhân", "Hải Tặc"],
-    status: "ongoing",
-    created_at: "",
-    updated_at: "",
-  },
-  {
-    novel_id: "test-n-3",
-    title: "Naruto: Vô Hạn Luân Hồi Giới",
-    author_name: "UchihaX",
-    has_audio: false,
-    chapters_count: 35,
-    cover_url: "",
-    synopsis: "Mở khóa Mangekyo Sharingan thức thứ tám, thay đổi vận mệnh Làng Lá.",
-    tags: ["Đồng Nhân", "Ninja"],
-    status: "ongoing",
-    created_at: "",
-    updated_at: "",
-  },
-  {
-    novel_id: "test-n-4",
-    title: "Học Viện Pháp Thuật & Khế Ước Cổ Đại",
-    author_name: "Lyna",
-    has_audio: true,
-    chapters_count: 24,
-    cover_url: "",
-    synopsis: "Phù thủy trẻ khám phá thư viện cấm kỵ và đánh thức linh hồn ngàn năm.",
-    tags: ["Fantasy", "Phép Thuật"],
-    status: "ongoing",
-    created_at: "",
-    updated_at: "",
-  },
-  {
-    novel_id: "test-n-5",
-    title: "Fairy Tail: Long Vương Thức Tỉnh",
-    author_name: "GrayFull",
-    has_audio: false,
-    chapters_count: 15,
-    cover_url: "",
-    synopsis: "Sức mạnh nguyên tố rồng kết hợp giữa băng và sấm sét.",
-    tags: ["Đồng Nhân", "Ma Pháp"],
-    status: "ongoing",
-    created_at: "",
-    updated_at: "",
-  },
-  {
-    novel_id: "test-n-6",
-    title: "Đấu La: Tinh Thần Chi Kiếm",
-    author_name: "Đường Môn",
-    has_audio: true,
-    chapters_count: 56,
-    cover_url: "",
-    synopsis: "Võ hồn song sinh, kiếm ý xé rách không gian thần giới.",
-    tags: ["Đồng Nhân", "Dị Giới"],
-    status: "ongoing",
-    created_at: "",
-    updated_at: "",
-  },
-];
+interface EditorialUpdate {
+  id: string;
+  title: string;
+  snippet: string;
+  tag: string;
+  href: string;
+  icon: string;
+}
 
-const TEST_POSTS: any[] = [
+const EDITORIAL_UPDATES: EditorialUpdate[] = [
   {
-    post_id: "test-p-1",
-    text: "🎉 Cập nhật hệ thống: Ra mắt tính năng Studio tạo Audio giọng đọc AI đa cảm xúc cực mượt!",
-    created_at: "1 giờ trước",
-    author: { user_id: "admin-1", display_name: "Ban Quản Trị", avatar_url: "", role: "admin" },
-    likes_count: 48,
-    comments_count: 12,
+    id: "update-156206",
+    title: "The Cold Between Wars: Đã xong 47 chương Audio",
+    snippet: "Toàn bộ 47 chương tiếng Việt đã hoàn thành Audio chất lượng cao bằng giọng đọc tự nhiên Piper.",
+    tag: "Audio",
+    href: "/novels/nov_rr_156206",
+    icon: "🎧",
   },
   {
-    post_id: "test-p-2",
-    text: "🔥 Sự kiện độc giả: Đọc truyện tích lũy chuỗi ngày để nhận huy hiệu Ma Pháp Sư tuần này.",
-    created_at: "3 giờ trước",
-    author: { user_id: "admin-2", display_name: "Hệ Thống", avatar_url: "", role: "admin" },
-    likes_count: 35,
-    comments_count: 9,
+    id: "update-library",
+    title: "Thư viện công khai: Duyệt trọn bộ danh mục tác phẩm",
+    snippet: "Khám phá danh mục truyện chữ, fanfic chuyển ngữ với bộ lọc vũ trụ, số chương và định dạng audio.",
+    tag: "Thư viện",
+    href: "/library",
+    icon: "📚",
   },
   {
-    post_id: "test-p-3",
-    text: "Mọi người nghe thử giọng đọc Audio bộ Kiếm Thần chưa? Ngữ điệu nhân vật nữ nghe rất tự nhiên.",
-    created_at: "5 giờ trước",
-    author: { user_id: "u-1", display_name: "kujo", avatar_url: "" },
-    likes_count: 19,
-    comments_count: 7,
-  },
-  {
-    post_id: "test-p-4",
-    text: "Vừa ra mắt chương 42 bộ Vương Giả Trở Lại, mời anh em ghé đọc và góp ý phần kết nhé!",
-    created_at: "Hôm qua",
-    author: { user_id: "u-2", display_name: "Nam Phong", avatar_url: "" },
-    likes_count: 24,
-    comments_count: 15,
-  },
-  {
-    post_id: "test-p-5",
-    text: "⚡ Video Animation tập mới vừa được đồng bộ phụ đề tiếng Việt chuẩn, xem mượt mà trên di động.",
-    created_at: "Hôm qua",
-    author: { user_id: "u-3", display_name: "AnimeHub", avatar_url: "" },
-    likes_count: 31,
-    comments_count: 4,
-  },
-  {
-    post_id: "test-p-6",
-    text: "Có bạn nào đang viết fanfic One Piece không? Cần tìm đồng đội cùng xây dựng kịch bản đảo Egghead.",
-    created_at: "2 ngày trước",
-    author: { user_id: "u-4", display_name: "LuffyKing", avatar_url: "" },
-    likes_count: 15,
-    comments_count: 8,
+    id: "update-hatake",
+    title: "Trọng Sinh Gia Tộc Hatake: Cú Sốc Kỹ Sư Vật Liệu",
+    snippet: "25 chương chuyển ngữ hài hước và kịch tính trong thế giới Naruto với góc nhìn khoa học độc đáo.",
+    tag: "Truyện mới",
+    href: "/novels/nov_hatake_156690",
+    icon: "⚡",
   },
 ];
 
 /**
  * Khung kính nổi bật đầu trang (Khai thác vùng phải còn trống trên desktop)
- * Hiển thị CÙNG LÚC 2 cột: Truyện mới & Thông báo/Tiêu điểm Cộng đồng kèm thanh cuộn dọc
+ * Hiển thị CÙNG LÚC 2 cột:
+ * - Cột 1: Truyện mới (Danh mục tác phẩm thật dạng hàng dọc tinh gọn)
+ * - Cột 2: Cập nhật mới (Thông báo biên tập & Tiêu điểm nội dung công khai)
  */
 function HomeHeroShowcase({
   novels,
@@ -394,44 +306,73 @@ function HomeHeroShowcase({
   novels: Novel[];
   posts: Post[];
 }) {
-  const danhSachTruyen = (novels.length > 0 ? [...novels, ...TEST_NOVELS.slice(novels.length)] : TEST_NOVELS).slice(0, 3);
-  const danhSachBaiViet = (posts.length > 0 ? [...posts, ...TEST_POSTS.slice(posts.length)] : TEST_POSTS).slice(0, 3);
+  const danhSachTruyen = novels.slice(0, 4);
 
   return (
     <div className="home-hero-showcase rise rise-1" aria-label="Tiêu điểm trên Fanfic World">
       <div className="showcase-header">
-        <span className="eyebrow">BẢNG TIN & TIÊU ĐIỂM</span>
+        <span className="eyebrow">DANH MỤC &amp; TIÊU ĐIỂM</span>
         <span className="hint">Cập nhật trực tiếp</span>
       </div>
 
       <div className="showcase-dual-cols">
-        {/* Cột 1: Truyện mới & Cập nhật */}
+        {/* Cột 1: Truyện mới thật từ cơ sở dữ liệu */}
         <div className="showcase-col">
           <div className="showcase-col-head">
             <div className="showcase-col-title">
               <IconFlame size={16} />
               <strong>Truyện mới</strong>
             </div>
-            <Link href="/fanfic" className="showcase-more" prefetch={false}>
+            <Link href="/library" className="showcase-more" prefetch={false}>
               Tất cả →
             </Link>
           </div>
           <div className="showcase-scroll-list">
-            {danhSachTruyen.map((n: any) => (
-              <Link key={n.novel_id} href={`/novels/${n.novel_id}`} className="showcase-item">
-                <div className="showcase-item-cover">
-                  <NovelCover novelId={n.novel_id} title={n.title} coverUrl={n.cover_url} size="thumb" />
-                </div>
-                <div className="showcase-item-info">
-                  <div className="showcase-item-title clamp-1">{n.title}</div>
-                  <div className="showcase-item-meta">
-                    <span className="author">{n.author_name || "Tác giả"}</span>
-                    {n.has_audio ? <span className="badge badge-brand badge-sm">Audio</span> : null}
-                    <span className="chapters">{n.chapters_count} chương</span>
-                  </div>
-                </div>
-              </Link>
-            ))}
+            {danhSachTruyen.length === 0 ? (
+              <div className="hint showcase-empty-hint">
+                Đang tải danh mục tác phẩm...
+              </div>
+            ) : (
+              danhSachTruyen.map((n) => {
+                const hasAudio = novelHasAudio(n);
+                const author = formatAuthor(n);
+                const chapterCount = formatChapterCount(n.external_chapter_count);
+                const fandom = novelFandom(n);
+
+                return (
+                  <Link
+                    key={n.novel_id}
+                    href={`/novels/${n.novel_id}`}
+                    className="showcase-item"
+                    prefetch={false}
+                  >
+                    <div className="showcase-item-cover">
+                      <NovelCover
+                        novelId={n.novel_id}
+                        title={n.title}
+                        coverUrl={n.cover_url}
+                        size="thumb"
+                      />
+                    </div>
+                    <div className="showcase-item-info">
+                      <div className="showcase-item-title clamp-1" title={n.title}>
+                        {n.title}
+                      </div>
+                      <div className="showcase-item-meta">
+                        <span className="author clamp-1" title={author}>
+                          {author}
+                        </span>
+                        <span className="fandom-chip">{fandom}</span>
+                        {hasAudio && (
+                          <span className="badge badge-brand badge-sm">Audio</span>
+                        )}
+                        <span className="chapters">{chapterCount}</span>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -440,36 +381,65 @@ function HomeHeroShowcase({
           <span className="showcase-divider-gem" />
         </div>
 
-        {/* Cột 2: Thông báo & Tiêu điểm Cộng đồng */}
+        {/* Cột 2: Cập nhật mới & Tiêu điểm nội dung (Công khai, trung thực) */}
         <div className="showcase-col">
           <div className="showcase-col-head">
             <div className="showcase-col-title">
-              <IconMegaphone size={16} />
-              <strong>Thông báo & Bài viết</strong>
+              <IconSparkles size={16} />
+              <strong>Cập nhật mới</strong>
             </div>
             <Link href="/community" className="showcase-more" prefetch={false}>
               Cộng đồng →
             </Link>
           </div>
           <div className="showcase-scroll-list">
-            {danhSachBaiViet.map((p) => (
-              <Link key={p.post_id} href={`/posts/${p.post_id}`} className="showcase-item showcase-post-item">
-                <Avatar
-                  name={p.author?.display_name || "Thành viên"}
-                  avatarUrl={p.author?.avatar_url}
-                  className="showcase-avatar"
-                />
-                <div className="showcase-item-info">
-                  <div className="showcase-post-author">
-                    <strong className="clamp-1">{p.author?.display_name || "Thành viên"}</strong>
-                    {(p.author as any)?.role === "admin" ? (
-                      <span className="badge badge-brand badge-sm">Admin</span>
-                    ) : null}
+            {posts.length > 0 ? (
+              posts.slice(0, 3).map((p) => (
+                <Link
+                  key={p.post_id}
+                  href={`/posts/${p.post_id}`}
+                  className="showcase-item showcase-post-item"
+                  prefetch={false}
+                >
+                  <Avatar
+                    name={p.author?.display_name || "Thành viên"}
+                    avatarUrl={p.author?.avatar_url}
+                    className="showcase-avatar"
+                  />
+                  <div className="showcase-item-info">
+                    <div className="showcase-post-author">
+                      <strong className="clamp-1">{p.author?.display_name || "Thành viên"}</strong>
+                      {(p.author as any)?.role === "admin" ? (
+                        <span className="badge badge-brand badge-sm">Admin</span>
+                      ) : null}
+                    </div>
+                    <p className="showcase-post-snippet clamp-2">{p.text}</p>
                   </div>
-                  <p className="showcase-post-snippet clamp-2">{p.text}</p>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              ))
+            ) : (
+              EDITORIAL_UPDATES.map((u) => (
+                <Link
+                  key={u.id}
+                  href={u.href}
+                  className="showcase-item showcase-post-item"
+                  prefetch={false}
+                >
+                  <span className="showcase-icon-box" aria-hidden="true">
+                    {u.icon}
+                  </span>
+                  <div className="showcase-item-info">
+                    <div className="showcase-post-author">
+                      <strong className="clamp-1 showcase-update-title">
+                        {u.title}
+                      </strong>
+                      <span className="badge badge-brand badge-sm">{u.tag}</span>
+                    </div>
+                    <p className="showcase-post-snippet clamp-2">{u.snippet}</p>
+                  </div>
+                </Link>
+              ))
+            )}
           </div>
         </div>
       </div>

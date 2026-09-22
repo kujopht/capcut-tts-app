@@ -26,8 +26,22 @@ if str(REPO_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from server.domain import ChineseMediaQueueItem  # noqa: E402
-from server.farmer.dedup import FARMER_OWNER, LANE_AUDIO, LANE_TEXT  # noqa: E402
+from server.farmer.dedup import (  # noqa: E402
+    FARMER_OWNER,
+    LANE_AUDIO,
+    LANE_TEXT,
+    is_tts_job_active_or_done,
+)
 from server.farmer.loop import Candidate  # noqa: E402
+from server.farmer.story_text import (  # noqa: E402
+    FetchedStoryText,
+    PreparedStoryPlan,
+    SourceChapter,
+    StoryImportPayload,
+    ingest_story_payload,
+    prepare_story_plan,
+    verify_served_novel,
+)
 
 #: Giong san xuat hien tai — cung giong moi runner khac dang dung.
 DEFAULT_VOICE_ID = "piper:ngochuyennew"
@@ -238,46 +252,85 @@ def _thu_fanficfare(url: str) -> str:
             ch.content for ch in (acq.chapters or []) if (ch.content or "").strip())
 
 
-def make_text_publisher(token: str) -> Callable[[Candidate, str], str]:
+def make_text_publisher(token: str) -> Callable:
     """Tao Novel + Chapter o trang thai NHAP qua API that.
 
-    Idempotent theo `external_source_url` — cung quy tac ma `ship_draft` dung,
-    nen mot lan chay lai khong sinh ban trung.
+    Idempotent theo `external_source_url` va `order_index`.
+    Neu `novel_id` duoc cung cap (lan chay tiep), bo qua POST /api/novels va
+    chi tao cac chuong con thieu.
+    Bao dam 100% ky tu goc va xac minh phuc vu qua verify_served_novel.
     """
-    def publish(c: Candidate, body: str) -> str:
+    def publish(c: Candidate, plan: PreparedStoryPlan, novel_id: str = "") -> str:
         api, goi = _api()
         meta = c.meta or {}
 
-        ma, r = goi(api, "POST", "/api/novels", {
-            "title": c.title or "(khong tieu de)",
-            "description": (meta.get("description")
-                            or f"Thu thap tu dong tu {c.url}"),
-            "tags": ["Farmer"],
-            "publication_mode": "full_text",
-            "external_author_name": meta.get("author", ""),
-            "external_source_url": c.url,
-            "language": meta.get("language", "vi"),
-            "status": "ongoing",
-        }, token=token)
-        if ma != 201:
-            raise RuntimeError(f"POST /api/novels -> {ma}: {r}")
-        novel_id = (r.get("novel") or r)["novel_id"]
+        if not isinstance(plan, PreparedStoryPlan):
+            if isinstance(plan, StoryImportPayload):
+                plan = ingest_story_payload(plan)
+            elif isinstance(plan, FetchedStoryText):
+                plan = prepare_story_plan(plan, title=c.title or "(khong tieu de)")
+            else:
+                plan = prepare_story_plan(
+                    FetchedStoryText.from_plain_text(str(plan or "")),
+                    title=c.title or "(khong tieu de)",
+                )
 
-        ma, r = goi(api, "POST", "/api/chapters", {
-            "novel_id": novel_id,
-            "title": c.title or "Chuong 1",
-            "content": body,
-            "order_index": 1,
-        }, token=token)
-        if ma != 201:
-            raise RuntimeError(f"POST /api/chapters -> {ma}: {r}")
+        # 1. Tao Novel neu chua co
+        if not novel_id:
+            ma, r = goi(api, "POST", "/api/novels", {
+                "title": c.title or "(khong tieu de)",
+                "description": (meta.get("description")
+                                or f"Thu thap tu dong tu {c.url}"),
+                "tags": ["Farmer"],
+                "publication_mode": "full_text",
+                "external_author_name": meta.get("author", ""),
+                "external_source_url": c.url,
+                "language": meta.get("language", "vi"),
+                "status": "ongoing",
+            }, token=token)
+            if ma != 201:
+                raise RuntimeError(f"POST /api/novels -> {ma}: {r}")
+            novel_id = (r.get("novel") or r)["novel_id"]
+
+        # 2. Doc cac chuong hien co de bo qua (idempotent resume)
+        ma, r = goi(api, "GET", f"/api/novels/{novel_id}", token=token)
+        existing_orders = set()
+        if ma == 200:
+            for ch in (r.get("chapters") or []):
+                existing_orders.add(ch.get("order_index"))
+
+        # 3. Tao cac chuong con thieu
+        for ch in plan.chapters:
+            if ch.order_index in existing_orders:
+                continue
+            ma, r = goi(api, "POST", "/api/chapters", {
+                "novel_id": novel_id,
+                "title": ch.title,
+                "content": ch.content,
+                "order_index": ch.order_index,
+            }, token=token)
+            if ma != 201:
+                raise RuntimeError(f"POST /api/chapters cho chuong {ch.order_index} -> {ma}: {r}")
+
+        # 4. Xac minh phuc vu (verification)
+        ma, r = goi(api, "GET", f"/api/novels/{novel_id}", token=token)
+        if ma != 200:
+            raise RuntimeError(f"GET /api/novels/{novel_id} sau xuat ban -> {ma}: {r}")
+        # Lay noi dung chuong de kiem tra neu GET /api/novels chua co content
+        for ch in (r.get("chapters") or []):
+            if not ch.get("content") and ch.get("chapter_id"):
+                ma_c, r_c = goi(api, "GET", f"/api/chapters/{ch['chapter_id']}", token=token)
+                if ma_c == 200:
+                    ch["content"] = (r_c.get("chapter") or r_c).get("content", "")
+        verify_served_novel(r, plan)
+
         return novel_id
     return publish
 
 
-def make_tts_enqueuer(token: str) -> Callable[[str], Optional[str]]:
-    """Tao job TTS roi bao Cloud Run — tong hop KHONG chay tren may gat."""
-    def enqueue(novel_id: str) -> Optional[str]:
+def make_tts_enqueuer(token: str) -> Callable[[str], List[str]]:
+    """Tao job TTS cho tat ca cac chuong chua co job roi bao Cloud Run — tong hop KHONG chay tren may gat."""
+    def enqueue(novel_id: str) -> List[str]:
         api, goi = _api()
         voice = os.environ.get(ENV_VOICE) or DEFAULT_VOICE_ID
 
@@ -289,16 +342,28 @@ def make_tts_enqueuer(token: str) -> Callable[[str], Optional[str]]:
         if not chapters:
             raise RuntimeError(f"{novel_id} chua co chuong nao de doc")
 
-        ma, r = goi(api, "POST", "/api/jobs", {
-            "chapter_id": chapters[0]["chapter_id"], "voice_id": voice,
-        }, token=token)
-        if ma != 201:
-            raise RuntimeError(f"POST /api/jobs -> {ma}: {r}")
-        job_id = (r.get("job") or r)["job_id"]
-
-        # Bao cho Cloud Run. `enqueue` tra None khi dieu phoi TAT — do la
-        # cau hinh hop le (worker se tu nhat), khong phai loi.
         from server import tts_dispatch
 
-        return tts_dispatch.enqueue(job_id)
+        job_ids: List[str] = []
+        for ch in chapters:
+            ch_id = ch["chapter_id"]
+            # Kiem tra chuong da co job active hoac completed hop le chua
+            ma_j, r_j = goi(api, "GET", f"/api/jobs?chapter_id={ch_id}", token=token)
+            if ma_j == 200:
+                existing_jobs = r_j.get("jobs") or []
+                active_or_done = [j for j in existing_jobs if is_tts_job_active_or_done(j)]
+                if active_or_done:
+                    job_ids.append(active_or_done[0].get("job_id", ""))
+                    continue
+
+            ma_p, r_p = goi(api, "POST", "/api/jobs", {
+                "chapter_id": ch_id, "voice_id": voice,
+            }, token=token)
+            if ma_p != 201:
+                raise RuntimeError(f"POST /api/jobs cho chuong {ch_id} -> {ma_p}: {r_p}")
+            job_id = (r_p.get("job") or r_p)["job_id"]
+            job_ids.append(job_id)
+            tts_dispatch.enqueue(job_id)
+
+        return job_ids
     return enqueue

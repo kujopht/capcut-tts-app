@@ -7,9 +7,8 @@ import { errorMessage } from "@/lib/session";
 import {
   EmptyState,
   ErrorState,
-  formatDate,
-  formatNumber,
 } from "@/components/ui";
+import { formatDate, formatNumber } from "@/lib/format";
 import { NovelCover } from "@/components/NovelCover";
 import { FollowButton } from "@/components/FollowButton";
 import {

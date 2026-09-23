@@ -14,7 +14,8 @@ import {
   ChapterOwnerAudioAction,
   ChapterReaderPrefsControl,
 } from "@/components/ChapterInteractiveReader";
-import { EmptyState, ErrorState, formatNumber } from "@/components/ui";
+import { EmptyState, ErrorState } from "@/components/ui";
+import { formatNumber } from "@/lib/format";
 import { IconBook, IconHeadphones } from "@/components/Icons";
 
 /**

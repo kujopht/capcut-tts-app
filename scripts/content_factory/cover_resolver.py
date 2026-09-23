@@ -448,6 +448,7 @@ def stage_beam_cover(
 
 def approve_cover(
     work_id: str,
+    novel_id: Optional[str] = None,
     upload_r2: bool = False,
     update_appwrite: bool = False,
     confirm_replace: bool = False,
@@ -459,6 +460,8 @@ def approve_cover(
     - If replacing an existing approved cover, requires confirm_replace=True.
     - Saves previous cover info in rollback history.
     - Never uploads to R2 or writes to Appwrite unless explicitly instructed.
+    - Requires canonical production novel_id when update_appwrite=True (never assumes raw work_id).
+    - Verifies document exists in Appwrite before mutation; fails closed on nonexistent ID.
     """
     staged_dir = STAGED_COVERS_DIR / work_id
     active_file = staged_dir / "active_staged.jpg"
@@ -501,6 +504,8 @@ def approve_cover(
     meta["status"] = STATUS_APPROVED
     meta["approved_at"] = datetime.now(timezone.utc).isoformat()
     meta["approved_by"] = operator
+    if novel_id:
+        meta["canonical_novel_id"] = novel_id
 
     # Append to history
     history.append({
@@ -543,10 +548,108 @@ def approve_cover(
                 ap_proj = cfg.get("APPWRITE_PROJECT_ID", "")
                 ap_key = cfg.get("APPWRITE_API_KEY", "")
                 ap_db = cfg.get("APPWRITE_DATABASE_ID", "")
+
+                target_doc_id = novel_id or meta.get("canonical_novel_id") or meta.get("novel_id")
+                if not target_doc_id:
+                    return False, f"Cannot update Appwrite: No canonical production novel_id provided for work {work_id}. Pass explicit novel_id.", meta
+
                 if ap_endpoint and ap_key:
-                    url = f"{ap_endpoint}/databases/{ap_db}/collections/novels/documents/{work_id}"
-                    resp = requests.patch(
-                        url,
+                    headers = {
+                        "X-Appwrite-Project": ap_proj,
+                        "X-Appwrite-Key": ap_key,
+                        "Content-Type": "application/json",
+                    }
+                    doc_url = f"{ap_endpoint}/databases/{ap_db}/collections/novels/documents/{target_doc_id}"
+
+                    # Verify target document exists first - wrong/nonexistent ID must fail without mutation!
+                    check_resp = requests.get(doc_url, headers=headers, timeout=15)
+                    if check_resp.status_code == 404:
+                        return False, f"Target novel document '{target_doc_id}' not found in Appwrite (404). Mutation aborted.", meta
+                    elif check_resp.status_code not in (200, 201):
+                        return False, f"Failed to verify novel document '{target_doc_id}' in Appwrite (HTTP {check_resp.status_code}). Mutation aborted.", meta
+
+                    patch_resp = requests.patch(
+                        doc_url,
+                        headers=headers,
+                        json={"cover_key": r2_key_name},
+                        timeout=15,
+                    )
+                    meta["appwrite_updated"] = (patch_resp.status_code in (200, 201))
+                    if not meta["appwrite_updated"]:
+                        return False, f"Failed to patch cover_key on novel '{target_doc_id}' (HTTP {patch_resp.status_code})", meta
+
+    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    return True, f"Cover approved successfully for {work_id}", meta
+
+
+def rollback_cover(
+    work_id: str,
+    novel_id: Optional[str] = None,
+    upload_r2: bool = False,
+    update_appwrite: bool = False,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """Rolls back the approved cover to the previous backup cover if one exists."""
+    approved_dir = APPROVED_COVERS_DIR / work_id
+    staged_dir = STAGED_COVERS_DIR / work_id
+    meta_path = staged_dir / "metadata.json"
+    approved_file = approved_dir / "cover.jpg"
+
+    if not meta_path.exists():
+        return False, f"No metadata found for {work_id}", {}
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    prev = meta.get("previous_cover")
+    if not prev or not prev.get("backup_file"):
+        return False, f"No previous cover found to rollback for work {work_id}", meta
+
+    backup_path = Path(prev["backup_file"])
+    if not backup_path.exists():
+        return False, f"Backup file {backup_path} does not exist", meta
+
+    # Restore backup file to approved cover
+    shutil.copyfile(backup_path, approved_file)
+    meta["status"] = STATUS_APPROVED
+    meta["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
+    meta.pop("previous_cover", None)
+
+    # Optional re-upload to R2 and Appwrite
+    if upload_r2:
+        from dotenv import dotenv_values
+        import boto3
+        from botocore.config import Config
+
+        cfg = dotenv_values(PROJECT_ROOT / "server" / ".env.production")
+        r2_acc = cfg.get("R2_ACCOUNT_ID")
+        r2_key = cfg.get("R2_ACCESS_KEY_ID")
+        r2_sec = cfg.get("R2_SECRET_ACCESS_KEY")
+        bucket = cfg.get("R2_BUCKET", "fanfic-prod")
+        owner_id = cfg.get("OWNER_ID", "6a8c525aa05b8642d568")
+
+        if r2_acc and r2_key and r2_sec:
+            client = boto3.client(
+                "s3",
+                endpoint_url=f"https://{r2_acc}.r2.cloudflarestorage.com",
+                aws_access_key_id=r2_key,
+                aws_secret_access_key=r2_sec,
+                config=Config(signature_version="s3v4"),
+                region_name="auto",
+            )
+            r2_key_name = f"covers/{owner_id}/{work_id}/cover.jpg"
+            client.upload_file(str(approved_file), bucket, r2_key_name, ExtraArgs={"ContentType": "image/jpeg"})
+            meta["r2_key"] = r2_key_name
+
+            if update_appwrite:
+                import requests
+                ap_endpoint = cfg.get("APPWRITE_ENDPOINT", "").rstrip("/")
+                ap_proj = cfg.get("APPWRITE_PROJECT_ID", "")
+                ap_key = cfg.get("APPWRITE_API_KEY", "")
+                ap_db = cfg.get("APPWRITE_DATABASE_ID", "")
+
+                target_doc_id = novel_id or meta.get("canonical_novel_id") or meta.get("novel_id")
+                if target_doc_id and ap_endpoint and ap_key:
+                    doc_url = f"{ap_endpoint}/databases/{ap_db}/collections/novels/documents/{target_doc_id}"
+                    requests.patch(
+                        doc_url,
                         headers={
                             "X-Appwrite-Project": ap_proj,
                             "X-Appwrite-Key": ap_key,
@@ -555,10 +658,9 @@ def approve_cover(
                         json={"cover_key": r2_key_name},
                         timeout=15,
                     )
-                    meta["appwrite_updated"] = (resp.status_code in (200, 201))
 
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
-    return True, f"Cover approved successfully for {work_id}", meta
+    return True, f"Cover successfully rolled back for {work_id}", meta
 
 
 def reject_cover(work_id: str, reason: str = "") -> Tuple[bool, str]:

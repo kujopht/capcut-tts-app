@@ -15,7 +15,7 @@ import hashlib
 import os
 import shutil
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, is_dataclass
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import (
@@ -479,6 +479,8 @@ class MetadataStore(Protocol):
         ...
 
     def delete_novel(self, novel_id: str, owner_id: str) -> None: ...
+
+    def cascade_delete_novel_references(self, novel_id: str) -> Dict[str, int]: ...
 
     # -- chapter -------------------------------------------------------------
     def create_chapter(self, chapter: Chapter) -> Chapter: ...
@@ -1333,6 +1335,8 @@ class MockMetadataStore(MockSocialStore):
         self.chapters: Dict[str, Chapter] = {}
         self.jobs: Dict[str, TtsJob] = {}
         self.tracks: Dict[str, AudioTrack] = {}
+        self.profiles: Dict[str, Any] = {}
+        self.content_queue: Dict[str, Any] = {}
         #: `(job_id, attempt)` da co worker nhan. Vai tro y het tinh duy nhat cua
         #: rowId ben Appwrite: mot lan thu chi mot worker duoc nhan.
         self._claims: Set[Tuple[str, int]] = set()
@@ -1504,6 +1508,102 @@ class MockMetadataStore(MockSocialStore):
         with self._lock:
             self.owned_novel(novel_id, owner_id)
             self.novels.pop(novel_id, None)
+
+    def cascade_delete_novel_references(self, novel_id: str) -> Dict[str, int]:
+        with self._lock:
+            removed = {"follows": 0, "posts_dissociated": 0, "queue_items": 0, "notifications": 0, "profiles_cleaned": 0}
+
+            # 1. Story follows
+            sf_dict = getattr(self, "_story_follows", None)
+            if sf_dict is None:
+                sf_dict = getattr(self, "story_follows", None)
+            if sf_dict is not None:
+                to_del = [fid for fid, f in list(sf_dict.items())
+                          if (getattr(f, "novel_id", None) == novel_id or (isinstance(f, dict) and f.get("novel_id") == novel_id))]
+                for fid in to_del:
+                    sf_dict.pop(fid, None)
+                    removed["follows"] += 1
+
+            # 2. Posts (dissociate novel_id -> None)
+            posts_dict = getattr(self, "_posts", None)
+            if posts_dict is None:
+                posts_dict = getattr(self, "posts", None)
+            if posts_dict is not None:
+                for pid, p in list(posts_dict.items()):
+                    if getattr(p, "novel_id", None) == novel_id:
+                        posts_dict[pid] = replace(p, novel_id=None)
+                        removed["posts_dissociated"] += 1
+                    elif isinstance(p, dict) and p.get("novel_id") == novel_id:
+                        p["novel_id"] = None
+                        removed["posts_dissociated"] += 1
+
+            # 3. Content queue
+            q_dict = getattr(self, "content_queue", None)
+            if q_dict is None:
+                q_dict = getattr(self, "_content_queue", None)
+            if q_dict is not None:
+                to_del_q = [qid for qid, q in list(q_dict.items())
+                            if (getattr(q, "novel_id", None) == novel_id or (isinstance(q, dict) and q.get("novel_id") == novel_id))]
+                for qid in to_del_q:
+                    q_dict.pop(qid, None)
+                    removed["queue_items"] += 1
+
+            # 4. Notifications
+            notif_dict = getattr(self, "_notifications", None)
+            if notif_dict is None:
+                notif_dict = getattr(self, "notifications", None)
+            if notif_dict is not None:
+                to_del_n = [nid for nid, n in list(notif_dict.items())
+                            if getattr(n, "novel_id", None) == novel_id or (isinstance(n, dict) and n.get("novel_id") == novel_id)]
+                for nid in to_del_n:
+                    notif_dict.pop(nid, None)
+                    removed["notifications"] += 1
+
+            # 5. Profiles (clear last_read_novel_id or last_listen_novel_id)
+            prof_dict = getattr(self, "profiles", None)
+            if prof_dict is None:
+                prof_dict = getattr(self, "_profiles", None)
+            if prof_dict is not None:
+                for uid, prof in list(prof_dict.items()):
+                    lr_nov = getattr(prof, "last_read_novel_id", None) if not isinstance(prof, dict) else prof.get("last_read_novel_id")
+                    ll_nov = getattr(prof, "last_listen_novel_id", None) if not isinstance(prof, dict) else prof.get("last_listen_novel_id")
+                    changed = False
+                    new_lr_nov = lr_nov
+                    new_lr_ch = getattr(prof, "last_read_chapter_id", None) if not isinstance(prof, dict) else prof.get("last_read_chapter_id")
+                    new_ll_nov = ll_nov
+                    new_ll_ch = getattr(prof, "last_listen_chapter_id", None) if not isinstance(prof, dict) else prof.get("last_listen_chapter_id")
+
+                    if lr_nov == novel_id:
+                        new_lr_nov = None
+                        new_lr_ch = None
+                        changed = True
+                    if ll_nov == novel_id:
+                        new_ll_nov = None
+                        new_ll_ch = None
+                        changed = True
+
+                    if changed:
+                        if is_dataclass(prof):
+                            prof_dict[uid] = replace(
+                                prof,
+                                last_read_novel_id=new_lr_nov,
+                                last_read_chapter_id=new_lr_ch,
+                                last_listen_novel_id=new_ll_nov,
+                                last_listen_chapter_id=new_ll_ch,
+                            )
+                        elif isinstance(prof, dict):
+                            prof["last_read_novel_id"] = new_lr_nov
+                            prof["last_read_chapter_id"] = new_lr_ch
+                            prof["last_listen_novel_id"] = new_ll_nov
+                            prof["last_listen_chapter_id"] = new_ll_ch
+                        else:
+                            setattr(prof, "last_read_novel_id", new_lr_nov)
+                            setattr(prof, "last_read_chapter_id", new_lr_ch)
+                            setattr(prof, "last_listen_novel_id", new_ll_nov)
+                            setattr(prof, "last_listen_chapter_id", new_ll_ch)
+                        removed["profiles_cleaned"] += 1
+
+            return removed
 
     # -- chapter -------------------------------------------------------------
 

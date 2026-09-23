@@ -38,6 +38,7 @@ import {
 } from "react";
 import {
   audioFileName,
+  isAudioUrlExpired,
   resolveAudio,
   type PlayableAudio,
 } from "@/lib/audio";
@@ -218,12 +219,48 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
     }
   }, [tep]);
 
-  const tua = useCallback((giay: number) => {
-    const a = el.current;
-    if (!a || !Number.isFinite(a.duration)) return;
-    a.currentTime = Math.min(Math.max(0, giay), a.duration);
-    setThoiDiem(a.currentTime);
-  }, []);
+  const lamMoiUrl = useCallback(
+    async (viTriCanKhoiPhuc?: number, tuDongPhat = false): Promise<boolean> => {
+      if (!track) return false;
+      const a = el.current;
+      const resumeTime = viTriCanKhoiPhuc ?? a?.currentTime ?? thoiDiem;
+      try {
+        const moi = await resolveAudio(track.chapterId);
+        thuHoi.current?.();
+        thuHoi.current = moi.revoke;
+        setTep(moi);
+        setLoi("");
+        if (a) {
+          a.src = moi.playUrl;
+          a.load();
+          a.currentTime = resumeTime;
+          if (tuDongPhat) {
+            a.play().catch(() => {});
+          }
+        }
+        return true;
+      } catch (e) {
+        setLoi("Không tải được audio. Vui lòng kiểm tra kết nối mạng.");
+        return false;
+      }
+    },
+    [track, thoiDiem],
+  );
+
+  const tua = useCallback(
+    async (giay: number) => {
+      const a = el.current;
+      if (!a) return;
+      if (tep && isAudioUrlExpired(tep)) {
+        await lamMoiUrl(giay, !a.paused);
+        return;
+      }
+      if (!Number.isFinite(a.duration)) return;
+      a.currentTime = Math.min(Math.max(0, giay), a.duration);
+      setThoiDiem(a.currentTime);
+    },
+    [tep, lamMoiUrl],
+  );
 
   const datAmLuong = useCallback((v: number) => {
     const a = el.current;
@@ -302,9 +339,16 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
             setDangPhat(false);
             setDaXong(true);
           }}
-          onError={() =>
-            setLoi("Không phát được audio. Liên kết có thể đã hết hạn.")
-          }
+          onError={async () => {
+            const a = el.current;
+            const viTri = a?.currentTime ?? thoiDiem;
+            const dangChay = dangPhat;
+            console.warn(`[AudioEngine] Gặp lỗi hoặc hết hạn URL tại ${viTri}s, đang tự động làm mới...`);
+            const thanhCong = await lamMoiUrl(viTri, dangChay);
+            if (!thanhCong) {
+              setLoi("Không phát được audio. Liên kết có thể đã hết hạn.");
+            }
+          }}
         />
       ) : null}
       {children}

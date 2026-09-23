@@ -47,6 +47,16 @@ export interface PlayableAudio {
   /** Blob URL can duoc thu hoi khi khong dung nua. */
   revoke: (() => void) | null;
   sizeBytes: number;
+  /** Thoi han URL ky (giay). */
+  expiresIn?: number;
+  /** Timestamp luc nhan link (ms). */
+  obtainedAt?: number;
+}
+
+export function isAudioUrlExpired(audio: PlayableAudio, bufferSeconds = 60): boolean {
+  if (!audio.obtainedAt || !audio.expiresIn) return false;
+  const elapsedSec = (Date.now() - audio.obtainedAt) / 1000;
+  return elapsedSec >= (audio.expiresIn - bufferSeconds);
 }
 
 async function blobUrl(streamPath: string): Promise<string> {
@@ -71,6 +81,8 @@ export async function resolveAudio(chapterId: string): Promise<PlayableAudio> {
       downloadUrl: download.url ?? link.url,
       revoke: null,
       sizeBytes: link.size_bytes,
+      expiresIn: link.expires_in ?? 14400,
+      obtainedAt: Date.now(),
     };
   }
 
@@ -82,6 +94,8 @@ export async function resolveAudio(chapterId: string): Promise<PlayableAudio> {
     downloadUrl: objectUrl,
     revoke: () => URL.revokeObjectURL(objectUrl),
     sizeBytes: link.size_bytes,
+    expiresIn: 86400,
+    obtainedAt: Date.now(),
   };
 }
 

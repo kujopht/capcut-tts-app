@@ -530,8 +530,8 @@ image_studio_svc = ImageStudioService(
 )
 image_payment_provider = MockPaymentProvider()
 
-#: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
-AUDIO_URL_TTL_SECONDS = 300
+#: URL ky cho audio co thoi han 4 gio (14.400s) du cho chuong dai, backend van la noi quyet dinh quyen.
+AUDIO_URL_TTL_SECONDS = 14400
 
 #: Cac phu thuoc CUA RIENG V2. Thieu chung thi tinh nang tac gia khong dung duoc,
 #: nhung doc/nghe/tao audio van chay — nen chung duoc BAO RA o `/api/ready` ma
@@ -1802,12 +1802,30 @@ def delete_novel(novel_id: str,
     except PermissionDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
 
-    removed = {"chapters": 0, "tracks": 0, "jobs": 0, "objects": 0}
+    removed = {"chapters": 0, "tracks": 0, "jobs": 0, "objects": 0, "follows": 0, "posts_dissociated": 0, "queue_items": 0, "profiles_cleaned": 0}
     for chapter in store.list_chapters(novel.novel_id):
         counts = _purge_chapter(chapter)
         removed["chapters"] += 1
         for key in ("tracks", "jobs", "objects"):
             removed[key] += counts[key]
+
+    # Xoa anh bia khoi R2 neu co
+    if getattr(novel, "cover_key", None):
+        try:
+            if storage.delete(novel.cover_key):
+                removed["objects"] += 1
+        except Exception:
+            pass
+
+    # Don dep toan ven tham chieu phan tang (story_follows, posts, content_queue, profiles)
+    if hasattr(store, "cascade_delete_novel_references"):
+        try:
+            ref_counts = store.cascade_delete_novel_references(novel.novel_id)
+            if ref_counts:
+                for k, v in ref_counts.items():
+                    removed[k] = removed.get(k, 0) + v
+        except Exception:
+            pass
 
     store.delete_novel(novel.novel_id, profile.user_id)
     return {"deleted": True, "removed": removed}

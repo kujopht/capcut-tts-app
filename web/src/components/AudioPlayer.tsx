@@ -28,6 +28,33 @@ export function AudioPlayer({
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const revoke = useRef<(() => void) | null>(null);
+  const audioEl = useRef<HTMLAudioElement | null>(null);
+
+  const lamMoiAudio = async (): Promise<boolean> => {
+    const a = audioEl.current;
+    const resumeTime = a?.currentTime ?? 0;
+    const wasPlaying = a ? !a.paused : false;
+    try {
+      console.warn(`[AudioPlayer] Làm mới URL audio cho ${chapterId} tại ${resumeTime}s...`);
+      const resolved = await resolveAudio(chapterId);
+      revoke.current?.();
+      revoke.current = resolved.revoke;
+      setAudio(resolved);
+      setError("");
+      if (a) {
+        a.src = resolved.playUrl;
+        a.load();
+        a.currentTime = resumeTime;
+        if (wasPlaying) {
+          a.play().catch(() => {});
+        }
+      }
+      return true;
+    } catch (cause) {
+      setError("Không phát được audio. File có thể đã hết hạn liên kết.");
+      return false;
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -80,14 +107,18 @@ export function AudioPlayer({
           {/* Audio do chinh nguoi dung tao tu van ban ho nhap; "phu de" chinh
               la van ban do va da hien ngay tren trang, nen khong can track. */}
           <audio
+            ref={audioEl}
             controls
             preload="metadata"
             src={audio.playUrl}
             aria-label={`Trình phát audio: ${title}`}
             onCanPlay={() => setReady(true)}
-            onError={() =>
-              setError("Không phát được audio. File có thể đã hết hạn liên kết.")
-            }
+            onError={async () => {
+              const ok = await lamMoiAudio();
+              if (!ok) {
+                setError("Không phát được audio. File có thể đã hết hạn liên kết.");
+              }
+            }}
           >
             Trình duyệt của bạn không hỗ trợ phát audio.
           </audio>

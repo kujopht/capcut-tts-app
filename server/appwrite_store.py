@@ -59,6 +59,7 @@ from server.domain import (
     now_iso,
 )
 
+COL_PROFILES = "profiles"
 COL_NOVELS = "novels"
 COL_CHAPTERS = "chapters"
 COL_JOBS = "tts_jobs"
@@ -850,6 +851,72 @@ class AppwriteMetadataStore(AppwriteSocialStore):
     def delete_novel(self, novel_id: str, owner_id: str) -> None:
         self.owned_novel(novel_id, owner_id)
         self._delete(COL_NOVELS, novel_id)
+
+    def cascade_delete_novel_references(self, novel_id: str) -> Dict[str, int]:
+        """Cleans up all referential integrity dependencies for a deleted novel.
+        - Deletes story_follows pointing to novel_id
+        - Dissociates/tombstones posts pointing to novel_id (sets novel_id=None)
+        - Deletes content_queue entries for novel_id
+        - Clears user profiles pointing to novel_id as last_read/last_listen
+        Idempotent and safe to retry.
+        """
+        removed = {"follows": 0, "posts_dissociated": 0, "queue_items": 0, "profiles_cleaned": 0}
+
+        # 1. story_follows: cascade delete
+        try:
+            follows = self._list(COL_STORY_FOLLOWS, [q_equal("novel_id", novel_id), q_limit(100)])
+            for f in follows:
+                doc_id = f.get("$id") or f.get("follow_id")
+                if doc_id:
+                    self._delete(COL_STORY_FOLLOWS, doc_id)
+                    removed["follows"] += 1
+        except Exception:
+            pass
+
+        # 2. posts: dissociate/tombstone (set novel_id = None to preserve discussion)
+        try:
+            posts = self._list(COL_POSTS, [q_equal("novel_id", novel_id), q_limit(100)])
+            for p in posts:
+                doc_id = p.get("$id") or p.get("post_id")
+                if doc_id:
+                    self._update(COL_POSTS, doc_id, {"novel_id": None})
+                    removed["posts_dissociated"] += 1
+        except Exception:
+            pass
+
+        # 3. content_queue: cascade delete
+        try:
+            queue_items = self._list(COL_CONTENT_QUEUE, [q_equal("novel_id", novel_id), q_limit(100)])
+            for q in queue_items:
+                doc_id = q.get("$id") or q.get("queue_id")
+                if doc_id:
+                    self._delete(COL_CONTENT_QUEUE, doc_id)
+                    removed["queue_items"] += 1
+        except Exception:
+            pass
+
+        # 4. profiles: clear last_read_novel_id or last_listen_novel_id
+        try:
+            read_profs = self._list(COL_PROFILES, [q_equal("last_read_novel_id", novel_id), q_limit(50)])
+            for pr in read_profs:
+                doc_id = pr.get("$id") or pr.get("user_id")
+                if doc_id:
+                    self._update(COL_PROFILES, doc_id, {"last_read_novel_id": None, "last_read_chapter_id": None})
+                    removed["profiles_cleaned"] += 1
+        except Exception:
+            pass
+
+        try:
+            listen_profs = self._list(COL_PROFILES, [q_equal("last_listen_novel_id", novel_id), q_limit(50)])
+            for pr in listen_profs:
+                doc_id = pr.get("$id") or pr.get("user_id")
+                if doc_id:
+                    self._update(COL_PROFILES, doc_id, {"last_listen_novel_id": None, "last_listen_chapter_id": None})
+                    removed["profiles_cleaned"] += 1
+        except Exception:
+            pass
+
+        return removed
 
     # -- chapter -------------------------------------------------------------
 

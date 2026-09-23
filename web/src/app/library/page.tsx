@@ -70,8 +70,18 @@ function LibraryContent() {
   };
 
   // State bộ lọc cho Danh mục công khai
-  const [searchQuery, setSearchQuery] = useState("");
-  const [fandomFilter, setFandomFilter] = useState("all");
+  const initialQuery = searchParams.get("q") ?? "";
+  const initialFandom = (() => {
+    const f = searchParams.get("fandom");
+    if (f) return f;
+    const tag = searchParams.get("tag");
+    if (tag && tag.startsWith("fandom:")) return tag.replace("fandom:", "");
+    if (tag && tag !== "all") return tag;
+    return "all";
+  })();
+
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [fandomFilter, setFandomFilter] = useState(initialFandom);
   const [audioFilter, setAudioFilter] = useState<AudioFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("updated");
@@ -89,7 +99,21 @@ function LibraryContent() {
 
   const PAGE_SIZE = 12;
   const [pageIndex, setPageIndex] = useState(0);
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialQuery);
+
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q !== null && q !== searchQuery) {
+      setSearchQuery(q);
+      setDebouncedSearchQuery(q);
+    }
+    const f = searchParams.get("fandom");
+    const tag = searchParams.get("tag");
+    const targetFandom = f ?? (tag && tag.startsWith("fandom:") ? tag.replace("fandom:", "") : tag ?? null);
+    if (targetFandom !== null && targetFandom !== fandomFilter) {
+      setFandomFilter(targetFandom);
+    }
+  }, [searchParams]);
 
   const CORE_FANDOMS = useMemo(() => [
     "Naruto",

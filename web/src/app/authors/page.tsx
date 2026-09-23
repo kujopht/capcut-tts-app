@@ -34,7 +34,7 @@ export default function AuthorsPage() {
           <li>Trợ lý AI hỏi–đáp về truyện đang được định hướng cho tương lai.</li>
         </ul>
         <div className="row">
-          <Link className="btn btn-primary" href="/import" prefetch={false}>
+          <Link className="btn btn-primary" href="/studio/write/import" prefetch={false}>
             Nhập fanfic của tôi
           </Link>
           <Link className="btn" href="/studio/write" prefetch={false}>

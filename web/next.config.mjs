@@ -28,6 +28,8 @@ const nextConfig = {
       { source: "/tools/subtitles", destination: "/studio/subtitle", permanent: true },
       { source: "/write", destination: "/studio/write", permanent: true },
       { source: "/write/import", destination: "/studio/write/import", permanent: true },
+      { source: "/import", destination: "/studio/write/import", permanent: true },
+      { source: "/fanfic", destination: "/library?tab=fanfic", permanent: true },
       { source: "/animation", destination: "/entertainment", permanent: true },
       { source: "/animation/:path*", destination: "/entertainment", permanent: true },
       /*

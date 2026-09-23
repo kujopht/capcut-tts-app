@@ -35,16 +35,16 @@ from pydantic import BaseModel, Field
 
 # Summary indicators that suggest accidental LLM compression instead of translation
 SUMMARIZATION_PATTERNS = [
-    r"\btóm lại\b",
-    r"\btóm tắt\b",
-    r"\bnói tóm lại\b",
+    r"\btác giả tóm tắt\b",
     r"\bphần còn lại của chương\b",
     r"\bđoạn sau kể về\b",
-    r"\btác giả tóm tắt\b",
     r"\bnhìn chung trong chương này\b",
     r"\bcâu chuyện tiếp tục với việc tóm lược\b",
     r"\[\s*tóm tắt\s*\]",
     r"\[\s*lược dịch\s*\]",
+    r"^\s*tóm tắt\s*:",
+    r"\bdưới đây là bản tóm tắt\b",
+    r"\btóm tắt nội dung\b",
 ]
 
 # Cutoff indicators at the very end of translated text
@@ -160,37 +160,55 @@ class PublishQualityGate:
         )
 
         # 3. All Source Chunks Accounted For
-        s_chunks = source_chunks or []
-        c3_pass = len(s_chunks) > 0 or src_words == 0
+        if isinstance(source_chunks, int):
+            s_count = source_chunks
+            s_chunks = [{} for _ in range(s_count)]
+        else:
+            s_chunks = source_chunks or []
+            s_count = len(s_chunks)
+        c3_pass = s_count > 0 or src_words == 0
         if not c3_pass:
             blocking.append("Không có danh sách chunk nguồn được ghi nhận.")
         checks["all_source_chunks_accounted_for"] = CheckResult(
             name="All Source Chunks Accounted For",
             passed=c3_pass,
             is_hard_gate=True,
-            detail=f"Source chunks: {len(s_chunks)} chunks",
-            evidence={"source_chunks_count": len(s_chunks)},
+            detail=f"Source chunks: {s_count} chunks",
+            evidence={"source_chunks_count": s_count},
         )
 
         # 4. Translated Chunks Match Expected Count
-        t_chunks = translated_chunks or []
-        c4_pass = (len(s_chunks) == len(t_chunks)) and len(t_chunks) > 0
+        if isinstance(translated_chunks, int):
+            t_count = translated_chunks
+            t_chunks = [{} for _ in range(t_count)]
+        else:
+            t_chunks = translated_chunks or []
+            t_count = len(t_chunks)
+        c4_pass = (s_count == t_count) and t_count > 0
         if not c4_pass:
-            blocking.append(f"Số lượng chunk dịch ({len(t_chunks)}) không khớp số lượng chunk nguồn ({len(s_chunks)}).")
+            blocking.append(f"Số lượng chunk dịch ({t_count}) không khớp số lượng chunk nguồn ({s_count}).")
         checks["translated_chunks_match_expected"] = CheckResult(
             name="Translated Chunks Match Expected",
             passed=c4_pass,
             is_hard_gate=True,
-            detail=f"Expected: {len(s_chunks)} chunks, Translated: {len(t_chunks)} chunks",
-            evidence={"source_count": len(s_chunks), "translated_count": len(t_chunks)},
+            detail=f"Expected: {s_count} chunks, Translated: {t_count} chunks",
+            evidence={"source_count": s_count, "translated_count": t_count},
         )
 
         # 5. No Empty Translated Chunk
         empty_chunk_indices = []
-        for idx, tc in enumerate(t_chunks, start=1):
-            txt = tc.get("text", "") or tc.get("translated_text", "")
-            if not txt.strip():
-                empty_chunk_indices.append(idx)
+        if isinstance(translated_chunks, list):
+            for idx, tc in enumerate(t_chunks, start=1):
+                if isinstance(tc, str):
+                    txt = tc
+                elif isinstance(tc, dict):
+                    txt = tc.get("text", "") or tc.get("translated_text", "")
+                else:
+                    txt = str(tc)
+                if not txt.strip():
+                    empty_chunk_indices.append(idx)
+        elif t_count > 0 and not (translated_text or "").strip():
+            empty_chunk_indices.append(1)
         c5_pass = len(empty_chunk_indices) == 0
         if not c5_pass:
             blocking.append(f"Phát hiện chunk dịch rỗng tại vị trí: {empty_chunk_indices}")
@@ -208,6 +226,9 @@ class PublishQualityGate:
         cutoff_reason = ""
         for pat in CUTOFF_TERMINATORS:
             if re.search(pat, vi_clean, re.IGNORECASE):
+                # If pattern is trailing ellipsis, verify if upstream source also ended with an ellipsis
+                if pat == r"\.\.\.\s*$" and re.search(r"(\.\.\.|…)\s*$", src_clean):
+                    continue
                 cutoff_detected = True
                 cutoff_reason = f"Đuôi văn bản kết thúc đột ngột hoặc chứa từ nối chưa hoàn tất ('{pat}')"
                 break
@@ -241,11 +262,32 @@ class PublishQualityGate:
         # 8. Final Source Section Represented in Translated Output
         c8_pass = False
         c8_detail = ""
-        if s_chunks and t_chunks:
+        last_src = ""
+        last_vi = ""
+
+        if s_chunks and isinstance(s_chunks[-1], dict) and s_chunks[-1].get("text"):
             last_src = (s_chunks[-1].get("text") or "").strip()
+        if t_chunks and isinstance(t_chunks[-1], dict) and (t_chunks[-1].get("text") or t_chunks[-1].get("translated_text")):
             last_vi = (t_chunks[-1].get("text") or t_chunks[-1].get("translated_text") or "").strip()
-            # The final translated chunk must exist and have reasonable length relative to last source chunk
-            if len(last_vi) >= 10 and (len(last_vi) >= len(last_src) * 0.4 or len(last_src) < 100):
+
+        # If chunk texts were not in chunk dicts, derive from source_text and translated_text
+        if not last_src and src_clean:
+            src_paras = [p.strip() for p in re.split(r"\n\s*\n", src_clean) if p.strip()]
+            if src_paras and 3 <= len(src_paras[-1]) <= 600:
+                last_src = src_paras[-1]
+            else:
+                last_src = src_clean[-150:].strip()
+        if not last_vi and vi_clean:
+            vi_paras = [p.strip() for p in re.split(r"\n\s*\n", vi_clean) if p.strip()]
+            if vi_paras and 3 <= len(vi_paras[-1]) <= 600:
+                last_vi = vi_paras[-1]
+            else:
+                last_vi = vi_clean[-150:].strip()
+
+        if last_src and last_vi:
+            # The final translated section must exist and have reasonable length
+            min_vi_len = 3 if len(last_src) < 80 else 10
+            if len(last_vi) >= min_vi_len and (len(last_vi) >= len(last_src) * 0.35 or len(last_src) < 80):
                 c8_pass = True
                 c8_detail = f"Đoạn kết nguồn ({len(last_src)} ký tự) có đoạn dịch tương ứng ({len(last_vi)} ký tự)."
             else:

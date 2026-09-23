@@ -8,67 +8,64 @@ const librarySrc = readFileSync(new URL("../src/app/library/page.tsx", import.me
 const novelCoverSrc = readFileSync(new URL("../src/components/NovelCover.tsx", import.meta.url), "utf8");
 const cssSrc = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
 
-test("HomeHeroShowcase không mượn bài viết cộng đồng và chỉ dùng EDITORIAL_UPDATES", () => {
-  // HomeHeroShowcase chỉ nhận novels, không nhận posts
+test("Homepage Hero chứa đúng 2 cột tinh gọn Truyện mới và Bài đăng mới, không có khối cộng đồng bên dưới", () => {
+  // homepage contains Truyện mới
+  assert.match(homeSrc, /<strong>Truyện mới<\/strong>/);
+
+  // homepage contains Bài đăng mới
+  assert.match(homeSrc, /<strong>Bài đăng mới<\/strong>/);
+
+  // homepage does NOT contain heading Cộng đồng đang nói gì
   assert.ok(
-    /function HomeHeroShowcase\(\s*\{\s*novels,?\s*\}\s*:\s*\{\s*novels:\s*Novel\[\];?\s*\}\)/.test(homeSrc),
-    "HomeHeroShowcase không nhận posts prop"
+    !homeSrc.includes("Cộng đồng đang nói gì"),
+    "Trang chủ không được chứa tiêu đề Cộng đồng đang nói gì"
   );
 
-  // HomeHeroShowcase Column 2 ("Cập nhật mới") maps EDITORIAL_UPDATES
-  assert.match(
-    homeSrc,
-    /<strong>Cập nhật mới<\/strong>[\s\S]*?EDITORIAL_UPDATES\.map/,
-    "Cột 2 Cập nhật mới phải map EDITORIAL_UPDATES"
-  );
-
-  // HomeHeroShowcase Column 2 link leads to /library (Khám phá) instead of /community
-  assert.match(
-    homeSrc,
-    /href="\/library"[^>]*className="showcase-more"[^>]*>\s*Khám phá →/,
-    "Cột 2 dẫn tới /library"
-  );
-
-  // HomeHeroShowcase invocation on home page does not pass posts
-  assert.match(
-    homeSrc,
-    /<HomeHeroShowcase novels=\{novels\} \/>/,
-    "Gọi HomeHeroShowcase chỉ truyền novels"
-  );
-});
-
-test("Cộng đồng đang nói gì chỉ dùng communityPosts và có trạng thái rỗng trung thực", () => {
-  // Khu vực Cộng đồng đang nói gì
-  assert.match(
-    homeSrc,
-    /IconMegaphone size=\{20\} \/> Cộng đồng đang nói gì/,
-    "Có khu vực Cộng đồng đang nói gì"
-  );
-
-  // Dùng communityPosts.map(TheCongDong)
-  assert.match(
-    homeSrc,
-    /communityPosts\.length > 0 \? \([\s\S]*?communityPosts\.map\(\(bai\)/,
-    "Hiển thị bài viết từ communityPosts"
-  );
-
-  // Hiển thị trạng thái rỗng trung thực KeTrongGon khi không có bài viết
-  assert.match(
-    homeSrc,
-    /<KeTrongGon[\s\S]*?icon="💬"[\s\S]*?text="Chưa có thảo luận mới từ cộng đồng\."/,
-    "Hiển thị KeTrongGon khi communityPosts rỗng"
-  );
-
-  // EDITORIAL_UPDATES không xuất hiện trong khu vực Cộng đồng (slice từ thẻ h2 tới lối tắt)
-  const lastIndex = homeSrc.lastIndexOf("IconMegaphone size={20} /> Cộng đồng đang nói gì");
-  assert.ok(lastIndex !== -1, "Tìm thấy tiêu đề Cộng đồng đang nói gì");
-  const communitySection = homeSrc.slice(
-    lastIndex,
-    homeSrc.indexOf("home-discovery-strip", lastIndex)
-  );
+  // homepage does NOT contain heading Cập nhật mới
   assert.ok(
-    !communitySection.includes("EDITORIAL_UPDATES"),
-    "EDITORIAL_UPDATES không được mượn vào khu vực cộng đồng"
+    !homeSrc.includes("Cập nhật mới"),
+    "Trang chủ không được chứa tiêu đề Cập nhật mới"
+  );
+
+  // Bài đăng mới uses communityPosts
+  assert.match(
+    homeSrc,
+    /danhSachBaiDang\.map\(\(bai\)/,
+    "Bài đăng mới phải map từ danhSachBaiDang (communityPosts)"
+  );
+  assert.match(
+    homeSrc,
+    /<HomeHeroShowcase novels=\{novels\} communityPosts=\{communityPosts\} \/>/,
+    "Truyền communityPosts vào HomeHeroShowcase"
+  );
+
+  // Link header/action của Bài đăng mới dẫn sang /community
+  assert.match(
+    homeSrc,
+    /href="\/community"[^>]*className="showcase-more"[^>]*>\s*Xem cộng đồng →/,
+    "Hành động cột Bài đăng mới dẫn sang /community"
+  );
+
+  // maximum 3 novels
+  assert.match(
+    homeSrc,
+    /const danhSachTruyen = novels\.slice\(0,\s*3\);/,
+    "Truyện mới lấy tối đa 3 tác phẩm"
+  );
+
+  // maximum 3 posts
+  assert.match(
+    homeSrc,
+    /const danhSachBaiDang = communityPosts\.slice\(0,\s*3\);/,
+    "Bài đăng mới lấy tối đa 3 bài viết"
+  );
+
+  // no duplicated community post in Home
+  const matches = (homeSrc.match(/communityPosts\.slice/g) || []).length;
+  assert.equal(matches, 1, "communityPosts chỉ được dùng tại một vị trí duy nhất trong Hero");
+  assert.ok(
+    !homeSrc.includes("community-preview-grid"),
+    "Không còn khối community-preview-grid trùng lặp ở dưới"
   );
 });
 

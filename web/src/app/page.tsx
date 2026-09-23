@@ -30,9 +30,9 @@
  * khong `mine=true`, xem `server/main.py::list_animation_series`) — DA
  * XUAT BAN THAT, khong bia.
  *
- * "Cộng đồng đang nói gì": `GET /api/feed` — CONG KHAI, khong doi dang nhap
+ * "Bài đăng mới": `GET /api/feed` — CONG KHAI, khong doi dang nhap
  * (xem docstring `server/main.py::api_feed`) — khach vang lai van thay bang
- * tin kham pha.
+ * tin kham pha trong Hero.
  *
  * "Tiếp tục doc/nghe/xem" KHONG BIA: goi `GET /api/progress/continue`, mot
  * API THAT tra ve con tro CA NHAN da luu. Nguoi da dang nhap nhung CHUA
@@ -257,54 +257,21 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
   );
 }
 
-interface EditorialUpdate {
-  id: string;
-  title: string;
-  snippet: string;
-  tag: string;
-  href: string;
-  icon: string;
-}
-
-const EDITORIAL_UPDATES: EditorialUpdate[] = [
-  {
-    id: "update-156206",
-    title: "The Cold Between Wars: Đã xong 47 chương Audio",
-    snippet: "Toàn bộ 47 chương tiếng Việt đã hoàn thành Audio chất lượng cao bằng giọng đọc tự nhiên Piper.",
-    tag: "Audio",
-    href: "/novels/nov_rr_156206",
-    icon: "🎧",
-  },
-  {
-    id: "update-library",
-    title: "Thư viện công khai: Duyệt trọn bộ danh mục tác phẩm",
-    snippet: "Khám phá danh mục truyện chữ, fanfic chuyển ngữ với bộ lọc vũ trụ, số chương và định dạng audio.",
-    tag: "Thư viện",
-    href: "/library",
-    icon: "📚",
-  },
-  {
-    id: "update-hatake",
-    title: "Trọng Sinh Gia Tộc Hatake: Cú Sốc Kỹ Sư Vật Liệu",
-    snippet: "25 chương chuyển ngữ hài hước và kịch tính trong thế giới Naruto với góc nhìn khoa học độc đáo.",
-    tag: "Truyện mới",
-    href: "/novels/nov_hatake_156690",
-    icon: "⚡",
-  },
-];
-
 /**
  * Khung kính nổi bật đầu trang (Khai thác vùng phải còn trống trên desktop)
- * Hiển thị CÙNG LÚC 2 cột:
- * - Cột 1: Truyện mới (Danh mục tác phẩm thật dạng hàng dọc tinh gọn)
- * - Cột 2: Cập nhật mới (Thông báo biên tập & Tiêu điểm nội dung công khai)
+ * Hiển thị CÙNG LÚC 2 cột gọn:
+ * - Cột 1: Truyện mới (Tối đa 3 tác phẩm thật, ảnh bìa chân dung compact)
+ * - Cột 2: Bài đăng mới (Tối đa 3 bài viết thật từ cộng đồng, không dùng thông báo giả)
  */
 function HomeHeroShowcase({
   novels,
+  communityPosts,
 }: {
   novels: Novel[];
+  communityPosts: Post[];
 }) {
-  const danhSachTruyen = novels.slice(0, 4);
+  const danhSachTruyen = novels.slice(0, 3);
+  const danhSachBaiDang = communityPosts.slice(0, 3);
 
   return (
     <div className="home-hero-showcase rise rise-1" aria-label="Tiêu điểm trên Fanfic World">
@@ -356,15 +323,12 @@ function HomeHeroShowcase({
                       <div className="showcase-item-title clamp-1" title={n.title}>
                         {n.title}
                       </div>
-                      <div className="showcase-item-meta">
-                        <span className="author clamp-1" title={author}>
-                          {author}
-                        </span>
+                      <div className="showcase-item-meta clamp-1">
                         <span className="fandom-chip">{fandom}</span>
+                        <span className="chapters">{chapterCount}</span>
                         {hasAudio && (
                           <span className="badge badge-brand badge-sm">Audio</span>
                         )}
-                        <span className="chapters">{chapterCount}</span>
                       </div>
                     </div>
                   </Link>
@@ -379,39 +343,54 @@ function HomeHeroShowcase({
           <span className="showcase-divider-gem" />
         </div>
 
-        {/* Cột 2: Cập nhật mới — Thông báo biên tập & Điểm tin hệ thống công khai (không mượn bài viết cộng đồng) */}
+        {/* Cột 2: Bài đăng mới — Thảo luận thật từ cộng đồng (communityPosts) */}
         <div className="showcase-col">
           <div className="showcase-col-head">
             <div className="showcase-col-title">
-              <IconSparkles size={16} />
-              <strong>Cập nhật mới</strong>
+              <IconMegaphone size={16} />
+              <strong>Bài đăng mới</strong>
             </div>
-            <Link href="/library" className="showcase-more" prefetch={false}>
-              Khám phá →
+            <Link href="/community" className="showcase-more" prefetch={false}>
+              Xem cộng đồng →
             </Link>
           </div>
           <div className="showcase-scroll-list">
-            {EDITORIAL_UPDATES.map((u) => (
-              <Link
-                key={u.id}
-                href={u.href}
-                className="showcase-item showcase-post-item"
-                prefetch={false}
-              >
-                <span className="showcase-icon-box" aria-hidden="true">
-                  {u.icon}
-                </span>
-                <div className="showcase-item-info">
-                  <div className="showcase-post-author">
-                    <strong className="clamp-1 showcase-update-title">
-                      {u.title}
-                    </strong>
-                    <span className="badge badge-brand badge-sm">{u.tag}</span>
-                  </div>
-                  <p className="showcase-post-snippet clamp-2">{u.snippet}</p>
-                </div>
-              </Link>
-            ))}
+            {danhSachBaiDang.length === 0 ? (
+              <div className="hint showcase-empty-hint">
+                Chưa có thảo luận mới từ cộng đồng.
+              </div>
+            ) : (
+              danhSachBaiDang.map((bai) => {
+                const authorName = bai.author?.display_name || bai.author?.username || "Ẩn danh";
+                return (
+                  <Link
+                    key={bai.post_id}
+                    href={`/posts/${bai.post_id}`}
+                    className="showcase-item showcase-post-item"
+                    prefetch={false}
+                  >
+                    <Avatar
+                      name={authorName}
+                      avatarUrl={bai.author?.avatar_url}
+                      className="showcase-avatar"
+                    />
+                    <div className="showcase-item-info">
+                      <div className="showcase-post-author clamp-1">
+                        <strong className="clamp-1 showcase-update-title" title={authorName}>
+                          {authorName}
+                        </strong>
+                        <span className="hint mono showcase-post-meta">
+                          ❤ {bai.like_count} · 💬 {bai.comment_count}
+                        </span>
+                      </div>
+                      <p className="showcase-post-snippet clamp-1" title={bai.text}>
+                        {bai.text}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -514,34 +493,6 @@ function KeTrongNoiBat() {
   );
 }
 
-/** The xem truoc mot bai dang cong dong (Phan 10 dac ta). */
-function TheCongDong({ bai }: { bai: Post }) {
-  return (
-    <Link href={`/posts/${bai.post_id}`} className="community-preview-card">
-      <div className="row row-tight">
-        <Avatar
-          name={bai.author?.display_name || bai.author?.username || "?"}
-          avatarUrl={bai.author?.avatar_url}
-          className="community-preview-avatar"
-        />
-        <span className="community-preview-author">
-          <strong className="hint">
-            {bai.author?.display_name || bai.author?.username || "Ẩn danh"}
-          </strong>
-          <span className="hint mono community-preview-timestamp">
-            {dinhDangNgay(bai.created_at)}
-          </span>
-        </span>
-      </div>
-      <p className="clamp-3 community-preview-text">
-        {bai.text.length > 140 ? `${bai.text.slice(0, 140)}…` : bai.text}
-      </p>
-      <span className="hint community-preview-meta">
-        ❤ {bai.like_count} · 💬 {bai.comment_count}
-      </span>
-    </Link>
-  );
-}
 
 /**
  * Series Animation DUY NHAT trong kho — chi mot series thi KHONG con nam lot
@@ -724,7 +675,7 @@ export default function HomePage() {
     ma trang nay tu dat ra la KHONG duoc lam (xem dau tep). Phai an CA khoi
     bao ngoai khi khong co gi de hien, khong chi tung ke ben trong.
   */
-  const coKeThuHai = !loading;
+  const coKeThuHai = !loading && animationSeries.length > 0;
   /* Cung nguyen tac voi `coKeThuHai`: khong dat cho cho mot cot rong. */
   const coBangVang = !loading && bangVangTuan.length > 0;
 
@@ -747,7 +698,7 @@ export default function HomePage() {
           <Hero daDangNhap={daDangNhap} />
           <DaiThanhVien gamification={data?.gamification ?? null} />
         </div>
-        <HomeHeroShowcase novels={novels} />
+        <HomeHeroShowcase novels={novels} communityPosts={communityPosts} />
       </div>
 
       {/*
@@ -896,40 +847,6 @@ export default function HomePage() {
               </Link>
             ))}
           </div>
-        </section>
-      ) : null}
-
-      {/*
-        Ke "Cộng đồng đang nói gì" — thảo luận cộng đồng công khai.
-        Nếu trống: hiển thị trạng thái rỗng trung thực, không mượn nội dung hệ thống.
-      */}
-      {!loading ? (
-        <section className="home-secondary-card stack-2" aria-labelledby="home-cong-dong">
-          <div className="section-head">
-            <h2 className="section-title section-title-icon" id="home-cong-dong">
-              <IconMegaphone size={20} /> Cộng đồng đang nói gì
-            </h2>
-            <Link href="/community" className="section-more" prefetch={false}>
-              Xem cộng đồng <span aria-hidden="true">→</span>
-            </Link>
-          </div>
-          {communityPosts.length > 0 ? (
-            <div className="community-preview-grid">
-              {communityPosts.map((bai) => (
-                <TheCongDong key={bai.post_id} bai={bai} />
-              ))}
-            </div>
-          ) : (
-            <KeTrongGon
-              icon="💬"
-              text="Chưa có thảo luận mới từ cộng đồng."
-              action={
-                <Link href="/community" className="btn btn-sm btn-secondary" prefetch={false}>
-                  Mở chủ đề đầu tiên →
-                </Link>
-              }
-            />
-          )}
         </section>
       ) : null}
       </div>

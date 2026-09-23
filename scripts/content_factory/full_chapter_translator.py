@@ -172,13 +172,21 @@ def detect_translation_defect(source_text: str, vi_text: str) -> Optional[str]:
         )
 
     # Cutoff detection: ends mid-sentence without terminal punctuation
-    # Terminal punctuation allowed: . ! ? " ” ' ’ … ... * - —
+    # Terminal punctuation allowed: . ! ? " ” ' ’ … ... * - — ) ] } >
     last_char = v_clean[-1]
-    if last_char not in ('.', '!', '?', '"', '”', '’', "'", '…', '*', '-', '—') and not v_clean.endswith('...'):
-        # Check if last word is incomplete or hanging
-        last_word = v_clean.split()[-1] if v_clean.split() else ""
-        if len(last_word) > 1 and not re.search(r"[.!?\"”]$", last_word):
-            return f"CUTOFF_DETECTED: Output ends abruptly without punctuation: '...{v_clean[-40:]}'"
+    allowed_punct = ('.', '!', '?', '"', '”', '’', "'", '…', '*', '-', '—', ')', ']', '}', '>')
+    src_last_char = s_clean[-1]
+    if last_char not in allowed_punct and not v_clean.endswith('...'):
+        # If the source text itself ends with a digit, bracket, or same non-punct character, it's not an abrupt cutoff
+        if src_last_char.isdigit() and last_char.isdigit():
+            pass
+        elif src_last_char == last_char:
+            pass
+        else:
+            # Check if last word is incomplete or hanging
+            last_word = v_clean.split()[-1] if v_clean.split() else ""
+            if len(last_word) > 1 and not re.search(r"[.!?\"”]$", last_word):
+                return f"CUTOFF_DETECTED: Output ends abruptly without punctuation: '...{v_clean[-40:]}'"
 
     # Summarization cues detection
     lower_vi = v_clean.lower()

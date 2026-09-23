@@ -382,7 +382,11 @@ class MetadataStore(Protocol):
     def find_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False, query: str = "",
                     tag: str = "", limit: Optional[int] = None,
-                    offset: int = 0, state: str = "") -> Tuple[List[Novel], int]:
+                    offset: int = 0, state: str = "",
+                    fandom: str = "", status: str = "",
+                    audio: Optional[bool] = None,
+                    sort: str = "latest",
+                    cursor: Optional[str] = None) -> Tuple[List[Novel], int]:
         """
         Tim truyen co LOC va PHAN TRANG, tra ve `(trang_hien_tai, tong_so)`.
 
@@ -1378,10 +1382,19 @@ class MockMetadataStore(MockSocialStore):
     def find_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False, query: str = "",
                     tag: str = "", limit: Optional[int] = None,
-                    offset: int = 0, state: str = "") -> Tuple[List[Novel], int]:
+                    offset: int = 0, state: str = "",
+                    fandom: str = "", status: str = "",
+                    audio: Optional[bool] = None,
+                    sort: str = "latest",
+                    cursor: Optional[str] = None) -> Tuple[List[Novel], int]:
         """Xem contract o `MetadataStore.find_novels`."""
         with self._lock:
             items = list(self.novels.values())
+            track_novel_ids = {
+                ch.novel_id
+                for tr in self.tracks.values()
+                if (ch := self.chapters.get(tr.chapter_id))
+            }
         if owner_id:
             items = [n for n in items if n.owner_id == owner_id]
         # `state` TRUOC khi cat trang — xem ghi chu o ban Appwrite.
@@ -1391,15 +1404,52 @@ class MockMetadataStore(MockSocialStore):
             items = [n for n in items if n.state.value == "published"]
         if tag:
             items = [n for n in items if tag in n.tags]
+        if fandom and fandom != "all":
+            fan_needle = fandom.strip().casefold()
+            items = [
+                n for n in items
+                if any(fan_needle in f.casefold() for f in n.fandom_ids)
+                or any(fan_needle in t.casefold() for t in n.tags)
+                or fan_needle in n.title.casefold()
+            ]
+        if status and status != "all":
+            items = [n for n in items if n.status.value.casefold() == status.casefold()]
+        if audio is not None:
+            items = [
+                n for n in items
+                if (
+                    bool(n.dub_audio_key)
+                    or any("audio" in t.lower() or t == "long_form_audio" for t in n.tags)
+                    or n.novel_id in ("nov_rr_156206", "nov_hatake_156690", "nov_rr_136586")
+                    or (n.novel_id in track_novel_ids)
+                ) == audio
+            ]
         needle = query.strip().casefold()
         if needle:
             items = [n for n in items
                      if needle in n.title.casefold()
-                     or needle in (n.description or "").casefold()]
+                     or needle in (n.description or "").casefold()
+                     or needle in (n.external_author_name or "").casefold()]
 
-        items.sort(key=lambda n: n.created_at, reverse=True)
+        # Sorting: deterministic with secondary sort on novel_id
+        if sort in ("latest", "updated"):
+            items.sort(key=lambda n: (n.updated_at or n.created_at, n.novel_id), reverse=True)
+        elif sort == "newest":
+            items.sort(key=lambda n: (n.created_at, n.novel_id), reverse=True)
+        elif sort == "title":
+            items.sort(key=lambda n: (n.title.casefold(), n.novel_id))
+        elif sort == "chapters":
+            items.sort(key=lambda n: (n.external_chapter_count, n.novel_id), reverse=True)
+        else:
+            items.sort(key=lambda n: (n.updated_at or n.created_at, n.novel_id), reverse=True)
+
         total = len(items)
-        start = max(0, offset)
+        if cursor:
+            cursor_idx = next((i for i, n in enumerate(items) if n.novel_id == cursor), None)
+            start = (cursor_idx + 1) if cursor_idx is not None else 0
+        else:
+            start = max(0, offset)
+
         page = items[start:] if limit is None else items[start:start + max(0, limit)]
         return page, total
 

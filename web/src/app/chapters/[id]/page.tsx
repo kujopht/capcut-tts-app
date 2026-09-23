@@ -1,106 +1,98 @@
-"use client";
-
 /**
  * Doc chuong — CHI CHU, chu-truoc-tien (Phan 2A/2E, overnight Phase 2).
- *
- * TRUOC: trang nay tu la CA trinh doc lan trinh nghe — `ChapterPlayer` +
- * `MiniPlayer` + `ListenReporter` nam TREN dau, chiem het man hinh dau tien
- * truoc khi toi duoc chu. SAU: trai nghiem NGHE chuyen het sang `/listen/[id]`
- * (trang rieng, uu tien tap truoc/sau + chon tap + phu de dong bo); trang nay
- * chi con tieu de + mot lien ket "Nghe chương này" (khi co audio) + noi dung +
- * binh luan — dung nhu ten goi "trang doc".
+ * Server Component SSR van ban, semantic article markup va dynamic metadata cho SEO.
  */
 
+import type { Metadata } from "next";
 import Link from "next/link";
-import { use, useCallback, useEffect, useMemo, useState } from "react";
-import { api, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
-import { useSession } from "@/lib/session";
-import { useAsyncData } from "@/lib/useAsyncData";
+import { API_BASE, api, ApiError, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
+import { errorMessage } from "@/lib/session";
 import { ChapterComments } from "@/components/ChapterComments";
 import { AskAiPanel } from "@/components/AskAiPanel";
-import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
+import {
+  ChapterInteractiveReader,
+  ChapterOwnerAudioAction,
+  ChapterReaderPrefsControl,
+} from "@/components/ChapterInteractiveReader";
+import { EmptyState, ErrorState, formatNumber } from "@/components/ui";
 import { IconBook, IconHeadphones } from "@/components/Icons";
-import { ReaderPrefs, ReaderProgress } from "@/components/ReaderPrefs";
-import { MAC_DINH, type TuyChonDoc } from "@/lib/readerPrefs";
 
-export default function ChapterPage({
+/**
+ * Dynamic metadata cho SEO, OpenGraph (article), Twitter card va canonical URL.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  try {
+    const res = await fetch(`${API_BASE}/api/chapters/${encodeURIComponent(id)}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) throw new Error("not found");
+    const data = await res.json();
+    const chapter: Chapter = data.chapter;
+    const novel: NovelBrief | null = data.novel ?? null;
+    const title = novel
+      ? `${chapter.title} - ${novel.title} | Fanfic World`
+      : `${chapter.title} | Fanfic World`;
+    const excerpt = chapter.content
+      ? chapter.content.slice(0, 160).replace(/\s+/g, " ").trim()
+      : `Đọc chương ${chapter.title} tại Fanfic World.`;
+    const canonical = `https://fanfic.world/chapters/${chapter.chapter_id}`;
+    const images = novel?.cover_url ? [novel.cover_url] : [];
+
+    return {
+      title,
+      description: excerpt,
+      alternates: { canonical },
+      openGraph: {
+        title,
+        description: excerpt,
+        url: canonical,
+        siteName: "Fanfic World",
+        type: "article",
+        images,
+      },
+      twitter: {
+        card: "summary",
+        title,
+        description: excerpt,
+        images,
+      },
+    };
+  } catch {
+    return {
+      title: "Đọc chương | Fanfic World",
+      description: "Đọc chương fanfic tiếng Việt tại Fanfic World.",
+    };
+  }
+}
+
+export default async function ChapterPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = use(params);
-  const { profile } = useSession();
-  /*
-    Giu o TANG TRANG chu khong trong `ReaderPrefs`: hai thuoc tinh `data-*`
-    nam tren the boc ngoai cung, con thanh dieu khien thi o giua trang. De
-    trang thai trong thanh do thi no khong voi toi cho can dat.
-  */
-  const [tuyChon, datTuyChon] = useState<TuyChonDoc>(MAC_DINH);
+  const { id } = await params;
 
-  /*
-    HAI request, khong phu thuoc so chuong: chuong hien tai (`getChapter`, da
-    kem san `novel` nen khong phai goi them chi de lay ten truyen) + danh sach
-    chuong cua truyen, de biet chuong TRUOC va chuong SAU la gi.
+  let ket_qua: {
+    chapter: Chapter;
+    audio: AudioTrack | null;
+    novel?: NovelBrief | null;
+  } | null = null;
+  let missing = false;
+  let errorMsg = "";
 
-    Danh sach chuong lay theo kieu KHONG DUOC PHEP LAM HONG VIEC DOC: neu
-    `getNovel` that bai thi `dsChuong` chi la rong, mat hai cai nut dieu huong,
-    va chu van hien ra binh thuong. Bat nguoc lai — de mot loi cua request phu
-    lam ca trang doc thanh trang loi — la doi mat noi dung chinh de lay mot
-    tien ich.
-  */
-  const fetchChapter = useCallback(async () => {
-    const ket_qua = await api.getChapter(id);
-    const novelId = ket_qua.novel?.novel_id ?? ket_qua.chapter?.novel_id;
-    if (!novelId) return { ...ket_qua, dsChuong: [] as Chapter[] };
-    const dsChuong = await api
-      .getNovel(novelId)
-      .then((r) => r.chapters)
-      .catch(() => [] as Chapter[]);
-    return { ...ket_qua, dsChuong };
-  }, [id]);
-
-  const { data, loading, error, missing, reload } = useAsyncData(fetchChapter);
-  const chapter: Chapter | null = data?.chapter ?? null;
-  const audio: AudioTrack | null = data?.audio ?? null;
-  const novel: NovelBrief | null = data?.novel ?? null;
-
-  /*
-    KHONG tu sap xep lai theo `order_index` — cung ly do da ghi o
-    `/listen/[id]`: chuong tao binh thuong deu mang gia tri MAC DINH giong het
-    nhau, nen sap theo do se tron hang. `GET /api/novels/{id}` da tra ve DUNG
-    thu tu hien thi, va `/novels/[id]` dung thang mang nay.
-  */
-  const { chuongTruoc, chuongSau, soThuTu, tongSo } = useMemo(() => {
-    const ds = data?.dsChuong ?? [];
-    const i = ds.findIndex((c) => c.chapter_id === id);
-    return {
-      chuongTruoc: i > 0 ? ds[i - 1] : null,
-      chuongSau: i >= 0 && i < ds.length - 1 ? ds[i + 1] : null,
-      // Vi tri trong mang, khong phai `order_index` — xem ghi chu o tren.
-      soThuTu: i >= 0 ? i + 1 : 0,
-      tongSo: ds.length,
-    };
-  }, [data, id]);
-
-  /*
-    Ghi con tro "Tiếp tục đọc" (Phần B, V4 visual completion) — MỘT LẦN khi mở
-    trang, không phải mỗi lần cuộn. Chỉ khi đã đăng nhập: route yêu cầu token,
-    và khách vãng lai không có "trang chủ của họ" để quay lại. Lỗi mạng ở đây
-    KHÔNG được làm hỏng việc đọc — chỉ là tiện ích, không phải nội dung chính.
-  */
-  useEffect(() => {
-    if (!profile || !chapter) return;
-    api.reportReadProgress(chapter.novel_id, chapter.chapter_id).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.user_id, chapter?.chapter_id]);
-
-  if (loading) {
-    return (
-      <div className="page">
-        <div className="sk sk-title" style={{ height: 30, width: "45%" }} />
-        <SkeletonList count={3} />
-      </div>
-    );
+  try {
+    ket_qua = await api.getChapter(id);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      missing = true;
+    } else {
+      errorMsg = errorMessage(err);
+    }
   }
 
   if (missing) {
@@ -119,19 +111,49 @@ export default function ChapterPage({
     );
   }
 
-  if (error || !chapter) {
+  if (errorMsg || !ket_qua || !ket_qua.chapter) {
     return (
       <div className="page">
-        <ErrorState message={error || "Không tải được chương."} onRetry={reload} />
+        <ErrorState message={errorMsg || "Không tải được chương."} />
       </div>
     );
   }
 
-  const isOwner = profile?.user_id === chapter.owner_id;
+  const chapter: Chapter = ket_qua.chapter;
+  const audio: AudioTrack | null = ket_qua.audio;
+  const novel: NovelBrief | null = ket_qua.novel ?? null;
+
+  /*
+    HAI request, khong phu thuoc so chuong: chuong hien tai (`getChapter`, da
+    kem san `novel` nen khong phai goi them chi de lay ten truyen) + danh sach
+    chuong cua truyen, de biet chuong TRUOC va chuong SAU la gi.
+
+    Danh sach chuong lay theo kieu KHONG DUOC PHEP LAM HONG VIEC DOC: neu
+    `getNovel` that bai thi `dsChuong` chi la rong, mat hai cai nut dieu huong,
+    va chu van hien ra binh thuong.
+  */
+  const novelId = ket_qua.novel?.novel_id ?? ket_qua.chapter?.novel_id;
+  const dsChuong: Chapter[] = novelId
+    ? await api
+        .getNovel(novelId)
+        .then((r) => r.chapters)
+        .catch(() => [] as Chapter[])
+    : [];
+
+  const ds = dsChuong ?? [];
+  const i = ds.findIndex((c) => c.chapter_id === id);
+  const { chuongTruoc, chuongSau, soThuTu, tongSo } = {
+    chuongTruoc: i > 0 ? ds[i - 1] : null,
+    chuongSau: i >= 0 && i < ds.length - 1 ? ds[i + 1] : null,
+    soThuTu: i >= 0 ? i + 1 : 0,
+    tongSo: ds.length,
+  };
 
   return (
-    <div className="page" data-doc-co={tuyChon.coChu} data-doc-ngang={tuyChon.beNgang}>
-      <ReaderProgress />
+    <ChapterInteractiveReader
+      novelId={chapter.novel_id}
+      chapterId={chapter.chapter_id}
+    >
       <nav aria-label="Đường dẫn" className="reader-crumb">
         <Link href={`/novels/${chapter.novel_id}`} className="hint crumb">
           ← {novel?.title ?? "Về truyện"}
@@ -158,11 +180,9 @@ export default function ChapterPage({
           >
             <IconHeadphones size={15} /> Nghe chương này
           </Link>
-        ) : isOwner ? (
-          <Link className="btn btn-sm btn-ghost" href="/studio/write" prefetch={false}>
-            <span aria-hidden="true">🎙️</span> Tạo audio cho chương
-          </Link>
-        ) : null}
+        ) : (
+          <ChapterOwnerAudioAction ownerId={chapter.owner_id} />
+        )}
       </header>
 
       {/*
@@ -170,23 +190,26 @@ export default function ChapterPage({
         can chinh co chu la nguoi dang thay chu kho doc, va bat ho di tim la
         bat sai nguoi.
       */}
-      <ReaderPrefs onDoi={datTuyChon} />
+      <ChapterReaderPrefsControl />
 
       {/*
         Cot chu hep hon phan con lai cua trang. Mot dong dai ~68 ky tu la nguong
         mat con lan duoc tu cuoi dong nay sang dau dong sau ma khong lac; ca be
-        rong 1180px thi doc mot chuong dai rat met. Nguoi doc tu noi/thu lai
-        duoc trong khoang 600–900px — xem `readerPrefs`.
+        rong 1180px thi doc mot chuong dai rat met.
       */}
       <section className="reader" aria-label="Nội dung chương">
         {chapter.content ? (
-          <div className="prose">{chapter.content}</div>
+          <div className="prose">
+            {chapter.content.split(/\n\n+/).map((para, idx) => (
+              <p key={idx} style={{ marginBottom: "1.25em" }}>
+                {para}
+              </p>
+            ))}
+          </div>
         ) : audio ? (
           // Cac tac pham nhap tu audio dai tap (13 truyen Fanfic Staging,
           // xem docs/reports/) khong co van ban goc — day la trang thai BINH
-          // THUONG cua chung, khong phai loi/thieu du lieu. "Chua co noi
-          // dung" doc nhu mot canh bao hong; trang thai rieng nay noi dung
-          // dieu do ro rang va dua thang toi trai nghiem nghe.
+          // THUONG cua chung, khong phai loi/thieu du lieu.
           <EmptyState
             icon="🎧"
             title="Chương này chỉ có bản audio"
@@ -220,16 +243,6 @@ export default function ChapterPage({
         Loi ra o CUOI chuong. Nguoi vua doc xong dang o day, khong phai o dau
         trang — bat ho cuon nguoc len de tim duong sang chuong sau la mot viec
         thua.
-
-        CO nut "chuong truoc / chuong sau" o day. Ban truoc CO Y khong co, voi ly
-        do "trang Nghe da co roi, trang doc chi can dan ve trang truyen" — do la
-        mot quyet dinh sai voi nguoi DOC: doc xong mot chuong roi phai quay ve
-        muc luc, tim lai dong vua doc, rồi bam chuong ke tiep la ba thao tac
-        cho mot viec dang le la mot cai bam. Tren mobile con te hon, vi muc luc
-        cua truyen 15 chuong phai cuon.
-
-        `prefetch={false}` cho hai nut nay: mot chuong la mot payload lon, va
-        Next se nap san CA HAI phia neu de mac dinh.
       */}
       {novel ? (
         <nav className="reader-foot reader-nav" aria-label="Điều hướng chương">
@@ -281,6 +294,6 @@ export default function ChapterPage({
           )}
         </nav>
       ) : null}
-    </div>
+    </ChapterInteractiveReader>
   );
 }

@@ -1063,16 +1063,30 @@ export const api = {
    * y nhu truoc, nen trang tac gia va `ensureStudioNovel` khong doi gi.
    */
   browseNovels: (opts: {
+    mine?: boolean;
     query?: string;
     tag?: string;
-    limit: number;
+    fandom?: string;
+    status?: string;
+    audio?: boolean | string;
+    sort?: string;
+    limit?: number;
     offset?: number;
+    cursor?: string;
   }) => {
     const params = new URLSearchParams();
+    if (opts.mine) params.set("mine", "true");
     if (opts.query?.trim()) params.set("q", opts.query.trim());
     if (opts.tag) params.set("tag", opts.tag);
-    params.set("limit", String(opts.limit));
-    params.set("offset", String(opts.offset ?? 0));
+    if (opts.fandom && opts.fandom !== "all") params.set("fandom", opts.fandom);
+    if (opts.status && opts.status !== "all") params.set("status", opts.status);
+    if (opts.audio !== undefined && opts.audio !== null && opts.audio !== "all" && opts.audio !== "") {
+      params.set("audio", String(opts.audio));
+    }
+    if (opts.sort) params.set("sort", opts.sort);
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+    if (opts.cursor) params.set("cursor", opts.cursor);
     return request<NovelPage>(`/api/novels?${params.toString()}`);
   },
 
@@ -1520,6 +1534,8 @@ export interface NovelPage {
   limit: number | null;
   offset: number;
   has_more: boolean;
+  cursor?: string | null;
+  next_cursor?: string | null;
 }
 
 /** Phan truyen kem theo chuong: vua du de hien bia va ten. */

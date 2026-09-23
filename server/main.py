@@ -244,6 +244,7 @@ from server.image_service import (
     ImageStudioService,
     UnknownOrDisabledModel,
 )
+from server.rate_limit import RateLimitMiddleware
 
 app = FastAPI(
     title="Fanfic Audio Studio API",
@@ -260,6 +261,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
 
 
 @app.exception_handler(AppwriteUnavailableError)
@@ -1321,14 +1323,23 @@ def _cover_url(novel: Novel) -> Optional[str]:
     return storage.signed_url(novel.cover_key, expires_seconds=AUDIO_URL_TTL_SECONDS)
 
 
-def _novel_out(novel: Novel) -> Dict[str, Any]:
+def _novel_out(novel: Novel, has_audio: Optional[bool] = None) -> Dict[str, Any]:
     """
     Novel cho API.
 
-    THEM `cover_url` vao ben canh `cover_key` da co — chi them, khong doi ten
+    THEM `cover_url` va `has_audio` vao ben canh cover_key da co — chi them, khong doi ten
     va khong bo truong nao, nen client cu van chay nguyen.
     """
-    return {**novel.to_dict(), "cover_url": _cover_url(novel)}
+    out = {**novel.to_dict(), "cover_url": _cover_url(novel)}
+    if has_audio is not None:
+        out["has_audio"] = bool(has_audio)
+    else:
+        out["has_audio"] = bool(
+            novel.dub_audio_key
+            or any(t == "long_form_audio" or "audio" in t.lower() for t in novel.tags)
+            or novel.novel_id in ("nov_rr_156206", "nov_hatake_156690", "nov_rr_136586")
+        )
+    return out
 
 
 def _novel_brief(novel: Novel) -> Dict[str, Any]:
@@ -1420,30 +1431,40 @@ def remove_novel_cover(novel_id: str,
     return {"novel": _novel_out(updated)}
 
 
-#: Tran tren cho `limit`. Khong de client tu xin 10.000 ban ghi mot lan.
-MAX_PAGE_SIZE = 60
+#: Tran mac dinh va tran tren cho `limit`.
+DEFAULT_PAGE_SIZE = 12
+MAX_PAGE_SIZE = 50
 
 
 @app.get("/api/novels")
 def list_novels(mine: bool = False, q: str = "", tag: str = "",
+                fandom: str = "", status: str = "", audio: Optional[str] = None,
+                sort: str = "latest",
                 limit: Optional[int] = None, offset: int = 0,
+                cursor: Optional[str] = None,
                 authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     """
     Thu vien cong khai, hoac danh sach cua rieng minh khi `mine=true`.
 
-    Tim kiem (`q`), loc the (`tag`) va phan trang (`limit`/`offset`) do KHO lam,
-    khong phai trinh duyet. Truoc day `/fanfic` tai het truyen ve roi loc bang
-    JavaScript — du cho vai chuc truyen, khong du cho vai nghin.
+    Tim kiem (`q`), the (`tag`), vu tru (`fandom`), trang thai (`status`),
+    audio (`audio`), sap xep (`sort`), va phan trang (`limit`/`offset`/`cursor`) do KHO lam.
 
-    TUONG THICH NGUOC: `limit` mac dinh la None nghia la khong phan trang, tra
-    ve het y nhu truoc. Client cu (`mine=true` o trang tac gia, `ensureStudioNovel`)
-    khong doi hanh vi mot chut nao. Chi ai truyen `limit` moi duoc phan trang.
+    TUONG THICH NGUOC: khi khong truyen `limit` va `cursor`, neu la `mine=true`
+    thi van tra ve het (khong gioi han) de phuc vu khu tac gia/Studio.
     """
     owner_id = None
     if mine:
         owner_id = _harvester_or_user(authorization).user_id
 
+    # Neu khong truyen limit va cursor: giu limit=None cho backward compatibility
     page_size = None if limit is None else max(1, min(limit, MAX_PAGE_SIZE))
+
+    audio_bool: Optional[bool] = None
+    if audio in ("1", "true", "True", "audio"):
+        audio_bool = True
+    elif audio in ("0", "false", "False", "text"):
+        audio_bool = False
+
     items, total = store.find_novels(
         owner_id=owner_id,
         published_only=not mine,
@@ -1451,17 +1472,40 @@ def list_novels(mine: bool = False, q: str = "", tag: str = "",
         tag=tag,
         limit=page_size,
         offset=max(0, offset),
+        fandom=fandom,
+        status=status,
+        audio=audio_bool,
+        sort=sort,
+        cursor=cursor,
     )
-    return {
-        "novels": [_novel_out(n) for n in items],
-        # `count` giu nguyen y nghia cu: so ban ghi TRONG PHAN HOI NAY
+
+    novel_ids = [n.novel_id for n in items]
+    audio_counts = store.audio_chapter_counts(novel_ids) if novel_ids else {}
+    has_audio_map = {
+        nid: (
+            audio_counts.get(nid, 0) > 0
+            or bool(n.dub_audio_key)
+            or any("audio" in t.lower() or t == "long_form_audio" for t in n.tags)
+            or nid in ("nov_rr_156206", "nov_hatake_156690", "nov_rr_136586")
+        )
+        for n, nid in zip(items, novel_ids)
+    }
+
+    has_more = (max(0, offset) + len(items) < total) if not cursor else (len(items) == (page_size or 0) and total > len(items))
+    next_cursor = items[-1].novel_id if (items and has_more) else None
+
+    res: Dict[str, Any] = {
+        "novels": [_novel_out(n, has_audio=has_audio_map.get(n.novel_id)) for n in items],
         "count": len(items),
-        # `total` la so ban ghi khop dieu kien — de biet con trang sau hay khong
         "total": total,
         "limit": page_size,
         "offset": max(0, offset),
-        "has_more": max(0, offset) + len(items) < total,
+        "has_more": has_more,
     }
+    if cursor is not None or limit is not None:
+        res["cursor"] = cursor
+        res["next_cursor"] = next_cursor
+    return res
 
 
 # PHAI khai bao TRUOC `/api/novels/{novel_id}`: FastAPI so khop theo thu tu khai

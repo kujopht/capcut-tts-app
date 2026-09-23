@@ -52,15 +52,16 @@ test("Trang chủ: Showcase Truyện mới dùng dữ liệu thật, đã loại
   const src = home();
   assert.ok(!src.includes("TEST_NOVELS"), "TEST_NOVELS phải bị loại bỏ");
   assert.ok(!src.includes("TEST_POSTS"), "TEST_POSTS phải bị loại bỏ");
-  assert.match(src, /novels\.slice\(0,\s*4\)/);
+  assert.match(src, /novels\.slice\(0,\s*3\)/);
   assert.match(src, /novelHasAudio\(n\)/);
   assert.match(src, /formatAuthor\(n\)/);
   assert.match(src, /formatChapterCount\(/);
 });
 
-test("Trang chủ: Cột bên phải đổi tên thành 'Cập nhật mới', phân tách với Thông báo cá nhân", () => {
+test("Trang chủ: Cột bên phải đổi tên thành 'Bài đăng mới', phân tách với Thông báo cá nhân", () => {
   const src = home();
-  assert.match(src, /Cập nhật mới/);
+  assert.match(src, /Bài đăng mới/);
+  assert.ok(!src.includes("Cập nhật mới"));
   assert.ok(!src.includes("Thông báo & Bài viết"));
 });
 

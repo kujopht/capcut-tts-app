@@ -104,3 +104,13 @@ build/
 dist/
 dist-*/
 installer_output/
+raw_spool/
+logs/
+scratch/
+earth_3d_simulation/
+*.vtt
+*.srt
+*.png
+*.jpg
+*.mp4
+*.mp3

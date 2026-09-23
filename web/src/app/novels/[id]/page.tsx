@@ -1,22 +1,72 @@
-"use client";
-
 /** Chi tiet truyen: thong tin, danh sach chuong kem trang thai audio. */
 
+import type { Metadata } from "next";
 import Link from "next/link";
-import { use, useCallback } from "react";
-import { api, type Chapter, type Novel } from "@/lib/api";
-import { useSession } from "@/lib/session";
-import { useAsyncData } from "@/lib/useAsyncData";
+import { API_BASE, api, ApiError, type Chapter, type Novel } from "@/lib/api";
+import { errorMessage } from "@/lib/session";
 import {
   EmptyState,
   ErrorState,
-  SkeletonList,
   formatDate,
   formatNumber,
 } from "@/components/ui";
 import { NovelCover } from "@/components/NovelCover";
 import { FollowButton } from "@/components/FollowButton";
+import {
+  NovelOwnerActions,
+  OwnerAddChapterAction,
+} from "@/components/NovelInteractiveActions";
 import { getReaderTags } from "@/lib/taxonomy";
+
+/**
+ * Dynamic metadata cho SEO, OpenGraph (book), Twitter card va canonical URL.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  try {
+    const res = await fetch(`${API_BASE}/api/novels/${encodeURIComponent(id)}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) throw new Error("not found");
+    const data = await res.json();
+    const novel: Novel = data.novel;
+    const title = `${novel.title} | Fanfic World`;
+    const description = novel.description
+      ? novel.description.slice(0, 160)
+      : `Đọc truyện fanfic ${novel.title} trên Fanfic World.`;
+    const canonical = `https://fanfic.world/novels/${novel.novel_id}`;
+    const images = novel.cover_url ? [novel.cover_url] : [];
+
+    return {
+      title,
+      description,
+      alternates: { canonical },
+      openGraph: {
+        title,
+        description,
+        url: canonical,
+        siteName: "Fanfic World",
+        type: "book",
+        images,
+      },
+      twitter: {
+        card: "summary_large_image",
+        title,
+        description,
+        images,
+      },
+    };
+  } catch {
+    return {
+      title: "Chi tiết truyện | Fanfic World",
+      description: "Đọc truyện fanfic tiếng Việt và audio tại Fanfic World.",
+    };
+  }
+}
 
 /**
  * Tien do tac pham -> nhan tieng Viet.
@@ -36,31 +86,33 @@ function nhanTienDo(status: string): string {
   return NHAN_TIEN_DO[status] ?? status;
 }
 
-export default function NovelDetailPage({
+export default async function NovelDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = use(params);
-  const { profile } = useSession();
+  const { id } = await params;
 
-  // MOT request duy nhat, du truyen co bao nhieu chuong: `has_audio` da nam
-  // san trong danh sach chuong. Truoc day cho nay goi them `/api/chapters/{id}`
-  // cho tung chuong chi de doc mot gia tri boolean.
-  const fetchNovel = useCallback(() => api.getNovel(id), [id]);
+  let data: {
+    novel: Novel;
+    chapters: Chapter[];
+    follow?: { following: boolean; follower_count: number };
+  } | null = null;
+  let missing = false;
+  let errorMsg = "";
 
-  const { data, loading, error, missing, reload } = useAsyncData(fetchNovel);
+  try {
+    data = await api.getNovel(id);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      missing = true;
+    } else {
+      errorMsg = errorMessage(err);
+    }
+  }
+
   const novel: Novel | null = data?.novel ?? null;
   const chapters: Chapter[] = data?.chapters ?? [];
-
-  if (loading) {
-    return (
-      <div className="page">
-        <div className="sk sk-title" style={{ height: 32, width: "40%" }} />
-        <SkeletonList count={5} />
-      </div>
-    );
-  }
 
   if (missing) {
     return (
@@ -79,15 +131,15 @@ export default function NovelDetailPage({
     );
   }
 
-  if (error || !novel) {
+  if (errorMsg || !novel) {
     return (
       <div className="page">
-        <ErrorState message={error || "Không tải được truyện."} onRetry={reload} />
+        <ErrorState message={errorMsg || "Không tải được truyện."} />
       </div>
     );
   }
 
-  const isOwner = profile?.user_id === novel.owner_id;
+  const isOwner = false;
   // `has_audio` da co san trong danh sach chuong (xem ghi chu o `fetchNovel`),
   // nen tong hop nay khong ton them request nao.
   const soChuongCoAudio = chapters.filter((c) => c.has_audio).length;
@@ -130,11 +182,12 @@ export default function NovelDetailPage({
             {novel.status ? (
               <span className="badge">{nhanTienDo(novel.status)}</span>
             ) : null}
-            {novel.tags && getReaderTags(novel, 6).map((tag) => (
-              <span key={tag} className="badge">
-                {tag}
-              </span>
-            ))}
+            {novel.tags &&
+              getReaderTags(novel, 6).map((tag) => (
+                <span key={tag} className="badge">
+                  {tag}
+                </span>
+              ))}
           </div>
           <h1 className="page-title">{novel.title}</h1>
           <p className="lead lead-narrow">
@@ -195,11 +248,7 @@ export default function NovelDetailPage({
                 Đọc từ đầu
               </Link>
             ) : null}
-            {isOwner ? (
-              <Link className="btn" href="/studio/write" prefetch={false}>
-                Quản lý truyện
-              </Link>
-            ) : null}
+            <NovelOwnerActions ownerId={novel.owner_id} />
             {/*
               Theo dõi truyện — để được thông báo khi có chương mới.
 
@@ -230,13 +279,7 @@ export default function NovelDetailPage({
           <EmptyState
             icon="📄"
             title="Truyện chưa có chương nào"
-            action={
-              isOwner ? (
-                <Link className="btn btn-primary" href="/studio/write" prefetch={false}>
-                  Thêm chương đầu tiên
-                </Link>
-              ) : undefined
-            }
+            action={<OwnerAddChapterAction ownerId={novel.owner_id} />}
           />
         ) : (
           <div className="list list-gon">

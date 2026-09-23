@@ -29,10 +29,14 @@ class CountingStore(MockMetadataStore):
         self.calls: List[Dict] = []
 
     def find_novels(self, owner_id=None, published_only=False, query="",
-                    tag="", limit=None, offset=0) -> Tuple[List[Novel], int]:
+                    tag="", limit=None, offset=0, state="",
+                    fandom="", status="", audio=None, sort="latest",
+                    cursor=None, **kwargs) -> Tuple[List[Novel], int]:
         page, total = super().find_novels(
             owner_id=owner_id, published_only=published_only, query=query,
-            tag=tag, limit=limit, offset=offset)
+            tag=tag, limit=limit, offset=offset, state=state,
+            fandom=fandom, status=status, audio=audio, sort=sort,
+            cursor=cursor, **kwargs)
         self.calls.append({
             "limit": limit, "offset": offset, "query": query, "tag": tag,
             "tra_ve": len(page), "tong": total,

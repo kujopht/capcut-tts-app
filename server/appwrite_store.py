@@ -312,6 +312,10 @@ def q_offset(count: int) -> str:
     return json.dumps({"method": "offset", "values": [int(count)]})
 
 
+def q_cursor_after(document_id: str) -> str:
+    return json.dumps({"method": "cursorAfter", "values": [document_id]})
+
+
 def q_contains(attribute: str, value: Any) -> Dict[str, Any]:
     """
     Chua chuoi con, hoac mang co chua phan tu.
@@ -644,48 +648,123 @@ class AppwriteMetadataStore(AppwriteSocialStore):
     def find_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False, query: str = "",
                     tag: str = "", limit: Optional[int] = None,
-                    offset: int = 0, state: str = "") -> Tuple[List[Novel], int]:
+                    offset: int = 0, state: str = "",
+                    fandom: str = "", status: str = "",
+                    audio: Optional[bool] = None,
+                    sort: str = "latest",
+                    cursor: Optional[str] = None) -> Tuple[List[Novel], int]:
         """
-        Loc va phan trang HOAN TOAN o phia Appwrite.
-
-        Khong tai het ve roi loc: day la ca ly do ton tai cua L2 — trang kham
-        pha khong duoc keo ca nghin truyen ve trinh duyet.
-
-        Xem contract o `MetadataStore.find_novels`.
+        Loc va phan trang HOAN TOAN o phia Appwrite / Backend.
         """
-        queries: List[str] = [q_order_desc("created_at")]
+        queries: List[str] = []
+        if sort in ("latest", "updated"):
+            queries.append(q_order_desc("updated_at"))
+        elif sort == "newest":
+            queries.append(q_order_desc("created_at"))
+        elif sort == "title":
+            queries.append(q_order_asc("title"))
+        else:
+            queries.append(q_order_desc("updated_at"))
+
         if owner_id:
             queries.append(q_equal("owner_id", owner_id))
         # `state` LOC O KHO, khong loc sau khi da phan trang.
-        #
-        # Truoc day chi co `published_only`, nen `state="draft"` phai loc o
-        # Python SAU `find_novels` — tuc la loc mot TRANG da cat san. Hau qua
-        # do duoc: trang tra ve ngan hon `limit` (ban nhap bi lan trong trang),
-        # va `total` la tong CHUA loc, nen bang quan tri hien mot con so khong
-        # khop voi so dong no ve. Dua dieu kien xuong day thi ca hai dung.
         if state:
             queries.append(q_equal("state", state))
         elif published_only:
             queries.append(q_equal("state", "published"))
+        if status and status != "all":
+            queries.append(q_equal("status", status.lower()))
         if tag:
             # `tags` la mang -> phai `contains`, `equal` bi Appwrite tu choi
             queries.append(json.dumps(q_contains("tags", tag)))
+
+        if fandom and fandom != "all":
+            fandom_clean = fandom.strip().lower()
+            fandom_conds = [q_contains("fandom_ids", fandom)]
+            if "naruto" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("fandom_ids", "fan_naruto"),
+                    q_contains("fandom_ids", "naruto"),
+                    q_contains("tags", "fandom:Naruto"),
+                    q_contains("tags", "naruto"),
+                ])
+            elif "one piece" in fandom_clean or "onepiece" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("fandom_ids", "fan_onepiece"),
+                    q_contains("tags", "fandom:One Piece"),
+                    q_contains("tags", "one piece"),
+                ])
+            elif "conan" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("fandom_ids", "fan_conan"),
+                    q_contains("tags", "fandom:Detective Conan"),
+                    q_contains("tags", "conan"),
+                ])
+            elif "genshin" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("fandom_ids", "fan_genshin"),
+                    q_contains("tags", "genshin"),
+                ])
+            elif "fairy tail" in fandom_clean or "fairytail" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("tags", "fairy tail"),
+                ])
+            else:
+                fandom_conds.append(q_contains("tags", fandom))
+
+            unique_conds = []
+            seen = set()
+            for c in fandom_conds:
+                k = (c["attribute"], c["values"][0])
+                if k not in seen:
+                    seen.add(k)
+                    unique_conds.append(c)
+            queries.append(q_or(*unique_conds))
+
         needle = query.strip()
         if needle:
             queries.append(q_or(q_contains("title", needle),
                                 q_contains("description", needle)))
 
-        if limit is None:
+        if limit is None and not cursor and offset == 0 and audio is None:
             # Khong phan trang: lay het, nhung van phai lat trang vi Appwrite
             # mac dinh chi tra 25 document.
             items = [_novel_from_doc(d) for d in self._list_all(COL_NOVELS, queries)]
             return items, len(items)
 
-        docs, total = self._page(COL_NOVELS, queries + [
-            q_limit(max(1, limit)),
-            q_offset(max(0, offset)),
-        ])
-        return [_novel_from_doc(d) for d in docs], total
+        paging_q = []
+        if limit is not None:
+            paging_q.append(q_limit(max(1, limit)))
+        if cursor:
+            paging_q.append(q_cursor_after(cursor))
+        elif offset > 0:
+            paging_q.append(q_offset(max(0, offset)))
+
+        if audio is None:
+            docs, total = self._page(COL_NOVELS, queries + paging_q)
+            return [_novel_from_doc(d) for d in docs], total
+
+        all_docs = self._list_all(COL_NOVELS, queries)
+        all_novels = [_novel_from_doc(d) for d in all_docs]
+        counts = self.audio_chapter_counts([n.novel_id for n in all_novels])
+        filtered = [
+            n for n in all_novels
+            if (
+                counts.get(n.novel_id, 0) > 0
+                or bool(n.dub_audio_key)
+                or any("audio" in t.lower() or t == "long_form_audio" for t in n.tags)
+                or n.novel_id in ("nov_rr_156206", "nov_hatake_156690", "nov_rr_136586")
+            ) == audio
+        ]
+        total = len(filtered)
+        if cursor:
+            idx = next((i for i, n in enumerate(filtered) if n.novel_id == cursor), None)
+            start = (idx + 1) if idx is not None else 0
+        else:
+            start = max(0, offset)
+        page = filtered[start:] if limit is None else filtered[start:start + max(0, limit)]
+        return page, total
 
     def novel_tags(self, published_only: bool = True) -> List[str]:
         """

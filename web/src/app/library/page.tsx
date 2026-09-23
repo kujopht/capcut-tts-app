@@ -87,10 +87,65 @@ function LibraryContent() {
   });
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  // Tải dữ liệu: Danh mục tác phẩm thật luôn được nạp công khai cho cả khách vãng lai
+  const PAGE_SIZE = 12;
+  const [pageIndex, setPageIndex] = useState(0);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+
+  const CORE_FANDOMS = useMemo(() => [
+    "Naruto",
+    "One Piece",
+    "Detective Conan",
+    "Genshin Impact",
+    "Fairy Tail",
+    "Thể thao / Bóng rổ",
+    "Sci-Fi / Warhammer",
+  ], []);
+  const [availableFandoms, setAvailableFandoms] = useState<string[]>(CORE_FANDOMS);
+
+  useEffect(() => {
+    api.novelTags().then((res) => {
+      const set = new Set(CORE_FANDOMS);
+      (res.tags || []).forEach((t) => {
+        if (t.startsWith("fandom:")) {
+          const clean = t.replace("fandom:", "").trim();
+          if (clean && !clean.includes("Unresolved")) set.add(clean);
+        }
+      });
+      setAvailableFandoms(Array.from(set));
+    }).catch(() => {});
+  }, [CORE_FANDOMS]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Reset trang khi thay đổi bộ lọc
+  useEffect(() => {
+    setPageIndex(0);
+  }, [debouncedSearchQuery, fandomFilter, audioFilter, statusFilter, sortMode]);
+
+  // Tải dữ liệu: Danh mục công khai phân trang ở máy chủ, kèm dữ liệu cá nhân nếu đã đăng nhập
   const nap = useCallback(async () => {
     const [publicNovelsRes, userFollowedRes, tiepTucRes] = await Promise.all([
-      api.listNovels(false).catch(() => ({ novels: [], count: 0 })),
+      api.browseNovels({
+        query: debouncedSearchQuery,
+        fandom: fandomFilter === "all" ? undefined : fandomFilter,
+        status: statusFilter === "all" ? undefined : statusFilter,
+        audio: audioFilter === "all" ? undefined : audioFilter === "audio",
+        sort: sortMode,
+        limit: PAGE_SIZE,
+        offset: pageIndex * PAGE_SIZE,
+      }).catch(() => api.listNovels(false).catch(() => ({
+        novels: [] as Novel[],
+        count: 0,
+        total: 0,
+        limit: PAGE_SIZE,
+        offset: 0,
+        has_more: false,
+      }))),
       profile ? social.followedStories(100, 0).catch(() => ({ novels: [] })) : Promise.resolve({ novels: [] }),
       profile
         ? api
@@ -101,76 +156,23 @@ function LibraryContent() {
 
     return {
       novels: publicNovelsRes.novels,
+      totalNovels: ("total" in publicNovelsRes ? publicNovelsRes.total : publicNovelsRes.novels.length) as number,
+      hasMore: ("has_more" in publicNovelsRes ? publicNovelsRes.has_more : false) as boolean,
       followed: userFollowedRes.novels,
       continueProgress: tiepTucRes,
     };
-  }, [profile]);
+  }, [debouncedSearchQuery, fandomFilter, audioFilter, statusFilter, sortMode, pageIndex, profile]);
 
   const { data, loading, error, reload } = useAsyncData(nap);
 
-  const allNovels = useMemo<Novel[]>(() => data?.novels ?? [], [data?.novels]);
+  const filteredPublicNovels = useMemo<Novel[]>(() => data?.novels ?? [], [data?.novels]);
+  const totalPublicNovels = data?.totalNovels ?? 0;
+  const hasMore = data?.hasMore ?? false;
+  const allNovels = filteredPublicNovels;
   const followedStories = useMemo<FollowedStory[]>(() => data?.followed ?? [], [data?.followed]);
   const dangDoc = data?.continueProgress?.reading ?? null;
   const dangNghe = data?.continueProgress?.listening ?? null;
   const hasPersonalProgress = Boolean(dangDoc || dangNghe);
-
-  // Danh sách các fandom thực tế có trong kho để làm chip lọc
-  const availableFandoms = useMemo(() => {
-    const set = new Set<string>();
-    allNovels.forEach((n) => {
-      const f = novelFandom(n);
-      if (f) set.add(f);
-    });
-    return Array.from(set).sort();
-  }, [allNovels]);
-
-  // Bộ lọc danh mục công khai
-  const filteredPublicNovels = useMemo(() => {
-    return allNovels
-      .filter((n) => {
-        // Tìm kiếm văn bản
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
-          const matchTitle = n.title.toLowerCase().includes(q);
-          const matchAuthor = (n.external_author_name ?? "").toLowerCase().includes(q);
-          const matchDesc = (n.description ?? "").toLowerCase().includes(q);
-          const matchTag = (n.tags ?? []).some((t) => t.toLowerCase().includes(q));
-          if (!matchTitle && !matchAuthor && !matchDesc && !matchTag) return false;
-        }
-
-        // Lọc Fandom
-        if (fandomFilter !== "all") {
-          const f = novelFandom(n);
-          if (f !== fandomFilter) return false;
-        }
-
-        // Lọc Audio
-        if (audioFilter === "audio") {
-          if (!novelHasAudio(n)) return false;
-        } else if (audioFilter === "text") {
-          if (novelHasAudio(n)) return false;
-        }
-
-        // Lọc trạng thái
-        if (statusFilter !== "all") {
-          if (n.status !== statusFilter) return false;
-        }
-
-        return true;
-      })
-      .sort((a, b) => {
-        if (sortMode === "chapters") {
-          return (b.external_chapter_count || 0) - (a.external_chapter_count || 0);
-        }
-        if (sortMode === "title") {
-          return a.title.localeCompare(b.title, "vi");
-        }
-        // Mặc định: mới cập nhật
-        const tA = new Date(a.updated_at || a.created_at).getTime();
-        const tB = new Date(b.updated_at || b.created_at).getTime();
-        return tB - tA;
-      });
-  }, [allNovels, searchQuery, fandomFilter, audioFilter, statusFilter, sortMode]);
 
   // Bộ lọc tủ sách cá nhân
   const filteredPersonalStories = useMemo(() => {
@@ -238,7 +240,7 @@ function LibraryContent() {
             className={`ent-mode-tab ${topTab === "fanfic" ? "is-active" : ""}`}
             onClick={() => setTopTab("fanfic")}
           >
-            <span aria-hidden="true">📖</span> Fanfic &amp; Tiểu thuyết ({allNovels.length})
+            <span aria-hidden="true">📖</span> Fanfic &amp; Tiểu thuyết ({totalPublicNovels})
           </button>
           <button
             ref={(el) => { tabRefs.current["books"] = el; }}
@@ -364,7 +366,7 @@ function LibraryContent() {
                     className={`ent-mood-chip ${fandomFilter === "all" ? "is-active" : ""}`}
                     onClick={() => setFandomFilter("all")}
                   >
-                    Tất cả ({allNovels.length})
+                    Tất cả ({totalPublicNovels})
                   </button>
                   {availableFandoms.map((f) => (
                     <button
@@ -440,7 +442,7 @@ function LibraryContent() {
               <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <h2 className="section-title">
                   Tác phẩm Fanfic &amp; Tiểu thuyết
-                  <span className="hint"> · {filteredPublicNovels.length} tác phẩm</span>
+                  <span className="hint"> · {totalPublicNovels} tác phẩm</span>
                 </h2>
               </div>
 
@@ -576,6 +578,50 @@ function LibraryContent() {
                     );
                   })}
                 </div>
+              )}
+
+              {/* Thanh phân trang ở máy chủ */}
+              {totalPublicNovels > PAGE_SIZE && (
+                <nav
+                  className="lib-pagination"
+                  aria-label="Phân trang danh mục"
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    gap: "16px",
+                    marginTop: "32px",
+                    padding: "16px 0",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    disabled={pageIndex === 0 || loading}
+                    onClick={() => {
+                      setPageIndex((p) => Math.max(0, p - 1));
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    aria-label="Trang trước"
+                  >
+                    ← Trang trước
+                  </button>
+                  <span className="hint" style={{ fontSize: "0.85rem", fontWeight: 500 }}>
+                    Trang {pageIndex + 1} / {Math.max(1, Math.ceil(totalPublicNovels / PAGE_SIZE))}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    disabled={!hasMore || loading || (pageIndex + 1) * PAGE_SIZE >= totalPublicNovels}
+                    onClick={() => {
+                      setPageIndex((p) => p + 1);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    aria-label="Trang sau"
+                  >
+                    Trang sau →
+                  </button>
+                </nav>
               )}
             </section>
           </div>

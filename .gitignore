@@ -164,3 +164,6 @@ scratchpad/
 # Ban luu truoc khi `scripts/kiem_quyen.py --ap-dung` ghi ho so quyen.
 # May-cu-the, khong phai cua kho.
 *.truoc-kiem-quyen
+
+# Sub-tool MoneyPrinterTurbo
+MoneyPrinterTurbo/

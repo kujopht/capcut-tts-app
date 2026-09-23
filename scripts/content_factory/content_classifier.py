@@ -34,7 +34,7 @@ ANNOUNCEMENT_TITLE_REGEX = re.compile(
     re.IGNORECASE
 )
 AUTHOR_NOTE_TITLE_REGEX = re.compile(
-    r"\b(author\s*note|author's\s*note|a/?n:?|ghi\s*chú\s*tác\s*giả|glossary|character\s*sheet)\b",
+    r"\b(author\s*note|author's\s*note|a/n:?|a\.n\.:?|ghi\s*chú\s*tác\s*giả|glossary|character\s*sheet)\b",
     re.IGNORECASE
 )
 EXTRA_TITLE_REGEX = re.compile(

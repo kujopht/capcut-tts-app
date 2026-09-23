@@ -178,7 +178,7 @@ test("ke Animation moi / cong dong TU AN khi rong, khong ve hop rong to", () => 
   // van phai TU AN het khi rong — khong con nhanh nao ca thi la `: null`.
   assert.match(src, /animationSeries\.length === 1 \? \(/);
   assert.match(src, /animationSeries\.length > 1 \? \(/);
-  assert.match(src, /communityPosts\.length > 0 \? \(/);
+  assert.match(src, /danhSachBaiDang\.length === 0 \? \(/);
   /*
     Rong thi tra `null` (khong ve gi), khong phai mot `EmptyState` day du.
     Ke truyen (ke quan trong nhat) TUNG la ngoai le DUY NHAT dung `EmptyState`
@@ -216,7 +216,7 @@ test("cac tru cot noi dung that co mat tren trang chu", () => {
   const src = home();
   assert.match(src, /id="home-noi-bat"/, "thiếu kệ truyện mới");
   assert.match(src, /id="home-animation"/, "thiếu kệ animation");
-  assert.match(src, /id="home-cong-dong"/, "thiếu kệ cộng đồng");
+  assert.match(src, /Bài đăng mới/, "thiếu cột bài đăng mới");
   assert.match(src, /id="home-tiep-tuc"/, "thiếu phần tiếp tục");
 });
 
@@ -258,7 +258,7 @@ test("da dang nhap nhung chua co gi de tiep tuc: mot dong onboarding GON, khong 
   const src = home();
   assert.match(src, /<KeTrongGon/);
   const atKe = src.indexOf("function KeTrongGon");
-  const than = src.slice(atKe, src.indexOf("function TheCongDong"));
+  const than = src.slice(atKe, src.indexOf("function TheAnimNoiBat"));
   assert.match(than, /shelf-empty-compact/);
   // KHONG dung `EmptyState` day du (qua to) cho truong hop nay.
   assert.ok(!than.includes("<EmptyState"));
@@ -274,7 +274,7 @@ test("moi ke co section rieng voi aria-labelledby", () => {
   const src = home();
   for (const id of [
     "home-hero-title", "home-tiep-tuc", "home-noi-bat",
-    "home-bang-vang", "home-animation", "home-cong-dong",
+    "home-bang-vang", "home-animation",
     "home-kham-pha-nhanh", "home-tac-gia",
   ]) {
     assert.ok(

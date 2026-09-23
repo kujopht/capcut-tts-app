@@ -1,17 +1,15 @@
 "use client";
 
 /**
- * Trinh phat audio + nut tai MP3.
+ * Trình phát audio + nút tải MP3.
  *
- * Dung the <audio controls> co san cua trinh duyet (dieu khien ban phim,
- * doc man hinh, tua — deu co san va dung chuan) nhung ep ve dark theme bang
- * `color-scheme: dark` trong globals.css.
- *
- * URL phat KHONG phai la `/api/audio/{id}` — xem `lib/audio.ts` de biet vi sao.
+ * Tiêu thụ trực tiếp động cơ âm thanh toàn cục (AudioEngineProvider),
+ * KHÔNG tạo thêm thẻ <audio> riêng biệt để tránh xung đột hoặc trùng lặp stream.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { audioFileName, resolveAudio, type PlayableAudio } from "@/lib/audio";
+import { useAudioEngine, dongHo } from "./AudioEngine";
 import { errorMessage } from "@/lib/session";
 import { formatBytes } from "./ui";
 
@@ -24,62 +22,52 @@ export function AudioPlayer({
   title: string;
   compact?: boolean;
 }) {
-  const [audio, setAudio] = useState<PlayableAudio | null>(null);
-  const [error, setError] = useState("");
-  const [ready, setReady] = useState(false);
-  const revoke = useRef<(() => void) | null>(null);
-  const audioEl = useRef<HTMLAudioElement | null>(null);
-  const soLanLamMoi = useRef(0);
+  const [downloadInfo, setDownloadInfo] = useState<PlayableAudio | null>(null);
+  const [fetchError, setFetchError] = useState("");
 
-  const lamMoiAudio = async (): Promise<boolean> => {
-    const a = audioEl.current;
-    const resumeTime = a?.currentTime ?? 0;
-    const wasPlaying = a ? !a.paused : false;
-    try {
-      console.warn(`[AudioPlayer] Làm mới URL audio cho ${chapterId} tại ${resumeTime}s...`);
-      const resolved = await resolveAudio(chapterId);
-      revoke.current?.();
-      revoke.current = resolved.revoke;
-      setAudio(resolved);
-      setError("");
-      if (a) {
-        a.src = resolved.playUrl;
-        a.load();
-        a.currentTime = resumeTime;
-        if (wasPlaying) {
-          a.play().catch(() => {});
-        }
-      }
-      return true;
-    } catch (cause) {
-      setError("Không phát được audio. File có thể đã hết hạn liên kết.");
-      return false;
-    }
-  };
+  const engine = useAudioEngine();
+  const isThisTrack = engine?.trangThai?.chapterId === chapterId;
 
+  const isPlaying = isThisTrack && (engine?.trangThai?.dangPhat ?? false);
+  const currentTime = isThisTrack ? (engine?.trangThai?.thoiDiem ?? 0) : 0;
+  const duration = isThisTrack ? (engine?.trangThai?.thoiLuong ?? 0) : 0;
+  const isReady = isThisTrack && (engine?.trangThai?.sanSang ?? false);
+  const isLoading = isThisTrack && (engine?.trangThai?.dangTai ?? false);
+  const error = isThisTrack ? (engine?.trangThai?.loi || fetchError) : fetchError;
+
+  // Lấy thông tin kích thước và liên kết tải MP3
   useEffect(() => {
     let cancelled = false;
-    soLanLamMoi.current = 0;
-
     resolveAudio(chapterId)
       .then((resolved) => {
-        if (cancelled) {
-          resolved.revoke?.();
-          return;
-        }
-        revoke.current = resolved.revoke;
-        setAudio(resolved);
+        if (!cancelled) setDownloadInfo(resolved);
       })
       .catch((cause) => {
-        if (!cancelled) setError(errorMessage(cause));
+        if (!cancelled) setFetchError(errorMessage(cause));
       });
 
     return () => {
       cancelled = true;
-      revoke.current?.();
-      revoke.current = null;
     };
   }, [chapterId]);
+
+  const handlePlayToggle = () => {
+    if (!engine) return;
+    if (isThisTrack) {
+      engine.dieuKhien.batTat();
+    } else {
+      engine.dieuKhien.phat(chapterId, title);
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!engine) return;
+    const target = Number(e.target.value);
+    if (!isThisTrack) {
+      engine.dieuKhien.phat(chapterId, title);
+    }
+    engine.dieuKhien.tua(target);
+  };
 
   if (error) {
     return (
@@ -98,62 +86,57 @@ export function AudioPlayer({
             <span aria-hidden="true">🎧</span>
             <strong className="player-title">{title}</strong>
           </span>
-          {audio ? (
-            <span className="hint">{formatBytes(audio.sizeBytes)}</span>
+          {downloadInfo ? (
+            <span className="hint">{formatBytes(downloadInfo.sizeBytes)}</span>
           ) : null}
         </div>
       ) : null}
 
-      {audio ? (
-        <>
-          {/* Audio do chinh nguoi dung tao tu van ban ho nhap; "phu de" chinh
-              la van ban do va da hien ngay tren trang, nen khong can track. */}
-          <audio
-            ref={audioEl}
-            controls
-            preload="metadata"
-            src={audio.playUrl}
-            aria-label={`Trình phát audio: ${title}`}
-            onCanPlay={() => {
-              soLanLamMoi.current = 0;
-              setReady(true);
-            }}
-            onError={async () => {
-              if (soLanLamMoi.current >= 2) {
-                console.error(`[AudioPlayer] Đã thử làm mới ${soLanLamMoi.current} lần nhưng vẫn lỗi. Dừng thử lại.`);
-                setError("Không phát được audio sau nhiều lần thử làm mới. File có thể bị lỗi hoặc không khả dụng.");
-                return;
-              }
-              soLanLamMoi.current += 1;
-              const ok = await lamMoiAudio();
-              if (!ok) {
-                setError("Không phát được audio. File có thể đã hết hạn liên kết.");
-              }
-            }}
+      <div className="player-custom-controls" style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
+        <div className="row" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={handlePlayToggle}
+            aria-label={isPlaying ? `Tạm dừng audio: ${title}` : `Phát audio: ${title}`}
+            style={{ minWidth: "90px", padding: "6px 12px" }}
           >
-            Trình duyệt của bạn không hỗ trợ phát audio.
-          </audio>
+            {isPlaying ? "⏸ Tạm dừng" : "▶ Phát"}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={duration > 0 ? duration : 100}
+            step={0.1}
+            value={currentTime}
+            onChange={handleSeek}
+            disabled={!isThisTrack && !isPlaying}
+            aria-label={`Tiến trình audio: ${title}`}
+            style={{ flex: 1, cursor: "pointer" }}
+          />
+          <span className="hint" style={{ fontSize: "0.8rem", minWidth: "85px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+            {dongHo(currentTime)} / {duration > 0 ? dongHo(duration) : "--:--"}
+          </span>
+        </div>
 
-          <div className="row row-spread">
-            <span className="hint" role="status" aria-label="Nghe audio">
-              {ready ? "Nghe" : "Đang chuẩn bị…"}
-            </span>
+        <div className="row row-spread" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="hint" role="status" aria-label="Nghe audio" style={{ fontSize: "0.85rem" }}>
+            {isLoading ? "Đang chuẩn bị…" : isPlaying ? "Đang phát…" : isReady ? "Sẵn sàng" : "Nghe"}
+          </span>
+          {downloadInfo ? (
             <a
               className="btn btn-sm"
-              href={audio.downloadUrl}
+              href={downloadInfo.downloadUrl}
               download={audioFileName(title)}
               aria-label={`Tải xuống audio MP3: ${title}`}
             >
               <span aria-hidden="true">⬇</span> Tải MP3
             </a>
-          </div>
-        </>
-      ) : (
-        <div className="row" role="status">
-          <span className="spinner" aria-hidden="true" />
-          <span className="hint">Đang lấy liên kết audio…</span>
+          ) : (
+            <span className="hint" style={{ fontSize: "0.8rem" }}>Đang lấy thông tin…</span>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

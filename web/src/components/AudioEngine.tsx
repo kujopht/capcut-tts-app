@@ -46,6 +46,7 @@ import {
 // Xuat lai de hai trinh phat chi phai import tu MOT cho.
 export { dongHo } from "@/lib/time";
 import { errorMessage } from "@/lib/session";
+import { musicStore } from "@/lib/musicStore";
 
 export interface TrangThaiAudio {
   /** Chuong dang la bai TOAN CUC hien tai, hoac `null` khi chua ai bam nghe
@@ -335,6 +336,11 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
           }}
           onTimeUpdate={(e) => setThoiDiem(e.currentTarget.currentTime)}
           onPlay={() => {
+            try {
+              if (musicStore.getSnapshot().isPlaying) {
+                musicStore.pause();
+              }
+            } catch {}
             setDangPhat(true);
             setDaXong(false);
             setDaBatDau(true);

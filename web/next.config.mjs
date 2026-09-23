@@ -30,8 +30,7 @@ const nextConfig = {
       { source: "/write/import", destination: "/studio/write/import", permanent: true },
       { source: "/import", destination: "/studio/write/import", permanent: true },
       { source: "/fanfic", destination: "/library?tab=fanfic", permanent: true },
-      { source: "/animation", destination: "/entertainment", permanent: true },
-      { source: "/animation/:path*", destination: "/entertainment", permanent: true },
+      { source: "/animation/new", destination: "/admin/animation/sources/new", permanent: true },
       /*
         `/library` KHONG con o day, va day la mot lan sua co y.
 

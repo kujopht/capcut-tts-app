@@ -69,12 +69,12 @@ test("Homepage Hero chứa đúng 2 cột tinh gọn Truyện mới và Bài đ�
   );
 });
 
-test("Chuẩn hoá tỷ lệ ảnh bìa chân dung 2:3 trên toàn bộ hệ thống", () => {
-  // NovelCover hỗ trợ size="portrait"
+test("Chuẩn hoá tỷ lệ ảnh bìa: 16:9 landscape cho catalog/browse và 2:3 portrait cho trang chi tiết", () => {
+  // NovelCover hỗ trợ size="portrait" và "landscape"
   assert.match(
     novelCoverSrc,
-    /size\?:\s*"card"\s*\|\s*"wide"\s*\|\s*"thumb"\s*\|\s*"portrait"/,
-    "NovelCover hỗ trợ size portrait"
+    /size\?:\s*"card"\s*\|\s*"wide"\s*\|\s*"thumb"\s*\|\s*"portrait"\s*\|\s*"landscape"/,
+    "NovelCover hỗ trợ size portrait và landscape"
   );
 
   // .cover-portrait định nghĩa aspect-ratio: 2 / 3
@@ -84,18 +84,25 @@ test("Chuẩn hoá tỷ lệ ảnh bìa chân dung 2:3 trên toàn bộ hệ th�
     "CSS .cover-portrait phải có aspect-ratio: 2 / 3"
   );
 
-  // .novel-head-cover .cover có aspect-ratio: 2 / 3
+  // .cover-landscape định nghĩa aspect-ratio: 16 / 9
+  assert.match(
+    cssSrc,
+    /\.cover-landscape\s*\{\s*aspect-ratio:\s*16\s*\/\s*9;/,
+    "CSS .cover-landscape phải có aspect-ratio: 16 / 9"
+  );
+
+  // .novel-head-cover .cover có aspect-ratio: 2 / 3 (Detail page giữ 2:3 portrait)
   assert.match(
     cssSrc,
     /\.novel-head-cover \.cover\s*\{[\s\S]*?aspect-ratio:\s*2\s*\/\s*3;/,
     "Bìa trang chi tiết truyện phải có aspect-ratio: 2 / 3"
   );
 
-  // .lib-card-cover-wrap có aspect-ratio: 2 / 3
+  // .lib-card-cover-wrap có aspect-ratio: 16 / 9 (Catalog chuyển sang 16:9 landscape)
   assert.match(
     cssSrc,
-    /\.lib-card-cover-wrap\s*\{[\s\S]*?aspect-ratio:\s*2\s*\/\s*3;/,
-    "Khung bìa thư viện /library phải có aspect-ratio: 2 / 3"
+    /\.lib-card-cover-wrap\s*\{[\s\S]*?aspect-ratio:\s*16\s*\/\s*9;/,
+    "Khung bìa thư viện /library phải có aspect-ratio: 16 / 9"
   );
 
   // Trang chi tiết truyện /novels/[id] gọi size="portrait"
@@ -105,11 +112,11 @@ test("Chuẩn hoá tỷ lệ ảnh bìa chân dung 2:3 trên toàn bộ hệ th�
     "Trang chi tiết truyện gọi NovelCover với size portrait"
   );
 
-  // Trang thư viện /library gọi size="portrait"
+  // Trang thư viện /library gọi size="landscape"
   assert.match(
     librarySrc,
-    /<NovelCover[\s\S]*?size="portrait"/,
-    "Trang thư viện gọi NovelCover với size portrait"
+    /<NovelCover[\s\S]*?size="landscape"/,
+    "Trang thư viện gọi NovelCover với size landscape"
   );
 });
 

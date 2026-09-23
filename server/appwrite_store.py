@@ -652,7 +652,8 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                     fandom: str = "", status: str = "",
                     audio: Optional[bool] = None,
                     sort: str = "latest",
-                    cursor: Optional[str] = None) -> Tuple[List[Novel], int]:
+                    cursor: Optional[str] = None,
+                    content_mode: Optional[str] = None) -> Tuple[List[Novel], int]:
         """
         Loc va phan trang HOAN TOAN o phia Appwrite / Backend.
         """
@@ -741,22 +742,36 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         elif offset > 0:
             paging_q.append(q_offset(max(0, offset)))
 
-        if audio is None:
+        if audio is None and content_mode is None:
             docs, total = self._page(COL_NOVELS, queries + paging_q)
             return [_novel_from_doc(d) for d in docs], total
 
         all_docs = self._list_all(COL_NOVELS, queries)
         all_novels = [_novel_from_doc(d) for d in all_docs]
-        counts = self.audio_chapter_counts([n.novel_id for n in all_novels])
-        filtered = [
-            n for n in all_novels
-            if (
-                counts.get(n.novel_id, 0) > 0
-                or bool(n.dub_audio_key)
-                or any("audio" in t.lower() or t == "long_form_audio" for t in n.tags)
-                or n.novel_id in ("nov_rr_156206", "nov_hatake_156690", "nov_rr_136586")
-            ) == audio
-        ]
+        if audio is not None:
+            counts = self.audio_chapter_counts([n.novel_id for n in all_novels])
+            all_novels = [
+                n for n in all_novels
+                if (
+                    counts.get(n.novel_id, 0) > 0
+                    or bool(n.dub_audio_key)
+                    or any("audio" in t.lower() or t == "long_form_audio" for t in n.tags)
+                    or n.novel_id in ("nov_rr_156206", "nov_hatake_156690", "nov_rr_136586")
+                ) == audio
+            ]
+
+        if content_mode == "readable":
+            all_novels = [
+                n for n in all_novels
+                if not any(t == "long_form_audio" or t.startswith("work:CAT-") or t.startswith("work:OP-") for t in (n.tags or []))
+            ]
+        elif content_mode == "audio_only":
+            all_novels = [
+                n for n in all_novels
+                if any(t == "long_form_audio" or t.startswith("work:CAT-") or t.startswith("work:OP-") for t in (n.tags or []))
+            ]
+
+        filtered = all_novels
         total = len(filtered)
         if cursor:
             idx = next((i for i, n in enumerate(filtered) if n.novel_id == cursor), None)

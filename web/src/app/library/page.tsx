@@ -101,19 +101,24 @@ function LibraryContent() {
   const [pageIndex, setPageIndex] = useState(0);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialQuery);
 
-  useEffect(() => {
-    const q = searchParams.get("q");
-    if (q !== null && q !== searchQuery) {
-      setSearchQuery(q);
-      setDebouncedSearchQuery(q);
+  const qParam = searchParams.get("q");
+  const fParam = searchParams.get("fandom");
+  const tagParam = searchParams.get("tag");
+  const targetFandomParam = fParam ?? (tagParam && tagParam.startsWith("fandom:") ? tagParam.replace("fandom:", "") : tagParam ?? null);
+
+  const [prevParams, setPrevParams] = useState({ q: initialQuery, fandom: initialFandom });
+  if ((qParam !== null && qParam !== prevParams.q) || (targetFandomParam !== null && targetFandomParam !== prevParams.fandom)) {
+    const nextQ = qParam !== null ? qParam : prevParams.q;
+    const nextF = targetFandomParam !== null ? targetFandomParam : prevParams.fandom;
+    setPrevParams({ q: nextQ, fandom: nextF });
+    if (qParam !== null && qParam !== searchQuery) {
+      setSearchQuery(qParam);
+      setDebouncedSearchQuery(qParam);
     }
-    const f = searchParams.get("fandom");
-    const tag = searchParams.get("tag");
-    const targetFandom = f ?? (tag && tag.startsWith("fandom:") ? tag.replace("fandom:", "") : tag ?? null);
-    if (targetFandom !== null && targetFandom !== fandomFilter) {
-      setFandomFilter(targetFandom);
+    if (targetFandomParam !== null && targetFandomParam !== fandomFilter) {
+      setFandomFilter(targetFandomParam);
     }
-  }, [searchParams]);
+  }
 
   const CORE_FANDOMS = useMemo(() => [
     "Naruto",
@@ -147,9 +152,12 @@ function LibraryContent() {
   }, [searchQuery]);
 
   // Reset trang khi thay đổi bộ lọc
-  useEffect(() => {
+  const filterKey = `${debouncedSearchQuery}|${fandomFilter}|${audioFilter}|${statusFilter}|${sortMode}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
     setPageIndex(0);
-  }, [debouncedSearchQuery, fandomFilter, audioFilter, statusFilter, sortMode]);
+  }
 
   // Tải dữ liệu: Danh mục công khai phân trang ở máy chủ, kèm dữ liệu cá nhân nếu đã đăng nhập
   const nap = useCallback(async () => {
@@ -162,6 +170,7 @@ function LibraryContent() {
         sort: sortMode,
         limit: PAGE_SIZE,
         offset: pageIndex * PAGE_SIZE,
+        content_mode: "readable",
       }).catch(() => api.listNovels(false).catch(() => ({
         novels: [] as Novel[],
         count: 0,
@@ -510,7 +519,7 @@ function LibraryContent() {
                             novelId={n.novel_id}
                             title={n.title}
                             coverUrl={n.cover_url}
-                            size="portrait"
+                            size="landscape"
                           />
                           <span className={`lib-card-status-badge status-${n.status}`}>
                             {NHAN_TRANG_THAI[n.status] ?? n.status}
@@ -575,7 +584,7 @@ function LibraryContent() {
                           novelId={n.novel_id}
                           title={n.title}
                           coverUrl={n.cover_url}
-                          size="thumb"
+                          size="landscape"
                         />
                         <span className="stack-1 list-main">
                           <Link href={`/novels/${n.novel_id}`} className="truncate list-title" prefetch={false}>
@@ -842,7 +851,7 @@ function LibraryContent() {
                                 novelId={n.novel_id}
                                 title={n.title}
                                 coverUrl={n.cover_url}
-                                size="portrait"
+                                size="landscape"
                               />
                               <span className={`lib-card-status-badge status-${n.status}`}>
                                 {NHAN_TRANG_THAI[n.status] ?? n.status}

@@ -297,6 +297,13 @@ class PiperModelManager:
         if bound is not None:
             return bound
         base = self.models_dir
+        # Alias fallback: "ngochuyen" and "ngochuyennew" map to the same physical NghiTTS model
+        if name == "ngochuyen" and not (base / f"{name}{ONNX_SUFFIX}").is_file():
+            if (base / f"ngochuyennew{ONNX_SUFFIX}").is_file():
+                return base / f"ngochuyennew{ONNX_SUFFIX}", base / f"ngochuyennew{CONFIG_SUFFIX}"
+        elif name == "ngochuyennew" and not (base / f"{name}{ONNX_SUFFIX}").is_file():
+            if (base / f"ngochuyen{ONNX_SUFFIX}").is_file():
+                return base / f"ngochuyen{ONNX_SUFFIX}", base / f"ngochuyen{CONFIG_SUFFIX}"
         return base / f"{name}{ONNX_SUFFIX}", base / f"{name}{CONFIG_SUFFIX}"
 
     def find(self, name: str) -> PiperModel:
@@ -339,7 +346,11 @@ class PiperModelManager:
                     names.append(name)
         except OSError:
             return []
-        return names
+        if "ngochuyennew" in names and "ngochuyen" not in names and self.find("ngochuyen").installed:
+            names.append("ngochuyen")
+        elif "ngochuyen" in names and "ngochuyennew" not in names and self.find("ngochuyennew").installed:
+            names.append("ngochuyennew")
+        return sorted(names)
 
     def status_map(self, names: List[str]) -> Dict[str, PiperModel]:
         return {name: self.find(name) for name in names}

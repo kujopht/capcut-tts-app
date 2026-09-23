@@ -55,20 +55,25 @@ class TestNovelPaginationAndFiltering(unittest.TestCase):
             self.store.novels[novel.novel_id] = novel
             novels.append(novel)
 
-        # 1. Total count
-        res = self.client.get("/api/novels", params={"limit": 12, "offset": 0}).json()
+        # 1. Total count: default public catalog hides legacy audio-only (200 readable)
+        res_default = self.client.get("/api/novels", params={"limit": 12, "offset": 0}).json()
+        self.assertEqual(res_default["total"], 200)
+        self.assertEqual(res_default["count"], 12)
+
+        # Total count with content_mode="all" (300 records)
+        res = self.client.get("/api/novels", params={"limit": 12, "offset": 0, "content_mode": "all"}).json()
         self.assertEqual(res["total"], 300)
         self.assertEqual(res["count"], 12)
         self.assertEqual(res["limit"], 12)
         self.assertTrue(res["has_more"])
         self.assertIsNotNone(res["next_cursor"])
 
-        # 2. Iterate through all pages using offset pagination
+        # 2. Iterate through all pages using offset pagination (content_mode="all")
         seen_offset: List[str] = []
         offset = 0
         limit = 25
         while True:
-            r = self.client.get("/api/novels", params={"limit": limit, "offset": offset}).json()
+            r = self.client.get("/api/novels", params={"limit": limit, "offset": offset, "content_mode": "all"}).json()
             ids = [n["novel_id"] for n in r["novels"]]
             seen_offset.extend(ids)
             if not r["has_more"]:
@@ -77,11 +82,11 @@ class TestNovelPaginationAndFiltering(unittest.TestCase):
         self.assertEqual(len(seen_offset), 300)
         self.assertEqual(len(set(seen_offset)), 300, "Offset pagination must not duplicate items")
 
-        # 3. Iterate through all pages using cursor pagination
+        # 3. Iterate through all pages using cursor pagination (content_mode="all")
         seen_cursor: List[str] = []
         cursor = None
         while True:
-            params = {"limit": limit}
+            params = {"limit": limit, "content_mode": "all"}
             if cursor:
                 params["cursor"] = cursor
             r = self.client.get("/api/novels", params=params).json()
@@ -94,36 +99,36 @@ class TestNovelPaginationAndFiltering(unittest.TestCase):
         self.assertEqual(len(set(seen_cursor)), 300, "Cursor pagination must not duplicate items")
         self.assertEqual(seen_offset, seen_cursor, "Offset and cursor ordering must match")
 
-        # 4. Filter by fandom
-        r_naruto = self.client.get("/api/novels", params={"fandom": "fan_naruto", "limit": 100}).json()
+        # 4. Filter by fandom (content_mode="all")
+        r_naruto = self.client.get("/api/novels", params={"fandom": "fan_naruto", "limit": 100, "content_mode": "all"}).json()
         self.assertEqual(r_naruto["total"], 75)
         for n in r_naruto["novels"]:
             self.assertIn("fan_naruto", n["fandom_ids"])
 
-        # 5. Filter by status
-        r_ongoing = self.client.get("/api/novels", params={"status": "ongoing", "limit": 100}).json()
+        # 5. Filter by status (content_mode="all")
+        r_ongoing = self.client.get("/api/novels", params={"status": "ongoing", "limit": 100, "content_mode": "all"}).json()
         self.assertEqual(r_ongoing["total"], 100)
         for n in r_ongoing["novels"]:
             self.assertEqual(n["status"], "ongoing")
 
-        # 6. Filter by audio
-        r_audio = self.client.get("/api/novels", params={"audio": "true", "limit": 100}).json()
+        # 6. Filter by audio (content_mode="all")
+        r_audio = self.client.get("/api/novels", params={"audio": "true", "limit": 100, "content_mode": "all"}).json()
         self.assertEqual(r_audio["total"], 100)
         for n in r_audio["novels"]:
             self.assertTrue(n["has_audio"])
 
-        r_text = self.client.get("/api/novels", params={"audio": "false", "limit": 100}).json()
+        r_text = self.client.get("/api/novels", params={"audio": "false", "limit": 100, "content_mode": "all"}).json()
         self.assertEqual(r_text["total"], 200)
         for n in r_text["novels"]:
             self.assertFalse(n["has_audio"])
 
-        # 7. Sort by title
-        r_title = self.client.get("/api/novels", params={"sort": "title", "limit": 5}).json()
+        # 7. Sort by title (content_mode="all")
+        r_title = self.client.get("/api/novels", params={"sort": "title", "limit": 5, "content_mode": "all"}).json()
         titles = [n["title"] for n in r_title["novels"]]
         self.assertEqual(titles, sorted(titles))
 
-        # 8. Sort by chapters
-        r_chp = self.client.get("/api/novels", params={"sort": "chapters", "limit": 5}).json()
+        # 8. Sort by chapters (content_mode="all")
+        r_chp = self.client.get("/api/novels", params={"sort": "chapters", "limit": 5, "content_mode": "all"}).json()
         counts = [n["external_chapter_count"] for n in r_chp["novels"]]
         self.assertEqual(counts, sorted(counts, reverse=True))
 
@@ -131,3 +136,15 @@ class TestNovelPaginationAndFiltering(unittest.TestCase):
         r_max = self.client.get("/api/novels", params={"limit": 500}).json()
         self.assertLessEqual(r_max["limit"], server_main.MAX_PAGE_SIZE)
         self.assertEqual(r_max["count"], server_main.MAX_PAGE_SIZE)
+
+        # 10. Filter by content_mode="readable"
+        r_readable = self.client.get("/api/novels", params={"content_mode": "readable", "limit": 100}).json()
+        self.assertEqual(r_readable["total"], 200)
+        for n in r_readable["novels"]:
+            self.assertEqual(n["content_mode"], "readable")
+
+        # 11. Filter by content_mode="audio_only"
+        r_audio_only = self.client.get("/api/novels", params={"content_mode": "audio_only", "limit": 100}).json()
+        self.assertEqual(r_audio_only["total"], 100)
+        for n in r_audio_only["novels"]:
+            self.assertEqual(n["content_mode"], "audio_only")

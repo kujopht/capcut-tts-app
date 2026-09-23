@@ -386,7 +386,8 @@ class MetadataStore(Protocol):
                     fandom: str = "", status: str = "",
                     audio: Optional[bool] = None,
                     sort: str = "latest",
-                    cursor: Optional[str] = None) -> Tuple[List[Novel], int]:
+                    cursor: Optional[str] = None,
+                    content_mode: Optional[str] = None) -> Tuple[List[Novel], int]:
         """
         Tim truyen co LOC va PHAN TRANG, tra ve `(trang_hien_tai, tong_so)`.
 
@@ -1386,7 +1387,8 @@ class MockMetadataStore(MockSocialStore):
                     fandom: str = "", status: str = "",
                     audio: Optional[bool] = None,
                     sort: str = "latest",
-                    cursor: Optional[str] = None) -> Tuple[List[Novel], int]:
+                    cursor: Optional[str] = None,
+                    content_mode: Optional[str] = None) -> Tuple[List[Novel], int]:
         """Xem contract o `MetadataStore.find_novels`."""
         with self._lock:
             items = list(self.novels.values())
@@ -1423,6 +1425,16 @@ class MockMetadataStore(MockSocialStore):
                     or n.novel_id in ("nov_rr_156206", "nov_hatake_156690", "nov_rr_136586")
                     or (n.novel_id in track_novel_ids)
                 ) == audio
+            ]
+        if content_mode == "readable":
+            items = [
+                n for n in items
+                if not any(t == "long_form_audio" or t.startswith("work:CAT-") or t.startswith("work:OP-") for t in (n.tags or []))
+            ]
+        elif content_mode == "audio_only":
+            items = [
+                n for n in items
+                if any(t == "long_form_audio" or t.startswith("work:CAT-") or t.startswith("work:OP-") for t in (n.tags or []))
             ]
         needle = query.strip().casefold()
         if needle:

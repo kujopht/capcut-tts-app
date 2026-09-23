@@ -1339,6 +1339,12 @@ def _novel_out(novel: Novel, has_audio: Optional[bool] = None) -> Dict[str, Any]
             or any(t == "long_form_audio" or "audio" in t.lower() for t in novel.tags)
             or novel.novel_id in ("nov_rr_156206", "nov_hatake_156690", "nov_rr_136586")
         )
+    tags = novel.tags or []
+    is_legacy_audio = any(
+        t == "long_form_audio" or t.startswith("work:CAT-") or t.startswith("work:OP-")
+        for t in tags
+    )
+    out["content_mode"] = "audio_only" if is_legacy_audio else "readable"
     return out
 
 
@@ -1442,6 +1448,7 @@ def list_novels(mine: bool = False, q: str = "", tag: str = "",
                 sort: str = "latest",
                 limit: Optional[int] = None, offset: int = 0,
                 cursor: Optional[str] = None,
+                content_mode: Optional[str] = None,
                 authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     """
     Thu vien cong khai, hoac danh sach cua rieng minh khi `mine=true`.
@@ -1465,6 +1472,12 @@ def list_novels(mine: bool = False, q: str = "", tag: str = "",
     elif audio in ("0", "false", "False", "text"):
         audio_bool = False
 
+    effective_content_mode = content_mode
+    if not mine and (effective_content_mode is None or effective_content_mode == ""):
+        effective_content_mode = "readable"
+    elif effective_content_mode == "all":
+        effective_content_mode = None
+
     items, total = store.find_novels(
         owner_id=owner_id,
         published_only=not mine,
@@ -1477,6 +1490,7 @@ def list_novels(mine: bool = False, q: str = "", tag: str = "",
         audio=audio_bool,
         sort=sort,
         cursor=cursor,
+        content_mode=effective_content_mode,
     )
 
     novel_ids = [n.novel_id for n in items]

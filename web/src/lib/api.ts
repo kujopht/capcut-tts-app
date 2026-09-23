@@ -341,6 +341,8 @@ export interface Novel {
   language: string;
   created_at: string;
   updated_at: string;
+  has_audio?: boolean;
+  content_mode?: "readable" | "audio_only";
 }
 
 export interface Chapter {
@@ -1073,6 +1075,7 @@ export const api = {
     limit?: number;
     offset?: number;
     cursor?: string;
+    content_mode?: "readable" | "audio_only" | "all";
   }) => {
     const params = new URLSearchParams();
     if (opts.mine) params.set("mine", "true");
@@ -1087,6 +1090,7 @@ export const api = {
     if (opts.limit !== undefined) params.set("limit", String(opts.limit));
     if (opts.offset !== undefined) params.set("offset", String(opts.offset));
     if (opts.cursor) params.set("cursor", opts.cursor);
+    if (opts.content_mode) params.set("content_mode", opts.content_mode);
     return request<NovelPage>(`/api/novels?${params.toString()}`);
   },
 

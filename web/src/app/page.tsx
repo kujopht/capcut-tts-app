@@ -316,7 +316,7 @@ function HomeHeroShowcase({
                         novelId={n.novel_id}
                         title={n.title}
                         coverUrl={n.cover_url}
-                        size="thumb"
+                        size="landscape"
                       />
                     </div>
                     <div className="showcase-item-info">
@@ -583,7 +583,7 @@ function HangTruyenMoi({ novel }: { novel: Novel }) {
         novelId={novel.novel_id}
         title={novel.title}
         coverUrl={novel.cover_url}
-        size="thumb"
+        size="landscape"
       />
       <span className="home-story-row-body">
         <strong className="home-story-row-title clamp-1">{novel.title}</strong>
@@ -631,7 +631,7 @@ export default function HomePage() {
       nguon moi).
     */
     const [page, tags, tiepTuc, gam, animRes, feedRes, lbRes] = await Promise.all([
-      api.browseNovels({ limit: GRID_COUNT }),
+      api.browseNovels({ limit: GRID_COUNT, content_mode: "readable" }),
       api.novelTags(),
       daDangNhap
         ? api.getContinueProgress().catch(() => ({ reading: null, listening: null, watching: null }))

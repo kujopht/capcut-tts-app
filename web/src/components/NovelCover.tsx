@@ -34,8 +34,8 @@ export function NovelCover({
   novelId: string;
   title: string;
   coverUrl?: string | null;
-  /** `card` cho luoi truyen (3:2), `portrait` cho bia doc chuan (2:3), `wide` cho dau trang, `thumb` cho luong nghe. */
-  size?: "card" | "wide" | "thumb" | "portrait";
+  /** `card` cho luoi truyen (3:2), `portrait` cho bia doc chuan (2:3), `wide` cho dau trang, `thumb` cho luong nghe, `landscape` cho 16:9. */
+  size?: "card" | "wide" | "thumb" | "portrait" | "landscape";
 }) {
   const [from, to] = paletteFor(novelId || title);
 
@@ -53,12 +53,21 @@ export function NovelCover({
         <StoryCoverFallback seed={novelId || title} />
       </div>
       {coverUrl ? (
-        <div
-          className="cover-image"
-          style={{ backgroundImage: `url("${coverUrl}")` }}
-          role="img"
-          aria-label={`Ảnh bìa truyện ${title}`}
-        />
+        <>
+          {size === "landscape" && (
+            <div
+              className="cover-image-backdrop"
+              style={{ backgroundImage: `url("${coverUrl}")` }}
+              aria-hidden="true"
+            />
+          )}
+          <div
+            className="cover-image"
+            style={{ backgroundImage: `url("${coverUrl}")` }}
+            role="img"
+            aria-label={`Ảnh bìa truyện ${title}`}
+          />
+        </>
       ) : null}
     </div>
   );

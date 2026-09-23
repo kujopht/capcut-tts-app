@@ -167,3 +167,38 @@ scratchpad/
 
 # Sub-tool MoneyPrinterTurbo
 MoneyPrinterTurbo/
+
+# --- Content Factory & Spooling Storage ---
+raw_spool/
+scratch/
+web/scratch/
+temp_profile/
+
+# --- Local Databases ---
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Log Files ---
+*.log
+*.log.*
+
+# --- Video & Subtitles ---
+*.mp4
+!web/public/artwork/**/*.mp4
+*.webm
+*.avi
+*.mkv
+*.srt
+*.vtt
+*.ass
+
+# --- Swarm Orchestration Metadata ---
+.swarm_worktrees/
+swarm_tasks.json
+
+# --- Root-Only Duplicate Dev Demos ---
+/cosmic_dragon_3d/
+/cyber_snake_3d/
+/cyber_snake_game/
+/earth_3d_simulation/

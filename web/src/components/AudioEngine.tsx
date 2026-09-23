@@ -128,6 +128,7 @@ interface Track {
 export function AudioEngineProvider({ children }: { children: React.ReactNode }) {
   const el = useRef<HTMLAudioElement | null>(null);
   const thuHoi = useRef<(() => void) | null>(null);
+  const soLanLamMoi = useRef(0);
 
   const [track, setTrack] = useState<Track | null>(null);
   const [tep, setTep] = useState<PlayableAudio | null>(null);
@@ -168,6 +169,7 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
     // do it nhat mot vong mang that, con day la mot microtask thuan).
     queueMicrotask(() => {
       if (huy) return;
+      soLanLamMoi.current = 0;
       setTep(null);
       setLoi("");
       setSanSang(false);
@@ -327,7 +329,10 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
           src={tep.playUrl}
           onLoadedMetadata={(e) => setThoiLuong(e.currentTarget.duration || 0)}
           onDurationChange={(e) => setThoiLuong(e.currentTarget.duration || 0)}
-          onCanPlay={() => setSanSang(true)}
+          onCanPlay={() => {
+            soLanLamMoi.current = 0;
+            setSanSang(true);
+          }}
           onTimeUpdate={(e) => setThoiDiem(e.currentTarget.currentTime)}
           onPlay={() => {
             setDangPhat(true);
@@ -343,7 +348,13 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
             const a = el.current;
             const viTri = a?.currentTime ?? thoiDiem;
             const dangChay = dangPhat;
-            console.warn(`[AudioEngine] Gặp lỗi hoặc hết hạn URL tại ${viTri}s, đang tự động làm mới...`);
+            if (soLanLamMoi.current >= 2) {
+              console.error(`[AudioEngine] Đã thử làm mới ${soLanLamMoi.current} lần nhưng vẫn lỗi. Dừng thử lại để tránh vòng lặp vô hạn.`);
+              setLoi("Không thể phát file âm thanh này sau nhiều lần thử làm mới. Vui lòng kiểm tra lại kết nối mạng hoặc thử lại sau.");
+              return;
+            }
+            soLanLamMoi.current += 1;
+            console.warn(`[AudioEngine] Gặp lỗi hoặc hết hạn URL tại ${viTri}s (lần ${soLanLamMoi.current}/2), đang tự động làm mới...`);
             const thanhCong = await lamMoiUrl(viTri, dangChay);
             if (!thanhCong) {
               setLoi("Không phát được audio. Liên kết có thể đã hết hạn.");

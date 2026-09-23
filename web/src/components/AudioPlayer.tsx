@@ -29,6 +29,7 @@ export function AudioPlayer({
   const [ready, setReady] = useState(false);
   const revoke = useRef<(() => void) | null>(null);
   const audioEl = useRef<HTMLAudioElement | null>(null);
+  const soLanLamMoi = useRef(0);
 
   const lamMoiAudio = async (): Promise<boolean> => {
     const a = audioEl.current;
@@ -58,6 +59,7 @@ export function AudioPlayer({
 
   useEffect(() => {
     let cancelled = false;
+    soLanLamMoi.current = 0;
 
     resolveAudio(chapterId)
       .then((resolved) => {
@@ -112,8 +114,17 @@ export function AudioPlayer({
             preload="metadata"
             src={audio.playUrl}
             aria-label={`Trình phát audio: ${title}`}
-            onCanPlay={() => setReady(true)}
+            onCanPlay={() => {
+              soLanLamMoi.current = 0;
+              setReady(true);
+            }}
             onError={async () => {
+              if (soLanLamMoi.current >= 2) {
+                console.error(`[AudioPlayer] Đã thử làm mới ${soLanLamMoi.current} lần nhưng vẫn lỗi. Dừng thử lại.`);
+                setError("Không phát được audio sau nhiều lần thử làm mới. File có thể bị lỗi hoặc không khả dụng.");
+                return;
+              }
+              soLanLamMoi.current += 1;
               const ok = await lamMoiAudio();
               if (!ok) {
                 setError("Không phát được audio. File có thể đã hết hạn liên kết.");

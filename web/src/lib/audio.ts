@@ -54,7 +54,16 @@ export interface PlayableAudio {
 }
 
 export function isAudioUrlExpired(audio: PlayableAudio, bufferSeconds = 60): boolean {
-  if (!audio.obtainedAt || !audio.expiresIn) return false;
+  if (
+    !audio.obtainedAt ||
+    typeof audio.obtainedAt !== "number" ||
+    !audio.expiresIn ||
+    typeof audio.expiresIn !== "number" ||
+    isNaN(audio.expiresIn) ||
+    audio.expiresIn <= 0
+  ) {
+    return false;
+  }
   const elapsedSec = (Date.now() - audio.obtainedAt) / 1000;
   return elapsedSec >= (audio.expiresIn - bufferSeconds);
 }
@@ -76,12 +85,14 @@ export async function resolveAudio(chapterId: string): Promise<PlayableAudio> {
   if (link.url) {
     // Che do R2: URL da ky, dung truc tiep duoc o ca hai cho.
     const download = await linkWithRetry(chapterId, true);
+    const rawExp = Number(link.expires_in);
+    const validExp = Number.isFinite(rawExp) && rawExp > 0 ? rawExp : 14400;
     return {
       playUrl: link.url,
       downloadUrl: download.url ?? link.url,
       revoke: null,
       sizeBytes: link.size_bytes,
-      expiresIn: link.expires_in ?? 14400,
+      expiresIn: validExp,
       obtainedAt: Date.now(),
     };
   }

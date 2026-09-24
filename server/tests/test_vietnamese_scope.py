@@ -109,17 +109,15 @@ class ApiChiTraGiongTiengViet(unittest.TestCase):
 
     def test_chi_giong_piper_duoc_duyet_moi_xuat_hien(self) -> None:
         piper = {v["voice_id"] for v in self.vs if v["provider"] == "piper"}
-        self.assertEqual(piper, {"piper:ngochuyen"})
+        self.assertEqual(piper, {"piper:ngochuyennew"})
 
 
 class MucGiongDeXuat(unittest.TestCase):
     """
     Dung cau hinh dang PRODUCTION, khong dung mac dinh cua `CauHinhGia`.
 
-    Mac dinh o day chi bat `piper:ngochuyen`. Muc de xuat nay co HAI giong
-    NghiTTS, va giong nao khong nam trong danh sach trang thi `list_voices()`
-    loc di truoc — bo test se do trong khi ma nguon dung. Production bat ca 25
-    giong NghiTTS, nen day moi la dieu kien can kiem.
+    Production bat ca 25 giong NghiTTS, nhung danh sach de xuat chi hien giong
+    chinh thuc (piper:ngochuyennew).
     """
 
     @classmethod
@@ -129,10 +127,9 @@ class MucGiongDeXuat(unittest.TestCase):
         cls.dx = sorted((v for v in cls.vs if v["recommended"]),
                         key=lambda v: v["recommended_order"])
 
-    def test_dung_tam_giong(self) -> None:
-        # Bay -> tam: them `piper:ngochuyennew` vao muc de xuat.
-        self.assertEqual(RECOMMENDED_COUNT, 8)
-        self.assertEqual(len(self.dx), 8)
+    def test_dung_bay_giong(self) -> None:
+        self.assertEqual(RECOMMENDED_COUNT, 7)
+        self.assertEqual(len(self.dx), 7)
 
     def test_dung_thu_tu_cua_app_desktop(self) -> None:
         """Doi chieu bang (provider, engine_voice_id) — ma ON DINH, khong phai ten."""
@@ -146,11 +143,9 @@ class MucGiongDeXuat(unittest.TestCase):
         self.assertEqual([v["recommended_order"] for v in self.dx],
                          list(range(RECOMMENDED_COUNT)))
 
-    def test_ca_hai_giong_NghiTTS_nam_trong_muc_de_xuat(self) -> None:
-        # Lien nhau va dung cuoi: "Ngọc Huyền" roi "Ngọc Huyền (Mới)".
+    def test_giong_NghiTTS_nam_trong_muc_de_xuat(self) -> None:
         ids = [v["voice_id"] for v in self.dx]
-        self.assertEqual(ids[-2:],
-                         ["piper:ngochuyen", "piper:ngochuyennew"])
+        self.assertEqual(ids[-1:], ["piper:ngochuyennew"])
 
     def test_khong_go_tay_danh_sach_o_backend(self) -> None:
         # Chep danh sach sang backend la cach chac chan de hai ban lech nhau.
@@ -238,7 +233,7 @@ class DinhTuyenDungProvider(unittest.TestCase):
     def test_ngochuyen_di_ve_piper(self) -> None:
         v = tts_bridge.resolve_voice("piper:ngochuyen")
         self.assertEqual(v.provider, "piper")
-        self.assertEqual(v.engine_voice_id, "ngochuyen")
+        self.assertEqual(v.engine_voice_id, "ngochuyennew")
 
     def test_cac_giong_capcut_de_xuat_di_ve_capcut(self) -> None:
         reg = tts_bridge.get_registry()

@@ -56,6 +56,11 @@ class _KhongKhoa:
 
 _KHONG_KHOA = _KhongKhoa()
 
+#: Map voice aliases to canonical voice IDs for backward compatibility.
+VOICE_ALIASES: Dict[str, str] = {
+    "piper:ngochuyen": "piper:ngochuyennew",
+}
+
 
 def get_registry() -> Any:
     """
@@ -187,7 +192,15 @@ def voice_is_local_allowed(voice_id: str, settings: Any = None) -> bool:
     provider = (voice_id or "").split(":", 1)[0]
     if provider != LOCAL_PROVIDER:
         return True
-    return voice_id in allowed_local_voice_ids(settings)
+    allowed = allowed_local_voice_ids(settings)
+    if voice_id in allowed:
+        return True
+    canonical = VOICE_ALIASES.get(voice_id)
+    if canonical and canonical in allowed:
+        return True
+    if voice_id == "piper:ngochuyennew" and "piper:ngochuyen" in allowed:
+        return True
+    return False
 
 
 def voice_is_public(voice: Any, settings: Any = None) -> bool:
@@ -213,7 +226,10 @@ def ensure_voice_public(voice_id: str, settings: Any = None) -> None:
     TUYET DOI khong tu chon mot giong Viet khac thay the. Bao loi ro rang de
     nguoi dung biet minh vua gui gi.
     """
-    voice = get_registry().voice_by_id(voice_id)
+    canonical_id = VOICE_ALIASES.get(voice_id, voice_id)
+    voice = get_registry().voice_by_id(canonical_id)
+    if voice is None:
+        voice = get_registry().voice_by_id(voice_id)
     if voice is None:
         raise TtsBridgeError(
             ErrorKind.VOICE_NOT_FOUND.value, f"Không có giọng '{voice_id}'.")
@@ -223,7 +239,7 @@ def ensure_voice_public(voice_id: str, settings: Any = None) -> None:
             f"Giọng '{voice_id}' không phải giọng tiếng Việt. "
             "Phiên bản này chỉ hỗ trợ giọng tiếng Việt.",
         )
-    if not voice_is_local_allowed(voice_id, settings):
+    if not (voice_is_local_allowed(voice_id, settings) or voice_is_local_allowed(canonical_id, settings)):
         raise TtsBridgeError(
             ErrorKind.VOICE_NOT_FOUND.value,
             f"Giọng '{voice_id}' hiện không được cung cấp.",
@@ -239,7 +255,8 @@ def ensure_voice_runnable(voice_id: str, settings: Any = None) -> None:
     job cu dang nam `pending` tu truoc khi thu hep pham vi van phai chay xong —
     thu hep pham vi khong duoc lam hong du lieu da co.
     """
-    if not voice_is_local_allowed(voice_id, settings):
+    canonical_id = VOICE_ALIASES.get(voice_id, voice_id)
+    if not (voice_is_local_allowed(voice_id, settings) or voice_is_local_allowed(canonical_id, settings)):
         raise TtsBridgeError(
             ErrorKind.VOICE_NOT_FOUND.value,
             f"Giọng '{voice_id}' hiện không được cung cấp.",
@@ -283,7 +300,10 @@ def voice_runnable_on_this_machine(voice_id: str) -> bool:
     if bo_chay is not None and not getattr(bo_chay, "installed", True):
         return False
 
-    voice = registry.voice_by_id(voice_id)
+    canonical_id = VOICE_ALIASES.get(voice_id, voice_id)
+    voice = registry.voice_by_id(canonical_id)
+    if voice is None:
+        voice = registry.voice_by_id(voice_id)
     if voice is None:
         # THAT SU khong biet giong nay (khong phai vi thieu runtime — da loai o
         # tren). De duong cu xu ly: nhan roi that bai voi thong diep doc duoc,
@@ -310,6 +330,9 @@ def list_voices(settings: Any = None) -> List[Dict[str, Any]]:
 
     out: List[Dict[str, Any]] = []
     for voice in registry.voices:
+        # Exclude legacy aliases: public voice selector only exposes canonical voice
+        if voice.id in VOICE_ALIASES:
+            continue
         is_local = voice.provider == LOCAL_PROVIDER
         if not voice_is_public(voice, settings):
             continue
@@ -357,7 +380,10 @@ def list_voices(settings: Any = None) -> List[Dict[str, Any]]:
 
 
 def resolve_voice(voice_id: str) -> Voice:
-    voice = get_registry().voice_by_id(voice_id)
+    canonical_id = VOICE_ALIASES.get(voice_id, voice_id)
+    voice = get_registry().voice_by_id(canonical_id)
+    if voice is None:
+        voice = get_registry().voice_by_id(voice_id)
     if voice is None:
         raise TtsBridgeError(
             ErrorKind.VOICE_NOT_FOUND.value, f"Không có giọng '{voice_id}'."

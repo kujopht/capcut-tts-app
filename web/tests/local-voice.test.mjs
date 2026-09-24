@@ -298,8 +298,7 @@ const TEN_CHINH_THUC = {
   "piper:minhthu": "Minh Thư",
   "piper:mytam2": "Mỹ Tâm 1",
   "piper:mytam2794": "Mỹ Tâm 2",
-  "piper:ngochuyen": "Ngọc Huyền",
-  "piper:ngochuyennew": "Ngọc Huyền (Mới)",
+  "piper:ngochuyennew": "Ngọc Huyền",
   "piper:ngocngan3701": "Ngọc Ngân",
   "piper:phuongtrang": "Phương Trang",
   "piper:taian2": "Tài An 1",
@@ -311,14 +310,14 @@ const TEN_CHINH_THUC = {
   "piper:yannew": "Yan (Mới)",
 };
 
-test("fixture production: 24 CapCut + 2 Edge + 25 NghiTTS = 51", () => {
+test("fixture production: 24 CapCut + 2 Edge + 24 NghiTTS = 50", () => {
   const dem = {};
   for (const v of FIXTURE) dem[v.provider] = (dem[v.provider] ?? 0) + 1;
-  assert.deepEqual(dem, { capcut: 24, edge: 2, piper: 25 });
-  assert.equal(FIXTURE.length, 51);
+  assert.deepEqual(dem, { capcut: 24, edge: 2, piper: 24 });
+  assert.equal(FIXTURE.length, 50);
 });
 
-test("fixture production: du 25 voice_id piper, dung bang ten", () => {
+test("fixture production: du 24 voice_id piper, dung bang ten", () => {
   const piper = Object.fromEntries(
     FIXTURE.filter((v) => v.provider === "piper").map((v) => [
       v.voice_id,
@@ -333,7 +332,7 @@ test("fixture production: moi nhan NghiTTS chi la ten, khong hau to", async () =
     "../src/lib/voices.ts"
   );
   const { all } = voiceSections(FIXTURE);
-  assert.equal(all.length, 51, "không giọng nào bị lọc mất");
+  assert.equal(all.length, 50, "không giọng nào bị lọc mất");
 
   for (const v of all.filter((x) => x.provider === "piper")) {
     const nhan = voiceOptionLabel(v);
@@ -412,21 +411,17 @@ test("fixture production: khong hai dong nao trong y het nhau", async () => {
   assert.deepEqual(trung, [], `nhãn trùng nhau: ${trung.join(", ")}`);
 });
 
-test("fixture production: ca hai giong Ngoc Huyen nam trong muc de xuat", async () => {
+test("fixture production: duy nhat mot giong Ngoc Huyen nam trong muc de xuat", async () => {
   const { voiceSections, voiceOptionLabel } = await import(
     "../src/lib/voices.ts"
   );
   const { recommended, all } = voiceSections(FIXTURE);
 
-  // So khop theo THU TU chu khong theo tap hop: yeu cau la "Ngọc Huyền" truoc,
-  // "Ngọc Huyền (Mới)" NGAY SAU. Mot test tap-hop se khong thay neu hai muc
-  // bi doi cho.
   const piper = recommended.filter((v) => v.provider === "piper");
   assert.deepEqual(
     piper.map((v) => [v.voice_id, voiceOptionLabel(v)]),
     [
-      ["piper:ngochuyen", "Ngọc Huyền"],
-      ["piper:ngochuyennew", "Ngọc Huyền (Mới)"],
+      ["piper:ngochuyennew", "Ngọc Huyền"],
     ],
   );
 
@@ -435,8 +430,7 @@ test("fixture production: ca hai giong Ngoc Huyen nam trong muc de xuat", async 
     assert.equal(typeof v.recommended_order, "number", v.voice_id);
   }
 
-  // Muc de xuat la mot CACH TRINH BAY. Ca hai van phai co trong muc day du,
-  // va phai la CUNG tham chieu — khong nhan ban ban ghi nao.
+  // Muc de xuat la mot CACH TRINH BAY. Giong de xuat van phai co trong muc day du
   for (const v of piper) {
     assert.ok(all.includes(v), `${v.voice_id} thiếu trong mục đầy đủ`);
   }
@@ -445,15 +439,15 @@ test("fixture production: ca hai giong Ngoc Huyen nam trong muc de xuat", async 
 test("fixture production: muc de xuat lien tuc va dung thu tu may chu", async () => {
   const { voiceSections } = await import("../src/lib/voices.ts");
   const { recommended } = voiceSections(FIXTURE);
-  assert.equal(recommended.length, 8);
+  assert.equal(recommended.length, 7);
   assert.deepEqual(
     recommended.map((v) => v.recommended_order),
-    [0, 1, 2, 3, 4, 5, 6, 7],
+    [0, 1, 2, 3, 4, 5, 6],
   );
-  // Hai giong NghiTTS dung cuoi, lien nhau.
-  assert.deepEqual(
-    recommended.slice(-2).map((v) => v.voice_id),
-    ["piper:ngochuyen", "piper:ngochuyennew"],
+  // Giong NghiTTS dung cuoi.
+  assert.equal(
+    recommended.slice(-1)[0].voice_id,
+    "piper:ngochuyennew",
   );
 });
 

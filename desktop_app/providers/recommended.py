@@ -53,8 +53,7 @@ RECOMMENDED_FANFIC_VOICES: Tuple[Tuple[str, str, str], ...] = (
     (PROVIDER_CAPCUT, "BV562_streaming", "Mai"),
     (PROVIDER_CAPCUT, "BV421_vivn_streaming", "Nhỏ Ngọt Ngào"),
     (PROVIDER_EDGE, "vi-VN-HoaiMyNeural", "Hoài My"),
-    (PROVIDER_PIPER, "ngochuyen", "Ngọc Huyền"),
-    (PROVIDER_PIPER, "ngochuyennew", "Ngọc Huyền (Mới)"),
+    (PROVIDER_PIPER, "ngochuyennew", "Ngọc Huyền"),
 )
 
 #: Chi (provider, engine_voice_id) - dung de doi chieu.

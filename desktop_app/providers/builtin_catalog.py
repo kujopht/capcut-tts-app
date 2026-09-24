@@ -82,7 +82,7 @@ NGHITTS_DISPLAY_NAMES: Dict[str, str] = {
     "mytam2": "Mỹ Tâm 1",
     "mytam2794": "Mỹ Tâm 2",
     "ngochuyen": "Ngọc Huyền",
-    "ngochuyennew": "Ngọc Huyền (Mới)",
+    "ngochuyennew": "Ngọc Huyền",
     "ngocngan3701": "Ngọc Ngân",
     "phuongtrang": "Phương Trang",
     "taian2": "Tài An 1",
@@ -95,6 +95,13 @@ NGHITTS_DISPLAY_NAMES: Dict[str, str] = {
 }
 
 PIPER_BUILTIN: List[Dict[str, str]] = [
+    {
+        "voice_key": "ngochuyennew",
+        "display_name": NGHITTS_DISPLAY_NAMES["ngochuyennew"],
+        "description": "Giọng nữ review phim — NghiTTS",
+        "language": "vi-VN",
+        "gender": "Female",
+    },
     {
         "voice_key": "ngochuyen",
         "display_name": NGHITTS_DISPLAY_NAMES["ngochuyen"],
@@ -154,7 +161,6 @@ PIPER_BUILTIN: List[Dict[str, str]] = [
         "minhthu",
         "mytam2",
         "mytam2794",
-        "ngochuyennew",
         "ngocngan3701",
         "phuongtrang",
         "taian2",
@@ -168,7 +174,7 @@ PIPER_BUILTIN: List[Dict[str, str]] = [
 ]
 
 #: Giong Piper duoc uu tien lam mac dinh khi da cai model hop le.
-PIPER_PREFERRED_KEY = "ngochuyen"
+PIPER_PREFERRED_KEY = "ngochuyennew"
 
 
 def edge_builtin_voices() -> List[Voice]:

@@ -28,7 +28,12 @@ export const VERIFIED_VOICE_ID = "edge:vi-VN-HoaiMyNeural";
  * va noi co model la may chu tong hop.
  */
 export function usableVoices(voices: Voice[]): Voice[] {
-  return voices.filter((voice) => voice.installed || voice.runs_on_worker);
+  const hasCanonical = voices.some((v) => v.voice_id === "piper:ngochuyennew");
+  return voices.filter(
+    (voice) =>
+      (!hasCanonical || voice.voice_id !== "piper:ngochuyen") &&
+      (voice.installed || voice.runs_on_worker),
+  );
 }
 
 /**
@@ -112,9 +117,13 @@ export function voiceSections(voices: Voice[]): {
  * quyet dinh KHONG dua no vao ten hien thi.
  */
 export function voiceOptionLabel(voice: Voice): string {
-  if (chiHienTen(voice)) return voice.display_name;
+  let displayName = voice.display_name;
+  if (voice.voice_id === "piper:ngochuyennew" && displayName === "Ngọc Huyền (Mới)") {
+    displayName = "Ngọc Huyền";
+  }
+  if (chiHienTen(voice)) return displayName;
 
-  const phan = [voice.display_name, voice.provider_label];
+  const phan = [displayName, voice.provider_label];
   // Chi hien trang thai khi no NOI LEN MOT VAN DE.
   //
   // "unknown" (nhan: "Chưa kiểm tra") la mac dinh cua MOI giong cho toi khi co

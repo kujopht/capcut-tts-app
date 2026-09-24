@@ -54,7 +54,7 @@ TEN_CHINH_THUC = {
     "mytam2": "Mỹ Tâm 1",
     "mytam2794": "Mỹ Tâm 2",
     "ngochuyen": "Ngọc Huyền",
-    "ngochuyennew": "Ngọc Huyền (Mới)",
+    "ngochuyennew": "Ngọc Huyền",
     "ngocngan3701": "Ngọc Ngân",
     "phuongtrang": "Phương Trang",
     "taian2": "Tài An 1",
@@ -84,7 +84,10 @@ class NhanCuaGiongNghiTTS(unittest.TestCase):
         cls.piper = [v for v in cls.vs if v["provider"] == "piper"]
 
     def test_ca_bo_NghiTTS_deu_ra(self) -> None:
-        self.assertEqual(len(self.piper), len(tts_bridge.nghitts_voice_ids()))
+        # 24 giong cong khai (piper:ngochuyen la alias cu nen duoc giau khoi danh sach)
+        self.assertEqual(len(self.piper), len(tts_bridge.nghitts_voice_ids()) - 1)
+        self.assertNotIn("piper:ngochuyen", [v["voice_id"] for v in self.piper])
+        self.assertIn("piper:ngochuyennew", [v["voice_id"] for v in self.piper])
 
     def test_provider_label_la_NghiTTS(self) -> None:
         for v in self.piper:
@@ -126,7 +129,7 @@ class NhanCuaGiongNghiTTS(unittest.TestCase):
 
     def test_display_name_dung_bang_ten_chinh_thuc(self) -> None:
         thuc_te = {v["voice_id"]: v["display_name"] for v in self.piper}
-        mong_doi = {f"piper:{k}": t for k, t in TEN_CHINH_THUC.items()}
+        mong_doi = {f"piper:{k}": t for k, t in TEN_CHINH_THUC.items() if k != "ngochuyen"}
         self.assertEqual(thuc_te, mong_doi)
 
     def test_khong_con_ten_ky_thuat_lam_ten_hien_thi(self) -> None:
@@ -148,15 +151,11 @@ class NhanCuaGiongNghiTTS(unittest.TestCase):
         ten = [v["display_name"] for v in self.piper]
         self.assertEqual(len(set(ten)), len(ten), "có tên hiển thị trùng nhau")
 
-    def test_hoan_doi_hau_to_moi_dung_huong(self) -> None:
-        """
-        `ngochuyen` truoc day mang ten "Ngọc Huyền (mới)". Bang ten chinh thuc
-        chuyen hau to do sang `ngochuyennew`. Day la mot HOAN DOI, khong phai
-        doi ten mot chieu — khoa lai de khong ai vo tinh doi nguoc.
-        """
+    def test_canonical_ngochuyen_name(self) -> None:
+        """`ngochuyennew` la giong duy nhat chao ban voi ten 'Ngọc Huyền'."""
         theo_id = {v["voice_id"]: v["display_name"] for v in self.piper}
-        self.assertEqual(theo_id["piper:ngochuyen"], "Ngọc Huyền")
-        self.assertEqual(theo_id["piper:ngochuyennew"], "Ngọc Huyền (Mới)")
+        self.assertEqual(theo_id["piper:ngochuyennew"], "Ngọc Huyền")
+        self.assertNotIn("piper:ngochuyen", theo_id)
 
     def test_voice_id_van_la_khoa_ben_vung(self) -> None:
         """
@@ -164,7 +163,7 @@ class NhanCuaGiongNghiTTS(unittest.TestCase):
         job va track da tao, va o `content_hash` sinh ra `output_key` tren R2.
         """
         ids = {v["voice_id"] for v in self.piper}
-        self.assertEqual(ids, set(tts_bridge.nghitts_voice_ids()))
+        self.assertEqual(ids, set(tts_bridge.nghitts_voice_ids()) - {"piper:ngochuyen"})
         for i in ids:
             self.assertTrue(i.startswith("piper:"), i)
 
@@ -230,13 +229,13 @@ class KhongDungToiCapCutVaEdge(unittest.TestCase):
             self.assertNotEqual(v["provider_label"], "NghiTTS", v["voice_id"])
             self.assertFalse(v["runs_on_worker"], v["voice_id"])
 
-    def test_tong_so_giong_dung_51(self) -> None:
-        """24 CapCut + 2 Edge + 25 NghiTTS."""
+    def test_tong_so_giong_dung_50(self) -> None:
+        """24 CapCut + 2 Edge + 24 NghiTTS (1 canonical Ngọc Huyền)."""
         from collections import Counter
 
         dem = Counter(v["provider"] for v in self.vs)
-        self.assertEqual(dict(dem), {"capcut": 24, "edge": 2, "piper": 25})
-        self.assertEqual(len(self.vs), 51)
+        self.assertEqual(dict(dem), {"capcut": 24, "edge": 2, "piper": 24})
+        self.assertEqual(len(self.vs), 50)
 
     def test_metadata_provider_van_giu_nguyen(self) -> None:
         """
@@ -301,12 +300,12 @@ class FixtureChoBoTestWeb(unittest.TestCase):
         tren may cua mot nguoi.
         """
         piper = [v for v in self._doc() if v["provider"] == "piper"]
-        self.assertEqual(len(piper), 25)
+        self.assertEqual(len(piper), 24)
         for v in piper:
             self.assertFalse(v["installed"], v["voice_id"])
 
-    def test_fixture_du_51_giong(self) -> None:
-        self.assertEqual(len(self._doc()), 51)
+    def test_fixture_du_50_giong(self) -> None:
+        self.assertEqual(len(self._doc()), 50)
 
 
 class GiongDeXuatPhaiThucSuDuocPhucVu(unittest.TestCase):
@@ -326,32 +325,25 @@ class GiongDeXuatPhaiThucSuDuocPhucVu(unittest.TestCase):
                           f"'{provider}:{khoa}' được đề xuất nhưng không có "
                           "trong catalog NghiTTS — sẽ không bao giờ hiện ra")
 
-    def test_hai_giong_NghiTTS_duoc_de_xuat_dung_thu_tu(self) -> None:
-        """
-        Yeu cau san pham: "Ngọc Huyền" truoc, "Ngọc Huyền (Mới)" NGAY SAU.
-
-        So khop theo THU TU chu khong theo tap hop: `recommended_order` sinh tu
-        chi so trong `RECOMMENDED_FANFIC_VOICES`, va giao dien sap xep theo con
-        so do. Doi cho hai muc do trong tuple se khong lam test tap-hop nao do.
-        """
+    def test_giong_NghiTTS_duoc_de_xuat_chinh_thuc(self) -> None:
+        """Yeu cau san pham: Chi hien mot giong de xuat 'Ngọc Huyền' (piper:ngochuyennew)."""
         de_xuat = sorted(
             [v for v in tts_bridge.list_voices(CauHinhGia()) if v["recommended"]],
             key=lambda v: v["recommended_order"])
         piper = [(v["voice_id"], v["display_name"]) for v in de_xuat
                  if v["provider"] == tts_bridge.LOCAL_PROVIDER]
-        self.assertEqual(piper, [("piper:ngochuyen", "Ngọc Huyền"),
-                                 ("piper:ngochuyennew", "Ngọc Huyền (Mới)")])
+        self.assertEqual(piper, [("piper:ngochuyennew", "Ngọc Huyền")])
 
-    def test_hai_giong_do_lien_nhau_va_dung_cuoi(self) -> None:
+    def test_giong_do_dung_cuoi(self) -> None:
         thu_tu = [f"{p}:{k}" for p, k in RECOMMENDED_CODES]
-        self.assertEqual(thu_tu[-2:], ["piper:ngochuyen", "piper:ngochuyennew"])
+        self.assertEqual(thu_tu[-1:], ["piper:ngochuyennew"])
 
     def test_de_xuat_van_nam_trong_muc_day_du(self) -> None:
         """Muc de xuat la mot CACH TRINH BAY, khong phai mot danh sach rieng."""
         vs = tts_bridge.list_voices(CauHinhGia())
         ids = {v["voice_id"] for v in vs}
-        for i in ("piper:ngochuyen", "piper:ngochuyennew"):
-            self.assertIn(i, ids)
+        self.assertIn("piper:ngochuyennew", ids)
+        self.assertNotIn("piper:ngochuyen", ids)
 
     def test_de_xuat_hien_ra_khi_danh_sach_trang_du(self) -> None:
         de_xuat = [v for v in tts_bridge.list_voices(CauHinhGia())
@@ -362,32 +354,21 @@ class GiongDeXuatPhaiThucSuDuocPhucVu(unittest.TestCase):
                          sorted(mong_doi))
 
     def test_danh_sach_trang_HEP_thi_giong_de_xuat_bien_mat_LANG_LE(self) -> None:
-        """
-        Bai test nay khoa lai mot HE QUA, khong phai mot mong muon.
-
-        Truoc day o day co bai `test_cau_hinh_mac_dinh_tu_nhat_quan`: no doi moi
-        giong NghiTTS duoc de xuat phai nam trong `Settings.local_voices` mac
-        dinh. Dieu do dung khi chi co MOT giong NghiTTS duoc de xuat. Nay co
-        hai, con mac dinh (va staging) van co y chi bat `piper:ngochuyen` —
-        noi lam giong duy nhat da probe that.
-
-        NOI RONG mac dinh de bai test cu xanh lai la sai huong: no se lam moi
-        moi truong khong dat `FAS_LOCAL_VOICES` chao ban mot giong ma worker o
-        do co the khong co model, va job se nam mai.
-
-        Nen thay vi ep hai ben bang nhau, khoa lai dung cai bay: danh sach
-        trang hep hon thi giong de xuat bi loc di TRUOC khi muc de xuat duoc
-        dung, va khong co log nao noi vi sao.
-        """
-        chi_mot = CauHinhGia("piper:ngochuyen")
-        de_xuat = [v["voice_id"] for v in tts_bridge.list_voices(chi_mot)
+        chi_khac = CauHinhGia("piper:calmwoman3688")
+        de_xuat = [v["voice_id"] for v in tts_bridge.list_voices(chi_khac)
                    if v["recommended"] and v["provider"] == "piper"]
-        self.assertEqual(de_xuat, ["piper:ngochuyen"])
+        self.assertEqual(de_xuat, [])
 
-        du_ca_hai = CauHinhGia("piper:ngochuyen", "piper:ngochuyennew")
-        de_xuat = [v["voice_id"] for v in tts_bridge.list_voices(du_ca_hai)
+        co_ngochuyen = CauHinhGia("piper:ngochuyennew")
+        de_xuat = [v["voice_id"] for v in tts_bridge.list_voices(co_ngochuyen)
                    if v["recommended"] and v["provider"] == "piper"]
-        self.assertEqual(de_xuat, ["piper:ngochuyen", "piper:ngochuyennew"])
+        self.assertEqual(de_xuat, ["piper:ngochuyennew"])
+
+        # Alias piper:ngochuyen cung duoc chap nhan va chao ban canonical
+        co_alias = CauHinhGia("piper:ngochuyen")
+        de_xuat = [v["voice_id"] for v in tts_bridge.list_voices(co_alias)
+                   if v["recommended"] and v["provider"] == "piper"]
+        self.assertEqual(de_xuat, ["piper:ngochuyennew"])
 
 
 if __name__ == "__main__":

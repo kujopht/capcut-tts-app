@@ -193,6 +193,12 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
   const [thoiLuong, setThoiLuong] = useState(0);
   const [amLuong, setAmLuongState] = useState(1);
   const [tocDo, setTocDoState] = useState(1);
+  /** Hen gio canh "dung hinh": xem `onWaiting`. */
+  const henCho = useRef<number | null>(null);
+  const boHenCho = () => {
+    if (henCho.current !== null) window.clearTimeout(henCho.current);
+    henCho.current = null;
+  };
 
   /* ------------------------------------------------------------ dieu khien */
 
@@ -337,6 +343,8 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
 
     // Dung NGAY am thanh cua bai cu: the gio song lau hon moi bai, nen doi
     // chuong ma khong dung thi bai cu con keo dai cho toi khi URL moi ve.
+    if (henCho.current !== null) window.clearTimeout(henCho.current);
+    henCho.current = null;
     const a = el.current;
     if (a && a.getAttribute("src")) {
       a.pause();
@@ -532,6 +540,24 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
           if (canPhat) choPhat();
         }}
         onTimeUpdate={(e) => setThoiDiem(e.currentTarget.currentTime)}
+        /*
+          Dung hinh vi URL DA HET HAN. Do duoc 2026-09-24 tren Chrome: khi
+          request cua the bi chan o tang mang, the KHONG ban `error` — no dung
+          o `readyState 1` va thu lai mai. Nhanh `onError` ben duoi khong bao
+          gio chay. Neu dang cho du lieu qua 6 giay MA URL da qua han (tinh
+          theo dong ho cua chinh ta, `isAudioUrlExpired`) thi lay URL moi.
+          Mang cham ma URL con han thi KHONG lam gi — tranh vong lam moi vo ich.
+        */
+        onWaiting={() => {
+          boHenCho();
+          henCho.current = window.setTimeout(() => {
+            const a = el.current;
+            if (a && tep && a.readyState < 3 && isAudioUrlExpired(tep)) {
+              void lamMoiUrl(a.currentTime, !a.paused);
+            }
+          }, 6000);
+        }}
+        onPlaying={boHenCho}
         onSeeked={capNhatViTriPhien}
         onRateChange={capNhatViTriPhien}
         onPlay={() => {

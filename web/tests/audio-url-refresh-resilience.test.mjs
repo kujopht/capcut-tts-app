@@ -127,6 +127,19 @@ test("Het han khi dang TAM DUNG: bam Phat lay URL moi TRUOC, khong thu URL cu", 
   assert.match(lamMoi, /yDinh\.current = yDinhKhiLamMoi\(resumeTime, tuDongPhat\)/);
 });
 
+test("The dung hinh (khong ban error) ma URL da het han -> van lam moi; mang cham ma URL con han -> khong", () => {
+  // Do that tren Chrome: request cua the bi chan o tang mang thi the dung o
+  // readyState 1 va thu lai mai, KHONG ban `error` — nhanh onError khong chay.
+  const khoi = audioEngineSrc.slice(audioEngineSrc.indexOf("onWaiting={() => {"));
+  const than = khoi.slice(0, khoi.indexOf("onPlaying={boHenCho}"));
+  assert.match(than, /window\.setTimeout\(/);
+  assert.match(than, /a\.readyState < 3 && isAudioUrlExpired\(tep\)/,
+    "chi lam moi khi URL DA het han, khong phai moi lan mang cham");
+  assert.match(than, /void lamMoiUrl\(a\.currentTime, !a\.paused\)/);
+  // Hen gio bi huy khi phat lai duoc va khi doi chuong.
+  assert.match(audioEngineSrc, /onPlaying=\{boHenCho\}/);
+});
+
 test("Lay URL audio: thu lai loi ha tang tam thoi (502/503/504) CO GIOI HAN", () => {
   assert.match(audioSrc, /const TRANSIENT_RETRIES = 2;/);
   assert.match(audioSrc, /new Set\(\[502, 503, 504\]\)/);

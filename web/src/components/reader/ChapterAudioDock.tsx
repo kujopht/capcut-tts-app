@@ -242,6 +242,10 @@ export const ChapterAudioDock = forwardRef<HTMLDivElement, ChapterAudioDockProps
                 className={`dock-chip${p.theoBat ? " is-on" : ""}`}
                 onClick={p.onTheo}
                 aria-pressed={p.theoBat}
+                // Ten doc duoc KHONG phu thuoc nhan chu: man hep an nhan (chi
+                // con bieu tuong), va `display: none` cung xoa nhan khoi cay
+                // tiep can.
+                aria-label="Theo giọng đọc"
                 disabled={!p.hienChu}
                 title={
                   p.uocLuong
@@ -256,7 +260,8 @@ export const ChapterAudioDock = forwardRef<HTMLDivElement, ChapterAudioDockProps
                 type="button"
                 className="dock-chip"
                 onClick={() => p.onHienChu(!p.hienChu)}
-                aria-pressed={!p.hienChu}
+                aria-label={p.hienChu ? "Ẩn truyện chữ" : "Hiện truyện chữ"}
+                title={p.hienChu ? "Ẩn truyện chữ" : "Hiện truyện chữ"}
               >
                 {p.hienChu ? <IconTextHide size={16} /> : <IconTextShow size={16} />}
                 <span className="dock-chip-label">{p.hienChu ? "Ẩn truyện chữ" : "Hiện truyện chữ"}</span>

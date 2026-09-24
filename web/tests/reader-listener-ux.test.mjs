@@ -93,6 +93,10 @@ test("dieu khien bat buoc co mat, bang tieng Viet", () => {
   assert.match(e, /role="group" aria-label="Hiển thị truyện chữ"/);
   assert.match(e, /aria-pressed=\{mode === m\}/);
   assert.match(d, /aria-pressed=\{p\.theoBat\}/);
+  // Man hep an nhan chu cua hai cong tac (`display: none` xoa luon khoi cay
+  // tiep can) — ten doc duoc phai nam o `aria-label`, khong o nhan.
+  assert.match(d, /aria-label="Theo giọng đọc"/);
+  assert.match(d, /aria-label=\{p\.hienChu \? "Ẩn truyện chữ" : "Hiện truyện chữ"\}/);
 });
 
 test("khung chu dong/thu gon chi AN bang `hidden`, van trong DOM — mo lai tuc thi, SEO van thay", () => {

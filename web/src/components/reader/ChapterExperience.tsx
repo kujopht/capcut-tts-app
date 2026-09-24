@@ -285,9 +285,15 @@ export function ChapterExperience(props: ChapterExperienceProps) {
       luuPrefs({ ...prefs, cheDo: "listen", khungChu: "closed" });
       // Chu vua an, trang ngan lai: dua trinh phat lon vao tam mat thay vi de
       // nguoi dung dung o giua khoang trong phia duoi.
-      requestAnimationFrame(() =>
-        hero.current?.scrollIntoView({ block: "start", behavior: kieuCuon(giamChuyenDong) }),
-      );
+      // Tru phan header dinh che: `scrollIntoView` dat trinh phat SAU header.
+      requestAnimationFrame(() => {
+        const el = hero.current;
+        if (!el) return;
+        window.scrollTo({
+          top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - caoDauTrang() - 12),
+          behavior: kieuCuon(giamChuyenDong),
+        });
+      });
     },
     [mode, prefs, luuPrefs, doiKhungChu, giamChuyenDong],
   );

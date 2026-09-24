@@ -11049,7 +11049,8 @@ button.cq-the:hover { background: #ffffff0a; }
 .reader-resume-actions { display: inline-flex; flex-wrap: wrap; gap: var(--s2); }
 
 /* Dieu huong nhanh trong dau chuong. */
-.reader-head-meta { align-items: center; gap: var(--s2); }
+.reader-head-meta { align-items: center; gap: var(--s2) var(--s3); }
+.reader-head-audio { white-space: nowrap; }
 .reader-topnav {
   display: flex;
   flex-wrap: wrap;
@@ -11411,6 +11412,9 @@ body.co-dock { padding-bottom: var(--dock-cao, 120px); }
   }
 
   .reader-toolbar { gap: var(--s2); }
+  /* Tuy chon doc tren dien thoai: hai nhom chia deu hai ben thay vi don
+     sang phai thanh hai hang lech. */
+  .reader-toolbar .doc-tuychon { justify-content: space-between; gap: var(--s2); }
   .reader-modes { width: 100%; }
   .reader-mode { flex: 1 1 0; justify-content: center; padding: 0 8px; min-height: 40px; }
   .reader-chips { right: 8px; }

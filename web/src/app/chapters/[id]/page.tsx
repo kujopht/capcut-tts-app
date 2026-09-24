@@ -81,6 +81,9 @@ export async function generateMetadata({
   }
 }
 
+/** Cho danh sach chuong (chi de dung nut truoc/sau) toi da bay nhieu. */
+const CHO_DS_CHUONG_MS = 6000;
+
 function lienKe(c: Chapter | null): ChuongLienKe | null {
   return c ? { chapter_id: c.chapter_id, title: c.title, has_audio: c.has_audio } : null;
 }
@@ -151,13 +154,21 @@ export default async function ChapterPage({
     Danh sach chuong lay theo kieu KHONG DUOC PHEP LAM HONG VIEC DOC: neu
     `getNovel` that bai thi `dsChuong` chi la rong, mat hai cai nut dieu huong,
     va chu van hien ra binh thuong.
+
+    "That bai" gom ca CHAM: do that 2026-09-24, `GET /api/novels/{id}` cua
+    truyen 99 chuong mat 180 giay+ trong mot dot may chu xuong cap, trong khi
+    `getChapter` van ~2 giay — trang chuong dung trang trang ca phut chi vi
+    hai cai nut. Cho toi da CHO_DS_CHUONG_MS; qua han thi doc chu truoc.
   */
   const novelId = ket_qua.novel?.novel_id ?? ket_qua.chapter?.novel_id;
   const dsChuong: Chapter[] = novelId
-    ? await api
-        .getNovel(novelId)
-        .then((r) => r.chapters)
-        .catch(() => [] as Chapter[])
+    ? await Promise.race([
+        api
+          .getNovel(novelId)
+          .then((r) => r.chapters)
+          .catch(() => [] as Chapter[]),
+        new Promise<Chapter[]>((xong) => setTimeout(() => xong([]), CHO_DS_CHUONG_MS)),
+      ])
     : [];
 
   const ds = dsChuong ?? [];
@@ -205,19 +216,21 @@ export default async function ChapterPage({
 
       <header className="stack-2 reader-head">
         <h1 className="page-title">{chapter.title}</h1>
+        {/* Hai nhan RIENG (khong gop chung mot hop flex): tren dien thoai
+            "Có bản nghe" gop chung thi bi bop, xuong dong tung chu. */}
         <div className="row row-spread reader-head-meta">
           <span className="hint eyebrow-icon">
             <IconBook size={16} />
             {formatNumber(chapter.char_count)} ký tự
             {novel ? ` · ${novel.title}` : ""}
-            {coAudio ? (
-              <>
-                {" · "}
-                <IconHeadphones size={15} /> Có bản nghe
-              </>
-            ) : null}
           </span>
-          {!audio ? <ChapterOwnerAudioAction ownerId={chapter.owner_id} /> : null}
+          {coAudio ? (
+            <span className="hint eyebrow-icon reader-head-audio">
+              <IconHeadphones size={15} /> Có bản nghe
+            </span>
+          ) : (
+            <ChapterOwnerAudioAction ownerId={chapter.owner_id} />
+          )}
         </div>
         {novel && tongSo > 0 ? (
           <nav className="reader-topnav" aria-label="Chuyển chương nhanh">

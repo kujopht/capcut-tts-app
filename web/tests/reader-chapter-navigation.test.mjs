@@ -68,6 +68,15 @@ test("danh sach chuong KHONG duoc phep lam hong viec doc", () => {
   );
 });
 
+test("danh sach chuong CHAM cung khong duoc giu trang doc — co tran thoi gian", () => {
+  // Do that 2026-09-24: `GET /api/novels/{id}` mat 180s+ khi may chu xuong
+  // cap; trang chuong phai hien chu truoc, chi mat nut truoc/sau.
+  assert.match(code, /const CHO_DS_CHUONG_MS = (\d+);/);
+  const ms = Number(code.match(/const CHO_DS_CHUONG_MS = (\d+);/)[1]);
+  assert.ok(ms > 0 && ms <= 10000, `tran ${ms}ms qua dai cho mot trang doc`);
+  assert.match(code, /await Promise\.race\(\[[\s\S]{0,300}?\.getNovel\([\s\S]{0,300}?setTimeout\(\(\) => xong\(\[\]\), CHO_DS_CHUONG_MS\)/);
+});
+
 test("van giu duong ve trang truyen (khong thay the, chi them)", () => {
   assert.match(code, /href=\{`\/novels\/\$\{novel\.novel_id\}`\}/,
     "mat duong ve danh sach chuong cua truyen");

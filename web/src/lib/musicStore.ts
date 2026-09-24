@@ -22,6 +22,7 @@ import {
   type LyricLine,
   type LyricWord,
 } from "@/lib/lyricsData";
+import { audioFocus, UU_TIEN } from "@/lib/audioFocus";
 
 export type { LyricLine, LyricWord };
 
@@ -459,6 +460,15 @@ class MusicStore {
     }
     this.updateSnapshot();
   };
+  /** Ha/tra am luong TAM THOI khi giong doc chuong giu tieng (chinh sach
+      "duck" cua `lib/audioFocus.ts`). KHONG doi `this.volume` — muc nguoi
+      dung da chon van nguyen. */
+  public haAmLuong = (ha: boolean) => {
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setTargetAtTime(ha ? this.volume * 0.2 : this.volume, this.ctx.currentTime, 0.15);
+    }
+  };
+
   public setVolume = (v: number) => {
     this.volume = Math.max(0, Math.min(1, v));
     if (this.masterGain && this.ctx) {
@@ -536,6 +546,20 @@ export function getTrackLyric(track: MusicTrack, time: number): string {
 }
 
 export const musicStore = new MusicStore();
+
+/*
+  Kenh "ambient" cua bo dieu phoi tieng (`lib/audioFocus.ts`): giong doc
+  chuong > nhac nen. Chinh sach hom nay la "pause" — dung hanh vi cu, khi
+  `AudioEngine` con goi thang `musicStore.pause()`. Nhanh "duck" da noi san
+  de san pham nhac sau nay chi phai doi MOT dong `CHINH_SACH`, khong cham
+  toi dong co truyen.
+*/
+audioFocus.dangKy("ambient", {
+  uuTien: UU_TIEN.ambient,
+  khiBiCat: (kieu) => (kieu === "duck" ? musicStore.haAmLuong(true) : musicStore.pause()),
+  khiDuocTraLai: () => musicStore.haAmLuong(false),
+});
+
 if (typeof window !== "undefined") {
   (window as any).musicStore = musicStore;
 }

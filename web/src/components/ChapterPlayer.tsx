@@ -15,9 +15,15 @@
  * phat mot chuong truyen khi nguoi ta vua mo trang la mot hanh vi tho lo.
  */
 
-import { useAudioEngine, dongHo, TOC_DO } from "./AudioEngine";
+import { useAudioEngine, dongHo, TOC_DO, BUOC_TUA } from "./AudioEngine";
 import { NovelCover } from "./NovelCover";
-import { IconHeadphones } from "./Icons";
+import {
+  IconBack10,
+  IconForward10,
+  IconHeadphones,
+  IconNextChapter,
+  IconPrevChapter,
+} from "./Icons";
 import { formatBytes } from "./ui";
 
 export function ChapterPlayer({
@@ -25,11 +31,16 @@ export function ChapterPlayer({
   novelTitle,
   coverUrl,
   chapterTitle,
+  onTruoc,
+  onSau,
 }: {
   novelId: string;
   novelTitle: string;
   coverUrl?: string | null;
   chapterTitle: string;
+  /** Sang chuong truoc/sau (trang chuong lo phan "phat tiep"). Thieu = khong co chuong do. */
+  onTruoc?: () => void;
+  onSau?: () => void;
 }) {
   const { trangThai: t, dieuKhien: d } = useAudioEngine();
 
@@ -66,27 +77,72 @@ export function ChapterPlayer({
         <p className="hint listen-hero-novel">{novelTitle}</p>
 
         <div className="listen-controls">
-          {/*
-            `is-playing` chi de CHAY MOT NHIP SONG khi bat dau phat — CSS chay
-            `animation` khi lop vua duoc them, nen no tu dong chi phat mot lan.
-            Khong mang y nghia trang thai nao khac; trang thai that nam o
-            `aria-label` va o dong `role="status"` ben duoi.
-          */}
-          <button
-            type="button"
-            className={`play-btn${t.dangPhat ? " is-playing" : ""}`}
-            onClick={d.batTat}
-            disabled={chua_the_bam}
-            aria-label={t.dangPhat ? "Tạm dừng" : "Phát"}
-          >
-            {chua_the_bam ? (
-              <span className="spinner" aria-hidden="true" />
-            ) : (
-              <span className="play-glyph" aria-hidden="true">
-                {t.dangPhat ? "❚❚" : "▶"}
-              </span>
-            )}
-          </button>
+          <div className="listen-buttons" role="group" aria-label="Điều khiển phát">
+            <button
+              type="button"
+              className="dock-icon-btn"
+              onClick={onTruoc}
+              disabled={!onTruoc}
+              aria-label="Chương trước"
+              title="Chương trước"
+            >
+              <IconPrevChapter size={18} />
+            </button>
+            <button
+              type="button"
+              className="dock-icon-btn"
+              onClick={() => d.tuaTuongDoi(-BUOC_TUA)}
+              disabled={chua_the_bam || !t.thoiLuong}
+              aria-label="Lùi 10 giây"
+              aria-keyshortcuts="j"
+              title="Lùi 10 giây (J)"
+            >
+              <IconBack10 size={22} />
+            </button>
+            {/*
+              `is-playing` chi de CHAY MOT NHIP SONG khi bat dau phat — CSS chay
+              `animation` khi lop vua duoc them, nen no tu dong chi phat mot lan.
+              Khong mang y nghia trang thai nao khac; trang thai that nam o
+              `aria-label` va o dong `role="status"` ben duoi.
+            */}
+            <button
+              type="button"
+              className={`play-btn${t.dangPhat ? " is-playing" : ""}`}
+              onClick={d.batTat}
+              disabled={chua_the_bam}
+              aria-label={t.dangPhat ? "Tạm dừng" : "Phát"}
+              aria-keyshortcuts="k"
+            >
+              {chua_the_bam ? (
+                <span className="spinner" aria-hidden="true" />
+              ) : (
+                <span className="play-glyph" aria-hidden="true">
+                  {t.dangPhat ? "❚❚" : "▶"}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              className="dock-icon-btn"
+              onClick={() => d.tuaTuongDoi(BUOC_TUA)}
+              disabled={chua_the_bam || !t.thoiLuong}
+              aria-label="Tới 10 giây"
+              aria-keyshortcuts="l"
+              title="Tới 10 giây (L)"
+            >
+              <IconForward10 size={22} />
+            </button>
+            <button
+              type="button"
+              className={`dock-icon-btn${t.daXong && onSau ? " is-cta" : ""}`}
+              onClick={onSau}
+              disabled={!onSau}
+              aria-label="Chương sau"
+              title="Chương sau"
+            >
+              <IconNextChapter size={18} />
+            </button>
+          </div>
 
           <div className="listen-track">
             {/*

@@ -142,9 +142,10 @@ test("khong pha M2/M3/M4", () => {
   // nam o `ui.test.mjs` ("trang chi tiet truyen KHONG con mo trinh phat...").
   assert.match(read("../src/components/studio/VietTruyen.tsx"), /api\.reorderChapters\(/);
   assert.match(read("../src/app/novels/[id]/page.tsx"), /chapter\.audio_outdated \?/);
-  // Canh bao "audio co the khong con khop" chuyen sang trang Nghe rieng
-  // cung voi trinh phat — trang doc (`/chapters/[id]`) khong con audio nua.
-  assert.match(read("../src/app/listen/[id]/page.tsx"), /audioOutdated/);
+  // Canh bao "audio co the khong con khop" di cung trinh phat — tu sprint
+  // doc/nghe la che do Nghe cua trang chuong thong nhat (`/listen/[id]` chi
+  // con la chuyen huong).
+  assert.match(read("../src/components/reader/ChapterExperience.tsx"), /audioOutdated/);
 });
 
 test("tai MP3 va trinh phat van con", () => {

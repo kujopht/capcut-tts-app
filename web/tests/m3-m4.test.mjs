@@ -14,10 +14,11 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const write = () => read("../src/components/studio/VietTruyen.tsx");
 const novel = () => read("../src/app/novels/[id]/page.tsx");
 const chapter = () => read("../src/app/chapters/[id]/page.tsx");
-/** Trang Nghe rieng (overnight Phase 2, Phan 2A) — day la noi trinh phat
-    (`<ChapterPlayer>`) va canh bao "audio co the khong con khop" song, tach
-    khoi trang doc (`chapter()`) tu vong nay. */
-const nghe = () => read("../src/app/listen/[id]/page.tsx");
+/** Che do NGHE cua trang chuong thong nhat (sprint doc/nghe 2026-09-24) —
+    noi trinh phat lon (`<ChapterPlayer>`) va canh bao "audio co the khong
+    con khop" song. Truoc do la trang rieng `/listen/[id]` (overnight Phase
+    2A), gio `/listen/[id]` chuyen huong ve `/chapters/[id]?mode=listen`. */
+const nghe = () => read("../src/components/reader/ChapterExperience.tsx");
 const api = () => read("../src/lib/api.ts");
 const css = () => read("../src/app/globals.css");
 
@@ -202,10 +203,9 @@ test("M4: cho nguoi dung CHON giu audio hay tao lai", () => {
   assert.match(alert, /Tạo lại audio/, "phai neu lua chon tao lai");
 });
 
-test("M4: trang Nghe canh bao ngay tren trinh phat", () => {
-  // Overnight Phase 2 (Phan 2A): canh bao "audio khong con khop" chuyen tu
-  // trang doc (`/chapters/[id]`, gio CHI CHU) sang trang Nghe rieng
-  // (`/listen/[id]`) — cung mot rang buoc DOM, khac trang.
+test("M4: che do Nghe canh bao ngay tren trinh phat", () => {
+  // Canh bao "audio khong con khop" song o che do Nghe cua trang chuong
+  // thong nhat — cung mot rang buoc DOM nhu thoi `/listen/[id]`, khac noi.
   const src = nghe();
   assert.match(src, /audioOutdated/);
   assert.match(src, /alert alert-warn/);
@@ -226,15 +226,22 @@ test("M4: chu so huu duoc chi duong tao lai bang NUT, khong phai link trong cau"
   assert.match(src, /isOwner \? \(/);
 });
 
-test("M4: trang doc KHONG con canh bao audio — do la viec cua trang Nghe", () => {
-  // Rang buoc MOI cua overnight Phase 2: trang doc chi con chu, khong con
-  // gi lien quan toi audio ngoai mot lien ket sang `/listen/[id]`.
+test("M4: canh bao audio chi nam o CHE DO NGHE, trang may chu chi chuyen co", () => {
+  // Sprint doc/nghe: MOT trang cho ca hai. Phan may chu (`page.tsx`) khong tu
+  // ve canh bao hay trinh phat — no chuyen `audio_outdated` cho
+  // `ChapterExperience`, noi canh bao chi hien o che do Nghe, ngay tren
+  // trinh phat. Khong con lien ket nao sang `/listen/[id]` (da chuyen huong).
   const src = chapter();
   assert.ok(!/alert alert-warn/.test(src),
-    "trang doc khong duoc tu ve canh bao audio nua");
+    "phan may chu khong duoc tu ve canh bao audio");
   assert.ok(!/<ChapterPlayer/.test(src),
-    "trang doc khong duoc tu mo ChapterPlayer nua");
-  assert.match(src, /href={`\/listen\/\$\{chapter\.chapter_id\}`}/);
+    "phan may chu khong duoc tu mo ChapterPlayer");
+  assert.match(src, /audioOutdated=\{Boolean\(ket_qua\.audio_outdated\)\}/,
+    "phai chuyen co audio_outdated cho trai nghiem doc/nghe");
+  assert.ok(!/href=\{`\/listen\//.test(src), "con lien ket sang trang Nghe cu");
+  const exp = nghe();
+  assert.match(exp, /mode === "listen" && hasAudio \?/,
+    "trinh phat lon + canh bao chi o che do Nghe");
 });
 
 test("M4: danh sach chuong cong khai cung hien canh bao", () => {

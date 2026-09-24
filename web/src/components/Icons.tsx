@@ -362,3 +362,125 @@ export function IconCrown(p: Props) {
     </Svg>
   );
 }
+
+/* -- trinh phat chuong: doc & nghe (sprint UX doc/nghe) ------------------- */
+
+/** Mui ten vong nguoc + "10" — lui 10 giay. */
+export function IconBack10(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" />
+      <path d="M4.5 4.5v3.2h3.2" />
+      <text x="12" y="15.2" textAnchor="middle" fontSize="7.5" fontWeight="700" fill="currentColor" stroke="none">10</text>
+    </Svg>
+  );
+}
+
+/** Mui ten vong xuoi + "10" — toi 10 giay. */
+export function IconForward10(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" />
+      <path d="M19.5 4.5v3.2h-3.2" />
+      <text x="12" y="15.2" textAnchor="middle" fontSize="7.5" fontWeight="700" fill="currentColor" stroke="none">10</text>
+    </Svg>
+  );
+}
+
+/** Vach + tam giac trai — chuong truoc. */
+export function IconPrevChapter(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M6 5v14" />
+      <path d="M18 5.5 9 12l9 6.5Z" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+/** Tam giac phai + vach — chuong sau. */
+export function IconNextChapter(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M18 5v14" />
+      <path d="M6 5.5 15 12l-9 6.5Z" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+/** Mui ten xuong — thu nho trinh phat / di xuong. */
+export function IconChevronDown(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="m6 9 6 6 6-6" />
+    </Svg>
+  );
+}
+
+/** Mui ten len — mo lai trinh phat / di len. */
+export function IconChevronUp(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="m6 15 6-6 6 6" />
+    </Svg>
+  );
+}
+
+/** Tam ngam — theo giong doc. */
+export function IconFollow(p: Props) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="6.5" />
+      <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+    </Svg>
+  );
+}
+
+/** Mui ten co duoi len — len dau trang. */
+export function IconArrowUp(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M12 19V5M6 11l6-6 6 6" />
+    </Svg>
+  );
+}
+
+/** Mui ten co duoi xuong. */
+export function IconArrowDown(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M12 5v14M6 13l6 6 6-6" />
+    </Svg>
+  );
+}
+
+/** Ba vach — danh sach chuong. */
+export function IconList(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M8 6h12M8 12h12M8 18h12" />
+      <circle cx="4" cy="6" r="1" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="18" r="1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+/** Trang chu mo — hien truyen chu. */
+export function IconTextShow(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 5.5h16M4 10h16M4 14.5h10M4 19h7" />
+    </Svg>
+  );
+}
+
+/** Trang chu gach cheo — an truyen chu. */
+export function IconTextHide(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 5.5h9M4 10h5M4 14.5h4" />
+      <path d="M14 13l6 6M20 13l-6 6" />
+    </Svg>
+  );
+}

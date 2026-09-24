@@ -20,21 +20,38 @@ import { API_BASE, ApiError, api, getToken } from "./api";
  * theo INDEX co the tre mot nhip. Da gap that: mo trinh phat ngay khi job xong
  * thi `/api/audio/{id}/url` tra 404.
  *
- * Nen thu lai vai lan khi gap 404 — chi 404, khong dung cho loi khac.
+ * Nen thu lai vai lan khi gap 404.
+ *
+ * Them 502/503/504: loi HA TANG TAM THOI (may chu khoi dong lai, Appwrite het
+ * han muc trong chot lat — do that tren production 2026-09-24: cung mot
+ * `GET /api/chapters/...` tra 200 roi 503 roi lai 200). Thu IT lan, gian
+ * cach tang dan; loi con keo dai thi bao that cho nguoi dung. Moi loi khac
+ * (401/403/422…) nem ngay — thu lai khong doi duoc ket qua.
  */
 const NOT_FOUND_RETRIES = 5;
 const RETRY_DELAY_MS = 600;
+const TRANSIENT_RETRIES = 2;
+const TRANSIENT_STATUSES = new Set([502, 503, 504]);
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function linkWithRetry(chapterId: string, download = false) {
+  let transient = 0;
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await api.audioLink(chapterId, download);
     } catch (cause) {
-      const isMissing = cause instanceof ApiError && cause.status === 404;
-      if (!isMissing || attempt >= NOT_FOUND_RETRIES) throw cause;
-      await wait(RETRY_DELAY_MS);
+      const status = cause instanceof ApiError ? cause.status : 0;
+      if (status === 404 && attempt < NOT_FOUND_RETRIES) {
+        await wait(RETRY_DELAY_MS);
+        continue;
+      }
+      if (TRANSIENT_STATUSES.has(status) && transient < TRANSIENT_RETRIES) {
+        transient += 1;
+        await wait(800 * transient);
+        continue;
+      }
+      throw cause;
     }
   }
 }

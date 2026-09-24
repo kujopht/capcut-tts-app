@@ -7,14 +7,13 @@
  * giua cac trang khong lam no unmount, va no dung CHUNG the `<audio>` voi
  * `AudioEngineProvider` (khong tao dong co phat thu hai).
  *
- * Khac voi `MiniPlayer.tsx` (thanh nho O TRONG trang Nghe, hien/an theo VI
- * TRI CUON cua trinh phat lon): thanh nay hien/an theo TUYEN DUONG. Tren
- * chinh trang Nghe cua chuong dang phat (`/listen/[id]`, tach khoi trang doc
- * tu overnight Phase 2), `ChapterPlayer` (to) + `MiniPlayer` (theo cuon) da
- * lo lieu — hien them thanh nay o do la trung lap. Moi noi KHAC (`/fanfic`,
- * `/community`, `/account`, `/write`, va CA trang doc `/chapters/[id]` —
- * trang do gio khong con trinh phat rieng nua), day la giao dien DUY NHAT
- * cho biet van co audio dang phat.
+ * Thanh nay hien/an theo TUYEN DUONG. Tren chinh trang CHUONG dang phat
+ * (`/chapters/[id]` — tu sprint doc/nghe 2026-09-24 la trang doc VA nghe
+ * duy nhat; `/listen/[id]` chuyen huong ve do), trinh phat noi cua trang
+ * (`reader/ChapterAudioDock`) + trinh phat lon o che do Nghe da lo lieu —
+ * hien them thanh nay o do la HAI thanh cung noi mot chuyen. Moi noi KHAC
+ * (`/library`, `/community`, `/account`, `/studio`, va trang cua MOT CHUONG
+ * KHAC), day la giao dien DUY NHAT cho biet van co audio dang phat.
  */
 
 import Link from "next/link";
@@ -26,11 +25,13 @@ export function GlobalMiniPlayer() {
   const { trangThai: t, dieuKhien: d, tieuDe } = useAudioEngine();
   const pathname = usePathname();
 
-  /* Trang Nghe CHINH chuong nay da co ChapterPlayer + MiniPlayer rieng cua
-     no — an thanh toan cuc de khong trung lap. Moi tuyen duong khac deu can,
-     KE CA trang doc `/chapters/[id]` (khong con trinh phat rieng nua). */
+  /* Trang CHINH chuong dang phat da co trinh phat rieng — an thanh toan cuc
+     de khong trung lap. `/listen/...` giu lai cho khoang khac truoc khi
+     chuyen huong kip chay. Moi tuyen duong khac deu can, KE CA trang cua mot
+     chuong KHAC (dang doc chuong 7 trong khi nghe chuong 5). */
   const oTrangNgheChuongNay =
-    !!t.chapterId && pathname === `/listen/${t.chapterId}`;
+    !!t.chapterId &&
+    (pathname === `/chapters/${t.chapterId}` || pathname === `/listen/${t.chapterId}`);
   const hien = t.daBatDau && !t.loi && !oTrangNgheChuongNay;
 
   /* Chua cho o cuoi trang khi thanh nay noi len — cung ly do voi
@@ -58,10 +59,10 @@ export function GlobalMiniPlayer() {
           </span>
         </button>
 
-        {/* Bam vao ten -> quay lai trang Nghe cua chuong dang phat. Khac
-            `MiniPlayer.tsx` (cuon trong CUNG trang): o day phai DIEU HUONG,
-            vi chuong dang phat khong con o trang hien tai. */}
-        <Link href={`/listen/${t.chapterId}`} className="mini-title">
+        {/* Bam vao ten -> quay lai trang cua chuong dang phat (duong dan
+            chinh tac `/chapters/[id]`). Phai DIEU HUONG, vi chuong dang phat
+            khong o trang hien tai. Che do doc/nghe da nho trong cookie. */}
+        <Link href={`/chapters/${t.chapterId}`} className="mini-title">
           <span className="truncate">{tieuDe}</span>
           <span className="hint mono mini-time">
             {dongHo(t.thoiDiem)} / {dongHo(t.thoiLuong)}

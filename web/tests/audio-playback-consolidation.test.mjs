@@ -49,8 +49,20 @@ test("Audio Consolidation: SoundwaveVisualizer la visualization-only, khong tao 
 });
 
 test("Audio Consolidation: AudioEngine tu dong tam dung nhac ambient khi phat chuong", () => {
+  /*
+    Sprint doc/nghe 2026-09-24: engine khong goi thang `musicStore.pause()`
+    nua — no bao "giong doc giu tieng" cho bo dieu phoi (`lib/audioFocus.ts`),
+    va nhac nen dang ky la kenh uu tien thap voi hanh vi "pause". Hanh vi
+    nguoi dung thay KHONG doi; hanh vi that duoc kiem o `audio-focus.test.mjs`.
+  */
   const eng = audioEngine();
-  assert.match(eng, /musicStore\.pause\(\)/, "AudioEngine phai pause ambient music khi bat dau phat");
+  assert.match(eng, /audioFocus\.yeuCau\("narration"\)/, "AudioEngine phai xin quyen tieng khi phat");
+  assert.match(eng, /audioFocus\.traLai\("narration"\)/, "AudioEngine phai tra quyen tieng khi dung");
+  assert.ok(!/musicStore/.test(eng.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")),
+    "dong co truyen khong duoc biet ve mot kho nhac cu the");
+  const nhac = read("../src/lib/musicStore.ts");
+  assert.match(nhac, /audioFocus\.dangKy\("ambient"/, "nhac nen phai dang ky kenh ambient");
+  assert.match(nhac, /musicStore\.pause\(\)/, "kenh ambient phai tam dung khi bi cat");
 });
 
 test("Audio Consolidation: Giu nguyen nut Tai MP3 va dinh danh file tieu chuan", () => {

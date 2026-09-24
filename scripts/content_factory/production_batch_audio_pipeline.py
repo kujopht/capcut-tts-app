@@ -1,4 +1,8 @@
-"""Production Batch Audio Synthesis Pipeline via Lightning Serverless.
+"""
+# ARCHIVE_AFTER_PR_D — Preserved for incident history and forensic verification.
+# Replaced by unified CLI: python -m scripts.content_factory run <work_id> --tts
+#
+Production Batch Audio Synthesis Pipeline via Lightning Serverless.
 
 Processes The Cold Between Wars (nov_rr_156206) chapters 2–47 in controlled batches:
 - Batch 1: 02–10

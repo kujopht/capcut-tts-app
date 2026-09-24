@@ -1,4 +1,7 @@
 """
+# ARCHIVE_AFTER_PR_D — Preserved for incident history and forensic verification.
+# Replaced by unified CLI: python -m scripts.content_factory run <work_id>
+#
 Pipeline 156206 Runner — Phase 1 (Intake) & Phase 2 (Full Local Crawl)
 
 Executes:

@@ -303,6 +303,9 @@ export interface Novel {
    * Tuy chon de client cu (chua biet truong nay) van bien dich duoc.
    */
   cover_url?: string | null;
+  cover_portrait_url?: string | null;
+  hero_background_url?: string | null;
+  hero_background_status?: "staged" | "approved" | "missing" | "needs_regeneration";
   state: PublishState;
   tags: string[];
   /**
@@ -1549,6 +1552,8 @@ export interface NovelBrief {
   state: PublishState;
   cover_key: string | null;
   cover_url: string | null;
+  cover_portrait_url?: string | null;
+  hero_background_url?: string | null;
 }
 
 /** So luong da xoa, backend tra ve de doi soat. */

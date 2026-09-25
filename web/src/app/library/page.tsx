@@ -29,13 +29,16 @@ import {
   novelFandom,
   formatAuthor,
   formatChapterCount,
+  novelPortraitUrl,
+  novelHeroUrl,
+  isLegacyAudioOnly,
 } from "@/lib/catalog";
 
 type TopTab = "fanfic" | "books" | "personal";
 type PersonalFilter = "all" | "continue" | "following" | "completed";
-type AudioFilter = "all" | "audio" | "text";
+type AudioFilter = "all" | "audio" | "text" | "read_audio" | "legacy";
 type StatusFilter = "all" | "ongoing" | "completed";
-type SortMode = "updated" | "chapters" | "title";
+type SortMode = "updated" | "latest" | "chapters" | "title";
 
 const NHAN_TRANG_THAI: Record<string, string> = {
   ongoing: "Đang ra",
@@ -166,11 +169,11 @@ function LibraryContent() {
         query: debouncedSearchQuery,
         fandom: fandomFilter === "all" ? undefined : fandomFilter,
         status: statusFilter === "all" ? undefined : statusFilter,
-        audio: audioFilter === "all" ? undefined : audioFilter === "audio",
+        audio: audioFilter === "all" || audioFilter === "legacy" || audioFilter === "read_audio" ? undefined : audioFilter === "audio",
         sort: sortMode,
         limit: PAGE_SIZE,
         offset: pageIndex * PAGE_SIZE,
-        content_mode: "readable",
+        content_mode: audioFilter === "legacy" ? "audio_only" : "readable",
       }).catch(() => api.listNovels(false).catch(() => ({
         novels: [] as Novel[],
         count: 0,
@@ -198,7 +201,13 @@ function LibraryContent() {
 
   const { data, loading, error, reload } = useAsyncData(nap);
 
-  const filteredPublicNovels = useMemo<Novel[]>(() => data?.novels ?? [], [data?.novels]);
+  const filteredPublicNovels = useMemo<Novel[]>(() => {
+    let list = data?.novels ?? [];
+    if (audioFilter === "read_audio") {
+      list = list.filter((n) => novelHasAudio(n) && (n.external_chapter_count ?? 0) > 0);
+    }
+    return list;
+  }, [data?.novels, audioFilter]);
   const totalPublicNovels = data?.totalNovels ?? 0;
   const hasMore = data?.hasMore ?? false;
   const allNovels = filteredPublicNovels;
@@ -361,6 +370,7 @@ function LibraryContent() {
                     aria-label="Sắp xếp danh sách"
                   >
                     <option value="updated">Mới cập nhật</option>
+                    <option value="latest">Mới xuất bản</option>
                     <option value="chapters">Số chương (Nhiều nhất)</option>
                     <option value="title">Tên tác phẩm (A–Z)</option>
                   </select>
@@ -436,10 +446,24 @@ function LibraryContent() {
                   </button>
                   <button
                     type="button"
+                    className={`ent-mood-chip ${audioFilter === "read_audio" ? "is-active" : ""}`}
+                    onClick={() => setAudioFilter("read_audio")}
+                  >
+                    🎧 + 📖 Đọc &amp; Nghe
+                  </button>
+                  <button
+                    type="button"
                     className={`ent-mood-chip ${audioFilter === "text" ? "is-active" : ""}`}
                     onClick={() => setAudioFilter("text")}
                   >
                     📖 Chỉ văn bản
+                  </button>
+                  <button
+                    type="button"
+                    className={`ent-mood-chip ${audioFilter === "legacy" ? "is-active" : ""}`}
+                    onClick={() => setAudioFilter("legacy")}
+                  >
+                    📦 Kho Audio cũ
                   </button>
 
                   <span className="hint" style={{ fontSize: "0.8rem", margin: "0 4px 0 12px" }}>
@@ -519,6 +543,7 @@ function LibraryContent() {
                             novelId={n.novel_id}
                             title={n.title}
                             coverUrl={n.cover_url}
+                            heroUrl={novelHeroUrl(n)}
                             size="landscape"
                           />
                           <span className={`lib-card-status-badge status-${n.status}`}>
@@ -551,11 +576,11 @@ function LibraryContent() {
                             <div className="story-tags">
                               {n.tags
                                 .filter((t) => !t.startsWith("work:") && t !== "imported")
-                                .slice(0, 2)
+                                .slice(0, 3)
                                 .map((t) => (
-                                  <span key={t} className="chip chip-static">
-                                    {t}
-                                  </span>
+                                   <span key={t} className="chip chip-static">
+                                     {t}
+                                   </span>
                                 ))}
                             </div>
                           ) : null}
@@ -563,7 +588,11 @@ function LibraryContent() {
 
                         <div className="lib-card-footer">
                           <span className="btn btn-sm btn-primary btn-block">
-                            {hasAudio ? "🎧 Nghe & Đọc" : "📖 Đọc tác phẩm"}
+                            {isLegacyAudioOnly(n)
+                              ? "🎧 Nghe trọn bộ"
+                              : hasAudio
+                              ? "🎧 Nghe & Đọc"
+                              : "📖 Đọc tác phẩm"}
                           </span>
                         </div>
                       </Link>
@@ -584,6 +613,7 @@ function LibraryContent() {
                           novelId={n.novel_id}
                           title={n.title}
                           coverUrl={n.cover_url}
+                          heroUrl={novelHeroUrl(n)}
                           size="landscape"
                         />
                         <span className="stack-1 list-main">
@@ -604,7 +634,11 @@ function LibraryContent() {
                         </span>
                         <span className="list-actions">
                           <Link className="btn btn-sm btn-primary" href={`/novels/${n.novel_id}`} prefetch={false}>
-                            {hasAudio ? "🎧 Nghe" : "📖 Đọc"}
+                            {isLegacyAudioOnly(n)
+                              ? "🎧 Nghe"
+                              : hasAudio
+                              ? "🎧 Nghe & Đọc"
+                              : "📖 Đọc"}
                           </Link>
                         </span>
                       </div>

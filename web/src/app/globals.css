@@ -5363,6 +5363,8 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   day chinh ten truyen xuong duoi nep gap.
 */
 .novel-head {
+  position: relative;
+  overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
   gap: var(--s5);
@@ -5374,6 +5376,27 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
     radial-gradient(640px 280px at 100% 0%, #8b6cff1a, transparent 70%),
     linear-gradient(160deg, #0a0d1aa3, #070910a8);
   box-shadow: var(--shadow-1), var(--edge);
+}
+.novel-head-backdrop {
+  position: absolute;
+  inset: -20px;
+  background-size: cover;
+  background-position: center 25%;
+  filter: blur(20px) brightness(0.26) saturate(1.2);
+  transform: scale(1.12);
+  z-index: 0;
+  pointer-events: none;
+}
+.novel-head-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(7, 9, 18, 0.88) 0%, rgba(10, 13, 26, 0.78) 50%, rgba(6, 8, 16, 0.94) 100%);
+  z-index: 1;
+  pointer-events: none;
+}
+.novel-head > *:not(.novel-head-backdrop):not(.novel-head-overlay) {
+  position: relative;
+  z-index: 2;
 }
 .novel-head-cover {
   width: 100%;

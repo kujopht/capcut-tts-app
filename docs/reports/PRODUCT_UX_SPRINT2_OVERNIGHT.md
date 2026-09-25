@@ -18,7 +18,7 @@ Lưu ý: nhánh Sprint 2 **xếp chồng trên PR #225** (bỏ mật khẩu đă
 
 ## 2. SPRINT 2 — nhánh / PR / tệp
 
-- Nhánh: `feat/product-ux-sprint2` — PR: _(điền sau khi tạo)_ — **chưa merge, chưa deploy**.
+- Nhánh: `feat/product-ux-sprint2` — PR: **#226** https://github.com/kujopht/capcut-tts-app/pull/226 — **chưa merge, chưa deploy**.
 - Chỉ `web/` (+ báo cáo này). Không backend, không Content Factory, không pipeline.
 
 Tệp mới:
@@ -192,7 +192,7 @@ Test cũ cập nhật **có chủ đích** (12 tệp, mỗi chỗ ghi lý do tro
 
 ## 8. MORNING ACTION
 
-1. Review PR Sprint 2 (liên kết ở mục 2) + trang ảnh BEFORE/AFTER (liên kết trong phần trả lời cuối phiên).
+1. Review PR #226 + trang ảnh BEFORE/AFTER (artifact riêng tư): https://claude.ai/artifact/Vtjgqpmc1NLjwtPkGPBuX2
 2. Merge **#225 trước**, đổi mật khẩu tài khoản từng bị gắn cứng, rồi mới merge Sprint 2.
 3. Đăng nhập admin trong Chrome để kiểm 3 trang admin (mục 7).
 4. Khi muốn phát hành: deploy từ SHA của `main` sau khi merge, bằng đúng lệnh production trong `CLAUDE.md`, kiểm bundle không có `localhost`, smoke thật như Sprint 1.

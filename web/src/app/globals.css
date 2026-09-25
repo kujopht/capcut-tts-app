@@ -4149,6 +4149,27 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   text-overflow: ellipsis;
 }
 
+/*
+  Cot "Truyện mới" hep (~150px chu o 1366): ten mot dong con "[Naruto] Hỏa
+  Ảnh: Hi…" va nhan "Audio" bi cat thanh "Au" (QA Sprint 2). Ten cho HAI dong,
+  dong du kien duoc xuong dong thay vi cat giua chu.
+*/
+.showcase-item .showcase-item-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  line-height: 1.3;
+}
+.showcase-item .showcase-item-meta > * {
+  flex-shrink: 0;
+}
+.showcase-audio {
+  display: inline-flex;
+  align-items: center;
+  color: #a5f3fc;
+}
+
 .showcase-item-meta .author {
   max-width: 90px;
   white-space: nowrap;
@@ -4296,20 +4317,25 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   margin: 0;
 }
 
+/*
+  `minmax(0, 1fr)` chu khong `1fr`: `1fr` co san toi thieu = be rong noi dung
+  (bieu tuong + dong mo ta `nowrap`), nen o 390px luoi hai cot TRAN ra ngoai va
+  the ben phai bi cat chu ("Tủ sách &", "Sáng tác &") — do duoc o QA Sprint 2.
+*/
 .home-util-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   width: 100%;
 }
 @media (max-width: 880px) {
   .home-util-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 @media (max-width: 600px) {
   .home-util-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -7315,17 +7341,104 @@ body.co-mini { padding-bottom: 74px; }
 .tim-hh { display: flex; gap: 6px; flex: 0 0 auto; }
 
 .tim-chan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s3);
   padding: var(--s3) var(--s4);
   border-top: 1px solid var(--line-soft);
 }
 
+/* ---- Sprint 2: goi y tuc thi (fandom / tac gia) + fandom nhanh ---- */
+.tim-goiy-icon {
+  flex: 0 0 44px;
+  display: grid;
+  place-items: center;
+  height: 34px;
+  border-radius: var(--r2);
+  background: var(--brand-soft);
+  color: var(--brand-hover);
+}
+.tim-dau-goi-y {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  padding-bottom: var(--s4);
+}
+.tim-dau-goi-y .tim-trong {
+  padding-bottom: 0;
+}
+.tim-fandom-nhanh {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--s4);
+}
+.tim-fandom-nhan {
+  margin-right: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.tim-fandom-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-strong);
+  background: #ffffff08;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  text-decoration: none;
+}
+.tim-fandom-chip:hover,
+.tim-fandom-chip:focus-visible {
+  color: var(--text);
+  border-color: var(--brand);
+}
+.tim-fandom-so {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.tim-meo {
+  font-size: 11.5px;
+}
+.tim-meo kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  font-family: inherit;
+  font-size: 10.5px;
+  text-align: center;
+}
+
 @media (max-width: 640px) {
   /* O dien thoai, overlay chiem gan het man hinh: mot hop nho o giua thi ban
-     phim ao che mat mot nua ket qua. */
+     phim ao che mat mot nua ket qua. `dvh`: thanh dia chi co gian khong day
+     chan hop ra khoi man hinh. */
   .tim-lop { padding: 0; }
   .tim-hop { width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; }
+  @supports (height: 100dvh) {
+    .tim-hop { max-height: 100dvh; height: 100dvh; }
+  }
   /* Huy hieu xuong dong thay vi ep ten nguoi con vai ky tu. */
   .tim-hh { display: none; }
+  /* Phim tat vo nghia tren man hinh cham. */
+  .tim-meo { display: none; }
+  .tim-o { font-size: 16px; }
 }
 
 /* ============================================================ khu quan tri
@@ -8025,6 +8138,703 @@ body.co-mini { padding-bottom: 74px; }
   text-transform: uppercase;
 }
 
+/* --------------------------------------------------------------------------
+   THU VIEN (/library) — Product UX Sprint 2.
+
+   Moi lop `.lib-*` chi trang Thu vien dung. Nguyen tac:
+   - MOT nut chinh moi the, va no chi ruc (tim dac) khi co TIEN DO de tiep
+     tuc; truyen chua doc dung nut vien — bay nut tim dac canh nhau o ban truoc
+     khong con cai nao la "buoc tiep theo".
+   - Anh bia sach: fandom o goc, tien do o day; trang thai/so chuong/audio
+     xuong dong du kien duoi ten (ban truoc bon nhan de len anh).
+   - Diem cham >= 34px cho chip, 36px cho tab.
+   -------------------------------------------------------------------------- */
+
+.lib-header {
+  align-items: flex-end;
+}
+
+/* Muc: dieu khien phan doan, KHONG con thanh truot do bang JS. */
+.lib-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 4px;
+  border-radius: var(--r-full);
+  background: rgba(4, 7, 16, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.lib-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.lib-tab:hover {
+  color: var(--text);
+  background: #ffffff0d;
+}
+.lib-tab.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, #8b6cff5c, #22d3ee33);
+  box-shadow: inset 0 0 0 1px #8b6cff80;
+}
+.lib-tab:focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 2px;
+}
+.lib-tab-ngan {
+  display: none;
+}
+.lib-tab-dem {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  background: #ffffff1a;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-section-title {
+  margin: 0;
+  font-size: var(--t-md);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* ---- dai "Đang đọc dở" ---- */
+.lib-continue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.lib-continue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--s3);
+}
+.lib-continue-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 64px;
+  padding: 10px 14px;
+  border-radius: var(--r2);
+  background: linear-gradient(160deg, #1b1f33e6, #0f1220f0);
+  border: 1px solid #8b6cff40;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.lib-continue-item:hover {
+  border-color: var(--brand);
+  background: linear-gradient(160deg, #22264000, #141829f5), #1b1f33;
+}
+.lib-continue-item:focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 2px;
+}
+.lib-continue-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-hover);
+}
+.lib-continue-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+}
+.lib-continue-copy strong {
+  font-size: var(--t-sm);
+  font-weight: 650;
+  color: var(--text);
+}
+.lib-continue-bar {
+  display: block;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: #ffffff14;
+  overflow: hidden;
+}
+.lib-continue-bar > span,
+.lib-card-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--grad-brand);
+}
+.lib-continue-cta {
+  flex: none;
+  font-size: var(--t-xs);
+  font-weight: 700;
+  color: var(--brand-hover);
+  white-space: nowrap;
+}
+
+/* ---- tim + sap xep + kieu xem ---- */
+.lib-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.lib-search {
+  position: relative;
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.lib-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.lib-search input {
+  width: 100%;
+  height: var(--h-input);
+  padding: 0 42px 0 38px;
+  border-radius: var(--r2);
+  border: 1px solid var(--line-strong);
+  background: #0b0e18d9;
+  color: var(--text);
+  font-size: var(--t-base);
+}
+.lib-search input::placeholder {
+  color: var(--text-3);
+}
+.lib-search input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+}
+.lib-search input::-webkit-search-cancel-button {
+  display: none;
+}
+.lib-search-clear {
+  position: absolute;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--r1);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.lib-search-clear:hover {
+  color: var(--text);
+  background: #ffffff0f;
+}
+.lib-filter-toggle {
+  display: none;
+}
+.lib-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.lib-sort-label {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.lib-sort select {
+  height: var(--h-md);
+  padding: 0 12px;
+  border-radius: var(--r2);
+  border: 1px solid var(--line-strong);
+  background-color: #0b0e18d9;
+  color: var(--text);
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+.lib-sort select:focus-visible {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+}
+.lib-view {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r2);
+  border: 1px solid var(--line-strong);
+  background: #0b0e18d9;
+}
+.lib-view-btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--r1);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.lib-view-btn:hover {
+  color: var(--text);
+}
+.lib-view-btn.is-active {
+  background: #ffffff1a;
+  color: #fff;
+}
+.lib-view-btn:focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 1px;
+}
+
+/* ---- bo loc ---- */
+.lib-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r2);
+  background: #0b0e18a6;
+  border: 1px solid var(--line-soft);
+}
+.lib-filter-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+.lib-filter-label {
+  flex: none;
+  width: 84px;
+  padding-top: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.lib-filter-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+}
+/* O giua hang: nhan ngan theo chu, khong giu cot 84px cua hang dau. */
+.lib-filter-label-gon {
+  width: auto;
+}
+.lib-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.lib-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-strong);
+  background: #ffffff08;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.lib-chip:hover {
+  color: var(--text);
+  border-color: #8b6cff80;
+}
+.lib-chip.is-active {
+  color: #fff;
+  background: #8b6cff38;
+  border-color: var(--brand);
+}
+.lib-chip:focus-visible {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 2px;
+}
+/* Kho audio cu: co mat nhung khong phai lua chon chinh. */
+.lib-chip-phu:not(.is-active) {
+  border-style: dashed;
+}
+.lib-chip-dem {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.lib-chip.is-active .lib-chip-dem {
+  color: #e9e4ff;
+}
+
+/* ---- bo loc dang bat ---- */
+.lib-active {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.lib-active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--brand-line);
+  background: var(--brand-soft);
+  color: var(--text);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.lib-active-chip:hover {
+  border-color: var(--brand);
+}
+.lib-active-clear {
+  padding: 6px 4px;
+  border: 0;
+  background: none;
+  color: var(--brand-hover);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* ---- ket qua ---- */
+.lib-results-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s3);
+}
+.lib-results-count {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.lib-results {
+  transition: opacity var(--dur) var(--ease);
+}
+.lib-results.is-stale {
+  opacity: 0.55;
+}
+
+.lib-story-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: var(--s4);
+}
+
+.lib-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r3);
+  background: linear-gradient(180deg, #121627f2, #0c0f1cf7);
+  border: 1px solid #ffffff14;
+  box-shadow: 0 4px 16px #0000004d;
+  overflow: hidden;
+  transition: transform 220ms var(--ease), border-color 220ms ease, box-shadow 220ms ease;
+}
+.lib-card:hover {
+  transform: translateY(-2px);
+  border-color: #8b6cff73;
+  box-shadow: 0 10px 28px #00000073;
+}
+.lib-card:has(.lib-card-link:focus-visible),
+.lib-row:has(.lib-card-link:focus-visible) {
+  outline: 2px solid var(--brand-hover);
+  outline-offset: 2px;
+}
+.lib-card-cover-wrap {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  background: rgba(0, 0, 0, 0.25);
+}
+.lib-card-cover-wrap .cover {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+.lib-card-fandom {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  padding: 3px 9px;
+  border-radius: var(--r-full);
+  background: #0a0d18d9;
+  border: 1px solid #ffffff26;
+  color: #e9e4ff;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-card-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  height: 4px;
+  background: #00000099;
+}
+.lib-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 0;
+}
+.lib-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lib-card-link {
+  color: inherit;
+  text-decoration: none;
+}
+/* Ca the bam duoc (lien ket keo gian), nut chinh nam TREN lop do. */
+.lib-card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+.lib-card-link:focus-visible {
+  outline: none;
+}
+.lib-card:hover .lib-card-title {
+  color: #ddd5ff;
+}
+.lib-card-author {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-card-facts {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.lib-fact-status {
+  font-weight: 650;
+}
+.lib-fact-status.status-ongoing {
+  color: #7dd3fc;
+}
+.lib-fact-status.status-completed {
+  color: #86efac;
+}
+.lib-fact-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #a5f3fc;
+}
+.lib-fact-fandom {
+  color: #d8ccff;
+  font-weight: 600;
+}
+.lib-card-tags {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.lib-card-tags li {
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: var(--r1);
+  background: #ffffff0d;
+  border: 1px solid #ffffff12;
+  color: var(--text-2);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-top: auto;
+  padding: 12px 14px 14px;
+}
+.lib-card-cta {
+  position: relative;
+  z-index: 2;
+}
+.lib-cta-pct {
+  font-weight: 600;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+.lib-card-date {
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- dang danh sach ---- */
+.lib-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lib-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 10px 12px;
+  border-radius: var(--r2);
+  background: #121627d9;
+  border: 1px solid #ffffff12;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.lib-row:hover {
+  border-color: #8b6cff66;
+}
+.lib-row .cover-landscape {
+  flex: none;
+  width: 112px;
+  height: 63px;
+  border-radius: var(--r1);
+}
+.lib-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lib-row-title {
+  margin: 0;
+  font-size: var(--t-base);
+  font-weight: 650;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- khung xuong: CUNG kich thuoc the that ---- */
+.lib-sk {
+  pointer-events: none;
+}
+.lib-card.lib-sk:hover {
+  transform: none;
+  border-color: #ffffff14;
+  box-shadow: 0 4px 16px #0000004d;
+}
+.lib-card-cover-wrap.sk {
+  border-radius: 0;
+}
+.lib-sk-line {
+  height: 12px;
+  border-radius: 6px;
+}
+.lib-sk-title {
+  height: 16px;
+  width: 85%;
+}
+.lib-sk-btn {
+  width: 124px;
+  height: var(--h-sm);
+  border-radius: var(--r2);
+}
+.lib-sk-thumb {
+  flex: none;
+  width: 112px;
+  height: 63px;
+  border-radius: var(--r1);
+}
+.lib-sk-chip {
+  display: inline-block;
+  width: 220px;
+  height: 34px;
+  border-radius: var(--r-full);
+}
+
+.lib-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s4);
+  padding: var(--s4) 0;
+}
+.lib-page-of {
+  font-size: var(--t-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.lib-note {
+  margin: var(--s3) 0 0;
+}
+
 .lib-guest-banner {
   display: flex;
   align-items: center;
@@ -8034,14 +8844,11 @@ body.co-mini { padding-bottom: 74px; }
   border-radius: var(--r2);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--kinh-vien);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
-
 .lib-guest-text strong {
   display: block;
-  color: var(--text);
   margin-bottom: 2px;
+  color: var(--text);
 }
 .lib-guest-text p {
   margin: 0;
@@ -8049,303 +8856,494 @@ body.co-mini { padding-bottom: 74px; }
   color: var(--text-3);
 }
 
-/* --------------------------------------------------------------------------
-   Thư viện cá nhân — Hiển thị dạng ô (Grid Cards)
-   -------------------------------------------------------------------------- */
-
-.lib-view-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--r-full);
-}
-.lib-view-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: var(--r-full);
-  border: 0;
-  background: transparent;
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 550;
-  cursor: pointer;
-  transition: all 180ms ease;
-}
-.lib-view-btn:hover {
-  color: var(--text);
-}
-.lib-view-btn.is-active {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-}
-
-.lib-story-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
-  gap: var(--s4);
-}
-@media (max-width: 640px) {
+/* Man hinh vua (1024): the gon hon mot chut de du bon cot o 1366. */
+@media (max-width: 1100px) {
   .lib-story-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: var(--s3);
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   }
 }
 
-.lib-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 10px;
-  border-radius: var(--r2);
-  background: linear-gradient(180deg, rgba(16, 20, 36, 0.85), rgba(10, 13, 24, 0.96));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 220ms ease,
-    box-shadow 220ms ease;
-  text-decoration: none;
-  color: inherit;
-  overflow: hidden;
-}
-.lib-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(168, 85, 247, 0.5);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 16px rgba(168, 85, 247, 0.16);
-}
-.lib-card-cover-wrap {
-  position: relative;
-  width: 100%;
-  border-radius: var(--r2);
-  overflow: hidden;
-  aspect-ratio: 16 / 9;
-  background: rgba(0, 0, 0, 0.25);
-}
-.lib-card-cover-wrap .cover {
-  width: 100%;
-  height: 100%;
-  aspect-ratio: 16 / 9;
-}
-.lib-card-status-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 3px 8px;
-  border-radius: var(--r-full);
-  font-size: 11px;
-  font-weight: 600;
-  background: rgba(15, 23, 42, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #e2e8f0;
-  z-index: 2;
-}
-.lib-card-status-badge.status-ongoing {
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.4);
-}
-.lib-card-status-badge.status-completed {
-  color: #4ade80;
-  border-color: rgba(74, 222, 128, 0.4);
-}
-.lib-card-progress-pill {
-  position: absolute;
-  bottom: 8px;
-  left: 8px;
-  right: 8px;
-  padding: 4px 10px;
-  border-radius: var(--r-full);
-  font-size: 11.5px;
-  font-weight: 600;
-  background: rgba(14, 165, 233, 0.9);
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-  z-index: 2;
-}
-.lib-card-progress-pill.is-listening {
-  background: rgba(168, 85, 247, 0.9);
-}
-.lib-badge-fandom-corner {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 2px 8px;
-  border-radius: var(--r-full);
-  font-size: 11px;
-  font-weight: 600;
-  background: rgba(15, 23, 42, 0.88);
-  border: 1px solid rgba(168, 85, 247, 0.4);
-  color: #d8b4fe;
-  z-index: 2;
-  backdrop-filter: blur(4px);
-}
-.lib-badge-audio-pill {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  padding: 3px 8px;
-  border-radius: var(--r-full);
-  font-size: 11px;
-  font-weight: 700;
-  background: rgba(14, 165, 233, 0.92);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  z-index: 2;
-}
-.lib-continue-callout {
-  padding: 12px 18px;
-  border-radius: var(--r2);
-  background: radial-gradient(400px 100px at 0% 0%, rgba(168, 85, 247, 0.15), transparent 70%),
-    linear-gradient(160deg, rgba(30, 27, 75, 0.5), rgba(15, 23, 42, 0.6));
-  border: 1px solid rgba(168, 85, 247, 0.3);
-  backdrop-filter: blur(8px);
-}
-.lib-continue-callout-inner {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.lib-continue-icon {
-  font-size: 1.5rem;
-}
-.lib-continue-text {
-  flex: 1;
-  min-width: 200px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.lib-continue-text strong {
-  color: #f1f5f9;
-  font-size: 0.95rem;
-}
-.lib-filter-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: var(--r2);
-}
-.lib-filter-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.lib-filter-group {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.lib-search-input {
-  flex: 1 1 240px;
-  max-width: 380px;
-  padding: 8px 14px;
-  font-size: 0.85rem;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--r-sm, 8px);
-  outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-.lib-search-input:focus {
-  border-color: rgba(168, 85, 247, 0.6);
-  box-shadow: 0 0 10px rgba(168, 85, 247, 0.25);
-}
-.lib-sort-select {
-  padding: 7px 12px;
-  font-size: 0.82rem;
-  color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--r-sm, 8px);
-  outline: none;
-  cursor: pointer;
-}
-.lib-badge-audio {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  border-radius: 6px;
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  color: #38bdf8;
-}
-.lib-badge-text-only {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  border-radius: 6px;
-  background: rgba(148, 163, 184, 0.1);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  color: #94a3b8;
-}
-.lib-badge-fandom {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 7px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  border-radius: 6px;
-  background: rgba(168, 85, 247, 0.15);
-  border: 1px solid rgba(168, 85, 247, 0.3);
-  color: #c084fc;
+/*
+  DIEN THOAI: the NGANG gon (bia 16:9 nho ben trai, chu ben phai, nut o
+  duoi) — mot cot the doc 16:9 day du ton ~370px moi truyen, nguoi doc luot
+  mai moi het bay truyen. Bo loc gon sau nut "Bộ lọc (n)".
+*/
+@media (max-width: 640px) {
+  .lib-header {
+    padding: 12px 14px;
+  }
+  .lib-tabs {
+    width: 100%;
+  }
+  .lib-tab {
+    flex: 1;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 8px;
+  }
+  .lib-tab-dai {
+    display: none;
+  }
+  .lib-tab-ngan {
+    display: inline;
+  }
+  .lib-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .lib-search {
+    grid-column: 1 / -1;
+  }
+  .lib-search input {
+    font-size: 16px;
+  }
+  .lib-filter-toggle {
+    display: inline-flex;
+    min-height: var(--h-md);
+  }
+  .lib-filter-toggle.is-open {
+    border-color: var(--brand);
+    color: var(--text);
+  }
+  .lib-sort-label {
+    display: none;
+  }
+  .lib-sort select {
+    width: 100%;
+  }
+  .lib-filters[data-mo="0"] {
+    display: none;
+  }
+  .lib-filter-pair {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .lib-filter-line {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .lib-filter-label {
+    width: auto;
+    padding-top: 0;
+  }
+  /* Mot HANG cuon ngang: ba muc xep doc ton ~230px truoc ca o tim. */
+  .lib-continue-list {
+    display: flex;
+    gap: var(--s2);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    margin: 0 -16px;
+    padding: 0 16px 2px;
+  }
+  .lib-continue-list::-webkit-scrollbar {
+    display: none;
+  }
+  .lib-continue-list > li {
+    flex: 0 0 86%;
+    scroll-snap-align: start;
+  }
+  .lib-continue-list > li:only-child {
+    flex-basis: 100%;
+  }
+  .lib-story-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s3);
+  }
+  .lib-card {
+    display: grid;
+    grid-template-columns: 124px minmax(0, 1fr);
+    grid-template-areas:
+      "bia chu"
+      "nut nut";
+    border-radius: var(--r2);
+  }
+  .lib-card:hover {
+    transform: none;
+  }
+  .lib-card-cover-wrap {
+    grid-area: bia;
+    align-self: start;
+    margin: 12px 0 0 12px;
+    width: auto;
+    border-radius: var(--r1);
+  }
+  .lib-card-fandom {
+    display: none;
+  }
+  .lib-card-body {
+    grid-area: chu;
+    gap: 4px;
+    padding: 10px 12px 0;
+  }
+  .lib-card-title {
+    font-size: 14.5px;
+  }
+  .lib-card-tags {
+    display: none;
+  }
+  .lib-card-footer {
+    grid-area: nut;
+    padding: 10px 12px 12px;
+  }
+  .lib-card.lib-sk .lib-card-cover-wrap {
+    width: auto;
+  }
+  .lib-row {
+    flex-wrap: wrap;
+  }
+  .lib-row .cover-landscape,
+  .lib-sk-thumb {
+    width: 88px;
+    height: 50px;
+  }
+  .lib-row .lib-card-cta {
+    margin-left: auto;
+  }
+  .lib-guest-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
-.lib-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin-top: 8px;
-  flex: 1;
+/* --------------------------------------------------------------------------
+   TRANG TRUYEN (/novels/[id]) — Product UX Sprint 2.
+   Dong nho tren ten (fandom + tien do), ten, dong du kien, nut, mo ta thu
+   gon, the the loai. Nen rong chi khi co hero that (`.has-hero`).
+   -------------------------------------------------------------------------- */
+.novel-head-kicker {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
 }
-.lib-card-title {
-  font-size: 13.5px;
+.novel-kicker-fandom {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--brand-line);
+  background: var(--brand-soft);
+  color: #ddd5ff;
+  font-size: var(--t-xs);
   font-weight: 650;
-  line-height: 1.3;
-  color: #f1f5f9;
+  text-decoration: none;
+}
+.novel-kicker-fandom:hover {
+  border-color: var(--brand);
+  color: #fff;
+}
+.novel-kicker-status {
+  font-size: var(--t-xs);
+  font-weight: 650;
+  color: var(--text-2);
+}
+.novel-kicker-status.status-ongoing {
+  color: #7dd3fc;
+}
+.novel-kicker-status.status-completed {
+  color: #86efac;
+}
+.novel-title {
   margin: 0;
-  transition: color 180ms ease;
+  text-wrap: balance;
 }
-.lib-card:hover .lib-card-title {
-  color: #c084fc;
+.novel-facts {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  font-size: var(--t-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
-.lib-card-meta {
+.novel-facts strong {
+  color: var(--text-2);
+  font-weight: 600;
+}
+.novel-fact-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #a5f3fc;
+}
+.novel-head-actions {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+}
+/* Dong "Đang ở: …" luon xuong CUOI hang nut — nam giua thi day "Theo dõi"
+   sang mot hang rieng. */
+.novel-cta-note {
+  order: 10;
+  flex-basis: 100%;
+  font-size: var(--t-xs);
+}
+.novel-cta-note strong {
+  color: var(--text-2);
+  font-weight: 600;
+}
+.novel-desc {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 11.5px;
-  color: #94a3b8;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: var(--s2);
 }
-.lib-card-author {
-  font-weight: 500;
-  color: #cbd5e1;
+.novel-desc-text {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.lib-card-footer {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+.novel-desc-text.is-open {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.novel-desc-toggle {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--brand-hover);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.novel-desc-toggle:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.novel-tags {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.novel-tags li {
+  padding: 3px 10px;
+  border-radius: var(--r1);
+  background: #ffffff0d;
+  border: 1px solid #ffffff12;
+  color: var(--text-2);
+  font-size: var(--t-xs);
+}
+.novel-toc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+/* ---- muc luc ---- */
+.chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.chapter-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+.chapter-search {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.chapter-search-icon {
+  position: absolute;
+  left: 11px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.chapter-search input {
+  width: 100%;
+  height: var(--h-md);
+  padding: 0 12px 0 34px;
+  border-radius: var(--r2);
+  border: 1px solid var(--line-strong);
+  background: #0b0e18d9;
+  color: var(--text);
+  font-size: var(--t-sm);
+}
+.chapter-search input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+}
+.chapter-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/*
+  Muc luc DAI (> 150 chuong, vd 500+): hang ngoai man hinh khong ton bo cuc/ve.
+  Khong bat cho muc luc ngan: 15-99 hang ve het van re, va bo qua ve lam anh
+  chup toan trang / in ra thanh cac hang trong.
+*/
+.chapter-rows.is-long > .chapter-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 60px;
+}
+.chapter-row.is-current {
+  background: #8b6cff14;
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+/* Ten chuong: chu sang, KHONG gach chan tim ca 99 dong — gach chan khi ro. */
+.chapter-row .list-title {
+  color: var(--text);
+  text-decoration: none;
+  font-size: var(--t-base);
+}
+.chapter-row .list-title:hover,
+.chapter-row .list-title:focus-visible {
+  color: #ddd5ff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.chapter-row.is-done .list-title {
+  color: var(--text-2);
+}
+.chapter-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-variant-numeric: tabular-nums;
+}
+.chapter-state {
+  font-weight: 650;
+}
+.chapter-state.is-current {
+  color: var(--brand-hover);
+}
+.chapter-state.is-done {
+  color: #86efac;
+}
+.chapter-empty {
+  margin: 0;
+  padding: var(--s4) 0;
+}
+
+@media (max-width: 640px) {
+  .novel-facts {
+    gap: 2px 12px;
+    font-size: var(--t-xs);
+  }
+  .novel-head-kicker {
+    justify-content: center;
+  }
+  .novel-title {
+    text-align: center;
+  }
+  .novel-facts {
+    justify-content: center;
+  }
+  /* Muc luc: bieu tuong thay chu tren hang — ten chuong duoc cho rong. */
+  .chapter-btn-label {
+    display: none;
+  }
+  .chapter-order {
+    margin-left: auto;
+  }
+}
+
+/* ---- cong quan tri (chua dang nhap / khong du quyen) ---- */
+.admin-gate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s6) var(--s5);
+  border-radius: var(--r4);
+  background: #080a14d9;
+  border: 1px solid var(--kinh-vien);
+  box-shadow: var(--do-sau), var(--kinh-sang);
+  -webkit-backdrop-filter: blur(var(--blur-the));
+  backdrop-filter: blur(var(--blur-the));
+}
+.admin-gate-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-hover);
+}
+.admin-gate-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+}
+
+/* ---- trang chu: chip fandom that (FandomStrip) ---- */
+.fandom-strip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fandom-strip-so {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- khung xuong trang truyen / trang chuong (loading.tsx) ---- */
+.nsk-line {
+  height: 14px;
+  border-radius: 7px;
+}
+.nsk-btn {
+  width: 140px;
+  height: var(--h-md);
+  border-radius: var(--r2);
+}
+.novel-head-cover .cover.sk {
+  box-shadow: none;
+}
+.reader-sk-text {
+  max-width: 72ch;
+  margin: var(--s4) auto 0;
+  width: 100%;
+}
+.reader-sk-text .nsk-line {
+  height: 16px;
+}
+
+@media (max-width: 640px) {
+  /* Bia gon hon mot chut: nut "Đọc tiếp" vao khung nhin dau tien cung doan
+     dau mo ta. */
+  .novel-page .novel-head-cover {
+    max-width: 136px;
+  }
+}
+
+/*
+  THANH DIEU HUONG tren dien thoai (Sprint 2): bon muc VUA mot hang tu 380px
+  tro len, nen chia deu thay vi cuon ngang — ban truoc "Giải trí" bi vet mo
+  mep phai cat mat nua chu o 390px, doc ra nhu loi bo cuc. Duoi 380px van cuon
+  ngang nhu cu (quy tac o khoi 900px).
+*/
+@media (min-width: 380px) and (max-width: 640px) {
+  .nav-links {
+    gap: 2px;
+    overflow-x: visible;
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+  .nav-link {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding: 7px 6px;
+  }
 }
 
 .list-item .cover-landscape {

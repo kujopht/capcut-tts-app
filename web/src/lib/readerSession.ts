@@ -118,6 +118,13 @@ export interface BanGhiTienDo {
   giay: number;
   thoiLuong: number;
   capNhat: number;
+  /**
+   * Ten truyen / ten chuong luc ghi (Sprint 2). TUY CHON: ban ghi Sprint 1
+   * khong co, va Thu vien van dung duoc ban ghi do (chi thieu ten de hien o
+   * dai "Đang đọc dở" khi truyen khong nam trong trang hien tai).
+   */
+  tenTruyen?: string;
+  tenChuong?: string;
 }
 
 export interface KhoLuu {
@@ -149,6 +156,11 @@ export function docTienDo(kho: KhoLuu | null, chapterId: string): BanGhiTienDo |
   return docTatCa(kho).find((r) => r.chapterId === chapterId) ?? null;
 }
 
+/** Moi ban ghi (moi -> cu) — Thu vien va trang truyen tinh "đọc tiếp" tu day. */
+export function docTatCaTienDo(kho: KhoLuu | null): BanGhiTienDo[] {
+  return docTatCa(kho);
+}
+
 /**
  * Ghi (gop) tien do mot chuong. Chi cac truong DUOC TRUYEN moi doi — cuon
  * trang khong xoa vi tri audio, va nguoc lai.
@@ -173,6 +185,11 @@ export function ghiTienDo(
     thoiLuong: phan.thoiLuong ?? cu?.thoiLuong ?? 0,
     capNhat: bayGio,
   };
+  // Chi gan khi CO gia tri — ban ghi khong co ten van y het dang Sprint 1.
+  const tenTruyen = phan.tenTruyen ?? cu?.tenTruyen;
+  const tenChuong = phan.tenChuong ?? cu?.tenChuong;
+  if (tenTruyen) moi.tenTruyen = tenTruyen.slice(0, 160);
+  if (tenChuong) moi.tenChuong = tenChuong.slice(0, 160);
   const conLai = ds.filter((r) => r.chapterId !== chapterId);
   const ra = [moi, ...conLai].slice(0, TOI_DA_BAN_GHI);
   try {

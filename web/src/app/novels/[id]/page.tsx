@@ -1,4 +1,19 @@
-/** Chi tiet truyen: thong tin, danh sach chuong kem trang thai audio. */
+/**
+ * Chi tiet truyen: thong tin, nut hanh dong theo tien do, muc luc.
+ *
+ * PRODUCT UX SPRINT 2:
+ * - Anh nen rong (hero) CHI khi truyen co `hero_background_url` that. Ban
+ *   truoc roi ve bia DOC va keo gian no lam nen — mot bia 2:3 phong to thanh
+ *   16:9 roi lam mo trong nhu anh hong. Khong co hero thi nen tinh.
+ * - Nut chinh doi theo tien do (`NovelPrimaryCta`): Bắt đầu đọc / Đọc tiếp /
+ *   Nghe tiếp / Tiếp tục đọc & nghe, mo DUNG chuong dang do. "Theo dõi" la nut
+ *   PHU (vien), khong con tim dac canh tranh voi nut doc.
+ * - Nhan khong day ten truyen xuong: bo nhan "Đã xuất bản" (trang cong khai
+ *   thi truyen nao cung da xuat ban — chi con nhan "Bản nháp" khi dung), the
+ *   the loai (toi da 4) xuong DUOI mo ta, fandom la lien ket ve Thu vien.
+ * - Mo ta dai thu gon 4 dong + "Xem thêm".
+ * - Muc luc tim duoc, dao thu tu duoc, danh dau chuong dang/da doc.
+ */
 
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -15,9 +30,12 @@ import {
   NovelOwnerActions,
   OwnerAddChapterAction,
 } from "@/components/NovelInteractiveActions";
-import { getReaderTags } from "@/lib/taxonomy";
-import { novelHeroUrl, novelPortraitUrl, isLegacyAudioOnly } from "@/lib/catalog";
-import { IconBook, IconHeadphones } from "@/components/Icons";
+import { fandomCauTruc, theChoThe } from "@/lib/taxonomy";
+import { novelPortraitUrl, isLegacyAudioOnly } from "@/lib/catalog";
+import { IconHeadphones } from "@/components/Icons";
+import { NovelPrimaryCta, type LienKetBatDau } from "@/components/novel/NovelPrimaryCta";
+import { NovelDescription } from "@/components/novel/NovelDescription";
+import { ChapterList } from "@/components/novel/ChapterList";
 
 /**
  * Dynamic metadata cho SEO, OpenGraph (book), Twitter card va canonical URL.
@@ -87,6 +105,13 @@ function nhanTienDo(status: string): string {
   return NHAN_TIEN_DO[status] ?? status;
 }
 
+/** Ten tac gia hien duoc; "Unknown Author" / rong thi an (khong bia ten). */
+function tacGiaThat(raw?: string | null): string | null {
+  const s = (raw ?? "").trim();
+  if (!s || /^(unknown|unknown author|anonymous|n\/a)$/i.test(s)) return null;
+  return s;
+}
+
 export default async function NovelDetailPage({
   params,
 }: {
@@ -123,8 +148,8 @@ export default async function NovelDetailPage({
           title="Không tìm thấy truyện này"
           hint="Truyện có thể đã bị xoá hoặc chưa được xuất bản."
           action={
-            <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
-              Về trang khám phá
+            <Link className="btn btn-primary" href="/library" prefetch={false}>
+              Về Thư viện
             </Link>
           }
         />
@@ -135,6 +160,11 @@ export default async function NovelDetailPage({
   if (errorMsg || !novel) {
     return (
       <div className="page">
+        <nav aria-label="Đường dẫn">
+          <Link href="/library" className="hint crumb" prefetch={false}>
+            ← Thư viện
+          </Link>
+        </nav>
         <ErrorState message={errorMsg || "Không tải được truyện."} />
       </div>
     );
@@ -144,12 +174,37 @@ export default async function NovelDetailPage({
   // `has_audio` da co san trong danh sach chuong (xem ghi chu o `fetchNovel`),
   // nen tong hop nay khong ton them request nao.
   const soChuongCoAudio = chapters.filter((c) => c.has_audio).length;
+  const chiAudio = isLegacyAudioOnly(novel);
+  // Fandom CO CAU TRUC (fandom_ids / the) — dung cai bo loc Thu vien hieu,
+  // nen lien ket "Naruto" o day mo dung danh sach Naruto.
+  const fandom = fandomCauTruc(novel);
+  const tacGia = tacGiaThat(novel.external_author_name);
+  // Toi da BON the the loai, bo the trung voi fandom (fandom co chip rieng).
+  const theLoai = theChoThe(novel, 4, [fandom]);
+  // Anh nen rong CHI tu hero 16:9 that — khong keo gian bia doc lam nen.
+  const heroThat = novel.hero_background_url || null;
+
+  /*
+    Lien ket BAT DAU dung tham so ma trang chuong Sprint 1 hieu
+    (`readerSession.cheDoKhiMo`): `mode` quyet dinh bo cuc, `autoplay=1` xin
+    phat ngay (nguoi doc vua bam nut — trinh duyet cho phep).
+  */
+  const dau = chapters[0]?.chapter_id;
+  const batDau: LienKetBatDau | null = !dau
+    ? null
+    : chiAudio
+      ? { href: `/chapters/${dau}?mode=listen&autoplay=1`, nhan: "Bắt đầu nghe", nghe: true }
+      : { href: `/chapters/${dau}?mode=read`, nhan: "Bắt đầu đọc", nghe: false };
+  const batDauPhu: LienKetBatDau | null =
+    dau && !chiAudio && soChuongCoAudio > 0
+      ? { href: `/chapters/${dau}?mode=read_listen&autoplay=1`, nhan: "Đọc & nghe", nghe: true }
+      : null;
 
   return (
-    <div className="page">
+    <div className="page novel-page">
       <nav aria-label="Đường dẫn">
-        <Link href="/fanfic" className="hint crumb" prefetch={false}>
-          ← Khám phá Fanfic
+        <Link href="/library" className="hint crumb" prefetch={false}>
+          ← Thư viện
         </Link>
       </nav>
 
@@ -159,12 +214,12 @@ export default async function NovelDetailPage({
         desktop, bia rong 1180px chiem gan het man hinh dau tien va day ten
         truyen xuong duoi nep gap.
       */}
-      <header className="novel-head">
-        {novelHeroUrl(novel) ? (
+      <header className={`novel-head${heroThat ? " has-hero" : ""}`}>
+        {heroThat ? (
           <>
             <div
               className="novel-head-backdrop"
-              style={{ backgroundImage: `url("${novelHeroUrl(novel)}")` }}
+              style={{ backgroundImage: `url("${heroThat}")` }}
               aria-hidden="true"
             />
             <div className="novel-head-overlay" aria-hidden="true" />
@@ -181,63 +236,64 @@ export default async function NovelDetailPage({
         </div>
 
         <div className="stack-2 novel-head-body">
-          <div className="row novel-head-tags">
-            <span className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}>
-              {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
-            </span>
+          {/* Dong nho TREN ten: fandom (lien ket ve Thu vien) + tien do tac
+              pham. Nhan the loai xuong duoi mo ta — khong day ten xuong. */}
+          <div className="row novel-head-kicker">
+            {fandom ? (
+              <Link
+                href={`/library?fandom=${encodeURIComponent(fandom)}`}
+                className="novel-kicker-fandom"
+                prefetch={false}
+              >
+                {fandom}
+              </Link>
+            ) : null}
             {/*
               Tien do TAC PHAM (`status`), khac han trang thai XUAT BAN
-              (`state`) o badge ben canh: mot truyen da hoan thanh van co the
-              dang la ban nhap. Hai khai niem nay tu truoc van bi bo mat mot
-              nua o day, du backend luon tra ve ca hai.
+              (`state`): mot truyen da hoan thanh van co the dang la ban nhap.
+              Trang cong khai chi hien `state` khi no la BAN NHAP — "Đã xuất
+              bản" dung o moi truyen cong khai thi khong noi gi.
             */}
             {novel.status ? (
-              <span className="badge">{nhanTienDo(novel.status)}</span>
+              <span className={`novel-kicker-status status-${novel.status}`}>{nhanTienDo(novel.status)}</span>
             ) : null}
-            {novel.tags &&
-              getReaderTags(novel, 6).map((tag) => (
-                <span key={tag} className="badge">
-                  {tag}
-                </span>
-              ))}
+            {novel.state !== "published" ? <span className="badge badge-warn">Bản nháp</span> : null}
           </div>
-          <h1 className="page-title">{novel.title}</h1>
-          <p className="lead lead-narrow">
-            {novel.description || "Chưa có mô tả."}
-          </p>
-          <span className="hint">
-            {chapters.length} chương
-            {soChuongCoAudio > 0 ? ` · ${soChuongCoAudio} chương có audio` : ""}
-            {" · cập nhật "}
-            {formatDate(novel.updated_at)}
-          </span>
+          <h1 className="page-title novel-title">{novel.title}</h1>
 
           {/*
             GHI CONG NGUON. Kho nay chua fanfic NHAP tu noi khac, nen ten tac
             gia goc va duong ve nguon khong phai "metadata cho dep" — do la dieu
-            toi thieu phai hien. Backend luon tra ve ba truong nay; trang nay
-            truoc day khong ve mot cai nao.
+            toi thieu phai hien.
 
             `nofollow` tren lien ket ngoai: day la link do nguoi nhap dat, khong
             phai mot su gioi thieu cua Fanfic World.
           */}
-          {novel.external_author_name || novel.external_source_url || novel.language ? (
-            <span className="hint novel-head-source">
-              {novel.external_author_name ? (
-                <span>Tác giả gốc: {novel.external_author_name}</span>
-              ) : null}
-              {novel.language ? <span>Ngôn ngữ gốc: {novel.language}</span> : null}
-              {novel.external_source_url ? (
-                <a
-                  href={novel.external_source_url}
-                  target="_blank"
-                  rel="noopener noreferrer nofollow"
-                >
-                  Nguồn gốc ↗
-                </a>
-              ) : null}
-            </span>
-          ) : null}
+          <p className="novel-facts">
+            {tacGia ? (
+              <span>
+                Tác giả gốc: <strong>{novel.external_author_name}</strong>
+              </span>
+            ) : null}
+            <span>{formatNumber(chapters.length)} chương</span>
+            {soChuongCoAudio > 0 ? (
+              <span className="novel-fact-audio">
+                <IconHeadphones size={14} />{" "}
+                {soChuongCoAudio === chapters.length ? "Có audio mọi chương" : `${soChuongCoAudio} chương có audio`}
+              </span>
+            ) : null}
+            <span>Cập nhật {formatDate(novel.updated_at)}</span>
+            {novel.language ? <span>Ngôn ngữ gốc: {novel.language}</span> : null}
+            {novel.external_source_url ? (
+              <a
+                href={novel.external_source_url}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+              >
+                Nguồn gốc ↗
+              </a>
+            ) : null}
+          </p>
 
           {/*
             Nguon cong bo NHIEU chuong hon so dang co o day. KHONG che con so
@@ -252,41 +308,20 @@ export default async function NovelDetailPage({
           ) : null}
 
           <div className="row novel-head-actions">
-            {chapters.length > 0 ? (
-              isLegacyAudioOnly(novel) ? (
-                <Link
-                  className="btn btn-primary"
-                  href={`/chapters/${chapters[0].chapter_id}?mode=listen&autoplay=1`}
-                >
-                  <IconHeadphones size={16} /> Nghe chương đầu
-                </Link>
-              ) : soChuongCoAudio > 0 ? (
-                <>
-                  <Link
-                    className="btn btn-primary"
-                    href={`/chapters/${chapters[0].chapter_id}?mode=read_listen&autoplay=1`}
-                  >
-                    <IconHeadphones size={16} /> Đọc &amp; Nghe
-                  </Link>
-                  <Link
-                    className="btn btn-ghost"
-                    href={`/chapters/${chapters[0].chapter_id}?mode=read`}
-                  >
-                    <IconBook size={16} /> Chỉ đọc
-                  </Link>
-                </>
-              ) : (
-                <Link
-                  className="btn btn-primary"
-                  href={`/chapters/${chapters[0].chapter_id}?mode=read`}
-                >
-                  <IconBook size={16} /> Đọc từ đầu
-                </Link>
-              )
+            {batDau ? (
+              <NovelPrimaryCta
+                novelId={novel.novel_id}
+                coAudio={soChuongCoAudio > 0}
+                chiAudio={chiAudio}
+                chuong={chapters.map((c) => ({ id: c.chapter_id, tieuDe: c.title }))}
+                batDau={batDau}
+                phu={batDauPhu}
+              />
             ) : null}
             <NovelOwnerActions ownerId={novel.owner_id} />
             {/*
-              Theo dõi truyện — để được thông báo khi có chương mới.
+              Theo dõi truyện — để được thông báo khi có chương mới. Nút PHỤ:
+              đọc mới là việc chính ở trang này.
 
               KHÔNG hiện với chủ sở hữu: một tác giả tự theo dõi truyện của mình
               thì backend cũng không gửi thông báo (xem `notify_new_chapter`),
@@ -303,14 +338,30 @@ export default async function NovelDetailPage({
                 initialFollowing={data.follow.following}
                 initialCount={data.follow.follower_count}
                 label="Theo dõi truyện"
+                phu
               />
             ) : null}
           </div>
+
+          <NovelDescription text={novel.description || "Chưa có mô tả."} />
+
+          {theLoai.length > 0 ? (
+            <ul className="novel-tags" aria-label="Thể loại">
+              {theLoai.map((tag) => (
+                <li key={tag}>{tag}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </header>
 
-      <section className="stack" aria-label="Danh sách chương">
-        <h2 className="section-title">Danh sách chương</h2>
+      <section className="stack" aria-labelledby="novel-toc-h">
+        <div className="novel-toc-head">
+          <h2 className="section-title" id="novel-toc-h">
+            Danh sách chương
+          </h2>
+          <span className="hint">{formatNumber(chapters.length)} chương</span>
+        </div>
         {chapters.length === 0 ? (
           <EmptyState
             icon="📄"
@@ -318,67 +369,16 @@ export default async function NovelDetailPage({
             action={<OwnerAddChapterAction ownerId={novel.owner_id} />}
           />
         ) : (
-          <div className="list list-gon">
-            {chapters.map((chapter, index) => (
-              // KHONG con boc ca hang trong <Link>: the <a> khong duoc chua
-              // <button>/<a> khac, va nut Doc/Nghe phai nam ngay trong hang.
-              // Tieu de moi la lien ket (toi trang Doc), cac nut la anh em.
-              <div key={chapter.chapter_id} className="list-item">
-                <span className="list-index" aria-hidden="true">
-                  {index + 1}
-                </span>
-                <span className="stack-2 list-main">
-                  <Link
-                    href={`/chapters/${chapter.chapter_id}`}
-                    className="truncate list-title"
-                  >
-                    {chapter.title}
-                  </Link>
-                  <span className="hint">
-                    {formatNumber(chapter.char_count)} ký tự
-                  </span>
-                </span>
-
-                <span className="list-actions">
-                  {/* Doc va Nghe cung MOT trang chuong (sprint doc/nghe
-                      2026-09-24) — hai nut chi khac che do mo dau. Doc luon
-                      di duoc (chua co audio van doc duoc chu); Nghe chi hien
-                      khi da co audio, mo `?mode=listen`, KHONG tu phat. */}
-                  <Link className="btn btn-sm" href={`/chapters/${chapter.chapter_id}`}>
-                    <span aria-hidden="true">📖</span> Đọc
-                  </Link>
-                  {chapter.has_audio ? (
-                    <>
-                      {/* M4: audio con nghe duoc, chi la co the khong khop
-                          noi dung moi nhat. Noi ro thay vi im lang. */}
-                      {chapter.audio_outdated ? (
-                        <span
-                          className="badge badge-warn"
-                          title="Chương đã sửa sau khi tạo audio — audio có thể không còn khớp"
-                        >
-                          <span aria-hidden="true">⚠</span> Audio cũ
-                        </span>
-                      ) : null}
-                      <Link
-                        className="btn btn-sm btn-primary"
-                        href={`/chapters/${chapter.chapter_id}?mode=listen`}
-                      >
-                        <span aria-hidden="true">▶</span> Nghe
-                      </Link>
-                    </>
-                  ) : null}
-                  {/*
-                    KHONG con nhan "Chưa có audio" tren tung hang.
-
-                    No dung mot lan thi la thong tin; lap lai 31 lan trong mot
-                    muc luc thi la nhieu — va no con trong nhu mot cai nut bi
-                    khoa, trong khi khong co gi de bam. Vang mat da noi dung
-                    dieu do roi, va hang nao CO audio thi van co nut "Nghe".
-                  */}
-                </span>
-              </div>
-            ))}
-          </div>
+          <ChapterList
+            novelId={novel.novel_id}
+            chapters={chapters.map((c) => ({
+              chapter_id: c.chapter_id,
+              title: c.title,
+              char_count: c.char_count,
+              has_audio: c.has_audio,
+              audio_outdated: c.audio_outdated,
+            }))}
+          />
         )}
       </section>
     </div>

@@ -42,8 +42,14 @@ test("Trang chi tiết truyện /novels/[id] là Server Component với generate
   assert.match(novelSrc, /canonical/);
   // SSR layout và markup
   assert.match(novelSrc, /<NovelCover/);
-  assert.match(novelSrc, /<h1 className="page-title">/);
-  assert.match(novelSrc, /className="list list-gon"/);
+  assert.match(novelSrc, /<h1 className="page-title[^"]*">/);
+  // Sprint 2: muc luc la mot client island (`ChapterList` — tim, dao thu tu,
+  // danh dau dang doc); HTML van do may chu ve san trong lan dau.
+  assert.match(novelSrc, /<ChapterList/);
+  assert.match(
+    readFileSync(new URL("../src/components/novel/ChapterList.tsx", import.meta.url), "utf8"),
+    /list list-gon/,
+  );
   // Client island được nhúng
   assert.match(novelSrc, /<NovelOwnerActions/);
   assert.ok(novelActionsSrc.startsWith('"use client"') || novelActionsSrc.startsWith("'use client'"), "NovelInteractiveActions phải là Client Component");

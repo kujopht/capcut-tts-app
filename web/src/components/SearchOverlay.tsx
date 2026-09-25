@@ -22,6 +22,17 @@
  * cac ket qua, Enter mo ket qua dang chon. `role="combobox"` +
  * `aria-activedescendant` de trinh doc man hinh doc duoc muc dang chon ma tieu
  * diem van o o nhap.
+ *
+ * PRODUCT UX SPRINT 2:
+ *   - GOI Y TUC THI tu anh chup kho (`lib/catalogSnapshot.ts` +
+ *     `lib/searchSuggest.ts`): fandom ("nar" -> Naruto), TAC GIA (backend
+ *     khong tim theo tac gia) va ten truyen khong phan biet dau — hien NGAY
+ *     trong luc backend (do that: vai giay moi truy van) con dang tra loi.
+ *     Ket qua day du van cua backend.
+ *   - Enter khi CHUA chon muc nao = xem moi ket qua trong Thu vien
+ *     (`/library?q=`); mui ten xuong moi chon muc dau. Ban truoc muc dau luon
+ *     "dang chon" nen Enter mo thang truyen dau tien, ke ca khi nguoi doc chi
+ *     muon tim.
  */
 
 import Link from "next/link";
@@ -38,15 +49,30 @@ import {
 } from "@/lib/api";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { Avatar } from "@/components/Avatar";
-import { getReaderTags } from "@/lib/taxonomy";
+import { fandomCauTruc, getReaderTags, theChoThe } from "@/lib/taxonomy";
 import { NovelCover } from "@/components/NovelCover";
-import { IconBook, IconFilm, IconHeadphones, IconMegaphone, IconUser } from "@/components/Icons";
+import {
+  IconBook,
+  IconFeather,
+  IconFilm,
+  IconHeadphones,
+  IconMegaphone,
+  IconSearch,
+  IconTag,
+  IconUser,
+} from "@/components/Icons";
+import { taiAnhChupKho, type AnhChupKho } from "@/lib/catalogSnapshot";
+import { chipFandom, chuanHoaTim, MAC_DINH_THU_VIEN } from "@/lib/libraryQuery";
+import { boTrungTheoId, goiYTimKiem, gopTruyen } from "@/lib/searchSuggest";
+import { isLegacyAudioOnly, novelHasAudio } from "@/lib/catalog";
 
 const NHIP_GO = 250;
 
 type NovelAudio = Novel & { audio_chapter_count: number };
 
 type KetQua =
+  | { loai: "fandom"; ten: string; so: number }
+  | { loai: "tacgia"; ten: string; so: number }
   | { loai: "truyen"; novel: Novel }
   | { loai: "nguoi"; nguoi: PublicProfile }
   | { loai: "bai"; bai: Post }
@@ -113,26 +139,79 @@ export function SearchOverlay({
     animation: AnimationSeries[];
   } | null>(null);
   const [tuLoi, setTuLoi] = useState("");
-  const [chon, setChon] = useState(0);
+  // -1 = CHUA chon muc nao: Enter tim trong Thu vien, khong mo truyen dau.
+  const [chon, setChon] = useState(-1);
   const [danhMuc, setDanhMuc] = useState<DanhMuc>("tat_ca");
+  const [kho, setKho] = useState<AnhChupKho | null>(null);
 
   const tu = q.trim();
   const KHONG: never[] = useMemo(() => [], []);
-  const truyen = ketQua?.tu === tu ? ketQua.truyen : KHONG;
-  const nguoi = ketQua?.tu === tu ? ketQua.nguoi : KHONG;
-  const bai = ketQua?.tu === tu ? ketQua.bai : KHONG;
-  const audio = ketQua?.tu === tu ? ketQua.audio : KHONG;
-  const animation = ketQua?.tu === tu ? ketQua.animation : KHONG;
+  const coMayChu = ketQua?.tu === tu;
+  const truyenMayChu = coMayChu ? ketQua.truyen : KHONG;
+  const nguoi = coMayChu ? ketQua.nguoi : KHONG;
+  const bai = coMayChu ? ketQua.bai : KHONG;
+  const audioMayChu = coMayChu ? ketQua.audio : KHONG;
+  const animation = coMayChu ? ketQua.animation : KHONG;
+
+  /* Goi y tai cho (fandom / tac gia / ten truyen) — chi o "Tất cả" va "Truyện". */
+  const goiY = useMemo(
+    () =>
+      danhMuc === "tat_ca" || danhMuc === "truyen"
+        ? goiYTimKiem(tu, kho?.novels ?? KHONG, {
+            fandomCua: fandomCauTruc,
+            chuanHoa: chuanHoaTim,
+            // So dem fandom = so truyen Thu vien SE HIEN khi bam (kho doc duoc).
+            demFandom: (n) => !isLegacyAudioOnly(n),
+          })
+        : { fandom: KHONG, tacGia: KHONG, truyen: KHONG },
+    [tu, kho, danhMuc, KHONG],
+  );
+  const gioiHanHien = danhMuc === "tat_ca" ? 5 : 20;
+  const truyen = useMemo(
+    () => (coMayChu ? gopTruyen(truyenMayChu, goiY.truyen, gioiHanHien) : goiY.truyen),
+    [coMayChu, truyenMayChu, goiY.truyen, gioiHanHien],
+  );
+  // Nhom Audio chi giu truyen CHUA hien o nhom Truyen.
+  const audio = useMemo(() => boTrungTheoId(audioMayChu, truyen), [audioMayChu, truyen]);
+  const fandomGoiY = goiY.fandom;
+  const tacGiaGoiY = goiY.tacGia;
+  const coGoiY = fandomGoiY.length + tacGiaGoiY.length + goiY.truyen.length > 0;
+  // Dang cho backend (ke ca khi da co goi y tai cho de hien).
+  const choMayChu = !!tu && !coMayChu && tuLoi !== tu;
 
   const trangThai: TrangThai = !tu
     ? "dau"
-    : tuLoi === tu
+    : tuLoi === tu && !coGoiY
       ? "loi"
-      : ketQua?.tu !== tu
+      : !coMayChu && !coGoiY
         ? "dang-tai"
-        : truyen.length + nguoi.length + bai.length + audio.length + animation.length
+        : truyen.length + nguoi.length + bai.length + audio.length + animation.length + fandomGoiY.length + tacGiaGoiY.length
           ? "co"
           : "rong";
+
+  /* Fandom pho bien (khi chua go gi): tu anh chup, pham vi doc duoc mac dinh. */
+  const fandomPhoBien = useMemo(
+    () =>
+      chipFandom(
+        kho?.novels ?? KHONG,
+        fandomCauTruc,
+        (n: Novel) => ({ cu: isLegacyAudioOnly(n), audio: novelHasAudio(n), status: n.status }),
+        MAC_DINH_THU_VIEN,
+      ).slice(0, 6),
+    [kho, KHONG],
+  );
+
+  useEffect(() => {
+    // Anh chup kho chi tai khi o tim MO lan dau (dung chung voi Thu vien).
+    if (!mo || kho) return;
+    let huy = false;
+    void taiAnhChupKho().then((k) => {
+      if (!huy) setKho(k);
+    });
+    return () => {
+      huy = true;
+    };
+  }, [mo, kho]);
 
   /* -- tim -------------------------------------------------------------- */
 
@@ -186,7 +265,6 @@ export function SearchOverlay({
           tu, truyen: a.novels, nguoi: b.people, bai: c.items, audio: d.novels,
           animation: e.series,
         });
-        setChon(0);
       } catch {
         if (!bo.signal.aborted) setTuLoi(tu);
       }
@@ -202,16 +280,30 @@ export function SearchOverlay({
 
   const danh: KetQua[] = useMemo(
     () => [
+      ...fandomGoiY.map((f) => ({ loai: "fandom" as const, ten: f.ten, so: f.so })),
+      ...tacGiaGoiY.map((a) => ({ loai: "tacgia" as const, ten: a.ten, so: a.so })),
       ...truyen.map((n) => ({ loai: "truyen" as const, novel: n })),
       ...audio.map((n) => ({ loai: "audio" as const, novel: n })),
       ...animation.map((s) => ({ loai: "animation" as const, series: s })),
       ...nguoi.map((p) => ({ loai: "nguoi" as const, nguoi: p })),
       ...bai.map((b) => ({ loai: "bai" as const, bai: b })),
     ],
-    [truyen, audio, animation, nguoi, bai],
+    [fandomGoiY, tacGiaGoiY, truyen, audio, animation, nguoi, bai],
   );
+  /* Vi tri bat dau cua tung nhom trong `danh` (cho id/aria cua tung dong). */
+  const bd = {
+    tacgia: fandomGoiY.length,
+    truyen: fandomGoiY.length + tacGiaGoiY.length,
+    audio: fandomGoiY.length + tacGiaGoiY.length + truyen.length,
+    animation: fandomGoiY.length + tacGiaGoiY.length + truyen.length + audio.length,
+    nguoi: fandomGoiY.length + tacGiaGoiY.length + truyen.length + audio.length + animation.length,
+    bai:
+      fandomGoiY.length + tacGiaGoiY.length + truyen.length + audio.length + animation.length + nguoi.length,
+  };
 
   const duong = useCallback((k: KetQua) => {
+    if (k.loai === "fandom") return `/library?fandom=${encodeURIComponent(k.ten)}`;
+    if (k.loai === "tacgia") return `/library?q=${encodeURIComponent(k.ten)}`;
     if (k.loai === "truyen" || k.loai === "audio") return `/novels/${k.novel.novel_id}`;
     if (k.loai === "animation") return `/animation/${k.series.series_id}`;
     if (k.loai === "bai") return `/posts/${k.bai.post_id}`;
@@ -226,27 +318,40 @@ export function SearchOverlay({
         onDong();
         return;
       }
+      if (e.key === "Enter") {
+        // Tieu diem dang o mot lien ket/nut (Tab toi) thi de no tu xu ly.
+        if (e.target !== oNhap.current) return;
+        // Chua chon muc nao: xem moi ket qua trong Thu vien.
+        const muc = chon >= 0 ? danh[chon] : undefined;
+        if (!muc && !tu) return;
+        e.preventDefault();
+        router.push(muc ? duong(muc) : `/library?q=${encodeURIComponent(tu)}`);
+        onDong();
+        return;
+      }
       if (!danh.length) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setChon((c) => (c + 1) % danh.length);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setChon((c) => (c - 1 + danh.length) % danh.length);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        router.push(duong(danh[chon]));
-        onDong();
+        setChon((c) => (c <= 0 ? danh.length - 1 : c - 1));
       }
     };
     window.addEventListener("keydown", phim);
     return () => window.removeEventListener("keydown", phim);
-  }, [mo, danh, chon, duong, router, onDong]);
+  }, [mo, danh, chon, duong, router, onDong, tu]);
 
   useEffect(() => {
     // Tieu diem vao o nhap ngay khi mo. Khong co buoc nay thi nguoi dung ban
     // phim phai Tab qua ca thanh dieu huong moi go duoc.
-    if (mo) oNhap.current?.focus();
+    // BOI DEN tu khoa cu: go tiep la THAY the, khong noi vao duoi ("nar" +
+    // "corty" = "narcorty" — loi do duoc o QA Sprint 2). Muon sua tu cu thi
+    // bam mui ten/chuot nhu moi o nhap.
+    if (mo) {
+      oNhap.current?.focus();
+      oNhap.current?.select();
+    }
   }, [mo]);
 
   if (!mo) return null;
@@ -285,10 +390,10 @@ export function SearchOverlay({
               tim quay — xem phan hoi thiet ke tai `docs/design/` va lich su
               o day: ban truoc tung xoay ca vien hop tim, nguoi dung khong
               muon vay. */}
-          {trangThai === "dang-tai" ? (
+          {trangThai === "dang-tai" || choMayChu ? (
             <span className="spinner" aria-hidden="true" />
           ) : (
-            <IconBook size={18} />
+            <IconSearch size={18} />
           )}
           {/* Bo chon danh muc (Phan F) — kien truc mo rong duoc, xem
               `DANH_MUC` o dau tep. */}
@@ -309,14 +414,19 @@ export function SearchOverlay({
             ref={oNhap}
             className="tim-o"
             type="search"
-            placeholder="Tìm truyện, tác giả, Animation…"
+            placeholder="Tìm truyện, tác giả, fandom…"
+            aria-label="Tìm truyện, tác giả, fandom"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setChon(-1);
+            }}
+            enterKeyHint="search"
             role="combobox"
             aria-expanded={danh.length > 0}
             aria-controls={`${idGoc}-ds`}
             aria-activedescendant={
-              danh.length ? `${idGoc}-kq-${chon}` : undefined
+              chon >= 0 && danh.length ? `${idGoc}-kq-${chon}` : undefined
             }
             aria-autocomplete="list"
             autoComplete="off"
@@ -329,10 +439,28 @@ export function SearchOverlay({
 
         <div className="tim-than" id={`${idGoc}-ds`} role="listbox">
           {trangThai === "dau" ? (
-            <p className="tim-trong">
-              Gõ để tìm <strong>truyện</strong>, <strong>tác giả</strong> hoặc{" "}
-              <strong>người dùng</strong>.
-            </p>
+            <div className="tim-dau-goi-y">
+              <p className="tim-trong">
+                Gõ tên <strong>truyện</strong>, <strong>tác giả</strong>, <strong>fandom</strong> hoặc{" "}
+                <strong>người dùng</strong>.
+              </p>
+              {fandomPhoBien.length ? (
+                <div className="tim-fandom-nhanh" aria-label="Fandom có truyện">
+                  <span className="tim-fandom-nhan">Fandom</span>
+                  {fandomPhoBien.map((f) => (
+                    <Link
+                      key={f.ten}
+                      className="tim-fandom-chip"
+                      href={`/library?fandom=${encodeURIComponent(f.ten)}`}
+                      onClick={onDong}
+                    >
+                      {f.ten}
+                      <span className="tim-fandom-so">{f.so}</span>
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ) : trangThai === "dang-tai" ? (
             <p className="tim-trong" role="status">
               Đang tìm “{tu}”…
@@ -342,43 +470,103 @@ export function SearchOverlay({
               Không tìm được lúc này. Thử lại sau một chút.
             </p>
           ) : trangThai === "rong" ? (
-            <p className="tim-trong" role="status">
-              Không có kết quả cho “{tu}”.
-            </p>
+            <div className="tim-trong" role="status">
+              <p>Không có kết quả cho “{tu}”.</p>
+              <p className="hint">
+                Thử tên ngắn hơn, bỏ dấu, hoặc tìm theo fandom — ví dụ “Naruto”, “One Piece”.
+              </p>
+            </div>
           ) : (
             <>
+              {fandomGoiY.length || tacGiaGoiY.length ? (
+                <section aria-labelledby={`${idGoc}-goiy`}>
+                  <h2 className="tim-nhom" id={`${idGoc}-goiy`}>
+                    <IconTag size={15} /> Gợi ý
+                  </h2>
+                  {fandomGoiY.map((f, i) => (
+                    <Link
+                      key={`f-${f.ten}`}
+                      id={`${idGoc}-kq-${i}`}
+                      role="option"
+                      aria-selected={chon === i}
+                      className={`tim-kq tim-kq-goiy${chon === i ? " la-chon" : ""}`}
+                      href={`/library?fandom=${encodeURIComponent(f.ten)}`}
+                      onClick={onDong}
+                      onMouseEnter={() => setChon(i)}
+                    >
+                      <span className="tim-goiy-icon" aria-hidden="true">
+                        <IconTag size={16} />
+                      </span>
+                      <span className="tim-chu">
+                        <strong>{f.ten}</strong>
+                        <span className="hint">Fandom · {f.so} truyện</span>
+                      </span>
+                    </Link>
+                  ))}
+                  {tacGiaGoiY.map((a, i) => {
+                    const vt = bd.tacgia + i;
+                    return (
+                      <Link
+                        key={`a-${a.ten}`}
+                        id={`${idGoc}-kq-${vt}`}
+                        role="option"
+                        aria-selected={chon === vt}
+                        className={`tim-kq tim-kq-goiy${chon === vt ? " la-chon" : ""}`}
+                        href={`/library?q=${encodeURIComponent(a.ten)}`}
+                        onClick={onDong}
+                        onMouseEnter={() => setChon(vt)}
+                      >
+                        <span className="tim-goiy-icon" aria-hidden="true">
+                          <IconFeather size={16} />
+                        </span>
+                        <span className="tim-chu">
+                          <strong>{a.ten}</strong>
+                          <span className="hint">Tác giả · {a.so} truyện</span>
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </section>
+              ) : null}
+
               {truyen.length ? (
                 <section aria-labelledby={`${idGoc}-truyen`}>
                   <h2 className="tim-nhom" id={`${idGoc}-truyen`}>
                     <IconBook size={15} /> Truyện
                   </h2>
-                  {truyen.map((n, i) => (
-                    <Link
-                      key={n.novel_id}
-                      id={`${idGoc}-kq-${i}`}
-                      role="option"
-                      aria-selected={chon === i}
-                      className={`tim-kq${chon === i ? " la-chon" : ""}`}
-                      href={`/novels/${n.novel_id}`}
-                      onClick={onDong}
-                      onMouseEnter={() => setChon(i)}
-                    >
-                      <span className="tim-bia">
-                        <NovelCover
-                          novelId={n.novel_id}
-                          title={n.title}
-                          coverUrl={n.cover_url}
-                          size="thumb"
-                        />
-                      </span>
-                      <span className="tim-chu">
-                        <strong>{n.title}</strong>
-                        {getReaderTags(n, 3).length > 0 ? (
-                          <span className="hint">{getReaderTags(n, 3).join(" · ")}</span>
-                        ) : null}
-                      </span>
-                    </Link>
-                  ))}
+                  {truyen.map((n, i) => {
+                    const vt = bd.truyen + i;
+                    const tacGia = n.external_author_name?.trim();
+                    // Tac gia truoc (nguoi doc hay nho ten nguoi viet), roi hai the.
+                    const phu: string[] = [];
+                    if (tacGia && !/^unknown/i.test(tacGia)) phu.push(tacGia);
+                    phu.push(...theChoThe(n, 2, [fandomCauTruc(n)]));
+                    return (
+                      <Link
+                        key={n.novel_id}
+                        id={`${idGoc}-kq-${vt}`}
+                        role="option"
+                        aria-selected={chon === vt}
+                        className={`tim-kq${chon === vt ? " la-chon" : ""}`}
+                        href={`/novels/${n.novel_id}`}
+                        onClick={onDong}
+                        onMouseEnter={() => setChon(vt)}
+                      >
+                        <span className="tim-bia">
+                          <NovelCover
+                            novelId={n.novel_id}
+                            title={n.title}
+                            coverUrl={n.cover_url}
+                            size="thumb"
+                          />
+                        </span>
+                        <span className="tim-chu">
+                          <strong>{n.title}</strong>
+                          {phu.length > 0 ? <span className="hint">{phu.join(" · ")}</span> : null}
+                        </span>
+                      </Link>
+                    );
+                  })}
                 </section>
               ) : null}
 
@@ -388,7 +576,7 @@ export function SearchOverlay({
                     <IconHeadphones size={15} /> Audio
                   </h2>
                   {audio.map((n, i) => {
-                    const vt = truyen.length + i;
+                    const vt = bd.audio + i;
                     return (
                       <Link
                         key={n.novel_id}
@@ -426,7 +614,7 @@ export function SearchOverlay({
                     <IconFilm size={15} /> Animation
                   </h2>
                   {animation.map((s, i) => {
-                    const vt = truyen.length + audio.length + i;
+                    const vt = bd.animation + i;
                     return (
                       <Link
                         key={s.series_id}
@@ -464,7 +652,7 @@ export function SearchOverlay({
                     <IconUser size={15} /> Người dùng
                   </h2>
                   {nguoi.map((p, i) => {
-                    const vt = truyen.length + audio.length + animation.length + i;
+                    const vt = bd.nguoi + i;
                     return (
                       <Link
                         key={p.user_id}
@@ -510,8 +698,7 @@ export function SearchOverlay({
                     <IconMegaphone size={15} /> Bài viết
                   </h2>
                   {bai.map((b, i) => {
-                    const vt =
-                      truyen.length + audio.length + animation.length + nguoi.length + i;
+                    const vt = bd.bai + i;
                     return (
                       <Link
                         key={b.post_id}
@@ -547,13 +734,19 @@ export function SearchOverlay({
 
         {tu ? (
           <div className="tim-chan">
+            {/* Thu vien la trang ket qua day du (loc, sap xep, URL giu trang
+                thai). Enter khi chua chon muc nao cung dua toi day. */}
             <Link
               className="btn btn-sm"
-              href={`/fanfic?q=${encodeURIComponent(tu)}`}
+              href={`/library?q=${encodeURIComponent(tu)}`}
               onClick={onDong}
             >
-              Xem tất cả truyện khớp “{tu}”
+              <IconSearch size={14} /> Xem tất cả kết quả “{tu}” trong Thư viện
             </Link>
+            <span className="tim-meo hint" aria-hidden="true">
+              <kbd>↑</kbd>
+              <kbd>↓</kbd> chọn · <kbd>Enter</kbd> mở · <kbd>Esc</kbd> đóng
+            </span>
           </div>
         ) : null}
       </div>

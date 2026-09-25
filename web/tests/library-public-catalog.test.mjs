@@ -15,9 +15,18 @@ const library = () => read("../src/app/library/page.tsx");
 const home = () => read("../src/app/page.tsx");
 const catalog = () => read("../src/lib/catalog.ts");
 
-test("Thư viện: Tải danh mục tác phẩm thật bằng api.listNovels, không chỉ theo dõi cá nhân", () => {
+test("Thư viện: Tải danh mục tác phẩm thật (phân trang ở máy chủ), không chỉ theo dõi cá nhân", () => {
+  /*
+    Product UX Sprint 2: tai bang `api.browseNovels` (phan trang, loc o may
+    chu) + anh chup kho (`lib/catalogSnapshot.ts`). KHONG con am tham roi ve
+    `api.listNovels` khi loi — ban truoc lam vay nen loi mang bi GIAU va trang
+    tai het kho khong phan trang; nay loi hien kem nut "Thử lại".
+  */
   const src = library();
-  assert.match(src, /api\.listNovels\(/, "Thư viện phải gọi api.listNovels để tải tác phẩm thật");
+  assert.match(src, /api\s*\.browseNovels\(/, "Thư viện phải tải tác phẩm thật từ backend");
+  assert.match(src, /taiAnhChupKho/, "dùng ảnh chụp kho chung");
+  assert.ok(!/api\.listNovels\(/.test(src), "không được âm thầm rơi về listNovels");
+  assert.match(src, /<ErrorState message=\{loi\} onRetry=\{thuLai\}/, "lỗi phải hiện, có Thử lại");
   assert.match(src, /social\.followedStories\(/, "Vẫn giữ followedStories cho mục cá nhân");
 });
 
@@ -34,12 +43,16 @@ test("Thư viện: Truyền coverUrl={n.cover_url} vào NovelCover để hiển 
 });
 
 test("Thư viện: Có đầy đủ bộ lọc tìm kiếm, vũ trụ fandom, audio và chế độ hiển thị", () => {
+  // Sprint 2: trang thai nam TREN URL (`lib/libraryQuery.ts`), khong con la
+  // nam `useState` roi rac — Back/Forward va chia se lien ket giu dung bo loc.
+  const q = read("../src/lib/libraryQuery.ts");
+  for (const truong of ["q: string", "fandom: string", "audio: LocAudio", "status: LocTrangThai", "sort: SapXep", "view: KieuXem", "page: number"]) {
+    assert.ok(q.includes(truong), `thiếu trường ${truong}`);
+  }
   const src = library();
-  assert.match(src, /searchQuery/);
-  assert.match(src, /fandomFilter/);
-  assert.match(src, /audioFilter/);
-  assert.match(src, /sortMode/);
-  assert.match(src, /viewMode/);
+  assert.match(src, /docTuUrl\(searchParams\)/, "trang phải đọc trạng thái từ URL");
+  assert.match(src, /router\.push\(href, \{ scroll: false \}\)/, "đổi bộ lọc phải vào lịch sử (Back được)");
+  assert.match(src, /router\.replace\(href, \{ scroll: false \}\)/, "gõ tìm không được nhồi lịch sử");
 });
 
 test("Thư viện: Tab Sách & Tuyển tập có trạng thái trung thực, không bịa sách giả", () => {

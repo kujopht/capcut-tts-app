@@ -924,8 +924,11 @@ test("has_audio khai bao tuy chon de khong pha client cu", () => {
   assert.match(api, /has_audio\?: boolean;/);
 });
 
+/* Sprint 2: hang muc luc cua trang truyen nam o `ChapterList` (client island). */
+const mucLuc = () => read("../src/components/novel/ChapterList.tsx");
+
 test("danh sach chuong dung has_audio chu khong dung state rieng", () => {
-  const src = read("../src/app/novels/[id]/page.tsx");
+  const src = mucLuc();
   assert.match(src, /chapter\.has_audio \?/);
   assert.ok(!src.includes("audioReady"), "bo state trung gian da khong con can");
 });
@@ -1012,7 +1015,7 @@ test("nhom nut cuoi hang xuong dong rieng o mobile", () => {
 });
 
 test("hang chuong dung .list-actions o ca hai trang", () => {
-  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/components/studio/VietTruyen.tsx"]) {
+  for (const f of ["../src/components/novel/ChapterList.tsx", "../src/components/studio/VietTruyen.tsx"]) {
     assert.match(read(f), /className="list-actions"/, `${f} thieu .list-actions`);
   }
 });
@@ -1041,32 +1044,33 @@ test("kich thuoc lien ket tai khoan nam trong CSS chu khong phai style inline", 
    =================================================================== */
 
 test("trang chi tiet truyen KHONG mo trinh phat ngay trong hang — dan sang trang chuong o che do Nghe", () => {
-  const src = read("../src/app/novels/[id]/page.tsx");
+  const src = read("../src/app/novels/[id]/page.tsx") + mucLuc();
   assert.ok(
     !/import \{ AudioPlayer \}/.test(src) && !/<AudioPlayer/.test(src),
     "trang chi tiet truyen khong duoc tu mo AudioPlayer rieng — dung dong co toan cuc",
   );
-  assert.match(src, /href=\{`\/chapters\/\$\{chapter\.chapter_id\}\?mode=listen`\}/);
+  // Sprint 2: chuong DANG doc them `&resume=1` (ap vi tri da luu).
+  assert.match(src, /href=\{`\/chapters\/\$\{chapter\.chapter_id\}\?mode=listen/);
   assert.match(src, /href=\{`\/chapters\/\$\{chapter\.chapter_id\}`\}/);
   assert.ok(!/href=\{`\/listen\//.test(src), "con lien ket sang trang Nghe cu");
 });
 
 test("chi chuong CO audio moi hien nut nghe", () => {
-  const src = read("../src/app/novels/[id]/page.tsx");
+  const src = mucLuc();
   assert.match(src, /chapter\.has_audio \?/);
   const noAudio = src.slice(src.indexOf("chapter.has_audio ?"));
   assert.match(noAudio, /Chưa có audio/);
 });
 
 test("hang khong con boc ca trong the <a>", () => {
-  const src = read("../src/app/novels/[id]/page.tsx");
+  const src = mucLuc();
   // <a> khong duoc chua <button>/<a> khac; ban cu boc ca hang trong
   // <Link className="list-item">.
   assert.ok(
     !/<Link[^>]*className="list-item"/.test(src),
     "the <a> khong duoc chua <button>/<a> khac",
   );
-  assert.match(src, /className="list-item"/);
+  assert.match(src, /className=\{`list-item/);
 });
 
 test("vung bam cua hang khong bi thu nho lai", () => {
@@ -1075,7 +1079,7 @@ test("vung bam cua hang khong bi thu nho lai", () => {
   assert.match(css, /\.list-title::after\s*\{[^}]*position:\s*absolute/);
   assert.match(css, /\.list-title::after\s*\{[^}]*inset:\s*0/);
   assert.match(css, /\.list-item\s*\{[^}]*position:\s*relative/);
-  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/components/studio/VietTruyen.tsx"]) {
+  for (const f of ["../src/components/novel/ChapterList.tsx", "../src/components/studio/VietTruyen.tsx"]) {
     assert.match(read(f), /list-title/, `${f} thieu lop list-title`);
   }
 });

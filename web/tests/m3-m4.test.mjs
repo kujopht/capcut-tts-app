@@ -12,7 +12,10 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 // "Viết truyện" doi ten tep khi gop vao `/studio/content` — xem
 // `docs/reports/` mission gop Studio (feat/studio-media-workspace).
 const write = () => read("../src/components/studio/VietTruyen.tsx");
-const novel = () => read("../src/app/novels/[id]/page.tsx");
+// Sprint 2: muc luc cua trang truyen tach sang `ChapterList` (client island) —
+// "trang truyen" o day = trang may chu + muc luc cua no.
+const novel = () =>
+  read("../src/app/novels/[id]/page.tsx") + "\n" + read("../src/components/novel/ChapterList.tsx");
 const chapter = () => read("../src/app/chapters/[id]/page.tsx");
 /** Che do NGHE cua trang chuong thong nhat (sprint doc/nghe 2026-09-24) —
     noi trinh phat lon (`<ChapterPlayer>`) va canh bao "audio co the khong

@@ -88,12 +88,17 @@ test("KHONG dung requestAnimationFrame o component tim kiem", () => {
   }
 });
 
-test("placeholder o tim phan anh toan bo nen tang, khong chi truyen", () => {
+test("placeholder o tim noi dung nguoi doc tim nhieu nhat: truyen, tac gia, fandom", () => {
+  // Product UX Sprint 2 (yeu cau cua chu san pham): "Animation" -> "fandom".
+  // Nguoi doc tim theo vu tru truyen; Animation van tim duoc qua bo chon danh
+  // muc trong hop tim (xem `DANH_MUC` o SearchOverlay.tsx).
   const btn = read("../src/components/SiteSearch.tsx");
   const overlay = read("../src/components/SearchOverlay.tsx");
   for (const src of [btn, overlay]) {
-    assert.match(src, /Tìm truyện, tác giả, Animation/);
+    assert.match(src, /Tìm truyện, tác giả, fandom/);
+    assert.ok(!src.includes("Tìm truyện, tác giả, Animation"), "placeholder cu con sot");
   }
+  assert.match(overlay, /nhan: "Animation", sanSang: true/);
 });
 
 /* ===================================== vach dieu huong: "cong dich" di chuyen */

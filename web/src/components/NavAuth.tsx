@@ -5,6 +5,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { viTri } from "@/lib/sections";
+import { mucDangXem } from "@/lib/navActive";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
@@ -77,12 +78,9 @@ export function NavLinks() {
     vien thuoc. Truyen `pathname` roi de vien thuoc tu do DOM se dua voi chu ky
     ve cua React; da do duoc dieu do tren trinh duyet.
   */
-  const dangXem =
-    LINKS.find((l) =>
-      l.href === "/"
-        ? pathname === "/"
-        : pathname === l.href || pathname.startsWith(`${l.href}/`),
-    )?.href ?? "";
+  // Sprint 2: trang truyen / chuong sang "Thư viện", bai dang / trang ca nhan
+  // sang "Cộng đồng" — xem `lib/navActive.ts`.
+  const dangXem = mucDangXem(pathname);
   return (
     <nav className="nav-links" aria-label="Điều hướng chính" ref={hop}>
       {LINKS.map((link) => {

@@ -47,13 +47,27 @@ test("/admin/assets (Bia & Hero 16:9) ton tai va co trong dieu huong quan tri", 
   assert.match(stories, /Xem công khai ↗/);
 });
 
-test("thu vien: bo loc Doc & Nghe, Kho Audio cu (audio_only), sap xep Moi xuat ban, the co hero", () => {
+test("thu vien: bo loc Doc & Nghe, Kho Audio cu (audio_only), sap xep Moi xuat ban, the co hero", async () => {
+  /*
+    Product UX Sprint 2: logic bo loc chuyen vao `lib/libraryQuery.ts` (thuan)
+    nen kiem bang HANH VI thay vi chuoi nguon. Hai sua that so voi ban
+    production 5b855690:
+      - "Mới xuất bản" gui `sort=newest` (do that: `latest` = y het `updated`);
+      - "Có audio" mo ca kho audio cu (`content_mode=all`), "Đọc & nghe" chi
+        kho doc duoc CO audio — ban truoc hai lua chon tra ve giong nhau.
+  */
+  const { thamSoDuyet, MAC_DINH_THU_VIEN, NHAN_SAP_XEP } = await import("../src/lib/libraryQuery.ts");
+  const ts = (phan) => thamSoDuyet({ ...MAC_DINH_THU_VIEN, ...phan }, 12);
+  assert.equal(ts({}).content_mode, "readable", "mặc định KHÔNG hiện kho audio cũ");
+  assert.equal(ts({ audio: "legacy" }).content_mode, "audio_only");
+  assert.deepEqual([ts({ audio: "read_audio" }).content_mode, ts({ audio: "read_audio" }).audio], ["readable", true]);
+  assert.deepEqual([ts({ audio: "audio" }).content_mode, ts({ audio: "audio" }).audio], ["all", true]);
+  assert.equal(ts({ audio: "text" }).audio, false);
+  assert.equal(NHAN_SAP_XEP.latest, "Mới xuất bản");
+  assert.equal(ts({ sort: "latest" }).sort, "newest");
   const lib = read("../src/app/library/page.tsx");
-  assert.match(lib, /type AudioFilter = "all" \| "audio" \| "text" \| "read_audio" \| "legacy";/);
-  assert.match(lib, /content_mode: audioFilter === "legacy" \? "audio_only" : "readable"/);
-  assert.match(lib, /<option value="latest">Mới xuất bản<\/option>/);
-  assert.match(lib, /Đọc &amp; Nghe/);
-  assert.match(lib, /Kho Audio cũ/);
+  assert.match(lib, /nhan: "Đọc & nghe"/);
+  assert.match(lib, /nhan: "Kho audio cũ"/);
   assert.match(lib, /heroUrl=\{novelHeroUrl\(n\)\}/);
 });
 

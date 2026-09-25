@@ -38,7 +38,59 @@ export function isInternalTag(tag: string): boolean {
   if (lower === "imported") return true;
   if (lower === "long_form_audio") return true;
   if (lower.includes("unresolved")) return true;
+  // Co pipeline / trang thai lap lai dang the (Sprint 2): "audio_novel" la co
+  // nhap lieu, "completed"/"ongoing" da hien o nhan trang thai rieng.
+  if (lower === "audio_novel" || lower === "completed" || lower === "ongoing" || lower === "hiatus") return true;
   return false;
+}
+
+/**
+ * The qua chung chung de dung vi tri tren the: gan nhu moi truyen o day deu
+ * la fanfic, nen "đồng nhân" khong giup chon truyen. Van hien neu khong con
+ * the nao khac.
+ */
+const THE_CHUNG = new Set(["đồng nhân", "fanfic", "fanfiction", "fan fiction"]);
+
+/**
+ * The cho THE TRUYEN o Thu vien (Sprint 2): toi da `max` the, BO the trung voi
+ * fandom da hien o goc anh (vd "naruto" khi fandom la "Naruto", "genshin
+ * impact"), day the chung chung xuong cuoi, viet hoa chu dau.
+ */
+export function theChoThe(
+  novel: { tags?: string[]; title?: string },
+  max: number,
+  boQua: readonly string[] = [],
+): string[] {
+  const bo = new Set(boQua.map((x) => x.toLowerCase().trim()).filter(Boolean));
+  const tot: string[] = [];
+  const chung: string[] = [];
+  for (const t of getReaderTags(novel, 99)) {
+    const k = t.toLowerCase();
+    if (bo.has(k)) continue;
+    (THE_CHUNG.has(k) ? chung : tot).push(t.charAt(0).toLocaleUpperCase("vi") + t.slice(1));
+  }
+  return [...tot, ...chung].slice(0, max);
+}
+
+/**
+ * Fandom CO CAU TRUC (tu `fandom_ids` va the), KHONG suy tu tieu de.
+ *
+ * Dung cho CHIP loc fandom o Thu vien: bo loc `fandom` cua backend chi so
+ * `fandom_ids` va `tags`, nen mot truyen chi nhan ra fandom qua TIEU DE (vd
+ * truyen audio cu gan "fandom:Da Fandom Unresolved") se KHONG hien khi bam
+ * chip do. Dem nhung truyen ay vao chip la hua mot ket qua may chu khong tra.
+ * Chuoi rong = khong co fandom co cau truc.
+ */
+export function fandomCauTruc(novel: { tags?: string[]; fandom_ids?: string[] }): string {
+  const cac = [...(novel.fandom_ids ?? []), ...(novel.tags ?? [])].map((x) => x.toLowerCase().trim());
+  const co = (...k: string[]) => cac.some((x) => k.includes(x));
+  if (co("fan_naruto", "naruto", "fandom:naruto")) return "Naruto";
+  if (co("fan_onepiece", "one piece", "fandom:one piece")) return "One Piece";
+  if (co("fan_conan", "conan", "fandom:detective conan")) return "Detective Conan";
+  if (co("fan_genshin", "genshin", "genshin impact", "fandom:genshin impact")) return "Genshin Impact";
+  if (co("fairy tail", "fandom:fairy tail")) return "Fairy Tail";
+  const the = (novel.tags ?? []).find((x) => x.toLowerCase().startsWith("fandom:") && !isInternalTag(x));
+  return the ? the.slice(7).trim() : "";
 }
 
 /**

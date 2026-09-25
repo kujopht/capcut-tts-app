@@ -44,15 +44,15 @@ class TestCoverResolver(unittest.TestCase):
         self.approved_dir = APPROVED_COVERS_DIR / self.test_work_id
         # Clean test directories
         if self.staged_dir.exists():
-            shutil.rmtree(self.staged_dir, ignore_errors=True)
+            shutil.rmtree(self.staged_dir)
         if self.approved_dir.exists():
-            shutil.rmtree(self.approved_dir, ignore_errors=True)
+            shutil.rmtree(self.approved_dir)
 
     def tearDown(self):
         if self.staged_dir.exists():
-            shutil.rmtree(self.staged_dir, ignore_errors=True)
+            shutil.rmtree(self.staged_dir)
         if self.approved_dir.exists():
-            shutil.rmtree(self.approved_dir, ignore_errors=True)
+            shutil.rmtree(self.approved_dir)
 
     def test_prompt_rules_and_aspect_ratio(self):
         pos, neg = build_cover_prompt(

@@ -1,8 +1,4 @@
-"""
-# ARCHIVE_AFTER_PR_D — Preserved for incident history and forensic verification.
-# Replaced by unified CLI: python -m scripts.content_factory run <work_id> --promote
-#
-Production Promotion Engine for RoyalRoad 136586 (Naruto: The Butterfly Effect).
+"""Production Promotion Engine for RoyalRoad 136586 (Naruto: The Butterfly Effect).
 
 Executes Phase 5 Promotion:
 1. Promotes approved cover to Cloudflare R2: covers/6a8c525aa05b8642d568/nov_rr_136586.jpg

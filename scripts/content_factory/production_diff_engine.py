@@ -91,65 +91,26 @@ class ProductionDiffEngine:
         self.db_path = db_path or find_active_registry_db()
 
     def _get_novel_record(self, platform: str, work_id: str) -> Optional[Dict[str, Any]]:
-        if self.db_path.exists():
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT * FROM source_novel_registry WHERE source_platform = ? AND source_work_id = ?",
-                    (platform, work_id)
-                ).fetchone()
-                if row:
-                    return dict(row)
-
-        # Fallback: check production API read-only
-        candidate_novel_id = f"nov_rr_{work_id}" if platform == "royalroad" else f"nov_{work_id}"
-        try:
-            req = urllib.request.Request(f"https://fas-prod-api.onrender.com/api/novels/{candidate_novel_id}")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    return {
-                        "source_platform": platform,
-                        "source_work_id": work_id,
-                        "appwrite_novel_id": candidate_novel_id,
-                        "title_original": data.get("title", ""),
-                        "last_seen_chapter": len(data.get("chapters", [])),
-                    }
-        except Exception:
-            pass
-        return None
+        if not self.db_path.exists():
+            return None
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM source_novel_registry WHERE source_platform = ? AND source_work_id = ?",
+                (platform, work_id)
+            ).fetchone()
+            return dict(row) if row else None
 
     def _get_registered_chapters(self, platform: str, work_id: str) -> List[Dict[str, Any]]:
-        if self.db_path.exists():
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    "SELECT * FROM source_chapter_registry WHERE source_platform = ? AND source_work_id = ? ORDER BY chapter_order ASC",
-                    (platform, work_id)
-                ).fetchall()
-                if rows:
-                    return [dict(r) for r in rows]
-
-        # Fallback: check production API read-only
-        candidate_novel_id = f"nov_rr_{work_id}" if platform == "royalroad" else f"nov_{work_id}"
-        try:
-            req = urllib.request.Request(f"https://fas-prod-api.onrender.com/api/novels/{candidate_novel_id}")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    chs = data.get("chapters", [])
-                    return [
-                        {
-                            "chapter_order": c.get("order_index", idx),
-                            "source_chapter_id": c.get("source_chapter_id"),
-                            "source_text_hash": "",
-                            "appwrite_chapter_id": c.get("chapter_id"),
-                        }
-                        for idx, c in enumerate(chs, start=1)
-                    ]
-        except Exception:
-            pass
-        return []
+        if not self.db_path.exists():
+            return []
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM source_chapter_registry WHERE source_platform = ? AND source_work_id = ? ORDER BY chapter_order ASC",
+                (platform, work_id)
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def diff(
         self,
@@ -244,7 +205,7 @@ class ProductionDiffEngine:
             else:
                 prod_hash = match.get("source_text_hash", "")
                 prod_cid = match.get("appwrite_chapter_id")
-                if prod_hash == shash or (match and not prod_hash and match.get("appwrite_chapter_id")):
+                if prod_hash == shash:
                     diffs.append(ChapterDiff(
                         order=order,
                         title=ch_title,

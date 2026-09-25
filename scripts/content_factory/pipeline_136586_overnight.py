@@ -1,7 +1,4 @@
 """
-# ARCHIVE_AFTER_PR_D — Preserved for incident history and forensic verification.
-# Replaced by unified CLI: python -m scripts.content_factory run <work_id>
-#
 Overnight One-Shot Production Prep Pipeline: RoyalRoad 136586 — Naruto: The Butterfly Effect.
 
 Orchestrates all 8 phases unattended with hard safety constraints:

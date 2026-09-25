@@ -1,7 +1,4 @@
 """
-# ARCHIVE_AFTER_PR_D — Preserved for incident history and forensic verification.
-# Replaced by unified CLI: python -m scripts.content_factory run <work_id>
-#
 Pipeline Runner: RoyalRoad 156206 — The Cold Between Wars.
 Content Factory v2 Full Translation, Local QA Gate, Release Packaging, and Production Dry Run.
 

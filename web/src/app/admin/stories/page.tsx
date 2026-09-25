@@ -20,6 +20,11 @@ import { adminApi } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { DanhSachTrangThai } from "@/components/AdminShell";
 import { IconBook } from "@/components/Icons";
+import { isLegacyAudioOnly } from "@/lib/catalog";
+
+function duongCongKhai(id: string): string {
+  return `/novels/${id}`;
+}
 
 const TRANG_THAI = [
   { khoa: "", nhan: "Tất cả" },
@@ -143,6 +148,7 @@ export default function AdminStories() {
                 {/* Quyet dinh xuat ban can biet audio da san sang bao nhieu. */}
                 <th scope="col" className="admin-so">Audio</th>
                 <th scope="col">Trạng thái</th>
+                <th scope="col">Tài nguyên</th>
                 <th scope="col">Nguồn</th>
                 <th scope="col">Cập nhật</th>
               </tr>
@@ -163,6 +169,24 @@ export default function AdminStories() {
                     {n.kind && n.kind !== "story" ? (
                       <span className="hint admin-loai"> · {NHAN_LOAI[n.kind]}</span>
                     ) : null}
+                    {isLegacyAudioOnly(n) ? (
+                      <span className="hint admin-loai"> · Audio-only</span>
+                    ) : null}
+                    <div className="row" style={{ gap: "10px", marginTop: "2px", fontSize: "var(--t-xs)" }}>
+                      <Link href="/admin/assets" className="hint">
+                        Bìa &amp; Hero
+                      </Link>
+                      {n.state === "published" ? (
+                        <a
+                          href={duongCongKhai(n.novel_id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hint"
+                        >
+                          Xem công khai ↗
+                        </a>
+                      ) : null}
+                    </div>
                   </td>
                   <td>
                     {n.owner ? (
@@ -205,6 +229,20 @@ export default function AdminStories() {
                       className={`tt ${n.state === "published" ? "tt-duyet" : "tt-trong"}`}
                     >
                       {n.state === "published" ? "Đã xuất bản" : "Bản nháp"}
+                    </span>
+                  </td>
+                  <td>
+                    <span
+                      className={`tt ${
+                        n.hero_background_status === "approved" || n.hero_background_url
+                          ? "tt-duyet"
+                          : "tt-trong"
+                      }`}
+                      style={{ fontSize: "11px" }}
+                    >
+                      {n.hero_background_status === "approved" || n.hero_background_url
+                        ? "16:9 ✓"
+                        : "Hero 16:9?"}
                     </span>
                   </td>
                   {/*

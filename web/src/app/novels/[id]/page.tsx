@@ -16,6 +16,8 @@ import {
   OwnerAddChapterAction,
 } from "@/components/NovelInteractiveActions";
 import { getReaderTags } from "@/lib/taxonomy";
+import { novelHeroUrl, novelPortraitUrl, isLegacyAudioOnly } from "@/lib/catalog";
+import { IconBook, IconHeadphones } from "@/components/Icons";
 
 /**
  * Dynamic metadata cho SEO, OpenGraph (book), Twitter card va canonical URL.
@@ -158,11 +160,22 @@ export default async function NovelDetailPage({
         truyen xuong duoi nep gap.
       */}
       <header className="novel-head">
+        {novelHeroUrl(novel) ? (
+          <>
+            <div
+              className="novel-head-backdrop"
+              style={{ backgroundImage: `url("${novelHeroUrl(novel)}")` }}
+              aria-hidden="true"
+            />
+            <div className="novel-head-overlay" aria-hidden="true" />
+          </>
+        ) : null}
+
         <div className="novel-head-cover">
           <NovelCover
             novelId={novel.novel_id}
             title={novel.title}
-            coverUrl={novel.cover_url}
+            coverUrl={novelPortraitUrl(novel)}
             size="portrait"
           />
         </div>
@@ -240,12 +253,36 @@ export default async function NovelDetailPage({
 
           <div className="row novel-head-actions">
             {chapters.length > 0 ? (
-              <Link
-                className="btn btn-primary"
-                href={`/chapters/${chapters[0].chapter_id}`}
-              >
-                Đọc từ đầu
-              </Link>
+              isLegacyAudioOnly(novel) ? (
+                <Link
+                  className="btn btn-primary"
+                  href={`/chapters/${chapters[0].chapter_id}?mode=listen&autoplay=1`}
+                >
+                  <IconHeadphones size={16} /> Nghe chương đầu
+                </Link>
+              ) : soChuongCoAudio > 0 ? (
+                <>
+                  <Link
+                    className="btn btn-primary"
+                    href={`/chapters/${chapters[0].chapter_id}?mode=read_listen&autoplay=1`}
+                  >
+                    <IconHeadphones size={16} /> Đọc &amp; Nghe
+                  </Link>
+                  <Link
+                    className="btn btn-ghost"
+                    href={`/chapters/${chapters[0].chapter_id}?mode=read`}
+                  >
+                    <IconBook size={16} /> Chỉ đọc
+                  </Link>
+                </>
+              ) : (
+                <Link
+                  className="btn btn-primary"
+                  href={`/chapters/${chapters[0].chapter_id}?mode=read`}
+                >
+                  <IconBook size={16} /> Đọc từ đầu
+                </Link>
+              )
             ) : null}
             <NovelOwnerActions ownerId={novel.owner_id} />
             {/*

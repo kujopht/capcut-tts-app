@@ -817,7 +817,9 @@ test("bia that nam tren, bia du phong nam duoi", () => {
     src.indexOf("cover-fallback") < src.indexOf("cover-image"),
     "lop du phong phai o duoi",
   );
-  assert.match(src, /coverUrl \? \(/);
+  // Lop anh that chi them khi CO URL anh — `anh` la bia (khung doc) hoac nen
+  // hero roi ve bia (khung 16:9), xem NovelCover.tsx (doi soat 2026-09-25).
+  assert.match(src, /anh \? \(/);
   assert.ok(!/<img[\s/>]/.test(src), "phai dung background-image, khong dung the anh");
 });
 

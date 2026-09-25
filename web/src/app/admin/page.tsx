@@ -77,6 +77,18 @@ function CanBanXuLy({ data }: { data: AdminOverview }) {
   const { data: dsNhap } = useAsyncData(napNhap);
   const nhap = (dsNhap?.novels ?? []).filter((n) => n.chapters > 0).length;
 
+  const napXuatBan = useCallback(
+    () => adminApi.novels("", "published", 100, 0, "story"),
+    [],
+  );
+  const { data: dsXuatBan } = useAsyncData(napXuatBan);
+  const canHeroBg = (dsXuatBan?.novels ?? []).filter(
+    (n) =>
+      n.hero_background_status === "needs_regeneration" ||
+      n.hero_background_status === "missing" ||
+      (!n.hero_background_url && n.hero_background_status !== "approved"),
+  ).length;
+
   const viec = [
     {
       so: data.pending_applications,
@@ -95,6 +107,12 @@ function CanBanXuLy({ data }: { data: AdminOverview }) {
       nhan: "truyện có nội dung, đang chờ xem lại",
       href: "/admin/stories?state=draft",
       icon: IconBook,
+    },
+    {
+      so: canHeroBg,
+      nhan: "tác phẩm cần tạo hoặc duyệt ảnh nền hero 16:9",
+      href: "/admin/assets",
+      icon: IconSparkles,
     },
     {
       so: data.trusted_sources.pending_total ?? 0,

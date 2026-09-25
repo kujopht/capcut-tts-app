@@ -79,3 +79,30 @@ export function formatChapterCount(count?: number | null): string {
   }
   return `${count} chương`;
 }
+
+export function novelPortraitUrl(novel: {
+  cover_portrait_url?: string | null;
+  cover_url?: string | null;
+}): string | null {
+  return novel.cover_portrait_url || novel.cover_url || null;
+}
+
+export function novelHeroUrl(novel: {
+  hero_background_url?: string | null;
+  cover_portrait_url?: string | null;
+  cover_url?: string | null;
+}): string | null {
+  return novel.hero_background_url || novel.cover_portrait_url || novel.cover_url || null;
+}
+
+export function isLegacyAudioOnly(novel: {
+  content_mode?: string | null;
+  tags?: string[];
+  external_chapter_count?: number;
+}): boolean {
+  if (novel.content_mode === "audio_only") return true;
+  const tags = novel.tags ?? [];
+  return tags.some(
+    (t) => t === "long_form_audio" || t.startsWith("work:CAT-") || t.startsWith("work:OP-")
+  );
+}

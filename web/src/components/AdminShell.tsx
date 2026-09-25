@@ -80,6 +80,7 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
     nhom: "Content",
     muc: [
       { href: "/admin/stories", nhan: "Truyện", icon: IconBook },
+      { href: "/admin/assets", nhan: "Bìa & Hero 16:9", icon: IconSparkles },
       { href: "/admin/posts", nhan: "Bài đăng", icon: IconMegaphone },
       { href: "/admin/comments", nhan: "Bình luận", icon: IconFeather },
     ],

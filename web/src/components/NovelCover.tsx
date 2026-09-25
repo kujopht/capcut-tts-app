@@ -29,15 +29,26 @@ export function NovelCover({
   novelId,
   title,
   coverUrl,
+  heroUrl,
   size = "card",
 }: {
   novelId: string;
   title: string;
   coverUrl?: string | null;
+  heroUrl?: string | null;
   /** `card` cho luoi truyen (3:2), `portrait` cho bia doc chuan (2:3), `wide` cho dau trang, `thumb` cho luong nghe, `landscape` cho 16:9. */
   size?: "card" | "wide" | "thumb" | "portrait" | "landscape";
 }) {
   const [from, to] = paletteFor(novelId || title);
+  const isLandscape = size === "landscape" || size === "wide";
+  /*
+    Anh THAT se ve. Khung ngang (16:9) uu tien anh nen hero, khung doc giu bia.
+    Ban checkpoint tinh gia tri nay nhung lai chi ve khi co `coverUrl` — truyen
+    co hero ma CHUA co bia thi khong hien anh nao (loi da ghi trong commit
+    checkpoint 83b3a3e). Hom nay API production chua tra truong hero, nen
+    `heroUrl` luon roi ve `cover_url` va ket qua ve y het ban dang chay.
+  */
+  const anh = isLandscape ? heroUrl || coverUrl : coverUrl;
 
   return (
     <div className={`cover cover-${size}`}>
@@ -52,18 +63,21 @@ export function NovelCover({
             ro net. Xem `StoryCoverFallback`; o day khong con thao ra tung lop. */}
         <StoryCoverFallback seed={novelId || title} />
       </div>
-      {coverUrl ? (
+      {anh ? (
         <>
-          {size === "landscape" && (
+          {isLandscape && (
             <div
               className="cover-image-backdrop"
-              style={{ backgroundImage: `url("${coverUrl}")` }}
+              style={{ backgroundImage: `url("${anh}")` }}
               aria-hidden="true"
             />
           )}
           <div
             className="cover-image"
-            style={{ backgroundImage: `url("${coverUrl}")` }}
+            style={{
+              backgroundImage: `url("${anh}")`,
+              backgroundSize: heroUrl && isLandscape ? "cover" : undefined,
+            }}
             role="img"
             aria-label={`Ảnh bìa truyện ${title}`}
           />

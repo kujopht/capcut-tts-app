@@ -53,8 +53,7 @@ function dinhDangGio(giay: number): string {
 }
 
 function LibraryContent() {
-  const { profile, loading: dangNapPhien, signIn } = useSession();
-  const [testLoggingIn, setTestLoggingIn] = useState(false);
+  const { profile, loading: dangNapPhien } = useSession();
   const searchParams = useSearchParams();
 
   const tabParam = searchParams.get("tab");
@@ -725,31 +724,16 @@ function LibraryContent() {
                     Lưu giữ các tác phẩm bạn đang theo dõi và tự động đồng bộ vị trí đọc dở, nghe tiếp trên mọi thiết bị.
                   </p>
                 </div>
+                {/*
+                  KHONG co nut "đăng nhập nhanh" nao o day. Ban truoc gan cung
+                  email + mat khau that vao nut nay, khong co dieu kien moi
+                  truong, nen chuoi mat khau nam trong bundle production cong
+                  khai (do 2026-09-25). Dang nhap chi qua /login.
+                */}
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
                   <Link className="btn btn-primary btn-sm" href="/login?next=/library?tab=personal" prefetch={false}>
                     Đăng nhập
                   </Link>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={testLoggingIn}
-                    onClick={async () => {
-                      try {
-                        setTestLoggingIn(true);
-                        await signIn("kujopht@gmail.com", "Password123!");
-                      } catch {
-                        try {
-                          await signIn("reader@fanfic.vn", "Password123!");
-                        } catch {
-                          // ignore
-                        }
-                      } finally {
-                        setTestLoggingIn(false);
-                      }
-                    }}
-                  >
-                    {testLoggingIn ? "Đang đăng nhập..." : "⚡ Đăng nhập nhanh (Test)"}
-                  </button>
                 </div>
               </div>
             ) : (

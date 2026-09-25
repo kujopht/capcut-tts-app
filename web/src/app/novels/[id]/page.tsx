@@ -303,10 +303,10 @@ export default async function NovelDetailPage({
                 </span>
 
                 <span className="list-actions">
-                  {/* Doc va Nghe la HAI trai nghiem rieng (Phan 2A) — Doc
-                      luon di duoc (chua co audio van doc duoc chu), Nghe chi
-                      hien khi da co audio va dan sang trang Nghe rieng,
-                      KHONG con mo mot trinh phat ngay trong hang nay nua. */}
+                  {/* Doc va Nghe cung MOT trang chuong (sprint doc/nghe
+                      2026-09-24) — hai nut chi khac che do mo dau. Doc luon
+                      di duoc (chua co audio van doc duoc chu); Nghe chi hien
+                      khi da co audio, mo `?mode=listen`, KHONG tu phat. */}
                   <Link className="btn btn-sm" href={`/chapters/${chapter.chapter_id}`}>
                     <span aria-hidden="true">📖</span> Đọc
                   </Link>
@@ -324,7 +324,7 @@ export default async function NovelDetailPage({
                       ) : null}
                       <Link
                         className="btn btn-sm btn-primary"
-                        href={`/listen/${chapter.chapter_id}`}
+                        href={`/chapters/${chapter.chapter_id}?mode=listen`}
                       >
                         <span aria-hidden="true">▶</span> Nghe
                       </Link>

@@ -344,7 +344,8 @@ test("khong pha M2/M3/M4: cac tinh nang van con", () => {
   // rieng cho tung hang. Kiem o `ui.test.mjs`.
   assert.match(read("../src/components/studio/VietTruyen.tsx"), /api\.reorderChapters\(/);  // M3
   assert.match(novel(), /chapter\.audio_outdated \?/);                        // M4
-  assert.match(read("../src/app/listen/[id]/page.tsx"), /audioOutdated/);
+  // Canh bao audio cu nay o che do Nghe cua trang chuong thong nhat.
+  assert.match(read("../src/components/reader/ChapterExperience.tsx"), /audioOutdated/);
 });
 
 test("cac ho endpoint khong doi, chi them duong duoi novels", () => {

@@ -840,25 +840,21 @@ test("anh bia duoc dung o ca bon noi", () => {
   assert.ok(!read("../src/app/fanfic/page.tsx").includes("📖"));
 });
 
-test("trang doc lay chuong trong DUNG MOT request, khong con can bia/audio", () => {
-  // Overnight Phase 2 (Phan 2A): trang doc khong con ve trinh phat/bia nua
-  // (chi chu), nen no cung khong con ly do de goi `api.getNovel(` — bat biet
-  // "mot request" van dung, chi khac ly do.
+test("trang chuong (doc + nghe) dung DUNG HAI request bat ke truyen co bao nhieu chuong", () => {
+  /*
+    Sprint doc/nghe 2026-09-24: doc va nghe la MOT trang. Hai bai cu ("trang
+    doc MOT request" + "trang Nghe HAI request") gop lai thanh bat bien that:
+    `getChapter` (chuong + audio + bia) + `getNovel` (danh sach chuong cho
+    chuong truoc/sau, kem `has_audio`) — KHONG lap trong vong for, KHONG goi
+    lai moi chuong: rang buoc "khong N+1" cua Phan 2D.
+  */
   const src = read("../src/app/chapters/[id]/page.tsx");
   assert.match(src, /api\.getChapter\(id\)/);
-  assert.ok(!src.includes("api.getNovel("));
-});
-
-test("trang Nghe dung DUNG HAI request bat ke truyen co bao nhieu chuong", () => {
-  // `getChapter` (chuong + audio + bia truyen) + `getNovel` (danh sach
-  // chuong cho tap truoc/sau + chon tap) — KHONG lap trong vong for, KHONG
-  // goi lai moi chuong: day chinh la rang buoc "khong N+1" cua Phan 2D.
-  const src = read("../src/app/listen/[id]/page.tsx");
-  assert.match(src, /api\.getChapter\(id\)/);
-  assert.match(src, /api\.getNovel\(novelBrief\.novel_id\)/);
-  assert.equal((src.match(/api\.getNovel\(/g) ?? []).length, 1,
-    "chi duoc goi getNovel dung MOT lan trong load()");
-  assert.match(src, /coverUrl={novel\.cover_url}/);
+  assert.equal((src.match(/api\s*\.getNovel\(/g) ?? []).length, 1,
+    "chi duoc goi getNovel dung MOT lan");
+  assert.match(src, /coverUrl=\{novel\?\.cover_url\}/);
+  assert.ok(!existsSync(new URL("../src/app/listen/[id]/page.tsx", import.meta.url)),
+    "trang Nghe rieng da duoc thay bang chuyen huong — khong duoc song lai");
 });
 
 test("lop api khai bao truong moi la tuy chon", () => {
@@ -1037,20 +1033,20 @@ test("kich thuoc lien ket tai khoan nam trong CSS chu khong phai style inline", 
    M2 — nghe tai trang chi tiet truyen
 
    Vong overnight Phase 2 (Phan 2A): trinh phat KHONG con mo NGAY TRONG
-   HANG nua — hang gio chi co hai lien ket [Đọc]/[Nghe], "Nghe" dan sang
-   trang rieng `/listen/[id]` (dong co toan cuc DUY NHAT, xem
-   `chapter-player.test.mjs`). Cac bai cu kiem hanh vi mo-tai-cho da bi
-   XOA/THAY vi hanh vi do khong con nua, khong phai vi long lo test.
+   HANG nua — hang gio chi co hai lien ket [Đọc]/[Nghe] (dong co toan cuc
+   DUY NHAT, xem `chapter-player.test.mjs`). Tu sprint doc/nghe 2026-09-24
+   ca hai dan toi CUNG trang chuong; "Nghe" chi them `?mode=listen`.
    =================================================================== */
 
-test("trang chi tiet truyen KHONG con mo trinh phat ngay trong hang — dan sang /listen", () => {
+test("trang chi tiet truyen KHONG mo trinh phat ngay trong hang — dan sang trang chuong o che do Nghe", () => {
   const src = read("../src/app/novels/[id]/page.tsx");
   assert.ok(
     !/import \{ AudioPlayer \}/.test(src) && !/<AudioPlayer/.test(src),
-    "trang chi tiet truyen khong duoc tu mo AudioPlayer rieng nua — dung dong co toan cuc qua /listen",
+    "trang chi tiet truyen khong duoc tu mo AudioPlayer rieng — dung dong co toan cuc",
   );
-  assert.match(src, /href={`\/listen\/\$\{chapter\.chapter_id\}`}/);
-  assert.match(src, /href={`\/chapters\/\$\{chapter\.chapter_id\}`}/);
+  assert.match(src, /href=\{`\/chapters\/\$\{chapter\.chapter_id\}\?mode=listen`\}/);
+  assert.match(src, /href=\{`\/chapters\/\$\{chapter\.chapter_id\}`\}/);
+  assert.ok(!/href=\{`\/listen\//.test(src), "con lien ket sang trang Nghe cu");
 });
 
 test("chi chuong CO audio moi hien nut nghe", () => {

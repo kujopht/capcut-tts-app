@@ -386,7 +386,11 @@ test("ban nay KHONG cham vao logic phat, tien do hay dang nhap", () => {
   const canh = {
     "../src/components/AudioEngine.tsx": ["useAudioEngine", "TrangThaiAudio", "TOC_DO"],
     "../src/components/ChapterPlayer.tsx": ["useAudioEngine", "listen-hero", "play-btn"],
-    "../src/components/MiniPlayer.tsx": ["IntersectionObserver", "co-mini"],
+    // `MiniPlayer` (thanh theo cuon cua trang Nghe cu) duoc thay boi trinh
+    // phat noi cua trang chuong (sprint doc/nghe 2026-09-24) — no mang lai
+    // CA HAI moc: biet trinh phat lon con thay khong, va dem cuoi trang.
+    "../src/components/reader/ChapterExperience.tsx": ["IntersectionObserver", "co-dock"],
+    "../src/components/GlobalMiniPlayer.tsx": ["co-mini"],
     "../src/lib/useJobTracker.ts": ["gopNhipPoll", "khoaTheoDoi", "POLL_MS"],
     "../src/components/JobProgress.tsx": ["tienDoJob"],
   };

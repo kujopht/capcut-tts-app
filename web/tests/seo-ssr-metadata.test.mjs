@@ -56,10 +56,20 @@ test("Trang đọc chương /chapters/[id] là Server Component với generateMe
   assert.match(chapterSrc, /export async function generateMetadata/);
   assert.match(chapterSrc, /type:\s*"article"/);
   assert.match(chapterSrc, /canonical/);
-  // SSR readable prose paragraphs
-  assert.match(chapterSrc, /<div className="prose">/);
-  assert.match(chapterSrc, /chapter\.content\.split\(/);
-  assert.match(chapterSrc, /<p key=\{idx\}/);
+  // SSR readable prose paragraphs.
+  // Sprint doc/nghe 2026-09-24: doan van chia o MAY CHU bang CUNG ham ma bo
+  // dong bo doc/nghe dung (`tachDoanVan`), roi ve thanh `<div className="prose">
+  // <p>…` trong `ReaderText` — component client nhung Next van ve san thanh
+  // HTML, nen noi dung chuong van nam trong HTML dau tien nhu truoc.
+  assert.match(chapterSrc, /const doanVan = tachDoanVan\(chapter\.content\)/);
+  assert.match(chapterSrc, /paragraphs=\{doanVan\}/);
+  const readerTextSrc = readFileSync(new URL("../src/components/reader/ReaderText.tsx", import.meta.url), "utf8");
+  assert.match(readerTextSrc, /<div className="prose">/);
+  assert.match(readerTextSrc, /<p\b/);
+  // Cot chu KHONG bao gio bi go khoi DOM (chi `hidden` khi khung chu dong),
+  // nen may tim kiem luon thay chu.
+  const expSrc = readFileSync(new URL("../src/components/reader/ChapterExperience.tsx", import.meta.url), "utf8");
+  assert.match(expSrc, /hidden=\{coChu && !hienChuDay\}/);
   // Client island được nhúng
   assert.match(chapterSrc, /<ChapterInteractiveReader/);
   assert.ok(chapterReaderSrc.startsWith('"use client"') || chapterReaderSrc.startsWith("'use client'"), "ChapterInteractiveReader phải là Client Component");

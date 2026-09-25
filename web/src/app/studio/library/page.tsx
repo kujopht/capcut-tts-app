@@ -279,13 +279,13 @@ export default function LibraryPage() {
                       >
                         Mở chương
                       </Link>
-                      {/* Fanfic — dan sang trang Nghe rieng (Phan 2A), KHONG
-                          con mo trinh phat ngay trong hang nay: dong nhat
-                          voi trang chi tiet truyen, chi CON MOT dong-co-phat
+                      {/* Fanfic — dan sang trang chuong o che do Nghe, KHONG
+                          mo trinh phat ngay trong hang nay: dong nhat voi
+                          trang chi tiet truyen, chi CON MOT dong-co-phat
                           toan cuc cho moi audio fanfic. */}
                       <Link
                         className="btn btn-sm btn-primary"
-                        href={`/listen/${row.chapter.chapter_id}`}
+                        href={`/chapters/${row.chapter.chapter_id}?mode=listen`}
                       >
                         <span aria-hidden="true">▶</span> Nghe
                       </Link>

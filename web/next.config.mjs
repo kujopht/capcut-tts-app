@@ -32,6 +32,16 @@ const nextConfig = {
       { source: "/fanfic", destination: "/library?tab=fanfic", permanent: true },
       { source: "/animation/new", destination: "/admin/animation/sources/new", permanent: true },
       /*
+        Trang Nghe rieng -> trang chuong thong nhat (sprint doc/nghe
+        2026-09-24): doc va nghe gio la MOT duong dan chinh tac. Lien ket cu,
+        bookmark va chia se van chay, mo thang che do Nghe.
+
+        `permanent: false` (307) CO Y trong dot dau: 308 bi trinh duyet nho
+        vinh vien, neu phai lui ban thi nguoi dung da tung vao se khong bao
+        gio thay lai `/listen`. Nang len 308 sau khi trang moi da on dinh.
+      */
+      { source: "/listen/:id", destination: "/chapters/:id?mode=listen", permanent: false },
+      /*
         `/library` KHONG con o day, va day la mot lan sua co y.
 
         No tung tro sang `/studio/library`. Nhung `/studio/library` la THU

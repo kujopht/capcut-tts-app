@@ -1,10 +1,17 @@
 /**
- * Doc chuong — CHI CHU, chu-truoc-tien (Phan 2A/2E, overnight Phase 2).
- * Server Component SSR van ban, semantic article markup va dynamic metadata cho SEO.
+ * Trang CHUONG — doc VA nghe tren mot duong dan chinh tac (sprint UX doc/nghe,
+ * 2026-09-24). Truoc day doc o day, nghe o `/listen/[id]` (overnight Phase 2A);
+ * `/listen/[id]` gio chuyen huong ve day voi `?mode=listen`.
+ *
+ * Server Component: van ban chuong van ve o MAY CHU (SEO, `Ctrl+F`, trinh doc
+ * man hinh), metadata/canonical/OpenGraph giu nguyen. Phan tuong tac (che do,
+ * trinh phat, to sang doan dang doc, tiep tuc doc/nghe) nam o
+ * `components/reader/ChapterExperience.tsx`, dung CHUNG dong co audio toan cuc.
  */
 
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { API_BASE, api, ApiError, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
 import { errorMessage } from "@/lib/session";
 import { ChapterComments } from "@/components/ChapterComments";
@@ -12,11 +19,14 @@ import { AskAiPanel } from "@/components/AskAiPanel";
 import {
   ChapterInteractiveReader,
   ChapterOwnerAudioAction,
-  ChapterReaderPrefsControl,
 } from "@/components/ChapterInteractiveReader";
+import { ChapterExperience } from "@/components/reader/ChapterExperience";
+import { ChapterNavLink, type ChuongLienKe } from "@/components/reader/ChapterNavLink";
 import { EmptyState, ErrorState } from "@/components/ui";
 import { formatNumber } from "@/lib/format";
-import { IconBook, IconHeadphones } from "@/components/Icons";
+import { IconBook, IconHeadphones, IconList } from "@/components/Icons";
+import { tachDoanVan } from "@/lib/chapterSync";
+import { cheDoKhiMo, COOKIE_CHE_DO, giaiMaCookie } from "@/lib/readerSession";
 
 /**
  * Dynamic metadata cho SEO, OpenGraph (article), Twitter card va canonical URL.
@@ -71,17 +81,28 @@ export async function generateMetadata({
   }
 }
 
+/** Cho danh sach chuong (chi de dung nut truoc/sau) toi da bay nhieu. */
+const CHO_DS_CHUONG_MS = 6000;
+
+function lienKe(c: Chapter | null): ChuongLienKe | null {
+  return c ? { chapter_id: c.chapter_id, title: c.title, has_audio: c.has_audio } : null;
+}
+
 export default async function ChapterPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ mode?: string; autoplay?: string }>;
 }) {
   const { id } = await params;
+  const sp = searchParams ? await searchParams : {};
 
   let ket_qua: {
     chapter: Chapter;
     audio: AudioTrack | null;
     novel?: NovelBrief | null;
+    audio_outdated?: boolean;
   } | null = null;
   let missing = false;
   let errorMsg = "";
@@ -127,18 +148,27 @@ export default async function ChapterPage({
   /*
     HAI request, khong phu thuoc so chuong: chuong hien tai (`getChapter`, da
     kem san `novel` nen khong phai goi them chi de lay ten truyen) + danh sach
-    chuong cua truyen, de biet chuong TRUOC va chuong SAU la gi.
+    chuong cua truyen, de biet chuong TRUOC va chuong SAU la gi (kem
+    `has_audio`, de "Chương sau" biet co phat tiep duoc khong).
 
     Danh sach chuong lay theo kieu KHONG DUOC PHEP LAM HONG VIEC DOC: neu
     `getNovel` that bai thi `dsChuong` chi la rong, mat hai cai nut dieu huong,
     va chu van hien ra binh thuong.
+
+    "That bai" gom ca CHAM: do that 2026-09-24, `GET /api/novels/{id}` cua
+    truyen 99 chuong mat 180 giay+ trong mot dot may chu xuong cap, trong khi
+    `getChapter` van ~2 giay — trang chuong dung trang trang ca phut chi vi
+    hai cai nut. Cho toi da CHO_DS_CHUONG_MS; qua han thi doc chu truoc.
   */
   const novelId = ket_qua.novel?.novel_id ?? ket_qua.chapter?.novel_id;
   const dsChuong: Chapter[] = novelId
-    ? await api
-        .getNovel(novelId)
-        .then((r) => r.chapters)
-        .catch(() => [] as Chapter[])
+    ? await Promise.race([
+        api
+          .getNovel(novelId)
+          .then((r) => r.chapters)
+          .catch(() => [] as Chapter[]),
+        new Promise<Chapter[]>((xong) => setTimeout(() => xong([]), CHO_DS_CHUONG_MS)),
+      ])
     : [];
 
   const ds = dsChuong ?? [];
@@ -149,6 +179,29 @@ export default async function ChapterPage({
     soThuTu: i >= 0 ? i + 1 : 0,
     tongSo: ds.length,
   };
+
+  /*
+    Chia doan MOT lan o may chu bang CHINH ham ma bo dong bo dung de dem doan
+    (`lib/chapterSync.tachDoanVan`) — lech nhau mot doan la vach sang nhay sai.
+  */
+  const doanVan = tachDoanVan(chapter.content);
+  const coAudio = Boolean(audio);
+
+  /*
+    Che do va khung chu can biet NGAY lan ve dau (co trinh phat lon hay khong,
+    co hien chu hay khong) — nen doc tu cookie o may chu, khong doi JS. Xem
+    `lib/readerSession.ts`. Trang nay von da dong (doc `searchParams`), doc
+    cookie khong doi cach cache.
+  */
+  const kho = await cookies();
+  const prefs = giaiMaCookie(kho.get(COOKIE_CHE_DO)?.value);
+  const initialMode = cheDoKhiMo({
+    tuUrl: sp.mode,
+    daLuu: prefs.cheDo,
+    coAudio,
+    coChu: doanVan.length > 0,
+  });
+  const urlRequestsPlay = sp.autoplay === "1" || sp.autoplay === "true";
 
   return (
     <ChapterInteractiveReader
@@ -163,138 +216,143 @@ export default async function ChapterPage({
 
       <header className="stack-2 reader-head">
         <h1 className="page-title">{chapter.title}</h1>
-        <span className="hint eyebrow-icon">
-          <IconBook size={16} />
-          {formatNumber(chapter.char_count)} ký tự
-          {novel ? ` · ${novel.title}` : ""}
-        </span>
-        {/*
-          MOT lien ket gon toi trai nghiem NGHE rieng (`/listen/[id]`) — KHONG
-          con mo trinh phat/MiniPlayer/ListenReporter ngay tai day (Phan 2A).
-          Chua co audio thi chi thay huong dan tao (chu so huu) hoac khong
-          hien gi ca (nguoi doc thuong — khong ep ho quan tam toi audio).
-        */}
-        {audio ? (
-          <Link
-            className="btn btn-sm"
-            href={`/listen/${chapter.chapter_id}`}
-          >
-            <IconHeadphones size={15} /> Nghe chương này
-          </Link>
-        ) : (
-          <ChapterOwnerAudioAction ownerId={chapter.owner_id} />
-        )}
+        {/* Hai nhan RIENG (khong gop chung mot hop flex): tren dien thoai
+            "Có bản nghe" gop chung thi bi bop, xuong dong tung chu. */}
+        <div className="row row-spread reader-head-meta">
+          <span className="hint eyebrow-icon">
+            <IconBook size={16} />
+            {formatNumber(chapter.char_count)} ký tự
+            {novel ? ` · ${novel.title}` : ""}
+          </span>
+          {coAudio ? (
+            <span className="hint eyebrow-icon reader-head-audio">
+              <IconHeadphones size={15} /> Có bản nghe
+            </span>
+          ) : (
+            <ChapterOwnerAudioAction ownerId={chapter.owner_id} />
+          )}
+        </div>
+        {novel && tongSo > 0 ? (
+          <nav className="reader-topnav" aria-label="Chuyển chương nhanh">
+            {chuongTruoc ? (
+              <ChapterNavLink
+                target={lienKe(chuongTruoc)!}
+                href={`/chapters/${chuongTruoc.chapter_id}`}
+                className="btn btn-sm btn-ghost"
+              >
+                <span aria-hidden="true">←</span> Chương trước
+              </ChapterNavLink>
+            ) : (
+              <span className="btn btn-sm btn-ghost" aria-disabled="true">
+                <span aria-hidden="true">←</span> Chương trước
+              </span>
+            )}
+            <Link className="btn btn-sm btn-ghost" href={`/novels/${novel.novel_id}`}>
+              <IconList size={15} /> {soThuTu}/{tongSo}
+            </Link>
+            {chuongSau ? (
+              <ChapterNavLink
+                target={lienKe(chuongSau)!}
+                href={`/chapters/${chuongSau.chapter_id}`}
+                className="btn btn-sm btn-ghost"
+              >
+                Chương sau <span aria-hidden="true">→</span>
+              </ChapterNavLink>
+            ) : (
+              <span className="btn btn-sm btn-ghost" aria-disabled="true">
+                Chương sau <span aria-hidden="true">→</span>
+              </span>
+            )}
+          </nav>
+        ) : null}
       </header>
 
-      {/*
-        Tuy chon doc nam NGAY TREN cot chu, khong giau trong mot menu: nguoi
-        can chinh co chu la nguoi dang thay chu kho doc, va bat ho di tim la
-        bat sai nguoi.
-      */}
-      <ChapterReaderPrefsControl />
-
-      {/*
-        Cot chu hep hon phan con lai cua trang. Mot dong dai ~68 ky tu la nguong
-        mat con lan duoc tu cuoi dong nay sang dau dong sau ma khong lac; ca be
-        rong 1180px thi doc mot chuong dai rat met.
-      */}
-      <section className="reader" aria-label="Nội dung chương">
-        {chapter.content ? (
-          <div className="prose">
-            {chapter.content.split(/\n\n+/).map((para, idx) => (
-              <p key={idx} style={{ marginBottom: "1.25em" }}>
-                {para}
-              </p>
-            ))}
-          </div>
-        ) : audio ? (
-          // Cac tac pham nhap tu audio dai tap (13 truyen Fanfic Staging,
-          // xem docs/reports/) khong co van ban goc — day la trang thai BINH
-          // THUONG cua chung, khong phai loi/thieu du lieu.
-          <EmptyState
-            icon="🎧"
-            title="Chương này chỉ có bản audio"
-            hint={`Chưa có bản chữ cho chương này${novel ? ` trong ${novel.title}` : ""}. Nghe trọn tập tại trang Nghe.`}
-            action={
-              <Link className="btn btn-primary" href={`/listen/${chapter.chapter_id}`}>
-                <IconHeadphones size={15} /> Nghe tập này
-              </Link>
-            }
-          />
-        ) : (
-          <p className="hint">Chương này chưa có nội dung.</p>
-        )}
-      </section>
-
-      {/* Hỏi AI — trợ lý hỏi đáp về truyện/chương (xem AskAiPanel.tsx). */}
-      <AskAiPanel
-        novelId={chapter.novel_id}
+      <ChapterExperience
         chapterId={chapter.chapter_id}
-        chapterIndex={chapter.order_index}
-        chapterContent={chapter.content}
-      />
+        chapterTitle={chapter.title}
+        novelId={chapter.novel_id}
+        novelTitle={novel?.title ?? ""}
+        coverUrl={novel?.cover_url}
+        paragraphs={doanVan}
+        hasAudio={coAudio}
+        audioOutdated={Boolean(ket_qua.audio_outdated)}
+        initialMode={initialMode}
+        initialPrefs={prefs}
+        urlRequestsPlay={urlRequestsPlay}
+        prev={lienKe(chuongTruoc)}
+        next={lienKe(chuongSau)}
+        ownerId={chapter.owner_id}
+      >
+        {/* Hỏi AI — trợ lý hỏi đáp về truyện/chương (xem AskAiPanel.tsx). */}
+        <AskAiPanel
+          novelId={chapter.novel_id}
+          chapterId={chapter.chapter_id}
+          chapterIndex={chapter.order_index}
+          chapterContent={chapter.content}
+        />
 
-      {/* Binh luan chuong — luon hien du co audio hay khong: day la binh
-          luan ve NOI DUNG chuong, khong phai chi rieng ban audio. */}
-      <div className="listen-col">
-        <ChapterComments chapterId={chapter.chapter_id} />
-      </div>
+        {/* Binh luan chuong — luon hien du co audio hay khong: day la binh
+            luan ve NOI DUNG chuong, khong phai chi rieng ban audio. */}
+        <div className="listen-col">
+          <ChapterComments chapterId={chapter.chapter_id} />
+        </div>
 
-      {/*
-        Loi ra o CUOI chuong. Nguoi vua doc xong dang o day, khong phai o dau
-        trang — bat ho cuon nguoc len de tim duong sang chuong sau la mot viec
-        thua.
-      */}
-      {novel ? (
-        <nav className="reader-foot reader-nav" aria-label="Điều hướng chương">
-          {chuongTruoc ? (
-            <Link
-              className="btn reader-nav-prev"
-              href={`/chapters/${chuongTruoc.chapter_id}`}
-              prefetch={false}
-              rel="prev"
-            >
-              <span aria-hidden="true">←</span>
-              <span className="reader-nav-label">
-                <span className="reader-nav-cap">Chương trước</span>
-                <span className="truncate reader-nav-title">{chuongTruoc.title}</span>
-              </span>
+        {/*
+          Loi ra o CUOI trang. Nam TRONG `ChapterExperience` de hai lien ket
+          biet "ban dang nghe" — bam "Chương sau" luc dang phat thi chuong sau
+          phat tiep (xem `ChapterNavLink`).
+        */}
+        {novel ? (
+          <nav className="reader-foot reader-nav" aria-label="Điều hướng chương">
+            {chuongTruoc ? (
+              <ChapterNavLink
+                target={lienKe(chuongTruoc)!}
+                className="btn reader-nav-prev"
+                href={`/chapters/${chuongTruoc.chapter_id}`}
+                rel="prev"
+              >
+                <span aria-hidden="true">←</span>
+                <span className="reader-nav-label">
+                  <span className="reader-nav-cap">Chương trước</span>
+                  <span className="truncate reader-nav-title">{chuongTruoc.title}</span>
+                </span>
+              </ChapterNavLink>
+            ) : (
+              /* Giu o trong de nut "sau" khong nhay sang trai o chuong dau. */
+              <span className="reader-nav-prev" aria-hidden="true" />
+            )}
+
+            <Link className="btn btn-ghost reader-nav-up" href={`/novels/${novel.novel_id}`}>
+              <span aria-hidden="true">☰</span> Danh sách chương
+              {tongSo > 0 ? (
+                <span className="hint reader-nav-count">
+                  {soThuTu}/{tongSo}
+                </span>
+              ) : null}
             </Link>
-          ) : (
-            /* Giu o trong de nut "sau" khong nhay sang trai o chuong dau. */
-            <span className="reader-nav-prev" aria-hidden="true" />
-          )}
 
-          <Link className="btn btn-ghost reader-nav-up" href={`/novels/${novel.novel_id}`}>
-            <span aria-hidden="true">☰</span> Danh sách chương
-            {tongSo > 0 ? (
-              <span className="hint reader-nav-count">
-                {soThuTu}/{tongSo}
+            {chuongSau ? (
+              <ChapterNavLink
+                target={lienKe(chuongSau)!}
+                className="btn btn-primary reader-nav-next"
+                href={`/chapters/${chuongSau.chapter_id}`}
+                rel="next"
+              >
+                <span className="reader-nav-label">
+                  <span className="reader-nav-cap">Chương sau</span>
+                  <span className="truncate reader-nav-title">{chuongSau.title}</span>
+                </span>
+                <span aria-hidden="true">→</span>
+              </ChapterNavLink>
+            ) : (
+              /* Het truyen: noi ro thay vi de mot cho trong khong giai thich. */
+              <span className="hint reader-nav-next reader-nav-end">
+                Hết chương hiện có
               </span>
-            ) : null}
-          </Link>
-
-          {chuongSau ? (
-            <Link
-              className="btn btn-primary reader-nav-next"
-              href={`/chapters/${chuongSau.chapter_id}`}
-              prefetch={false}
-              rel="next"
-            >
-              <span className="reader-nav-label">
-                <span className="reader-nav-cap">Chương sau</span>
-                <span className="truncate reader-nav-title">{chuongSau.title}</span>
-              </span>
-              <span aria-hidden="true">→</span>
-            </Link>
-          ) : (
-            /* Het truyen: noi ro thay vi de mot cho trong khong giai thich. */
-            <span className="hint reader-nav-next reader-nav-end">
-              Hết chương hiện có
-            </span>
-          )}
-        </nav>
-      ) : null}
+            )}
+          </nav>
+        ) : null}
+      </ChapterExperience>
     </ChapterInteractiveReader>
   );
 }

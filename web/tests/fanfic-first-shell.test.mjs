@@ -124,8 +124,12 @@ test("muc dieu huong 'Trang chu' khop CHINH XAC, khong dung startsWith", () => {
   //
   // Phep so khop da chuyen len mot cho: `dangXem` duoc tinh MOT lan cho ca
   // `aria-current` lan vien thuoc dieu huong. Rang buoc thi y nguyen.
+  //
+  // Sprint 2: phep so khop chuyen vao `lib/navActive.ts` (trang truyen/chuong
+  // sang "Thư viện") — hanh vi co bai kiem rieng o `nav-active.test.mjs`.
   const nav = read("../src/components/NavAuth.tsx");
-  assert.match(nav, /l\.href === "\/"\s*\n?\s*\?\s*pathname === "\/"/);
+  assert.match(nav, /const dangXem = mucDangXem\(pathname\);/);
+  assert.match(read("../src/lib/navActive.ts"), /if \(pathname === "\/"\) return "\/";/);
   assert.match(nav, /const active = link\.href === dangXem;/);
 });
 

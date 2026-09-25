@@ -9255,18 +9255,36 @@ body.co-mini { padding-bottom: 74px; }
   }
 }
 
+/*
+  VUNG NOI DUNG CAO TOI THIEU MOT MAN HINH (Sprint 2).
+
+  Do bang PerformanceObserver (layout-shift) tren ban build production: khi
+  noi dung con NGAN (khung xuong `loading.tsx`, Thu vien dang tai, cong quan
+  tri dang kiem quyen), FOOTER nam trong khung nhin roi bi day xuong khi noi
+  dung ve — CLS 0,05–0,26 o /community, /admin, /library, trang chuong. Giu
+  `main` cao it nhat mot man hinh thi footer luon o duoi nep gap luc dang tai.
+*/
+#main {
+  min-height: 100vh;
+}
+@supports (min-height: 100svh) {
+  #main {
+    min-height: 100svh;
+  }
+}
+
 /* ---- cong quan tri (chua dang nhap / khong du quyen) ---- */
+/* Co che kinh (mo nen, vien, do sau) den tu lop `.kinh` gop — o day chi bo
+   cuc + nen dam hon mot chut de dong goi y doc duoc tren tranh nhieu chi tiet. */
 .admin-gate {
   display: flex;
   flex-direction: column;
   gap: var(--s4);
   padding: var(--s6) var(--s5);
   border-radius: var(--r4);
+}
+.admin-gate.kinh {
   background: #080a14d9;
-  border: 1px solid var(--kinh-vien);
-  box-shadow: var(--do-sau), var(--kinh-sang);
-  -webkit-backdrop-filter: blur(var(--blur-the));
-  backdrop-filter: blur(var(--blur-the));
 }
 .admin-gate-icon {
   display: grid;

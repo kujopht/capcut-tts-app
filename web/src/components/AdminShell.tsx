@@ -270,7 +270,7 @@ function TuChoi({ daDangNhap, loi }: { daDangNhap: boolean; loi: string }) {
   // tranh nen nhieu chi tiet, gan nhu khong doc duoc (QA 390/1366px).
   return (
     <div className="page auth-page">
-      <div className="admin-gate">
+      <div className="admin-gate kinh">
         <header className="auth-head">
           <span className="admin-gate-icon" aria-hidden="true">
             <IconShield size={22} />

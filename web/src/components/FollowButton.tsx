@@ -108,6 +108,7 @@ export function FollowButton({
       <Link
         className={nutKhach}
         href={loginHref(pathname)}
+        prefetch={false}
       >
         {label}
       </Link>

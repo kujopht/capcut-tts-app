@@ -44,7 +44,7 @@ export default function StudioOverview() {
         <h2 className="section-title">Hoặc mở thẳng một công cụ</h2>
         <p className="hint">
           Sáu công cụ, một tác phẩm. Mọi thứ bạn tạo ra đều nằm lại trong{" "}
-          <Link href="/studio/library">Tác phẩm của tôi</Link>.
+          <Link href="/studio/library" prefetch={false}>Tác phẩm của tôi</Link>.
         </p>
       </div>
 

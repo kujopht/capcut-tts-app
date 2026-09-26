@@ -103,7 +103,7 @@ export default function TranslatePage() {
           icon="🈺"
           title="Đăng nhập để bắt đầu dịch"
           action={
-            <Link className="btn btn-primary" href={loginHref("/studio/content?tab=translate")}>
+            <Link className="btn btn-primary" href={loginHref("/studio/content?tab=translate")} prefetch={false}>
               Đăng nhập
             </Link>
           }

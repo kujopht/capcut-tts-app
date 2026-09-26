@@ -135,6 +135,10 @@ test("memory: lat/khop co phan hoi chuyen dong (chi transform), tat o prefers-re
   assert.match(caro, /prefers-reduced-motion: reduce\)"\)\.matches \? "auto" : "smooth"/);
 });
 
+test("tab bang xep hang khong ngat dong o dien thoai (cuon ngang thay vi co nut)", () => {
+  assert.match(read("../src/app/globals.css"), /\.tab-hang \.tab-nut \{ white-space: nowrap; flex: 0 0 auto; \}/);
+});
+
 test("ban caro: 15 hang deu nhau, hang co quan khong cao hon hang trong", () => {
   const css = read("../src/app/globals.css");
   const dau = css.indexOf(".caro-ban {");

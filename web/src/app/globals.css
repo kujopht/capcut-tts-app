@@ -10899,6 +10899,9 @@ body.co-mini { padding-bottom: 74px; }
     scrollbar-width: none;
   }
   .tab-hang::-webkit-scrollbar { display: none; }
+  /* Sprint 3: nut tab KHONG co lai — "Toàn thời gian" tung vo thanh 3 dong o
+     390px (bang xep hang co 4 tab). Giu mot dong, hang tu cuon ngang. */
+  .tab-hang .tab-nut { white-space: nowrap; flex: 0 0 auto; }
 }
 
 /* -- tôn trọng lựa chọn giảm chuyển động ---------------------------------- */

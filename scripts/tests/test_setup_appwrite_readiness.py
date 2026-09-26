@@ -33,12 +33,22 @@ def _tao_setup() -> Setup:
     return Setup(dry_run=True)
 
 
+# Vong cho doc TUNG muc (`GET .../attributes/{key}`, `GET .../indexes/{key}`),
+# khong doc tai lieu collection — xem `Setup._doc_muc_that`. Mock tra dung
+# hinh dang mot muc don.
 def _thuoc_tinh(key: str, status: str, error: str = "") -> dict:
-    return {"attributes": [{"key": key, "status": status, "error": error}]}
+    return {"key": key, "status": status, "error": error}
 
 
 def _index(key: str, status: str, error: str = "") -> dict:
-    return {"indexes": [{"key": key, "status": status, "error": error}]}
+    return {"key": key, "status": status, "error": error}
+
+
+def _theo_duong_dan(bang: dict):
+    """side_effect cho `_call`: tra ket qua theo DUONG DAN duoc hoi (muc cuoi)."""
+    def _call_gia(method, path, *a, **kw):
+        return bang[path]
+    return _call_gia
 
 
 class ChoThuocTinhSanSangTest(unittest.TestCase):
@@ -100,7 +110,7 @@ class ChoThuocTinhSanSangTest(unittest.TestCase):
 
     def test_thuoc_tinh_bien_mat_nem_loi(self):
         s = _tao_setup()
-        with patch.object(s, "_call", return_value={"attributes": []}):
+        with patch.object(s, "_call", return_value={}):
             with self.assertRaises(SystemExit):
                 s._cho_thuoc_tinh_san_sang("/v1/.../profiles", "user_id")
 
@@ -126,13 +136,11 @@ class IndexChoTatCaThuocTinhTest(unittest.TestCase):
 
     def test_index_tu_choi_khi_mot_thuoc_tinh_chua_available(self):
         s = _tao_setup()
-        trang_thai = {
-            "attributes": [
-                {"key": "a", "status": "available"},
-                {"key": "b", "status": "processing"},
-            ]
+        bang = {
+            "/v1/.../t/attributes/a": _thuoc_tinh("a", "available"),
+            "/v1/.../t/attributes/b": _thuoc_tinh("b", "processing"),
         }
-        with patch.object(s, "_call", return_value=trang_thai):
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(bang)):
             with self.assertRaises(SystemExit) as ctx:
                 s._kiem_thuoc_tinh_san_sang_cho_index(
                     "/v1/.../t", "t_idx", ["a", "b"])
@@ -143,14 +151,54 @@ class IndexChoTatCaThuocTinhTest(unittest.TestCase):
 
     def test_index_khong_bao_loi_khi_tat_ca_da_available(self):
         s = _tao_setup()
-        trang_thai = {
-            "attributes": [
-                {"key": "a", "status": "available"},
-                {"key": "b", "status": "available"},
-            ]
+        bang = {
+            "/v1/.../t/attributes/a": _thuoc_tinh("a", "available"),
+            "/v1/.../t/attributes/b": _thuoc_tinh("b", "available"),
         }
-        with patch.object(s, "_call", return_value=trang_thai):
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(bang)):
             s._kiem_thuoc_tinh_san_sang_cho_index("/v1/.../t", "t_idx", ["a", "b"])
+
+
+class CacheCollectionCuKhongChanVongChoTest(unittest.TestCase):
+    """Do that 2026-09-26 tren Appwrite 1.9.6 + MongoDB THU: tai lieu collection
+    trong cache Redis (TTL -1) giu `rights_mode` = 'processing' mai mai, trong
+    khi chinh thuoc tinh da 'available'. Ba lan chay lai deu het 120s o cung mot
+    cho. Vong cho KHONG duoc doc tai lieu collection nua."""
+
+    BASE = "/v1/databases/db/collections/novels"
+    COLLECTION_CU = {
+        "attributes": [{"key": "rights_mode", "status": "processing"}],
+        "indexes": [{"key": "state_idx", "status": "processing"}],
+    }
+
+    def _bang(self):
+        return {
+            self.BASE: self.COLLECTION_CU,
+            f"{self.BASE}/attributes/rights_mode": _thuoc_tinh("rights_mode", "available"),
+            f"{self.BASE}/attributes/state": _thuoc_tinh("state", "available"),
+            f"{self.BASE}/indexes/state_idx": _index("state_idx", "available"),
+        }
+
+    def test_thuoc_tinh_doc_tung_muc_khong_doc_collection(self):
+        s = _tao_setup()
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(self._bang())) as m, \
+             patch("time.sleep", return_value=None):
+            s._cho_thuoc_tinh_san_sang(self.BASE, "rights_mode", timeout_giay=0.01)
+        self.assertEqual([c.args[1] for c in m.call_args_list],
+                         [f"{self.BASE}/attributes/rights_mode"])
+
+    def test_index_doc_tung_muc_khong_doc_collection(self):
+        s = _tao_setup()
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(self._bang())) as m, \
+             patch("time.sleep", return_value=None):
+            s._cho_index_san_sang(self.BASE, "state_idx", timeout_giay=0.01)
+        self.assertNotIn(self.BASE, [c.args[1] for c in m.call_args_list])
+
+    def test_kiem_truoc_index_doc_tung_thuoc_tinh(self):
+        s = _tao_setup()
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(self._bang())) as m:
+            s._kiem_thuoc_tinh_san_sang_cho_index(self.BASE, "x_idx", ["rights_mode", "state"])
+        self.assertNotIn(self.BASE, [c.args[1] for c in m.call_args_list])
 
 
 class IdempotentSauThatBaiMotPhanTest(unittest.TestCase):

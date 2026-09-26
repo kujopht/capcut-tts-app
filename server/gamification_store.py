@@ -86,6 +86,44 @@ class MockGamificationStore:
             ds = [e for e in self._xp_events.values() if e.user_id == user_id]
         return sorted(ds, key=lambda e: e.created_at)
 
+    def list_xp_events_since(self, user_id: str, since_iso: str) -> List[XpLedgerEntry]:
+        """`list_xp_events` LOC theo moc thoi gian — dung cho tran XP hang
+        ngay cua mini-game (Social & Play V1 Goi C): cong tong `xp_awarded`
+        cua moi su kien `event_type` bat dau bang `"game_"` tu dau ngay UTC."""
+        with self._lock:
+            ds = [e for e in self._xp_events.values()
+                  if e.user_id == user_id and e.created_at >= since_iso]
+        return sorted(ds, key=lambda e: e.created_at)
+
+    def award_xp_atomic(self, entry: XpLedgerEntry) -> Optional[UserProgress]:
+        """
+        Ghi MOT su kien XP VA ap dung vao tien do (cap goi thuong khi vuot
+        bac) NHU MOT KHOI NGUYEN TU — thay `award_xp`/`_ap_dung_xp` (hai buoc
+        rieng, `gamification_service.py`) cho duong Social & Play V1 Goi C
+        (settlement game): mot lan RLock giu ca doc-ghi-ghi, khong co khe ho
+        cho hai thread cung cong mot entry_id tranh nhau cap XP hai lan.
+
+        Trung `entry_id` -> tra `None`, KHONG thay doi gi (idempotent, cung
+        ngu nghia voi `record_xp_event`/`award_xp`). Cong thuc len bac giong
+        HET `gamification_service._ap_dung_xp` — xem docstring o do.
+        """
+        from server.gamification import level_for
+
+        with self._lock:
+            if entry.entry_id in self._xp_events:
+                return None
+            self._xp_events[entry.entry_id] = entry
+            progress = self._progress.get(entry.user_id) or UserProgress(
+                user_id=entry.user_id)
+            bac_truoc = level_for(progress.xp)
+            progress.xp += entry.xp_awarded
+            bac_sau = level_for(progress.xp)
+            if bac_sau.level > bac_truoc.level:
+                progress.goi_thuong_dang_cho += bac_sau.level - bac_truoc.level
+            progress.updated_at = entry.created_at
+            self._progress[entry.user_id] = progress
+            return progress
+
     # ======================================================== thanh tuu
 
     def list_unlocked_achievements(self, user_id: str) -> List[UnlockedAchievement]:

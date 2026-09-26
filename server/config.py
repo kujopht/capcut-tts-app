@@ -295,6 +295,16 @@ class Settings:
     #: Xem `docs/AUTHOR_RANK.md` muc "Ke hoach migration".
     author_gate_enabled: bool = False
 
+    #: Co bat mini-game (Social & Play V1 Goi C — Caro/Gomoku, Memory Runes).
+    #: Doc tu `FAS_GAMES_V1`. MAC DINH BAT khi `data_backend != "appwrite"`
+    #: (mock — an toan, khong cham du lieu production), MAC DINH TAT khi
+    #: `data_backend == "appwrite"` (production CHUA duoc migrate — xem
+    #: `docs/migrations/SOCIAL_PLAY_V1_GAMES_SCHEMA.md`), tru khi dat
+    #: `FAS_GAMES_V1=1` TUONG MINH sau khi da chay schema additive va doi
+    #: soat. Khi TAT: `GET /api/games/config` tra `{"enabled": false}`, moi
+    #: route `/api/games/*` khac tra 404 (xem `server/main.py`).
+    games_v1_enabled: bool = True
+
     #: Token dich vu cho CANARY (Phase 15/18), doc tu `FAS_CANARY_SERVICE_TOKEN`.
     #: MAC DINH RONG — khi rong, KHONG co danh tinh canary nao ton tai va moi
     #: so khop deu that bai; day la trang thai an toan, khong phai "tat kiem tra".
@@ -819,9 +829,14 @@ def load_settings() -> Settings:
         # Mac dinh: chi bat khi dang o development
         allow_unverified = environment.lower() in ("development", "dev", "local")
 
+    data_backend_raw = _env("DATA_BACKEND", "mock").lower()
+    games_v1_enabled = _env_bool(
+        "FAS_GAMES_V1", data_backend_raw != "appwrite")
+
     return Settings(
         environment=environment,
-        data_backend=_env("DATA_BACKEND", "mock").lower(),
+        data_backend=data_backend_raw,
+        games_v1_enabled=games_v1_enabled,
         storage_backend=_env("STORAGE_BACKEND", "local").lower(),
         cors_origins=_env_list("FAS_CORS_ORIGINS", "http://localhost:3000"),
         web_base_url=_env("FAS_WEB_BASE_URL", "http://localhost:3000").rstrip("/"),

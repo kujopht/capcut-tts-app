@@ -4390,3 +4390,179 @@ export const GROQ_CONSOLE_KEYS_URL = "https://console.groq.com/keys";
     `/keys` on dinh) — dung goc de tranh 404 neu console doi giao dien, chi
     goc `/` la thu duy nhat Cerebras xac nhan on dinh. */
 export const CEREBRAS_CONSOLE_KEYS_URL = "https://cloud.cerebras.ai";
+
+// =============================================================================
+// SOCIAL & PLAY V1 — goi C: tro choi co MAY CHU lam trong tai.
+//
+// Client CHI gui hanh dong (o, so thu tu nuoc/lat). Ban co, luot, thang/thua,
+// diem, XP deu do may chu tinh — xem `server/games_service.py`. Khong co ham
+// nao o day nhan hay gui diem/XP/nguoi thang.
+// =============================================================================
+
+export type GameSeat = "x" | "o";
+
+export interface GamePlayer {
+  user_id: string;
+  display_name: string;
+  username: string;
+  avatar_url: string | null;
+}
+
+export interface GameReward {
+  xp: number;
+  points: number;
+  reasons: string[];
+}
+
+export interface GamesConfig {
+  enabled: boolean;
+  season?: string;
+  rule_versions?: { caro: string; memory: string };
+  rewards?: { match_completed: number; match_won: number; run_completed: number };
+  caps?: { daily_game_xp: number; per_pair_per_day: number; runs_per_day: number };
+  disconnect_grace_seconds?: number;
+  poll_ms?: { lobby: number; playing: number };
+  memory?: { difficulties: Record<string, { rows: number; cols: number; pairs: number }> };
+}
+
+export interface CaroRoom {
+  room_id: string;
+  code: string;
+  game: "caro";
+  rule_version: string;
+  host_id: string;
+  status: "lobby" | "playing" | "finished" | "closed";
+  match_no: number;
+  match_id: string;
+  board: string;
+  moves: [number, GameSeat][];
+  move_no: number;
+  turn: GameSeat;
+  winner: GameSeat | "draw" | "";
+  win_line: number[];
+  end_reason: "five" | "draw" | "resign" | "timeout" | "abandon" | "";
+  ready_x: boolean;
+  ready_o: boolean;
+  rematch_x: boolean;
+  rematch_o: boolean;
+  settlement: "none" | "pending" | "settled";
+  you: GameSeat | null;
+  players: { x: GamePlayer | null; o: GamePlayer | null };
+  opponent_connected: boolean;
+  can_claim_timeout: boolean;
+  rewards?: Record<string, GameReward>;
+  version: number;
+}
+
+export interface GameResultView {
+  result_id?: string;
+  game: string;
+  season: string;
+  outcome: "win" | "loss" | "draw" | "completed";
+  points: number;
+  difficulty: string;
+  xp_awarded: number;
+  xp_entries: { event_type: string; entry_id: string; xp: number }[];
+  reasons: string[];
+  validated: boolean;
+  rule_version: string;
+  created_at: string;
+  settlement_state?: string;
+  opponent_id?: string;
+}
+
+export interface MemoryRunView {
+  run_id: string;
+  difficulty: string;
+  rows: number;
+  cols: number;
+  pairs: number;
+  matched: { index: number; key: string }[];
+  open: { index: number; key: string } | null;
+  moves: number;
+  seq: number;
+  status: "active" | "completed" | "expired" | "abandoned";
+  started_at: string;
+  finished_at: string;
+  elapsed_seconds: number;
+  score: number;
+  settlement: string;
+  result: GameResultView | null;
+}
+
+export interface MemoryFlip {
+  index: number;
+  key: string;
+  first_index?: number;
+  first_key?: string;
+  matched?: boolean;
+}
+
+export interface GameLeaderboardItem {
+  rank: number;
+  user_id: string;
+  display_name: string;
+  username: string;
+  avatar_url: string | null;
+  points?: number;
+  wins?: number;
+  draws?: number;
+  losses?: number;
+  matches?: number;
+  best_score?: number;
+  runs?: number;
+}
+
+export interface GameLeaderboardPage {
+  game: "caro" | "memory";
+  season: string;
+  difficulty: string;
+  items: GameLeaderboardItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  viewer_entry: GameLeaderboardItem | null;
+  seasons: string[];
+}
+
+const post = (body: unknown) => ({ method: "POST", body: JSON.stringify(body ?? {}) });
+
+export const games = {
+  config: () => request<GamesConfig>("/api/games/config"),
+
+  startMemory: (difficulty: string) =>
+    request<{ run: MemoryRunView }>("/api/games/memory/runs", post({ difficulty })),
+  memoryRun: (runId: string) =>
+    request<{ run: MemoryRunView }>(`/api/games/memory/runs/${encodeURIComponent(runId)}`),
+  flip: (runId: string, index: number, seq: number) =>
+    request<{ run: MemoryRunView; flip: MemoryFlip }>(
+      `/api/games/memory/runs/${encodeURIComponent(runId)}/flip`,
+      post({ index, seq }),
+    ),
+  abandonMemory: (runId: string) =>
+    request<{ run: MemoryRunView }>(`/api/games/memory/runs/${encodeURIComponent(runId)}/abandon`, post({})),
+
+  createRoom: () => request<{ room: CaroRoom }>("/api/games/rooms", post({ game: "caro" })),
+  joinRoom: (code: string) => request<{ room: CaroRoom }>("/api/games/rooms/join", post({ code })),
+  room: (code: string) => request<{ room: CaroRoom }>(`/api/games/rooms/${encodeURIComponent(code)}`),
+  ready: (code: string, ready: boolean) =>
+    request<{ room: CaroRoom }>(`/api/games/rooms/${encodeURIComponent(code)}/ready`, post({ ready })),
+  move: (code: string, index: number, moveNo: number) =>
+    request<{ room: CaroRoom }>(
+      `/api/games/rooms/${encodeURIComponent(code)}/move`,
+      post({ index, move_no: moveNo }),
+    ),
+  resign: (code: string) => request<{ room: CaroRoom }>(`/api/games/rooms/${encodeURIComponent(code)}/resign`, post({})),
+  claimTimeout: (code: string) =>
+    request<{ room: CaroRoom }>(`/api/games/rooms/${encodeURIComponent(code)}/claim-timeout`, post({})),
+  rematch: (code: string) => request<{ room: CaroRoom }>(`/api/games/rooms/${encodeURIComponent(code)}/rematch`, post({})),
+  leave: (code: string) => request<{ room: CaroRoom }>(`/api/games/rooms/${encodeURIComponent(code)}/leave`, post({})),
+
+  leaderboard: (opts: { game: "caro" | "memory"; season?: string; difficulty?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams({ game: opts.game, limit: String(opts.limit ?? 20), offset: String(opts.offset ?? 0) });
+    if (opts.season) q.set("season", opts.season);
+    if (opts.difficulty) q.set("difficulty", opts.difficulty);
+    return request<GameLeaderboardPage>(`/api/games/leaderboard?${q}`);
+  },
+  myHistory: (limit = 20) => request<{ items: GameResultView[] }>(`/api/games/me/history?limit=${limit}`),
+};

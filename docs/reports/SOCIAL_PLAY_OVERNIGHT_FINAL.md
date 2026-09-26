@@ -152,7 +152,7 @@ Giao diện XP:
 | | |
 |---|---|
 | Trạng thái | OPEN, `MERGEABLE`, `mergeStateStatus BLOCKED` |
-| Head | **`e5a0692`** (`feat/social-play-c-games`) |
+| Head | Mã: **`e5a0692`** (`feat/social-play-c-games`). Các commit sau đó chỉ thêm báo cáo này (tài liệu + ảnh) |
 | CI | Web + gitleaks pass. Backend fail đúng tập 734 lỗi của `main`, theo tên (0 lỗi mới) |
 | Đêm nay | `e5a0692`: sửa hàng bàn Caro + 1 test. Mô tả PR đã cập nhật. Báo cáo này nằm trên nhánh này |
 

@@ -11,6 +11,7 @@ NGUYEN TAC:
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
@@ -43,6 +44,12 @@ REQUEST_TIMEOUT = 15.0
 
 class AppwriteConfigError(RuntimeError):
     """Cau hinh Appwrite thieu hoac sai - bao ro thay vi im lang dung mock."""
+
+
+class _Appwrite5xx(AppwriteUnavailableError):
+    """Appwrite TRA VE 5xx (khac mat ket noi/timeout). CHI loai nay duoc `profile_from_token` thu lai:
+    thu lai ca timeout (15 s/lan) se giu moi request co token toi ~45 s khi Appwrite treo va bo doi
+    threadpool cua API (phat hien qua review doc lap)."""
 
 
 def profile_permissions(user_id: str) -> list:
@@ -160,8 +167,15 @@ class AppwriteIdentityAdapter:
             except Exception:
                 body = None
             message = thong_diep_loi_an_toan(body, status_code=response.status_code)
-            if response.status_code in (401, 403):
-                raise AuthError(message)
+            if response.status_code >= 500:
+                # 5xx la loi CUA Appwrite, khong phai nguoi dung sai thong tin — cung ly do voi
+                # nhanh `httpx.HTTPError` o tren: 503, khong phai 401. Do that (Appwrite 1.9.6 +
+                # MongoDB THU, 2026-09-26): nhieu request DONG THOI cua cung mot nguoi lam
+                # `GET /v1/account` tra 500 "Transaction aborted", va truoc day no thanh 401 — giao
+                # dien coi 401 la "phien het han", nen mot cu bam dup co the dang xuat nguoi dung.
+                # Thong diep CO DINH (nhu nhanh mat ket noi): khong dua loi noi bo cua Appwrite (vd
+                # "Utopia\\Database\\Exception\\Transaction") ra phan hoi.
+                raise _Appwrite5xx("Appwrite tạm thời không xử lý được yêu cầu. Vui lòng thử lại.")
             raise AuthError(message)
 
         if response.status_code == 204 or not response.content:
@@ -275,10 +289,23 @@ class AppwriteIdentityAdapter:
         segments" neu gui nham cho.
 
         Danh tinh LUON lay tu phan hoi cua Appwrite, khong bao gio tu client.
+
+        Thu lai TOI DA hai lan CHI khi Appwrite TRA VE 5xx (`_Appwrite5xx`) — day la mot
+        phep DOC, lap lai an toan. Do that: `GET /v1/account` DONG THOI cua cung mot nguoi
+        tren Appwrite 1.9.6 + MongoDB tra 500 "Transaction aborted" (3/6 request trong mot
+        lan gui trung dong thoi), lan goi lai ngay sau do thanh cong. Mat ket noi/timeout va
+        401/403 (phien sai/het han) KHONG bao gio duoc thu lai.
         """
-        data = self._request(
-            "GET", "/v1/account", session=(token or "").strip(), admin=False
-        )
+        for lan in range(3):
+            try:
+                data = self._request(
+                    "GET", "/v1/account", session=(token or "").strip(), admin=False
+                )
+                break
+            except _Appwrite5xx:
+                if lan == 2:
+                    raise
+                time.sleep(0.05 * (lan + 1))
         user_id = str(data.get("$id") or "")
         if not user_id:
             raise AuthError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn.")
@@ -329,6 +356,8 @@ class AppwriteIdentityAdapter:
         profile.last_watch_duration_seconds = float(
             row.get("last_watch_duration_seconds") or 0.0)
         profile.last_watch_at = str(row.get("last_watch_at") or "")
+        # Social Play V1 — cung ly do voi `_profile_from` ben duoi.
+        profile.banner_key, profile.accent, profile.fandom_ids = _truong_social_v1(row)
         return profile
 
     def _profile_path(self, user_id: str) -> str:
@@ -444,6 +473,11 @@ class AppwriteIdentityAdapter:
         "last_watch_series_id", "last_watch_episode_id",
         "last_watch_position_seconds", "last_watch_duration_seconds",
         "last_watch_at",
+        # Social Play V1 (capability `social_v1_schema`) — them SAU, CUNG co
+        # che dong-thieu-thi-bo-qua nay. `SocialService` con co lop TU CHOI RO
+        # RANG rieng (`CapabilityDisabled`) truoc khi ghi toi day; lop nay chi
+        # la luoi du phong THU HAI, giong moi nhom truong V2/V6 khac.
+        "banner_key", "accent", "fandom_ids",
     )
 
     #: Thuoc tinh KIEU `datetime` (khong bat buoc) trong `_PROFILE_V2_FIELDS` —
@@ -844,6 +878,7 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         status = AuthorStatus(row.get("author_status") or "none")
     except ValueError:
         status = AuthorStatus.NONE
+    banner_key, accent, fandom_ids = _truong_social_v1(row)
     return Profile(
         user_id=str(row.get("user_id") or row.get("") or ""),
         email=str(row.get("email") or ""),
@@ -871,7 +906,25 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         last_watch_duration_seconds=float(
             row.get("last_watch_duration_seconds") or 0.0),
         last_watch_at=str(row.get("last_watch_at") or ""),
+        banner_key=banner_key,
+        accent=accent,
+        fandom_ids=fandom_ids,
     )
+
+
+def _truong_social_v1(row: Dict[str, Any]) -> Tuple[str, str, List[str]]:
+    """`banner_key`/`accent`/`fandom_ids` (Social Play V1) tu hang `profiles`.
+
+    Hai duong doc (`_profile_from` cho danh sach/tim kiem/ho so cong khai,
+    `_merge_stored` cho `/api/auth/me`) PHAI cung doc ba truong nay. Do that tren
+    Appwrite 1.9.6 THU (2026-09-26): `PUT /api/me/profile` ghi dung ca ba vao hang
+    (doc tai lieu truc tiep thay `accent: jade`, `fandom_ids: [naruto]`,
+    `banner_key`), nhung `GET /api/users/{id}` tra `accent: null`, `fandom_ids: []`,
+    khong banner — ca hai ham tung QUEN chung (dung loai loi `avatar_key` da gap,
+    xem `TestProfileFromRow`). Kho mock khong lo ra vi no tra lai chinh doi tuong
+    trong bo nho."""
+    return (str(row.get("banner_key") or ""), str(row.get("accent") or ""),
+            [str(x) for x in (row.get("fandom_ids") or []) if x])
 
 
 def _account_from(row: Dict[str, Any]) -> AccountStatus:

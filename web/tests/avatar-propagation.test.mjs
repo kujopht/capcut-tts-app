@@ -32,15 +32,31 @@ test("AuthorCard (kieu dung chung cho bai/binh luan/tim kiem) co avatar_url", ()
   assert.match(than, /avatar_url/);
 });
 
+/*
+  Social & Play V1: moi be mat hien mot NGUOI di qua `UserAvatar` (avatar +
+  khung dang trang bi) thay vi tu ghep `<Avatar>`/`<CosmeticFrame>` — nen bat
+  bien "hien avatar THAT" gio co hai nua: (1) be mat truyen DUNG doi tuong
+  nguoi (co `avatar_url`) vao `UserAvatar`, (2) `UserAvatar` chuyen
+  `avatar_url` do xuong `<Avatar>` va gan khung dang deo.
+*/
+const userAvatar = () => read("../src/components/UserAvatar.tsx");
+
+test("UserAvatar chuyen avatar_url that xuong Avatar va gan khung dang deo", () => {
+  const src = userAvatar();
+  assert.match(src, /<Avatar name=\{ten\} avatarUrl=\{user\?\.avatar_url\}/);
+  assert.match(src, /<CosmeticFrame cosmetic=\{khung\}>/);
+  assert.match(src, /slot === "avatar_frame"/);
+});
+
 test("PostCard hien avatar that cua tac gia bai dang", () => {
   const src = postCard();
-  assert.match(src, /<Avatar\s+name=\{ten\}\s+avatarUrl=\{bai\.author\?\.avatar_url\}/);
+  assert.match(src, /<UserAvatar user=\{bai\.author\}/);
 });
 
 test("CommentThread hien avatar cho binh luan/tra loi (dung chung mot component)", () => {
   const src = commentThread();
-  // Hang binh luan da render (khong phai o soan) phai co Avatar lay tu bl.author.
-  assert.match(src, /avatarUrl=\{bl\.author\?\.avatar_url\}/);
+  // Hang binh luan da render (khong phai o soan) phai lay avatar tu bl.author.
+  assert.match(src, /<UserAvatar user=\{bl\.author\}/);
 });
 
 test("SearchOverlay hien avatar cho ca ket qua NGUOI va BAI VIET", () => {
@@ -50,8 +66,9 @@ test("SearchOverlay hien avatar cho ca ket qua NGUOI va BAI VIET", () => {
 });
 
 test("Trang ho so cong khai (/u/[username]) hien avatar that", () => {
+  // `{...p, …}` mang `p.avatar_url` vao UserAvatar, kem khung cong khai.
   const src = publicProfile();
-  assert.match(src, /avatarUrl=\{p\.avatar_url\}/);
+  assert.match(src, /<UserAvatar user=\{\{ \.\.\.p, equipped_cosmetics: gam\?\.equipped_cosmetics \?\? \[\] \}\}/);
 });
 
 /*
@@ -63,7 +80,10 @@ test("Trang ho so cong khai (/u/[username]) hien avatar that", () => {
 */
 test("PostComposer hien avatar that o hang kich hoat (khong chi luc mo rong)", () => {
   const src = postComposer();
-  assert.match(src, /<Avatar\s+name=\{tenToi\}\s+avatarUrl=\{profile\?\.avatar_url\}/);
+  const hang = src.slice(src.indexOf('className="card soan-bai-moi"'));
+  assert.match(hang, /^[^]*?<UserAvatar user=\{profile\}/);
+  assert.ok(hang.indexOf("<UserAvatar user={profile}") < hang.indexOf("soan-bai-kich-hoat"),
+    "avatar phai nam TRONG hang kich hoat, truoc nut mo");
 });
 
 test("CommunitySidebar (Tác giả nổi bật) hien avatar that cua tung nguoi", () => {

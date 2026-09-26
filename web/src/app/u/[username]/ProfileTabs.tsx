@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   social as apiSocial,
+  type Achievement,
   type Novel,
   type Post,
   type ServerLimits,
@@ -24,11 +25,13 @@ import { StoryCard } from "@/components/StoryCard";
 import { PostCard } from "@/components/PostCard";
 import { EmptyState, ErrorState, SkeletonList } from "@/components/ui";
 
-type Tab = "truyen" | "bai";
+type Tab = "bai" | "truyen" | "thanh-tuu";
 
+/** Thu tu theo brief Social & Play V1: bai viet, truyen da xuat ban, thanh tuu. */
 const TABS: ReadonlyArray<{ key: Tab; label: string }> = [
-  { key: "truyen", label: "Truyện" },
   { key: "bai", label: "Bài viết" },
+  { key: "truyen", label: "Truyện" },
+  { key: "thanh-tuu", label: "Thành tựu" },
 ];
 
 export function ProfileTabs({
@@ -36,13 +39,18 @@ export function ProfileTabs({
   novels,
   isAuthor,
   postCount,
+  achievements = [],
 }: {
   userId: string;
   novels: Novel[];
   isAuthor: boolean;
   postCount: number;
+  /** Thanh tuu CONG KHAI — chi hien nhung cai da mo. */
+  achievements?: Achievement[];
 }) {
-  const [tab, setTab] = useState<Tab>("truyen");
+  // Tac gia co truyen thi mo tab Truyen truoc; con lai la Bai viet.
+  const [tab, setTab] = useState<Tab>(isAuthor && novels.length ? "truyen" : "bai");
+  const daMo = achievements.filter((a) => a.unlocked);
   const [bai, setBai] = useState<Post[] | null>(null);
   const [limits, setLimits] = useState<ServerLimits | null>(null);
   const [loi, setLoi] = useState("");
@@ -108,7 +116,7 @@ export function ProfileTabs({
           >
             {t.label}
             <span className="hint tab-so">
-              {t.key === "truyen" ? novels.length : postCount}
+              {t.key === "truyen" ? novels.length : t.key === "bai" ? postCount : daMo.length}
             </span>
           </button>
         ))}
@@ -172,6 +180,25 @@ export function ProfileTabs({
                   setBai((truoc) => (truoc ?? []).filter((x) => x.post_id !== id))
                 }
               />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div role="tabpanel" id="panel-thanh-tuu" aria-labelledby="tab-thanh-tuu" hidden={tab !== "thanh-tuu"}>
+        {daMo.length === 0 ? (
+          <EmptyState icon="🏅" title="Chưa mở thành tựu nào" hint="Thành tựu mở khoá khi đọc, nghe, viết và tham gia cộng đồng." />
+        ) : (
+          <div className="bento-grid">
+            {daMo.map((a) => (
+              <div key={a.key} className={`achievement-card do-hiem-${a.rarity}`}>
+                <span className="achievement-card-icon" aria-hidden="true">
+                  {a.icon}
+                </span>
+                <span className="progress-card-body">
+                  <strong>{a.name}</strong>
+                </span>
+              </div>
             ))}
           </div>
         )}

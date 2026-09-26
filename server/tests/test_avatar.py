@@ -96,9 +96,18 @@ class TestAvatarUpload(AvatarTestCase):
         self.assertNotIn("example.com", khoa)
 
     def test_dinh_dang_khong_hop_le_bi_tu_choi_400(self):
+        """
+        Social Play V1: `PUT /api/creator/avatar` gio giai ma THAT anh truoc
+        khi luu (`image_normalize.normalize_avatar`) — loai anh duoc quyet
+        dinh boi NOI DUNG THAT SU, khong phai chuoi `mime` client tu khai.
+        Mot PNG THAT gan mime gia (`application/pdf`) nay ĐƯỢC CHẤP NHẬN (200)
+        vi noi dung giai ma ra la PNG hop le; bai test nay đổi sang gửi DỮ
+        LIỆU THẬT SỰ không giải mã được, để vẫn kiểm đúng đường 400.
+        """
         token = self.user()
+        rac = "dGhpcyBpcyBub3QgYW4gaW1hZ2UgYXQgYWxs"  # base64("this is not an image at all")
         r = self.client.put("/api/creator/avatar", headers=self.auth(token),
-                            json={"base64": PNG_1X1, "mime": "application/pdf"})
+                            json={"base64": rac, "mime": "image/png"})
         self.assertEqual(r.status_code, 400)
 
     def test_chua_dang_nhap_bi_401(self):
@@ -106,20 +115,28 @@ class TestAvatarUpload(AvatarTestCase):
                             json={"base64": PNG_1X1, "mime": "image/png"})
         self.assertEqual(r.status_code, 401)
 
-    def test_thay_avatar_moi_xoa_object_cu_khi_doi_duoi(self):
+    def test_thay_avatar_giu_cung_khoa_da_chuan_hoa(self):
+        """
+        Social Play V1: moi avatar gio di qua `image_normalize.normalize_avatar`
+        TRUOC khi cham `CreatorService.set_avatar`, nen dau ra LUON la WebP —
+        khoa doi tuong (`avatars/{user}/anh.{duoi}`) khong con doi theo mime
+        client khai NUA (`duoi` luon la `"webp"`). Bai test nay truoc kia kiem
+        "doi duoi thi xoa khoa cu"; gio kiem dung hanh vi MOI: khoa ON DINH,
+        va object THAT SU duoc GHI DE (khong con la file cu).
+        """
         token = self.user()
         head = self.auth(token)
         r1 = self.client.put("/api/creator/avatar", headers=head,
                              json={"base64": PNG_1X1, "mime": "image/jpeg"})
         khoa_cu = r1.json()["profile"]["avatar_key"]
+        self.assertTrue(khoa_cu.endswith(".webp"))
         self.assertTrue(server_main.storage._path(khoa_cu).is_file())
 
         r2 = self.client.put("/api/creator/avatar", headers=head,
                              json={"base64": PNG_1X1, "mime": "image/png"})
         khoa_moi = r2.json()["profile"]["avatar_key"]
-        self.assertNotEqual(khoa_cu, khoa_moi)
-        self.assertFalse(server_main.storage._path(khoa_cu).is_file(),
-                         "avatar cũ (đuôi khác) phải bị xoá sau khi thay")
+        self.assertEqual(khoa_cu, khoa_moi)
+        self.assertTrue(server_main.storage._path(khoa_moi).is_file())
 
     def test_go_avatar_xoa_ca_khoa_lan_object(self):
         token = self.user()

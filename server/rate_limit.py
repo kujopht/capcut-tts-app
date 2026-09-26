@@ -5,6 +5,10 @@ Phan loai endpoint:
 - Tier A — sensitive / expensive (auth mutations, tts/translation jobs, imports, signed URLs, admin mutations): 60/min.
 - Tier B — normal mutations (posts, comments, follows, progress, likes): 120/min.
 - Tier C — public reads (catalog, detail, chapters, tags, profile): 600/min.
+- Tier PROFILE — luu ho so / anh dai dien (`PUT /api/me/profile`, `PUT /api/creator/avatar`):
+  30/GIO (Social & Play V1). Moi lan co the kem anh toi 5-8 MB ma may chu phai GIAI MA
+  that (Pillow) — 120 lan/phut cua Tier B la mot cua de dot CPU, con mot nguoi that sua
+  ho so vai lan moi gio. Middleware khong doc body nen dem MOI lan luu, co anh hay khong.
 - EXCLUDED — healthcheck (/api/health, /api/ready), CORS preflight (OPTIONS), noi bo canary.
 """
 
@@ -26,7 +30,11 @@ from starlette.responses import Response
 TIER_A = "tier_a"
 TIER_B = "tier_b"
 TIER_C = "tier_c"
+TIER_PROFILE = "tier_profile"
 EXCLUDED = "excluded"
+
+#: Cua so dem (giay) theo tier — mac dinh 60s; luu ho so tinh theo GIO.
+TIER_WINDOW_SECONDS: Dict[str, float] = {TIER_PROFILE: 3600.0}
 
 
 class SlidingWindowRateLimiter:
@@ -36,6 +44,10 @@ class SlidingWindowRateLimiter:
         self._lock = threading.Lock()
         self._history: Dict[str, List[float]] = defaultdict(list)
         self._last_prune = time.monotonic()
+        #: Cua so LON NHAT tung gap — don dep theo no, khong theo cua so cua request
+        #: dang goi: mot request 60s kich hoat don dep khong duoc xoa lich su cua
+        #: mot khoa tinh theo GIO (Tier PROFILE) chi vi no im 2 phut.
+        self._max_window = 60.0
 
     def check(self, key: str, limit: int, window: float = 60.0) -> Tuple[bool, int, int]:
         """
@@ -48,9 +60,10 @@ class SlidingWindowRateLimiter:
         """
         now = time.monotonic()
         with self._lock:
+            self._max_window = max(self._max_window, window)
             # Dinh ky don cac key da het han de tiet kiem bo nho
             if now - self._last_prune > 60.0:
-                self._prune_expired(now, window * 2)
+                self._prune_expired(now, self._max_window * 2)
                 self._last_prune = now
 
             timestamps = self._history[key]
@@ -135,6 +148,10 @@ def classify_request(request: Request) -> Tuple[str, int]:
     limit_b = int(os.environ.get("FAS_RATE_LIMIT_TIER_B", "120"))
     limit_c = int(os.environ.get("FAS_RATE_LIMIT_TIER_C", "600"))
 
+    # TIER PROFILE: luu ho so/anh dai dien — giai ma anh that, dem theo GIO.
+    if method == "PUT" and path in ("/api/me/profile", "/api/creator/avatar"):
+        return TIER_PROFILE, int(os.environ.get("FAS_RATE_LIMIT_PROFILE_PER_HOUR", "30"))
+
     # TIER A: Sensitive & Expensive Operations
     if path in ("/api/auth/register", "/api/auth/login") or path.startswith("/api/auth/oauth"):
         return TIER_A, limit_a
@@ -176,7 +193,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         key = f"{tier}:{resolve_rate_limit_key(request)}"
-        allowed, remaining, retry_after = limiter.check(key, limit, window=60.0)
+        allowed, remaining, retry_after = limiter.check(
+            key, limit, window=TIER_WINDOW_SECONDS.get(tier, 60.0))
 
         if not allowed:
             payload = {

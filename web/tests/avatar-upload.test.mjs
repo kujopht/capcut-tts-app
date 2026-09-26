@@ -78,9 +78,12 @@ test("menu tai khoan (NavAuth) dung component Avatar dung chung, truyen avatar_u
     trang ho so cong khai) — bai kiem ve dac diem HIEN THI thuoc ve file do;
     o day chi con kiem NavAuth truyen dung prop.
   */
+  // Social & Play V1: NavAuth di qua `UserAvatar` (Avatar + khung dang deo) —
+  // doi khung trong trinh sua ho so la thay ngay tren thanh dieu huong.
   const src = navAuth();
-  assert.match(src, /import\s*\{\s*Avatar\s*\}\s*from\s*"@\/components\/Avatar"/);
-  assert.match(src, /<Avatar\s+name=\{name\}\s+avatarUrl=\{profile\.avatar_url\}/);
+  assert.match(src, /import\s*\{\s*UserAvatar\s*\}\s*from\s*"@\/components\/UserAvatar"/);
+  assert.match(src, /<UserAvatar user=\{profile\} className="avatar" \/>/);
+  assert.match(read("../src/components/UserAvatar.tsx"), /avatarUrl=\{user\?\.avatar_url\}/);
 });
 
 test("components/Avatar.tsx: anh that hay chu cai dau ten, khong de chu chong len anh", () => {

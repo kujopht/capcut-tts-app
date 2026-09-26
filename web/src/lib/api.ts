@@ -47,6 +47,26 @@ export interface Profile {
   /** URL xem được của avatar, do máy chủ ký. `null`/`undefined` = chưa có —
       giao diện lùi về chữ cái đầu tên. */
   avatar_url?: string | null;
+  /** Social & Play V1 — ảnh bìa hồ sơ, màu nhấn, fandom yêu thích. Tuỳ chọn:
+      máy chủ chưa bật tính năng thì không trả. */
+  banner_url?: string | null;
+  accent?: string | null;
+  fandom_ids?: string[];
+  /** Vật phẩm đang trang bị của CHÍNH MÌNH — để avatar thanh điều hướng mang
+      đúng khung, đổi khung là thấy ngay ở mọi nơi. */
+  equipped_cosmetics?: CosmeticItem[];
+}
+
+/** Một lần lưu trình sửa hồ sơ — mọi trường tuỳ chọn, máy chủ kiểm TẤT CẢ
+    trước khi ghi bất kỳ thứ gì (được cả hoặc không được gì). */
+export interface ProfileUpdate {
+  bio?: string;
+  fandom_ids?: string[];
+  accent?: string | null;
+  avatar?: { data: string; mime: string } | { remove: true };
+  banner?: { data: string; mime: string } | { remove: true };
+  /** `cosmetic_key` khung avatar đã sở hữu, hoặc `null` = không khung. */
+  frame?: string | null;
 }
 
 /**
@@ -287,6 +307,13 @@ export interface PublicProfile {
     achievements: Achievement[];
     equipped_cosmetics: CosmeticItem[];
   };
+  /** Social & Play V1 — tuỳ chọn như mọi trường mới ở đây. */
+  banner_url?: string | null;
+  accent?: string | null;
+  fandom_ids?: string[];
+  /** Chỉ khi người xem đã đăng nhập và xem hồ sơ NGƯỜI KHÁC. Không bao giờ có
+      chiều ngược lại ("họ chặn mình") — lộ ra thì thành công cụ dò xét. */
+  viewer_relation?: { blocked: boolean; muted: boolean };
 }
 
 export interface Novel {
@@ -826,6 +853,14 @@ export const api = {
   /** Go avatar — giao dien lui ve chu cai dau ten. */
   removeAvatar: () =>
     request<{ profile: Profile }>("/api/creator/avatar", { method: "DELETE" }),
+
+  /** Trình sửa hồ sơ (Social & Play V1): MỘT lần lưu, được cả hoặc không được
+      gì — máy chủ giải mã/nén lại ảnh và tự đặt khoá lưu trữ. */
+  updateMyProfile: (payload: ProfileUpdate) =>
+    request<{ profile: Profile }>("/api/me/profile", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
 
   applyAuthor: (payload: {
     pen_name: string;
@@ -2916,6 +2951,16 @@ export interface Post {
     /** Tuỳ chọn để client cũ vẫn biên dịch được — cùng lý do với `Novel.cover_url`. */
     cover_url?: string | null;
   };
+  /** Social & Play V1 — tuỳ chọn: máy chủ cũ không trả, giao diện coi như `false`/rỗng. */
+  spoiler?: boolean;
+  /** Slug trong `ServerLimits.community_fandoms`. Rỗng = không gắn fandom. */
+  fandom_id?: string;
+  /** Chỉ `true` khi TÁC GIẢ đã sửa chữ sau khi đăng — bộ đếm thích/bình luận
+      không bao giờ làm cờ này bật. */
+  edited?: boolean;
+  edited_at?: string;
+  /** Máy chủ trả lại bài CŨ cho một lần gửi lặp lại cùng `client_key`. */
+  replayed?: boolean;
 }
 
 export interface Comment {
@@ -2940,6 +2985,9 @@ export interface Comment {
   updated_at: string;
   author?: AuthorCard;
   replies?: Comment[];
+  /** Social & Play V1 — xem `Post.edited`. */
+  edited?: boolean;
+  edited_at?: string;
 }
 
 export type NotificationKind =
@@ -3015,6 +3063,44 @@ export interface FeedPage {
   following_truncated: boolean;
 }
 
+/**
+ * Bảng tin Social & Play V1 (`/api/feed?scope=…`): phân trang bằng CURSOR tất
+ * định (thời điểm tạo giảm dần, `post_id` phá hoà) và có TRẦN độ sâu — không
+ * có `total`, vì đếm cả kho cho mỗi trang là một phép quét toàn bảng.
+ */
+export interface FeedPageV2 {
+  items: Post[];
+  next_cursor: string | null;
+  scope: "latest" | "following";
+  fandom: string;
+  limit: number;
+  /** Đã chạm trần độ sâu — hết "Xem thêm", giao diện nói rõ. */
+  depth_capped: boolean;
+  following_truncated?: boolean;
+}
+
+export interface CommunityFandom {
+  id: string;
+  label: string;
+}
+
+/** Những gì MÁY CHỦ đang bật — nút nào máy chủ chưa hỗ trợ thì không vẽ. */
+export interface SocialCapabilities {
+  post_spoiler: boolean;
+  post_fandom: boolean;
+  edited_label: boolean;
+  user_reports: boolean;
+  blocks: boolean;
+  profile_banner: boolean;
+  profile_accent: boolean;
+  profile_fandoms: boolean;
+}
+
+export interface BlockList {
+  blocked: AuthorCard[];
+  muted: AuthorCard[];
+}
+
 export interface CommentPage {
   items: Comment[];
   total: number;
@@ -3072,6 +3158,22 @@ export interface ServerLimits {
     }
   >;
   rate: Record<string, { count: number; minutes: number }>;
+  /** Social & Play V1 — vắng mặt trên máy chủ cũ = coi như mọi cờ đều tắt. */
+  capabilities?: Partial<SocialCapabilities>;
+  community_fandoms?: CommunityFandom[];
+  feed_max_depth?: number;
+  profile_accent_presets?: string[];
+  profile_max_fandoms?: number;
+  /** Giới hạn ảnh hồ sơ do máy chủ cưỡng chế (`server/image_normalize.py`). */
+  profile_image?: {
+    avatar_max_input_bytes: number;
+    banner_max_input_bytes: number;
+    max_input_edge_px: number;
+    max_decoded_megapixels: number;
+    avatar_output_size: [number, number];
+    banner_output_size: [number, number];
+    accepted_mime: string[];
+  };
 }
 
 export const social = {
@@ -3112,6 +3214,19 @@ export const social = {
   feed: (limit = 20, offset = 0) =>
     request<FeedPage>(`/api/feed?limit=${limit}&offset=${offset}`),
 
+  /** Bảng tin theo tab/fandom, phân trang CURSOR (Social & Play V1). */
+  feedV2: (q: {
+    scope: "latest" | "following";
+    fandom?: string;
+    cursor?: string | null;
+    limit?: number;
+  }) => {
+    const p = new URLSearchParams({ scope: q.scope, limit: String(q.limit ?? 20) });
+    if (q.fandom) p.set("fandom", q.fandom);
+    if (q.cursor) p.set("cursor", q.cursor);
+    return request<FeedPageV2>(`/api/feed?${p.toString()}`);
+  },
+
   userPosts: (userId: string, limit = 20, offset = 0) =>
     request<FeedPage>(
       `/api/users/${encodeURIComponent(userId)}/posts` +
@@ -3136,6 +3251,10 @@ export const social = {
       width: number;
       height: number;
     }>;
+    /** Khoá idempotent — giữ nguyên qua mọi lần thử lại của CÙNG một bài. */
+    client_key?: string;
+    spoiler?: boolean;
+    fandom_id?: string;
   }) =>
     request<{ post: Post }>("/api/posts", {
       method: "POST",
@@ -3174,10 +3293,18 @@ export const social = {
         `?limit=${limit}&offset=${offset}`,
     ),
 
-  createComment: (postId: string, text: string, parentId = "") =>
+  createComment: (
+    postId: string,
+    text: string,
+    parentId = "",
+    opts: { client_key?: string; spoiler?: boolean } = {},
+  ) =>
     request<{ comment: Comment }>(
       `/api/posts/${encodeURIComponent(postId)}/comments`,
-      { method: "POST", body: JSON.stringify({ text, parent_id: parentId }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ text, parent_id: parentId, ...opts }),
+      },
     ),
 
   replies: (commentId: string, limit = 20, offset = 0) =>
@@ -3265,7 +3392,8 @@ export const social = {
   // -- báo cáo --------------------------------------------------------------
 
   report: (payload: {
-    target_kind: "post" | "comment";
+    /** `user` chỉ khi `capabilities.user_reports`. */
+    target_kind: "post" | "comment" | "user";
     target_id: string;
     reason: ReportReason;
     detail?: string;
@@ -3274,6 +3402,34 @@ export const social = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  // -- chặn / ẩn (Social & Play V1, `capabilities.blocks`) -------------------
+
+  /** Chặn: hai bên không tương tác được nữa, bài của nhau biến khỏi bảng tin. */
+  block: (userId: string) =>
+    request<{ blocked: boolean }>(`/api/users/${encodeURIComponent(userId)}/block`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unblock: (userId: string) =>
+    request<{ blocked: boolean }>(`/api/users/${encodeURIComponent(userId)}/block`, {
+      method: "DELETE",
+    }),
+
+  /** Ẩn: chỉ mình không thấy bài của họ nữa; họ không hề biết. */
+  mute: (userId: string) =>
+    request<{ muted: boolean }>(`/api/users/${encodeURIComponent(userId)}/mute`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unmute: (userId: string) =>
+    request<{ muted: boolean }>(`/api/users/${encodeURIComponent(userId)}/mute`, {
+      method: "DELETE",
+    }),
+
+  myBlocks: () => request<BlockList>("/api/me/blocks"),
 
   // -- tìm kiếm ---------------------------------------------------------------
 

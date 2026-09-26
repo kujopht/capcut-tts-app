@@ -4590,6 +4590,9 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   -webkit-backdrop-filter: blur(8px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
+/* Sprint 3: dong cap do dung chung `CapDoTaiKhoan` — o trang chu chi "Lv. N"
+   mang vien vang (giu dien mao cu), danh xung/XP to mau nhu truoc. */
+.home-hero-left .home-gamification-line .cap-do-lv,
 .home-hero-left .home-gamification-badge {
   display: inline-flex;
   align-items: center;
@@ -13377,3 +13380,12 @@ body.co-dock { padding-bottom: var(--dock-cao, 120px); }
 }
 .sc-the:hover { color: var(--text); }
 .sc-the-mo { color: var(--text); border-bottom-color: var(--brand); }
+
+/* Cap do TAI KHOAN dung chung (`CapDoTaiKhoan`): "Lv. N · danh xung · XP" —
+   cung mot thu tu, cung mau o trang chu, tai khoan, ho so. Dau "·" sinh bang
+   CSS de component khong phai biet phan nao dang vang mat. */
+.cap-do-gon { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.cap-do-gon > * + *::before { content: "·"; margin-right: 8px; color: rgba(255, 255, 255, 0.25); font-weight: 400; }
+.cap-do-lv { color: #fbbf24; font-weight: 700; }
+.cap-do-danh-xung { color: var(--text); font-weight: 550; }
+.cap-do-xp { color: #38bdf8; font-weight: 600; font-variant-numeric: tabular-nums; }

@@ -26,7 +26,7 @@ import { AchievementGrid } from "@/components/AchievementGrid";
 import { GamificationPanel } from "@/components/GamificationPanel";
 import { BlockedUsersPanel } from "@/components/BlockedUsersPanel";
 import { QuestPanel } from "@/components/QuestPanel";
-import { Avatar } from "@/components/Avatar";
+import { UserAvatar } from "@/components/UserAvatar";
 
 const TIER_LABEL: Record<string, string> = {
   free: "Miễn phí",
@@ -153,9 +153,8 @@ export default function AccountPage() {
           style={{ cursor: savingAvatar ? "wait" : "pointer" }}
           title="Đổi avatar"
         >
-          <Avatar
-            name={profile.display_name || profile.email}
-            avatarUrl={profile.avatar_url}
+          <UserAvatar
+            user={{ ...profile, display_name: profile.display_name || profile.email }}
             className="account-avatar"
           />
           <input

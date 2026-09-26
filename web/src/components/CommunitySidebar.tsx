@@ -16,7 +16,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type PublicProfile } from "@/lib/api";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
-import { Avatar } from "@/components/Avatar";
+import { UserAvatar } from "@/components/UserAvatar";
 import { FollowButton } from "@/components/FollowButton";
 import { useSession } from "@/lib/session";
 
@@ -66,9 +66,8 @@ export function TacGiaNoiBat({ gon = false }: { gon?: boolean }) {
       <ul className="sidebar-ds">
         {ds.map((p) => (
           <li key={p.user_id} className="sidebar-nguoi">
-            <Avatar
-              name={p.display_name || p.username}
-              avatarUrl={p.avatar_url}
+            <UserAvatar
+              user={{ ...p, equipped_cosmetics: p.gamification?.equipped_cosmetics }}
               className="avatar avatar-sm"
             />
             <span className="sidebar-nguoi-chu">

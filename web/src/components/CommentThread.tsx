@@ -130,10 +130,13 @@ function OGo({
   const [moc, setMoc] = useState<number | null>(null);
   const [spoiler, setSpoiler] = useState(false);
   const khoa = useRef("");
+  /** Chan bam lien tiep trong CUNG mot nhip — `dangGui` (state) chi doi o lan ve sau. */
+  const dangGuiRef = useRef(false);
 
   const gui = useCallback(async () => {
-    if (!chu.trim() || dangGui) return;
+    if (!chu.trim() || dangGui || dangGuiRef.current) return;
     if (!khoa.current) khoa.current = khoaMoi();
+    dangGuiRef.current = true;
     setDangGui(true);
     setLoi("");
     try {
@@ -150,6 +153,7 @@ function OGo({
           : "Mất kết nối. Chữ của bạn vẫn còn — bấm lại để thử.",
       );
     } finally {
+      dangGuiRef.current = false;
       setDangGui(false);
     }
   }, [chu, dangGui, moc, spoiler, onGui]);

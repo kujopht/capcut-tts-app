@@ -91,6 +91,7 @@ export function PostComposer({
   const [loi, setLoi] = useState("");
   const [daKhoiPhuc, setDaKhoiPhuc] = useState(false);
   const khoaGui = useRef("");
+  const dangGuiRef = useRef(false);
   const oTep = useRef<HTMLInputElement | null>(null);
   const hop = useRef<HTMLDivElement | null>(null);
   const nutMo = useRef<HTMLButtonElement | null>(null);
@@ -213,13 +214,17 @@ export function PostComposer({
   );
 
   const gui = useCallback(async () => {
-    if (dangGui) return;
+    // `dangGui` (state) chi cap nhat o lan ve SAU: ba cu bam trong cung mot nhip
+    // deu thay `false` va gui ba POST (do that, Sprint 3: 3 request, may chu khu
+    // trung con 1 bai — nhung moi request mang ca anh base64). Co ref chan ngay.
+    if (dangGui || dangGuiRef.current) return;
     const noiDung = chu.trim();
     if (!noiDung && !anhDs.length) {
       setLoi("Hãy viết gì đó, hoặc chọn một ảnh.");
       return;
     }
     if (!khoaGui.current) khoaGui.current = khoaMoi();
+    dangGuiRef.current = true;
     setDangGui(true);
     setLoi("");
     try {
@@ -257,6 +262,7 @@ export function PostComposer({
           : "Mất kết nối. Bài của bạn vẫn còn ở đây — bấm Đăng để thử lại.",
       );
     } finally {
+      dangGuiRef.current = false;
       setDangGui(false);
     }
   }, [dangGui, chu, anhDs, truyenId, cap.post_spoiler, cap.post_fandom, spoiler, fandom, uid, onPosted]);

@@ -14,6 +14,7 @@ import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
 import { errorMessage } from "@/lib/session";
 import { ProgressBar } from "@/components/ui";
+import { CapDoTaiKhoan } from "@/components/CapDoTaiKhoan";
 import { IconLibrary } from "@/components/Icons";
 import { BadgeIcon, CosmeticFrame, OrnamentIcon } from "@/components/cosmetics/Cosmetics";
 
@@ -124,17 +125,13 @@ export function GamificationPanel({
 
       <div className="profile-showcase-card">
         <div className="row-between">
-          <div className="stack-2">
-            <strong>
-              Bậc {progress.level} · {progress.equipped_title}
-            </strong>
-            <span className="hint">
-              {progress.xp} XP
-              {progress.next_level_xp
-                ? ` · còn ${progress.next_level_xp - progress.xp} XP để lên bậc tiếp theo`
-                : " · đã ở bậc cao nhất"}
-            </span>
-          </div>
+          <CapDoTaiKhoan
+            kieu="day"
+            level={progress.level}
+            title={progress.equipped_title}
+            xp={progress.xp}
+            nextXp={progress.next_level_xp}
+          />
           {progress.pending_reward_packs > 0 ? (
             <button
               type="button"
@@ -147,7 +144,7 @@ export function GamificationPanel({
             </button>
           ) : null}
         </div>
-        <ProgressBar percent={progress.progress_percent} label="Tiến trình lên bậc" />
+        <ProgressBar percent={progress.progress_percent} label={`Tiến trình lên Lv. ${progress.level + 1}`} />
       </div>
 
       <div className="stack-2">

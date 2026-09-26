@@ -29,6 +29,7 @@ import { IconHeadphones, IconUser } from "@/components/Icons";
 import { FollowButton } from "@/components/FollowButton";
 import { BadgeIcon, OrnamentIcon } from "@/components/cosmetics/Cosmetics";
 import { UserAvatar, tenHienThi } from "@/components/UserAvatar";
+import { CapDoTaiKhoan } from "@/components/CapDoTaiKhoan";
 import { ReportDialog } from "@/components/ReportDialog";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { ProfileTabs } from "./ProfileTabs";
@@ -240,7 +241,7 @@ export default function PublicProfilePage({
                 ) : (
                   "✦"
                 )}{" "}
-                {gam.equipped_title} · Lv. {gam.level}
+                <CapDoTaiKhoan level={gam.level} title={gam.equipped_title} />
                 {huyHieu ? (
                   <span className="ho-so-huy-hieu" title={huyHieu.name} aria-label={huyHieu.name}>
                     <BadgeIcon assetRef={huyHieu.asset_ref} size={16} />

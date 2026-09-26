@@ -60,9 +60,10 @@ test("CommentThread hien avatar cho binh luan/tra loi (dung chung mot component)
 });
 
 test("SearchOverlay hien avatar cho ca ket qua NGUOI va BAI VIET", () => {
+  // Sprint 3: qua UserAvatar (doc `avatar_url` + khung dang deo tu chinh doi tuong nguoi).
   const src = searchOverlay();
-  assert.match(src, /avatarUrl=\{p\.avatar_url\}/);
-  assert.match(src, /avatarUrl=\{b\.author\?\.avatar_url\}/);
+  assert.match(src, /<UserAvatar\s+user=\{\{ \.\.\.p, equipped_cosmetics: p\.gamification\?\.equipped_cosmetics \}\}/);
+  assert.match(src, /<UserAvatar user=\{b\.author\} className="tim-avatar" \/>/);
 });
 
 test("Trang ho so cong khai (/u/[username]) hien avatar that", () => {
@@ -90,8 +91,8 @@ test("CommunitySidebar (Tác giả nổi bật) hien avatar that cua tung nguoi"
   const src = communitySidebar();
   assert.match(
     src,
-    /avatarUrl=\{p\.avatar_url\}/,
-    "danh sách tác giả nổi bật không đọc avatar_url",
+    /<UserAvatar\s+user=\{\{ \.\.\.p, equipped_cosmetics: p\.gamification\?\.equipped_cosmetics \}\}/,
+    "danh sách tác giả nổi bật không đưa hồ sơ (kèm avatar_url, khung) vào UserAvatar",
   );
 });
 

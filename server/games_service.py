@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import copy
 import secrets
+import threading
+from contextlib import contextmanager
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -228,7 +230,38 @@ def _mark_run_settled(games_store: Any, run_id: str) -> None:
             continue
 
 
+#: Khoa quyet toan THEO NGUOI CHOI trong tien trinh. Doc tran (van/cap/ngay, XP game/ngay) ->
+#: quyet dinh -> luu hang ket qua phai la MOT doan tuan tu cho moi nguoi choi lien quan: khong co
+#: khoa, hai van KHAC NHAU cua cung mot nguoi ket thuc cung luc co the cung doc "con 1 suat" va
+#: cung duoc tinh (do that: test dong thoi `test_games_concurrency`). Voi khoa nay tran la CUNG
+#: trong MOT tien trinh API (production hien chay mot tien trinh uvicorn). Nhieu instance -> moi
+#: instance mot bo khoa, van co the vuot: tai lieu goi do la tran MEM, khong phai hard cap.
+_KHOA_QT_BAO_VE = threading.Lock()
+_KHOA_QT: Dict[str, threading.Lock] = {}
+
+
+@contextmanager
+def _khoa_quyet_toan(*user_ids: str):
+    khoa_ids = sorted({u for u in user_ids if u})  # thu tu co dinh -> khong the ket cheo (deadlock)
+    with _KHOA_QT_BAO_VE:
+        cac_khoa = [_KHOA_QT.setdefault(k, threading.Lock()) for k in khoa_ids]
+    for k in cac_khoa:
+        k.acquire()
+    try:
+        yield
+    finally:
+        for k in reversed(cac_khoa):
+            k.release()
+
+
 def _settle_room(games_store: Any, gamification_store: Any, room: Room) -> None:
+    if room.settlement == "settled":
+        return
+    with _khoa_quyet_toan(room.seat_x, room.seat_o):
+        _settle_room_trong_khoa(games_store, gamification_store, room)
+
+
+def _settle_room_trong_khoa(games_store: Any, gamification_store: Any, room: Room) -> None:
     """THU TU BAT BUOC (xem dac ta §4 "decisions frozen at first
     persistence" — phat hien qua review): quyet dinh -> `create_result`
     (hang PLANNED, gom san `xp_entries`/`xp_awarded` DU DINH) TRUOC, roi moi
@@ -290,6 +323,13 @@ def _settle_room(games_store: Any, gamification_store: Any, room: Room) -> None:
 
 
 def _settle_run(games_store: Any, gamification_store: Any, run: MemoryRun) -> None:
+    if run.settlement == "settled":
+        return
+    with _khoa_quyet_toan(run.user_id):
+        _settle_run_trong_khoa(games_store, gamification_store, run)
+
+
+def _settle_run_trong_khoa(games_store: Any, gamification_store: Any, run: MemoryRun) -> None:
     """Cung thu tu voi `_settle_room` — xem docstring o do."""
     if run.settlement == "settled":
         return

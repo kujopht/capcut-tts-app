@@ -100,17 +100,23 @@ Thua commit (transaction lỗi, HOẶC transaction trả về bình thường nh
 thử lại (tối đa 5 lần, jitter nhỏ); hết lượt vẫn không commit được →
 `AppwriteUnavailableError`.
 
-## 5. Đường xử lý cũ — race đã biết, CHƯA sửa trong PR này
+## 5. Đường XP cũ — ĐÃ chuyển sang ghi nguyên tử (sau cờ `FAS_XP_ATOMIC`)
 
-`gamification_service.award_xp`/`claim_quest_reward` (đường XP cũ, dùng cho
-mọi sự kiện KHÔNG PHẢI mini-game: xuất bản chương, nghe, nhiệm vụ...) **KHÔNG
-được đổi** trong PR này (đúng dặn dò ở §5.3 của đặc tả) — vẫn là đọc-sửa-ghi
-hai bước (`store.record_xp_event` rồi `_ap_dung_xp`), và **VẪN CÓ THỂ race**
-với settlement game trên Appwrite nếu cả hai đường cùng cập nhật `user_progress`
-của CÙNG một người gần như đồng thời (ví dụ vừa thắng một ván Caro vừa xuất
-bản một chương). Đây là race THẬT, chưa sửa, và PHẢI được chuyển sang
-`award_xp_atomic` (sau khi xác minh transaction hoạt động đúng trên Appwrite
-production thật) **TRƯỚC KHI** bật `games_v1_enabled` trên production.
+Mọi writer của hàng `user_progress` giờ đi qua **một** hàm: `update_progress_atomic(user, mutator, ledger_entry)`:
+`award_xp` (xuất bản, nghe, đóng góp…), `claim_quest_reward`, `equip_title`, `open_reward_pack` và quyết toán
+game (`award_xp_atomic`). Bản mock chạy dưới một khoá. Bản Appwrite gom sổ cái + tiến độ + hàng khoá
+`xp_progress_cas` (theo trạng thái hàng) vào một giao dịch, thua thì đọc lại và thử lại.
+
+- Cờ `FAS_XP_ATOMIC`: mặc định **bật** khi mock, **tắt** khi `DATA_BACKEND=appwrite`, nên production **giữ
+  nguyên** đường cũ tới khi giao dịch được kiểm trên Appwrite **thử nghiệm**
+  (`docs/migrations/SOCIAL_PLAY_V1_TEST_APPWRITE.md`). `Settings.validate()` **từ chối khởi động** nếu
+  `FAS_GAMES_V1=1` trên Appwrite mà `FAS_XP_ATOMIC` tắt.
+- `claim_quest_reward` đổi thứ tự thành cộng XP → cấp vật phẩm → rồi mới đánh dấu đã nhận. Cả hai bước đầu
+  idempotent theo khoá tất định, nên sập giữa chừng không còn làm mất thưởng.
+- Không đổi ngưỡng cấp, không đổi giá trị XP, không reset hay xoá dữ liệu nào.
+- Test: `server/tests/test_xp_concurrency.py`. Nội dung: đồng thời game + nhiệm vụ + nghe + đổi danh xưng;
+  từng writer đọc trạng thái cũ trên Appwrite giả lập; sập giữa lúc nhận thưởng; XP chỉnh về giá trị cũ; đường cũ
+  khi tắt cờ; luật cấu hình.
 
 ## 6. Lỗi đã sửa ở vòng review (bài học, không phải chỉ lịch sử)
 
@@ -218,7 +224,7 @@ tuý, không sửa/xoá cột của bảng có sẵn.
 | Phát hiện | Đánh giá | Xử lý |
 |---|---|---|
 | "Trần 3 ván/cặp/ngày chỉ đếm một chiều — đấu lại (đổi ghế) là né được" | **Không đúng**: mỗi ván ghi một hàng kết quả cho CẢ HAI người, nên đếm từ phía ai cầm X cũng đủ số ván | Khoá bằng bài test `PairCapDoiGheTest` (5 ván, đổi người cầm X mỗi ván → ván 4–5 không tính) |
-| Hai ván KHÁC NHAU giữa cùng một cặp kết thúc đúng cùng lúc có thể cùng đọc "còn 1 suất" → vượt trần 1 ván (tương tự: hai lượt Memory của một người → vượt trần lượt/ngày 1 lượt) | Đúng; cần hai phòng/lượt kết thúc đồng thời; vượt tối đa 1 ván/lượt cho mỗi lần trùng giờ, vẫn bị trần 30 XP/ngày chặn | Chấp nhận ở V1, ghi rõ. Nếu cần chặt: thêm hàng khoá `pair|ngày|n` trong cùng khối quyết toán |
+| Hai ván KHÁC NHAU giữa cùng một cặp kết thúc đúng cùng lúc có thể cùng đọc "còn 1 suất" → vượt trần (tương tự: trần XP game/ngày, trần lượt Memory/ngày) | **Đúng, và nặng hơn "vượt 1"**: đo với 8 ván kết thúc cùng lúc, mỗi lần đọc chậm 20 ms (như gọi mạng tới Appwrite), không khoá → 8/3 ván cặp, 40/30 XP ngày, 8/5 lượt Memory | **Đã sửa trong một tiến trình**: khoá quyết toán theo người chơi (`games_service._khoa_quyet_toan`) → 3/3, 30/30, 5/5 (`test_xp_concurrency.TranDuoiTaiDongThoiTest`, tự hỏng nếu gỡ khoá). Nhiều instance API → mỗi instance một bộ khoá → **vẫn là trần MỀM**, không gọi là hard cap. Production hiện chạy một tiến trình uvicorn |
 | Memory: người chơi (hoặc bot) nhớ hoàn hảo đạt điểm gần tối đa; phản hồi lật cho biết ký hiệu của thẻ vừa lật | Bản chất của trò chơi trí nhớ — máy chủ chỉ lộ thẻ đã lật, không lộ bố cục; kiểm độ hợp lý thời gian còn thấp | Không hứa chống bot tuyệt đối; XP bị trần (2 XP × 5 lượt/ngày). Bảng điểm Memory có thể bị bot đạt điểm cao — ghi trong báo cáo |
 | Dùng tài khoản phụ đánh ≥ 10 nước rồi để nó "mất kết nối" để nhận thắng | Đúng nhưng có trần: 3 ván/cặp/ngày + 30 XP/ngày; tốn một tài khoản + ~10 nước + 45 s mỗi ván | Chấp nhận ở V1; theo dõi cặp có tỉ lệ thắng-do-timeout cao nếu cần |
 | `touch_seat` (hiện diện) ghi ngoài khối CAS; một lần ghi phòng có thể đè `last_seen` bằng giá trị cũ vài mili giây | Không khai thác được: muốn gây "nhận thắng" giả cần trễ > 45 s giữa đọc và ghi | Chấp nhận, ghi rõ |

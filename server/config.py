@@ -305,6 +305,14 @@ class Settings:
     #: route `/api/games/*` khac tra 404 (xem `server/main.py`).
     games_v1_enabled: bool = True
 
+    #: Duong ghi tien do XP NGUYEN TU cho MOI writer (award_xp, claim_quest_reward, equip_title,
+    #: open_reward_pack, quyet toan game) — `FAS_XP_ATOMIC`. MAC DINH BAT khi mock, TAT khi
+    #: `data_backend == "appwrite"` cho toi khi transaction 3 thao tac duoc kiem tren mot project
+    #: Appwrite THU NGHIEM (khi tat, production giu dung duong cu doc-sua-ghi). `validate()` tu
+    #: choi khoi dong neu bat game tren Appwrite ma khong bat co nay: hai duong ghi tron lan tren
+    #: cung mot hang tien do la dung loai "mat mot lan cong" ma co nay ton tai de chan.
+    xp_atomic_enabled: bool = True
+
     #: Token dich vu cho CANARY (Phase 15/18), doc tu `FAS_CANARY_SERVICE_TOKEN`.
     #: MAC DINH RONG — khi rong, KHONG co danh tinh canary nao ton tai va moi
     #: so khop deu that bai; day la trang thai an toan, khong phai "tat kiem tra".
@@ -629,6 +637,12 @@ class Settings:
                 "STORAGE_BACKEND=r2 nhưng thiếu cấu hình. Cần đủ bốn biến: "
                 "R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET."
             )
+        if (self.data_backend == "appwrite" and self.games_v1_enabled
+                and not self.xp_atomic_enabled):
+            raise ConfigError(
+                "FAS_GAMES_V1=1 trên Appwrite cần FAS_XP_ATOMIC=1: quyết toán trò chơi và các "
+                "đường cộng XP cũ phải cùng ghi tiến độ qua cơ chế nguyên tử."
+            )
         # CORS: production khong duoc dung wildcard khi van gui credentials
         if not self.is_development and "*" in self.cors_origins:
             raise ConfigError(
@@ -832,11 +846,14 @@ def load_settings() -> Settings:
     data_backend_raw = _env("DATA_BACKEND", "mock").lower()
     games_v1_enabled = _env_bool(
         "FAS_GAMES_V1", data_backend_raw != "appwrite")
+    xp_atomic_enabled = _env_bool(
+        "FAS_XP_ATOMIC", data_backend_raw != "appwrite")
 
     return Settings(
         environment=environment,
         data_backend=data_backend_raw,
         games_v1_enabled=games_v1_enabled,
+        xp_atomic_enabled=xp_atomic_enabled,
         storage_backend=_env("STORAGE_BACKEND", "local").lower(),
         cors_origins=_env_list("FAS_CORS_ORIGINS", "http://localhost:3000"),
         web_base_url=_env("FAS_WEB_BASE_URL", "http://localhost:3000").rstrip("/"),

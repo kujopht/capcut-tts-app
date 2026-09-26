@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,9 +32,17 @@ class DuongDanTuyetDoiTest(unittest.TestCase):
     def test_khoa_tuyet_doi_va_unc_bi_tu_choi(self):
         goc = Path(tempfile.mkdtemp())
         kho = LocalStorageAdapter(goc)
-        for khoa in ("C:/Windows/win.ini", "C:\\Windows\\win.ini", "a/../../b"):
-            with self.assertRaises(ValueError, msg=khoa):
-                kho._path(khoa)
+        with self.assertRaises(ValueError):
+            kho._path("a/../../b")
+        # Tinh chat AN TOAN la "khong bao gio ra ngoai goc", khong phai "luon nem loi":
+        # tren Windows `root / "C:/x"` bo qua root nen PHAI bi tu choi; tren POSIX
+        # (CI Linux) "C:/x" chi la mot ten TUONG DOI nam trong goc — hop le va an toan.
+        for khoa in ("C:/Windows/win.ini", "C:\\Windows\\win.ini"):
+            if os.name == "nt":
+                with self.assertRaises(ValueError, msg=khoa):
+                    kho._path(khoa)
+            else:
+                self.assertIn(goc.resolve(), kho._path(khoa).resolve().parents, khoa)
         # "//host/share/x" bi `lstrip("/")` bien thanh duong TUONG DOI -> van nam trong goc.
         self.assertIn(goc.resolve(), kho._path("//host/share/x").resolve().parents)
         # Khoa binh thuong van dung.

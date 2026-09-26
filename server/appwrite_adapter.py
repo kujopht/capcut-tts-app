@@ -329,6 +329,8 @@ class AppwriteIdentityAdapter:
         profile.last_watch_duration_seconds = float(
             row.get("last_watch_duration_seconds") or 0.0)
         profile.last_watch_at = str(row.get("last_watch_at") or "")
+        # Social Play V1 — cung ly do voi `_profile_from` ben duoi.
+        profile.banner_key, profile.accent, profile.fandom_ids = _truong_social_v1(row)
         return profile
 
     def _profile_path(self, user_id: str) -> str:
@@ -849,6 +851,7 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         status = AuthorStatus(row.get("author_status") or "none")
     except ValueError:
         status = AuthorStatus.NONE
+    banner_key, accent, fandom_ids = _truong_social_v1(row)
     return Profile(
         user_id=str(row.get("user_id") or row.get("") or ""),
         email=str(row.get("email") or ""),
@@ -876,7 +879,25 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         last_watch_duration_seconds=float(
             row.get("last_watch_duration_seconds") or 0.0),
         last_watch_at=str(row.get("last_watch_at") or ""),
+        banner_key=banner_key,
+        accent=accent,
+        fandom_ids=fandom_ids,
     )
+
+
+def _truong_social_v1(row: Dict[str, Any]) -> Tuple[str, str, List[str]]:
+    """`banner_key`/`accent`/`fandom_ids` (Social Play V1) tu hang `profiles`.
+
+    Hai duong doc (`_profile_from` cho danh sach/tim kiem/ho so cong khai,
+    `_merge_stored` cho `/api/auth/me`) PHAI cung doc ba truong nay. Do that tren
+    Appwrite 1.9.6 THU (2026-09-26): `PUT /api/me/profile` ghi dung ca ba vao hang
+    (doc tai lieu truc tiep thay `accent: jade`, `fandom_ids: [naruto]`,
+    `banner_key`), nhung `GET /api/users/{id}` tra `accent: null`, `fandom_ids: []`,
+    khong banner — ca hai ham tung QUEN chung (dung loai loi `avatar_key` da gap,
+    xem `TestProfileFromRow`). Kho mock khong lo ra vi no tra lai chinh doi tuong
+    trong bo nho."""
+    return (str(row.get("banner_key") or ""), str(row.get("accent") or ""),
+            [str(x) for x in (row.get("fandom_ids") or []) if x])
 
 
 def _account_from(row: Dict[str, Any]) -> AccountStatus:

@@ -428,6 +428,43 @@ class TestProfileFromRow(unittest.TestCase):
         p = _profile_from({"user_id": "u1", "email": "a@vidu.vn"})
         self.assertEqual(p.avatar_key, "")
 
+    HANG_SOCIAL_V1 = {
+        "user_id": "u1", "email": "a@vidu.vn", "username": "an",
+        "banner_key": "banners/u1/b.webp", "accent": "jade",
+        "fandom_ids": ["naruto", "one-piece"],
+    }
+
+    def test_truong_social_v1_duoc_doc_tu_hang(self):
+        """Do that tren Appwrite 1.9.6 THU (2026-09-26): ghi dung ca ba truong
+        vao hang, nhung ho so cong khai tra `accent: null`, `fandom_ids: []`,
+        khong banner — `_profile_from` tung quen ca ba (cung loai voi avatar_key)."""
+        from server.appwrite_adapter import _profile_from
+
+        p = _profile_from(dict(self.HANG_SOCIAL_V1))
+        self.assertEqual((p.banner_key, p.accent, p.fandom_ids),
+                         ("banners/u1/b.webp", "jade", ["naruto", "one-piece"]))
+
+    def test_truong_social_v1_thieu_tra_rong_khong_nem(self):
+        from server.appwrite_adapter import _profile_from
+
+        p = _profile_from({"user_id": "u1", "email": "a@vidu.vn", "fandom_ids": None})
+        self.assertEqual((p.banner_key, p.accent, p.fandom_ids), ("", "", []))
+
+    def test_merge_stored_cung_doc_truong_social_v1(self):
+        """Duong THU HAI (`/api/auth/me` -> `_merge_stored`) phai doc cung ba
+        truong — hai duong doc tung lech nhau o `avatar_key`."""
+        from unittest.mock import patch
+
+        from server.appwrite_adapter import AppwriteIdentityAdapter
+        from server.domain import Profile
+
+        adapter = AppwriteIdentityAdapter(AppwriteSettings(
+            endpoint="https://x.invalid/v1", project_id="p", api_key="k", database_id="db"))
+        with patch.object(adapter, "_request", return_value=dict(self.HANG_SOCIAL_V1)):
+            p = adapter._merge_stored(Profile(user_id="u1", email="a@vidu.vn"))
+        self.assertEqual((p.banner_key, p.accent, p.fandom_ids),
+                         ("banners/u1/b.webp", "jade", ["naruto", "one-piece"]))
+
 
 class TestSaveProfileDatetimeCoercion(unittest.TestCase):
     """

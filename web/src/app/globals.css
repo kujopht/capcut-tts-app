@@ -9474,8 +9474,68 @@ body.co-mini { padding-bottom: 74px; }
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45), 0 0 24px color-mix(in srgb, var(--game-color, #00f0ff) 18%, transparent);
 }
 
+/* -- Social & Play V1: hub Giai tri — the game noi that che do/nguoi choi/thoi
+   luong/XP; be mat doc DAC hon the cu (chu mo tren tranh nen kho doc). -- */
+.giai-tri .gt-the {
+  gap: 12px;
+  justify-content: flex-start;
+  background: linear-gradient(155deg, #0e1222f2 0%, #090c18f7 100%);
+}
+.gt-the-dau { display: flex; align-items: center; gap: 12px; }
+.gt-the-icon { font-size: 30px; line-height: 1; }
+.gt-the-ten { margin: 0; font-size: var(--t-md); color: var(--text); }
+.gt-the-mota { margin: 0; line-height: 1.55; }
+.gt-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r2);
+  background: #ffffff05;
+}
+.gt-meta div { display: grid; gap: 2px; min-width: 0; }
+.gt-meta dt { font-size: var(--t-xs); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.gt-meta dd { margin: 0; font-size: var(--t-sm); color: var(--text); font-weight: 600; }
+.gt-the-nut { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.gt-the-nut .btn { min-height: 40px; }
+.gt-khung-dau {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #0e1222f2;
+}
+.gt-khung-dau .spacer { flex: 1; }
+.gt-khung-game {
+  position: relative;
+  height: clamp(420px, 68vh, 680px);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  overflow: hidden;
+  background: #000;
+}
+.gt-khung-game iframe { width: 100%; height: 100%; border: 0; display: block; }
+.gt-lien-ket { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.gt-lien-ket-the { display: grid; gap: 4px; text-decoration: none; color: var(--text); }
+.gt-lien-ket-the:hover { border-color: var(--line-strong); }
+.gt-lien-ket-the:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.gt-nhac-sau {
+  justify-self: start;
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  background: #0b0e18e6;
+}
+
 /* Responsive adjustments */
 @media (max-width: 640px) {
+  .gt-khung-game { height: 70dvh; }
   .ent-header {
     flex-direction: column;
     align-items: stretch;
@@ -12493,6 +12553,41 @@ body.co-dock { padding-bottom: var(--dock-cao, 120px); }
   .reader-end-next { flex-basis: 100%; }
   .reader-end-listen { flex: 1 1 100%; justify-content: center; }
   .listen-buttons { gap: var(--s1); }
+}
+
+/* -- Social & Play V1: Audio Studio — o van ban la chinh, tuy chon thu gon,
+   "Audio gan day" noi that (ten, giong, ngay, thoi luong that). ------------- */
+.tts-o-chinh .tts-van-ban { min-height: 200px; font-size: var(--t-md); line-height: 1.6; }
+.tts-them { border: 1px solid var(--line-soft); border-radius: var(--r2); padding: 8px 12px; }
+.tts-them > summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; color: var(--text-2); font-weight: 600; }
+.tts-them > summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.tts-them[open] > summary { margin-bottom: 8px; }
+.tts-nut-tao { min-height: 44px; font-size: var(--t-base); }
+.audio-gan-day { gap: 10px; }
+.audio-gan-day-chu { display: grid; gap: 2px; min-width: 0; }
+.audio-gan-day-ten { color: var(--text); overflow-wrap: anywhere; }
+.audio-gan-day-meta { font-variant-numeric: tabular-nums; }
+.audio-gan-day-nut { display: flex; flex-wrap: wrap; gap: 8px; }
+.audio-gan-day-nut .btn { min-height: 40px; }
+/* Dau cot "Audio gan day" nam thang tren tranh nen — do QA that: dong mo ta
+   chim vao khinh khi cau. Mot tam nen dac nhe giong the audio ben duoi. */
+.audio-recent-head {
+  padding: 10px 14px;
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #080a14d9;
+}
+.audio-recent-head .hint { margin: 0; }
+.audio-studio-intro .hint { color: var(--text-2); text-shadow: 0 1px 3px #000d, 0 0 12px #000a; }
+.audio-gan-day-trong {
+  margin: var(--s2) 0 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r2);
+  background: #080a14b8;
+}
+@media (max-width: 640px) {
+  .tts-nut-tao { width: 100%; }
 }
 
 /* ===================================================== Media Studio ======

@@ -99,27 +99,22 @@ export function TtsPanel({
     <form className="tts" onSubmit={gui}>
       <h3 className="tts-ten">Tạo lời đọc</h3>
 
-      <label className="field">
-        <span className="field-nhan">Tiêu đề</span>
-        <input
-          className="input"
-          value={tieuDe}
-          onChange={(e) => datTieuDe(e.target.value)}
-          placeholder="Chương 1 — Gió đêm…"
-          maxLength={120}
-        />
-      </label>
-
-      <label className="field">
-        <span className="field-nhan">Văn bản</span>
+      {/*
+        Social & Play V1 — THU TU THAO TAC: (1) van ban la o CHINH, to nhat;
+        (2) giong + toc do; (3) Tao; (4) tien trinh that; (5) nghe/tai o
+        "Audio gan day". Tieu de la tuy chon -> nam trong "Tuy chon them".
+      */}
+      <label className="field tts-o-chinh">
+        <span className="field-nhan">Văn bản cần đọc</span>
         <textarea
           className="input tts-van-ban"
           value={vanBan}
           onChange={(e) => datVanBan(e.target.value)}
           placeholder="Dán đoạn văn cần đọc…"
-          rows={7}
+          rows={10}
+          aria-describedby="tts-dem"
         />
-        <span className={vuotTran ? "trang-thai-loi" : "hint"}>
+        <span id="tts-dem" className={vuotTran ? "trang-thai-loi" : "hint"} aria-live="polite">
           {soKyTu.toLocaleString("vi-VN")} / {MAX_CHARS.toLocaleString("vi-VN")} ký tự
           {vuotTran
             ? ` — vượt quá ${MAX_CHARS.toLocaleString("vi-VN")} ký tự. Hãy cắt bớt hoặc chia thành nhiều phần.`
@@ -163,7 +158,22 @@ export function TtsPanel({
         </label>
       </div>
 
-      {loi ? <p className="trang-thai-loi">{loi}</p> : null}
+      <details className="tts-them">
+        <summary>Tuỳ chọn thêm</summary>
+        <label className="field">
+          <span className="field-nhan">Tiêu đề (không bắt buộc)</span>
+          <input
+            className="input"
+            value={tieuDe}
+            onChange={(e) => datTieuDe(e.target.value)}
+            placeholder="Chương 1 — Gió đêm…"
+            maxLength={120}
+          />
+          <span className="hint">Bỏ trống thì dùng vài chữ đầu của văn bản.</span>
+        </label>
+      </details>
+
+      {loi ? <p className="trang-thai-loi" role="alert">{loi}</p> : null}
       {job ? (
         <JobProgress job={job} tieuDe="Tiến trình tạo lời đọc" ghiChu={<GhiChuJob job={job} />} />
       ) : null}
@@ -174,7 +184,7 @@ export function TtsPanel({
         nen nham nhac lai chinh nut nay la du — no chi doi CHU de noi ro dang
         lam gi, dung nhu Audio Studio cu.
       */}
-      <button type="submit" className="btn btn-primary" disabled={!guiDuoc}>
+      <button type="submit" className="btn btn-primary tts-nut-tao" disabled={!guiDuoc} aria-busy={dangTao}>
         {dangTao
           ? "Đang tạo…"
           : job?.status === "failed" ? "Thử lại" : "Tạo lời đọc"}

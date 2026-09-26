@@ -13,6 +13,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { StreakBadge } from "@/components/StreakBadge";
 import { Avatar } from "@/components/Avatar";
 import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
+import { MUSIC_ENABLED } from "@/lib/features";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -133,7 +134,7 @@ export function NavLinks() {
           >
             <span style={{ display: "inline-flex", alignItems: "center" }}>
               {link.label}
-              {link.href === "/entertainment" ? <SoundwaveMini /> : null}
+              {MUSIC_ENABLED && link.href === "/entertainment" ? <SoundwaveMini /> : null}
             </span>
           </Link>
         );

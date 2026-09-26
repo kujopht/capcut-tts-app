@@ -276,7 +276,8 @@ export default function AdminAssetsPage() {
           </div>
 
           {/* --------------------------------- TAB ĐIỀU HƯỚNG BỘ LỌC */}
-          <div className="seg admin-loc" role="group" aria-label="Bộ lọc tác vụ">
+          {/* `admin-loc-luoi`: tren dien thoai thanh luoi 2 cot (xem globals.css). */}
+          <div className="seg admin-loc admin-loc-luoi" role="group" aria-label="Bộ lọc tác vụ">
             <button
               type="button"
               className="seg-item"

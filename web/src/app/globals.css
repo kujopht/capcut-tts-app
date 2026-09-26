@@ -9824,6 +9824,37 @@ body.co-mini { padding-bottom: 74px; }
 .admin-van { white-space: pre-wrap; line-height: var(--lh-normal); }
 .admin-loc { align-self: flex-start; }
 
+/*
+  Hang loc cua /admin/assets tren dien thoai: nam nut trong MOT vien thuoc
+  khong xuong dong bi ep con ~65px moi nut, chu gay 3-4 dong ("Giọng đọc &
+  Phụ đề"). O <= 640px doi thanh LUOI hai cot: "Tất cả" chiem ca hang dau, bon
+  nut con lai 2x2, chu mot dong, vung cham 44px (quy tac chung o khoi mobile).
+  Chi trang nay dung lop `admin-loc-luoi` — cac `.seg` khac giu nguyen.
+*/
+@media (max-width: 640px) {
+  .admin-loc-luoi {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    width: 100%;
+    align-self: stretch;
+    padding: 4px;
+    border-radius: var(--r3);
+  }
+  .admin-loc-luoi .seg-item {
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: var(--r2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+  }
+  .admin-loc-luoi .seg-item:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
 /* -- bang -------------------------------------------------------------- */
 /* Boc trong mot khung cuon RIENG: mot bang sau cot khong ep vua 390px duoc, va
    de no day ca trang rong ra thi moi trang khac cung tran theo. */

@@ -583,7 +583,7 @@ export default function WritePage() {
           icon="✍️"
           title="Đăng nhập để bắt đầu viết truyện"
           action={
-            <Link className="btn btn-primary" href={loginHref("/studio/content")}>
+            <Link className="btn btn-primary" href={loginHref("/studio/content")} prefetch={false}>
               Đăng nhập
             </Link>
           }
@@ -601,7 +601,7 @@ export default function WritePage() {
             {/* Trang nay tao MOT chuong moi lan. Voi mot bo 50-500 chuong thi
                 do la 50-500 lan bam nut, nen loi vao "nhap hang loat" phai nam
                 ngay day chu khong an trong menu. */}
-            <Link className="btn" href="/studio/write/import">
+            <Link className="btn" href="/studio/write/import" prefetch={false}>
               Nhập nhiều chương
             </Link>
             <Link className="btn" href="/fanfic" prefetch={false}>

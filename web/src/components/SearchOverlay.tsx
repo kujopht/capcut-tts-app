@@ -453,6 +453,7 @@ export function SearchOverlay({
                       className="tim-fandom-chip"
                       href={`/library?fandom=${encodeURIComponent(f.ten)}`}
                       onClick={onDong}
+                      prefetch={false}
                     >
                       {f.ten}
                       <span className="tim-fandom-so">{f.so}</span>
@@ -493,6 +494,7 @@ export function SearchOverlay({
                       href={`/library?fandom=${encodeURIComponent(f.ten)}`}
                       onClick={onDong}
                       onMouseEnter={() => setChon(i)}
+                      prefetch={false}
                     >
                       <span className="tim-goiy-icon" aria-hidden="true">
                         <IconTag size={16} />
@@ -515,6 +517,7 @@ export function SearchOverlay({
                         href={`/library?q=${encodeURIComponent(a.ten)}`}
                         onClick={onDong}
                         onMouseEnter={() => setChon(vt)}
+                        prefetch={false}
                       >
                         <span className="tim-goiy-icon" aria-hidden="true">
                           <IconFeather size={16} />
@@ -740,6 +743,7 @@ export function SearchOverlay({
               className="btn btn-sm"
               href={`/library?q=${encodeURIComponent(tu)}`}
               onClick={onDong}
+              prefetch={false}
             >
               <IconSearch size={14} /> Xem tất cả kết quả “{tu}” trong Thư viện
             </Link>

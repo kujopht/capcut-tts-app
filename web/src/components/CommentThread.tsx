@@ -488,7 +488,7 @@ export function CommentThread({
         />
       ) : (
         <p className="hint">
-          <Link href={loginHref(pathname)}>Đăng nhập</Link> để bình luận.
+          <Link href={loginHref(pathname)} prefetch={false}>Đăng nhập</Link> để bình luận.
         </p>
       )}
 

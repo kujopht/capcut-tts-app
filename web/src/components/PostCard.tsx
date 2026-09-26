@@ -352,7 +352,7 @@ export function PostCard({
             Thích
           </button>
         ) : (
-          <Link className="btn btn-ghost bai-nut" href={loginHref(pathname)}>
+          <Link className="btn btn-ghost bai-nut" href={loginHref(pathname)} prefetch={false}>
             <span aria-hidden="true">♡</span> Thích
           </Link>
         )}

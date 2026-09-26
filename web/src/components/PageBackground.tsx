@@ -27,7 +27,7 @@
  */
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { anhNen, videoNen } from "@/lib/backgrounds";
+import { anhNen, anhNenNho, videoNen } from "@/lib/backgrounds";
 import { AmbientScene } from "@/components/AmbientScene";
 import { LiveBackground } from "@/components/LiveBackground";
 import { routeTransitionStore } from "@/lib/routeTransitionInstance";
@@ -132,6 +132,7 @@ export function PageBackground() {
           key={ten}
           poster={anhNen(ten)}
           video={videoNen(ten)}
+          posterNho={anhNenNho(ten)}
           className="live-wallpaper-lop"
         />
       </div>
@@ -147,6 +148,7 @@ export function PageBackground() {
           <LiveBackground
             poster={anhNen(tenMoi)}
             video={videoNen(tenMoi)}
+            posterNho={anhNenNho(tenMoi)}
             className="live-wallpaper-lop"
           />
         </div>

@@ -33,7 +33,7 @@ const CHU_DE = ["home", "explore", "reader", "studio", "write", "library", "acco
 test("PageBackground import LiveBackground va videoNen (khong tu ghep duong dan)", () => {
   const s = comp();
   assert.match(s, /import \{ LiveBackground \} from "@\/components\/LiveBackground";/);
-  assert.match(s, /import \{ anhNen, videoNen \} from "@\/lib\/backgrounds";/);
+  assert.match(s, /import \{ anhNen, anhNenNho, videoNen \} from "@\/lib\/backgrounds";/);
 });
 
 test("LiveBackground duoc goi cho MOI chu de (khong con dieu kien rieng \"home\")", () => {

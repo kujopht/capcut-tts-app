@@ -237,6 +237,7 @@ export function NotificationBell() {
                 className="menu-item"
                 role="menuitem"
                 onClick={dong}
+                prefetch={false}
               >
                 Xem tất cả thông báo
               </Link>

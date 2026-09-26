@@ -265,10 +265,10 @@ function AccountMenu() {
           <Link href={hoSoHref(profile) || "/account"} className="menu-item" role="menuitem" onClick={close} prefetch={false}>
             <span aria-hidden="true">🪪</span> Hồ sơ của tôi
           </Link>
-          <Link href="/account" className="menu-item" role="menuitem" onClick={close}>
+          <Link href="/account" className="menu-item" role="menuitem" onClick={close} prefetch={false}>
             <span aria-hidden="true">👤</span> Tài khoản
           </Link>
-          <Link href="/leaderboard" className="menu-item" role="menuitem" onClick={close}>
+          <Link href="/leaderboard" className="menu-item" role="menuitem" onClick={close} prefetch={false}>
             <span aria-hidden="true">👑</span> Bảng xếp hạng
           </Link>
           {/*

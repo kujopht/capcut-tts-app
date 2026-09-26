@@ -2418,6 +2418,16 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   object-fit: contain;
   user-select: none;
 }
+/* Anh khung "Go Moc" va "Bac Co" ve net XAM trung binh (do sang TB 74 va
+   77/255) tren nen trong suot: tren giao dien toi khung gan nhu bien mat, chi
+   con vong mau nhan hien ra (do 2026-09-26). Nhuom lai bang filter — go thanh
+   mau nau am, bac sang len — khong doi tai san, khung khac giu nguyen mau. */
+.cosmetic-frame-img[data-khung="frame_go"] {
+  filter: sepia(1) saturate(1.7) hue-rotate(-12deg) brightness(2.3) drop-shadow(0 0 1px #000000cc);
+}
+.cosmetic-frame-img[data-khung="frame_bac"] {
+  filter: saturate(0.7) brightness(2.1) drop-shadow(0 0 1px #000000cc);
+}
 
 /* Khoi ho so trong showcase (Phan M) — nhe hon `.account-hero` cu, danh cho
    moi module rieng (thanh tuu, suu tap, hoat dong) thay vi mot khoi hero to
@@ -6656,6 +6666,12 @@ body.co-mini { padding-bottom: 74px; }
   */
   .page-bg-lop::before { background-image: var(--anh-nho, var(--anh)); }
   .wrap { padding: 0 var(--s4); }
+  /* Luat `.wrap` ngay tren la shorthand nen xoa luon padding doc cua chan
+     trang (khai bao truoc do): o 390px vach ngan dinh sat link cuoi va dong
+     ghi chu dinh sat vach (~4px). Tra lai padding doc CHI cho chan trang —
+     khong doi `.wrap` chung (thanh phat nho cung dung no). */
+  .footer-grid { padding-block: var(--s5) var(--s4); }
+  .footer-note { padding-block: var(--s3) var(--s4); }
   .page { padding: var(--s5) 0 var(--s7); gap: var(--s4); }
   .page-head { padding: var(--s4); }
   .reader-head { padding: var(--s4); }
@@ -11178,7 +11194,12 @@ body.co-mini { padding-bottom: 74px; }
 .soan-hop-day { justify-content: flex-end; border-top: 1px solid var(--line-soft); }
 .soan-hop-day #soan-bai-dem { margin-right: auto; }
 .soan-hop-dong { min-width: 40px; min-height: 40px; }
-.soan-hop-than { display: grid; gap: var(--s3); padding: 14px 16px; overflow-y: auto; min-height: 0; }
+.soan-hop-than { display: grid; gap: var(--s3); padding: 14px 16px; overflow-y: auto; min-height: 0; grid-auto-rows: max-content; }
+/* `grid-auto-rows: max-content`: than hop thoai la LUOI co chieu cao gioi han
+   va TU CUON. Voi hang `auto`, o luoi `overflow: hidden` (kich thuoc toi thieu
+   tu dong = 0) bi ep khi noi dung dai hon hop thoai: do that 2026-09-26 o xem
+   truoc cua trinh sua ho so con hang cao 1px, hop 235px tran de len "Ảnh đại
+   diện"/"Ảnh bìa". Moi hang giu du cao noi dung; than hop tu cuon. */
 .soan-hop-nguoi { display: flex; align-items: center; gap: 10px; }
 .soan-hop .soan-bai-o { min-height: 140px; font-size: var(--t-md); line-height: 1.55; }
 .soan-hop-tuy-chon { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s2) var(--s3); }

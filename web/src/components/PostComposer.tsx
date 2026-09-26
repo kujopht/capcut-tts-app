@@ -446,7 +446,7 @@ export function PostComposer({
 
             <footer className="soan-hop-day">
               <span id="soan-bai-dem" className={gan ? "hint loi" : "hint"} aria-live="polite">
-                {conLai} ký tự
+                Còn {conLai} ký tự
               </span>
               <button
                 type="button"

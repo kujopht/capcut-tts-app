@@ -321,7 +321,7 @@ export function ProfileEditor({
               <label className="sua-ho-so-nhom">
                 <span className="sua-ho-so-nhan">Giới thiệu ngắn</span>
                 <textarea className="input" rows={3} maxLength={tranBio} value={bio} onChange={(e) => setBio(e.target.value)} />
-                <span className="hint">{tranBio - bio.length} ký tự</span>
+                <span className="hint">Còn {tranBio - bio.length} ký tự</span>
               </label>
 
               {cap.profile_fandoms && fandoms.length ? (

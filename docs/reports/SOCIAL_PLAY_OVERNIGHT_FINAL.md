@@ -166,7 +166,7 @@ Cả hai đều chưa merge.
 CI của hai PR nhỏ:
 
 - #232: backend đỏ, trùng tập lỗi với `main`.
-- #233: web + gitleaks pass; job backend đỏ như `main`. Việc so tập lỗi theo tên đang chờ run CI kết thúc: log chỉ tải được khi cả run xong, mà job Router (không bắt buộc) vẫn chạy. #233 không đụng mã backend.
+- #233 (`2e8906f`): web + gitleaks pass; backend 4.869 test, đỏ đúng tập 734 lỗi của `main` theo tên (0 lỗi mới).
 
 ## 10. Kết quả tích hợp Appwrite
 
@@ -187,7 +187,10 @@ Chi tiết: `docs/reports/SOCIAL_PLAY_V1_APPWRITE_INTEGRATION.md`. Môi trườn
 ## 11. Kết quả trên Lightning
 
 - Lightning CPU Studio có sẵn, `scratch-studio-devbox` (4 vCPU, không GPU, không nâng cấu hình), dùng để chạy stack Appwrite thử ở §10.
-- Đã dọn container/volume của phiên thử (không `prune`) và **đã tắt** Studio. Lần kiểm cuối ghi ở MOBILE HANDOFF.
+- Đã dọn container/volume của phiên thử (không `prune`) và **đã tắt** Studio. Kiểm lần cuối lúc 2026-09-26 ~18:30Z: SDK báo `scratch-studio-devbox is Stopped`.
+- Dọn máy cục bộ cuối đêm:
+  - đã tắt Chrome QA (cổng 9333), các server `next` 3010/3100 và uvicorn mock 8010.
+  - **không** chạm daemon Router (8765), worker TTS production chạy cục bộ qua `deploy\windows\run_worker.bat`, hay Chrome của owner.
 - Full backend suite **không** chạy trên Windows: chạy trên GitHub CI, 4.869–4.984 test mỗi PR.
 
 ## 12. Lỗi mới tìm thấy và đã sửa đêm nay
@@ -273,5 +276,5 @@ Việc này đóng §2 thành `PACKAGE_B_PRODUCTION_VERIFIED`. Đó là điều 
 
 **`SOCIAL_PLAY_V1_PARTIALLY_READY`**
 
-- **Đã sẵn sàng:** mã A/C đã kiểm trên Appwrite thật; #229/#231/#232/#233 đều MERGEABLE; #229/#231 có 0 lỗi CI mới so với `main`; B đã live.
+- **Đã sẵn sàng:** mã A/C đã kiểm trên Appwrite thật; #229/#231/#232/#233 đều MERGEABLE với 0 lỗi CI mới so với `main`; B đã live.
 - **Chưa sẵn sàng:** B còn một bước chưa chạy; migration production bị chặn vì không truy cập được host Appwrite.

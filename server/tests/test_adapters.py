@@ -537,6 +537,32 @@ class TestLoi5xxAppwriteKhongThanh401(unittest.TestCase):
             adapter.profile_from_token("s")
         self.assertEqual(gia.goi, 1)
 
+    def test_timeout_khong_thu_lai(self):
+        """Review doc lap: thu lai ca timeout (15 s/lan) giu request toi ~45 s khi Appwrite treo."""
+        import httpx
+
+        from server.adapters import AppwriteUnavailableError
+
+        adapter, gia = self._adapter([])
+        goi = {"n": 0}
+
+        def treo(method, url, **kw):
+            goi["n"] += 1
+            raise httpx.ReadTimeout("timed out")
+
+        gia.request = treo
+        with self.assertRaises(AppwriteUnavailableError):
+            adapter.profile_from_token("s")
+        self.assertEqual(goi["n"], 1)
+
+    def test_5xx_khong_lo_loi_noi_bo_appwrite(self):
+        from server.adapters import AppwriteUnavailableError
+
+        adapter, _ = self._adapter([500, 500, 500])
+        with self.assertRaises(AppwriteUnavailableError) as ctx:
+            adapter.profile_from_token("s")
+        self.assertNotIn("Transaction", str(ctx.exception))
+
 
 class TestSaveProfileDatetimeCoercion(unittest.TestCase):
     """

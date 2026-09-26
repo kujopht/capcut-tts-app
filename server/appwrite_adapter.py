@@ -46,6 +46,12 @@ class AppwriteConfigError(RuntimeError):
     """Cau hinh Appwrite thieu hoac sai - bao ro thay vi im lang dung mock."""
 
 
+class _Appwrite5xx(AppwriteUnavailableError):
+    """Appwrite TRA VE 5xx (khac mat ket noi/timeout). CHI loai nay duoc `profile_from_token` thu lai:
+    thu lai ca timeout (15 s/lan) se giu moi request co token toi ~45 s khi Appwrite treo va bo doi
+    threadpool cua API (phat hien qua review doc lap)."""
+
+
 def profile_permissions(user_id: str) -> list:
     """
     Quyen tren document `profiles`: CHI DOC, va chi cho chinh chu ho so.
@@ -167,7 +173,9 @@ class AppwriteIdentityAdapter:
                 # MongoDB THU, 2026-09-26): nhieu request DONG THOI cua cung mot nguoi lam
                 # `GET /v1/account` tra 500 "Transaction aborted", va truoc day no thanh 401 — giao
                 # dien coi 401 la "phien het han", nen mot cu bam dup co the dang xuat nguoi dung.
-                raise AppwriteUnavailableError(message)
+                # Thong diep CO DINH (nhu nhanh mat ket noi): khong dua loi noi bo cua Appwrite (vd
+                # "Utopia\\Database\\Exception\\Transaction") ra phan hoi.
+                raise _Appwrite5xx("Appwrite tạm thời không xử lý được yêu cầu. Vui lòng thử lại.")
             raise AuthError(message)
 
         if response.status_code == 204 or not response.content:
@@ -282,11 +290,11 @@ class AppwriteIdentityAdapter:
 
         Danh tinh LUON lay tu phan hoi cua Appwrite, khong bao gio tu client.
 
-        Thu lai TOI DA hai lan khi Appwrite loi TAM THOI (`AppwriteUnavailableError`:
-        5xx hoac mat ket noi) — day la mot phep DOC, lap lai an toan. Do that: `GET
-        /v1/account` DONG THOI cua cung mot nguoi tren Appwrite 1.9.6 + MongoDB tra 500
-        "Transaction aborted" (3/6 request trong mot lan gui trung dong thoi), lan goi lai
-        ngay sau do thanh cong. 401/403 (phien sai/het han) KHONG bao gio duoc thu lai.
+        Thu lai TOI DA hai lan CHI khi Appwrite TRA VE 5xx (`_Appwrite5xx`) — day la mot
+        phep DOC, lap lai an toan. Do that: `GET /v1/account` DONG THOI cua cung mot nguoi
+        tren Appwrite 1.9.6 + MongoDB tra 500 "Transaction aborted" (3/6 request trong mot
+        lan gui trung dong thoi), lan goi lai ngay sau do thanh cong. Mat ket noi/timeout va
+        401/403 (phien sai/het han) KHONG bao gio duoc thu lai.
         """
         for lan in range(3):
             try:
@@ -294,7 +302,7 @@ class AppwriteIdentityAdapter:
                     "GET", "/v1/account", session=(token or "").strip(), admin=False
                 )
                 break
-            except AppwriteUnavailableError:
+            except _Appwrite5xx:
                 if lan == 2:
                     raise
                 time.sleep(0.05 * (lan + 1))

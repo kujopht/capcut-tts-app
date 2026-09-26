@@ -444,6 +444,11 @@ class AppwriteIdentityAdapter:
         "last_watch_series_id", "last_watch_episode_id",
         "last_watch_position_seconds", "last_watch_duration_seconds",
         "last_watch_at",
+        # Social Play V1 (capability `social_v1_schema`) — them SAU, CUNG co
+        # che dong-thieu-thi-bo-qua nay. `SocialService` con co lop TU CHOI RO
+        # RANG rieng (`CapabilityDisabled`) truoc khi ghi toi day; lop nay chi
+        # la luoi du phong THU HAI, giong moi nhom truong V2/V6 khac.
+        "banner_key", "accent", "fandom_ids",
     )
 
     #: Thuoc tinh KIEU `datetime` (khong bat buoc) trong `_PROFILE_V2_FIELDS` —

@@ -42,6 +42,7 @@ from server.secret_redaction import loc_bo_theo_gia_tri
 from server.adapters import (
     AppwriteUnavailableError,
     AuthError,
+    LocalStorageAdapter,
     MockImportRecordStore,
     MockMediaAssetStore,
     MockMetadataStore,
@@ -165,14 +166,18 @@ from server.import_pipeline.safe_zip import UnsafeZipError
 from server.scraper.raw_archive import SensitiveContentDetected, drain_archive_queue
 from server.social import (
     COMMENT_MAX_CHARS,
+    FEED_MAX_DEPTH,
     POST_MAX_CHARS,
+    CapabilityDisabled,
     RateLimited,
     SocialError,
+    capabilities_for,
     kiem_anh,
     mo_ta_gioi_han,
     object_key,
 )
 from server.social_service import SocialService
+from server import image_normalize
 from server.translation import (
     QuotaExceeded as TranslationQuotaExceeded,
     ManualEditWouldBeOverwritten,
@@ -375,7 +380,10 @@ trusted_sources = TrustedSourceService(
 social = SocialService(identity, store, storage,
                        han_muc=settings.social_limits or None,
                        animation_store=animation_store,
-                       gamification_store=gamification_store)
+                       gamification_store=gamification_store,
+                       capabilities=capabilities_for(
+                           data_backend=settings.data_backend,
+                           social_v1_schema=settings.social_v1_schema))
 
 #: `CreatorService` khong biet gi ve thong bao, va khong nen biet: no la tang
 #: moderation cua tac gia. Noi hai tang lai bang mot moc thay vi mot import
@@ -1075,12 +1083,21 @@ def _ho_so_tra_ve(profile: Profile) -> Dict[str, Any]:
     `/api/admin/*` van tu kiem lai qua `admin_profile`/`admin_or_owner_profile`/
     `owner_profile` — mot nguoi sua `admin_role` bang tay trong DevTools van
     nhan 403 y het truoc gio.
+
+    `equipped_cosmetics` (Social Play V1) — CUNG danh sach cong khai ma the
+    tac gia gon dung (`SocialService._the_nguoi`), de thanh dieu huong (navbar)
+    hien DUNG khung/huy hieu ma CHINH CHU vua trang bi ma khong can tai lai
+    trang. `[]` khi khong co gamification store (cung quy uoc voi
+    `_the_nguoi`/`cong_khai_vat_pham_dang_trang_bi`).
     """
     vai_tro = settings.admin_role_of(profile.user_id)
     return {**profile.to_dict(),
             "is_admin": vai_tro != AdminRole.NONE,
             "admin_role": vai_tro.value,
-            "avatar_url": creators.avatar_url(profile)}
+            "avatar_url": creators.avatar_url(profile),
+            "banner_url": creators.banner_url(profile),
+            "equipped_cosmetics": cong_khai_vat_pham_dang_trang_bi(
+                gamification_store, profile.user_id)}
 
 
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
@@ -3767,6 +3784,51 @@ def stream_audio(
     return Response(content=data, media_type="audio/mpeg")
 
 
+#: Duoi tep -> Content-Type CHO PHEP cua duong media dev cuc bo (muc 9) —
+#: DANH SACH CHO PHEP, khong doan tu MIME client tung gui: chi anh, chi ba
+#: dinh dang `image_normalize` thuc su xuat ra hoac nhan vao.
+_DEV_MEDIA_CONTENT_TYPES = {
+    "webp": "image/webp", "png": "image/png",
+    "jpg": "image/jpeg", "jpeg": "image/jpeg",
+}
+
+
+@app.get("/api/dev/media/{key:path}")
+def dev_media(key: str, exp: int = 0, sig: str = "") -> Response:
+    """
+    Phuc vu anh (avatar/banner/anh bai dang) tai len CUC BO cho QA thi giac
+    (Social Play V1, muc 9) — CHI hoat dong khi `storage_backend == "local"`,
+    moi truong la development, VA `FAS_DEV_MEDIA_URLS=1` (cong tac RIENG,
+    MAC DINH TAT — xem `Settings.dev_media_urls_enabled`).
+    `LocalStorageAdapter.signed_url` chi phat URL toi day trong DUNG ba dieu
+    kien do.
+
+    O MOI cau hinh khac (R2/production, storage cuc bo o moi truong
+    khong-development, hoac cong tac chua bat) duong nay TRA VE 404 VO DIEU
+    KIEN — khong bao gio doc/ghi gi tren R2, va khong ro ri thong tin ve viec
+    object co ton tai hay khong khi tinh nang dang TAT.
+    """
+    if not (settings.storage_backend == "local" and settings.is_development
+            and settings.dev_media_urls_enabled
+            and isinstance(storage, LocalStorageAdapter)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if not storage.verify_dev_media_url(key, exp, sig):
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    duoi = key.rsplit(".", 1)[-1].lower() if "." in key else ""
+    content_type = _DEV_MEDIA_CONTENT_TYPES.get(duoi)
+    if content_type is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    try:
+        # `storage.get()` di qua `_path()` cua CHINH adapter — cung phep
+        # chan duong dan vuot thu muc goc voi MOI thao tac kho khac, khong
+        # phai mot phep kiem rieng cho duong nay.
+        data = storage.get(key)
+    except (NotFoundError, ValueError):
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    return Response(content=data, media_type=content_type,
+                    headers={"Cache-Control": "private, max-age=300"})
+
+
 # -----------------------------------------------------------------------------
 # Tac gia: don, ho so cong khai, tim kiem, uy tin
 # -----------------------------------------------------------------------------
@@ -4091,10 +4153,22 @@ class AvatarIn(BaseModel):
 @app.put("/api/creator/avatar")
 def set_avatar(payload: AvatarIn,
                profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    """Tai/doi anh dai dien. Xem `CreatorService.set_avatar`."""
+    """
+    Tai/doi anh dai dien. Xem `CreatorService.set_avatar`.
+
+    Duong nay VAN GIU nguyen khoa CO DINH (khong noi dung-dinh-dia-chi) cua
+    `CreatorService` — chi THEM buoc chuan hoa may chu
+    (`server/image_normalize.py`: giai ma AN TOAN, cat vuong, xoa metadata,
+    ma hoa WebP) TRUOC khi ghi, cung mot duong voi `PUT /api/me/profile`,
+    thay vi tin thang byte client gui len.
+    """
     anh = _giai_ma_anh(payload.base64, payload.mime, payload.width, payload.height)
     try:
-        updated = creators.set_avatar(profile, data=anh["data"], mime=anh["mime"])
+        chuan = image_normalize.normalize_avatar(anh["data"])
+    except image_normalize.ImageValidationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    try:
+        updated = creators.set_avatar(profile, data=chuan.data, mime=chuan.mime)
     except SocialError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return {"profile": _ho_so_tra_ve(updated)}
@@ -4104,6 +4178,73 @@ def set_avatar(payload: AvatarIn,
 def remove_avatar(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     """Go anh dai dien — giao dien lui ve chu cai dau ten."""
     updated = creators.remove_avatar(profile)
+    return {"profile": _ho_so_tra_ve(updated)}
+
+
+# -- ho so ca nhan (Social Play V1) -------------------------------------------
+
+
+class ProfileImageIn(BaseModel):
+    """`{"data": base64, "mime": str}` de tai/doi, hoac `{"remove": true}`
+    de xoa — xem `SocialService.update_profile`."""
+
+    data: Annotated[str, StringConstraints(max_length=12_000_000)] = ""
+    mime: Annotated[str, StringConstraints(max_length=60)] = ""
+    remove: bool = False
+
+
+class ProfileUpdateIn(BaseModel):
+    """
+    Than cua `PUT /api/me/profile`. MOI truong deu TUY CHON — chi truong
+    NAM TRONG payload (`model_fields_set`, xem route) moi duoc chuyen xuong
+    tang dich vu; truong vang mat nghia la GIU NGUYEN, KHAC voi gui `null`
+    (nghia la XOA/BO). Route doc `model_fields_set` de phan biet hai truong
+    hop nay — Pydantic ghi nhan mot khoa la "da dat" ngay ca khi gia tri cua
+    no la `None`.
+    """
+
+    bio: Optional[Annotated[str, StringConstraints(max_length=400)]] = None
+    fandom_ids: Optional[List[Annotated[str, StringConstraints(max_length=32)]]] = Field(
+        default=None, max_length=5)
+    accent: Optional[Annotated[str, StringConstraints(max_length=16)]] = None
+    avatar: Optional[ProfileImageIn] = None
+    banner: Optional[ProfileImageIn] = None
+    frame: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
+
+
+def _anh_ho_so_tu_body(muc: Optional[ProfileImageIn]) -> Optional[Dict[str, Any]]:
+    """`None` (khong doi) | `{"remove": True}` | `{"data", "mime"}` —
+    xem contract o `SocialService.update_profile`."""
+    if muc is None:
+        return None
+    if muc.remove:
+        return {"remove": True}
+    return {"data": muc.data, "mime": muc.mime}
+
+
+@app.put("/api/me/profile")
+def update_my_profile(payload: ProfileUpdateIn,
+                      profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Sua ho so ca nhan: gioi thieu, fandom, mau nhan dien, avatar, banner,
+    khung avatar — TAT CA hoac KHONG GI (xem `SocialService.update_profile`).
+    """
+    dat = payload.model_fields_set
+    kwargs: Dict[str, Any] = {}
+    if "bio" in dat:
+        kwargs["bio"] = payload.bio
+    if "fandom_ids" in dat:
+        kwargs["fandom_ids"] = payload.fandom_ids
+    if "accent" in dat:
+        kwargs["accent"] = payload.accent
+    if "avatar" in dat:
+        kwargs["avatar"] = _anh_ho_so_tu_body(payload.avatar)
+    if "banner" in dat:
+        kwargs["banner"] = _anh_ho_so_tu_body(payload.banner)
+    if "frame" in dat:
+        kwargs["frame"] = payload.frame
+
+    updated = _xa_hoi(social.update_profile, profile, **kwargs)
     return {"profile": _ho_so_tra_ve(updated)}
 
 
@@ -4146,10 +4287,17 @@ def public_profile_route(
     "dang theo doi" (no luon `false`).
     """
     data = creators.public_profile_by_username(username)
+    ho_so = identity.profile_by_username(username)
+    if data is None:
+        # Khong khop USERNAME — thu lai theo DUNG user_id (Social Play V1):
+        # mot the tac gia gon luon co `user_id`, nhung nguoi chua chon
+        # username thi khong co, nen web can duong nay de van dieu huong toi
+        # duoc trang cua ho.
+        data = creators.public_profile_by_id(username)
+        ho_so = identity.profiles_by_ids([username]).get(username)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
     viewer = optional_profile(authorization)
-    ho_so = identity.profile_by_username(username)
     if ho_so is not None:
         data["social"] = social.profile_social(ho_so, viewer)
         # Gamification CONG KHAI (V4 visual completion, vong 2) — CHI danh
@@ -5917,6 +6065,12 @@ class PostIn(BaseModel):
     #: Tran do dai danh sach o day chi la lop chan tho — tran THAT (so anh,
     #: tong byte) nam o `server/social.py` va duoc kiem sau khi giai ma.
     images: List["AnhIn"] = Field(default_factory=list, max_length=6)
+    #: Social Play V1 — xem `social.CLIENT_KEY_RE`/`social.post_key`.
+    client_key: Annotated[str, StringConstraints(max_length=64)] = ""
+    spoiler: bool = False
+    #: Slug trong `social.COMMUNITY_FANDOMS` — kiem THAT o tang dich vu
+    #: (danh sach dong, khong phai regex).
+    fandom_id: Annotated[str, StringConstraints(max_length=32)] = ""
 
 
 class AnhIn(BaseModel):
@@ -5935,6 +6089,12 @@ class CommentIn(BaseModel):
     text: Annotated[str, StringConstraints(min_length=1,
                                           max_length=COMMENT_MAX_CHARS)]
     parent_id: Annotated[str, StringConstraints(max_length=64)] = ""
+    #: Social Play V1 — xem `social.CLIENT_KEY_RE`/`social.comment_key`.
+    client_key: Annotated[str, StringConstraints(max_length=64)] = ""
+    #: Binh luan BAI DANG cung duoc danh dau spoiler tu day (capability
+    #: `post_spoiler`) — binh luan CHUONG dung `ChapterCommentIn.spoiler`
+    #: rieng (da co tu truoc, khong gate).
+    spoiler: bool = False
 
 
 class ChapterCommentIn(CommentIn):
@@ -5944,7 +6104,6 @@ class ChapterCommentIn(CommentIn):
     #: nam o `social.kiem_timestamp`.
     timestamp_ms: Optional[int] = Field(default=None, ge=0,
                                         le=12 * 60 * 60 * 1000)
-    spoiler: bool = False
 
 
 class ReportIn(BaseModel):
@@ -5975,6 +6134,10 @@ def _xa_hoi(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except RateLimited as exc:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
+    except CapabilityDisabled as exc:
+        # PHAI bat TRUOC `SocialError` (no la con): tinh nang Social Play V1
+        # chua bat la "chưa sẵn sàng" (409), khong phai du lieu nguoi dung sai.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except SocialError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except PermissionDenied as exc:
@@ -6081,6 +6244,13 @@ def api_limits() -> Dict[str, Any]:
         "max_chapter_chars": MAX_CHAPTER_CHARS,
         "max_active_jobs": MAX_ACTIVE_JOBS,
         **mo_ta_gioi_han(),
+        # Social Play V1 — nang luc dang BAT/TAT (xem `social.capabilities_for`)
+        # va gioi han anh dai dien/banner (`server/image_normalize.py`).
+        "capabilities": capabilities_for(
+            data_backend=settings.data_backend,
+            social_v1_schema=settings.social_v1_schema),
+        "feed_max_depth": FEED_MAX_DEPTH,
+        "profile_image": image_normalize.limits_out(),
     }
 
 
@@ -6097,6 +6267,38 @@ def follow_user(user_id: str, payload: FollowIn,
 def unfollow_user(user_id: str,
                   profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return _xa_hoi(social.unfollow_user, profile, user_id)
+
+
+# -- chan / tat tieng (Social Play V1, capability `blocks`) -------------------
+
+
+@app.post("/api/users/{user_id}/block")
+def block_user(user_id: str, payload: FollowIn,
+               profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.block_user, profile, user_id)
+
+
+@app.delete("/api/users/{user_id}/block")
+def unblock_user(user_id: str,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.unblock_user, profile, user_id)
+
+
+@app.post("/api/users/{user_id}/mute")
+def mute_user(user_id: str, payload: FollowIn,
+              profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.mute_user, profile, user_id)
+
+
+@app.delete("/api/users/{user_id}/mute")
+def unmute_user(user_id: str,
+                profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.unmute_user, profile, user_id)
+
+
+@app.get("/api/me/blocks")
+def my_blocks(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.my_blocks, profile)
 
 
 @app.post("/api/novels/{novel_id}/follow")
@@ -6129,28 +6331,45 @@ def followed_stories(limit: int = 50, offset: int = 0,
 
 
 @app.get("/api/feed")
-def api_feed(limit: int = 0, offset: int = 0,
+def api_feed(limit: int = 0, offset: int = 0, scope: str = "",
+             cursor: str = "", fandom: str = "",
              authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     """
     Bang tin. KHONG doi dang nhap — khach vang lai thay bang tin kham pha.
 
     Dung `optional_profile`: mot trang cong dong tra 401 cho nguoi chua dang nhap
     la mot canh cua dong, va noi dung o day von la cong khai.
+
+    KHONG `scope` — hanh vi CU, giu NGUYEN byte-for-byte (client dang deploy
+    dua vao `limit`/`offset`, khong biet `scope`/`cursor`/`fandom`). CO
+    `scope` (Social Play V1: `latest`/`following`) — di duong MOI, co cursor
+    va loc fandom, xem `SocialService.feed_v2`.
     """
     viewer = optional_profile(authorization)
-    return _xa_hoi(social.feed, viewer, limit=limit or None,
-                   offset=max(0, offset))
+    if not scope:
+        return _xa_hoi(social.feed, viewer, limit=limit or None,
+                       offset=max(0, offset))
+    if scope == "following" and viewer is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Cần đăng nhập.")
+    return _xa_hoi(social.feed_v2, viewer, scope=scope, limit=limit or None,
+                   cursor=cursor or None, fandom=fandom)
 
 
 @app.post("/api/posts", status_code=status.HTTP_201_CREATED)
-def create_post(payload: PostIn,
+def create_post(payload: PostIn, response: Response,
                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    ket_qua = {"post": _xa_hoi(social.create_post, profile, text=payload.text,
-                               kind=payload.kind, novel_id=payload.novel_id,
-                               images=_bo_anh_tu_body(payload))}
+    bai = _xa_hoi(social.create_post, profile, text=payload.text,
+                 kind=payload.kind, novel_id=payload.novel_id,
+                 images=_bo_anh_tu_body(payload), client_key=payload.client_key,
+                 spoiler=payload.spoiler, fandom_id=payload.fandom_id)
+    if bai.get("replayed"):
+        # Idempotent replay: KHONG tao noi dung moi, KHONG chay lai hieu ung
+        # phu — xem docstring `SocialService.create_post`. 200, khong 201.
+        response.status_code = status.HTTP_200_OK
+        return {"post": bai}
     record_quest_event(gamification_store, profile.user_id,
                        "community_interaction", _ngay_utc_hom_nay())
-    return ket_qua
+    return {"post": bai}
 
 
 @app.get("/api/posts/{post_id}")
@@ -6218,12 +6437,16 @@ def _cong_nhiem_vu_binh_luan(user_id: str) -> None:
 
 
 @app.post("/api/posts/{post_id}/comments", status_code=status.HTTP_201_CREATED)
-def create_comment(post_id: str, payload: CommentIn,
+def create_comment(post_id: str, payload: CommentIn, response: Response,
                    profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    ket_qua = {"comment": _xa_hoi(social.create_comment, profile, post_id,
-                                  text=payload.text, parent_id=payload.parent_id)}
+    bl = _xa_hoi(social.create_comment, profile, post_id,
+                text=payload.text, parent_id=payload.parent_id,
+                client_key=payload.client_key, spoiler=payload.spoiler)
+    if bl.get("replayed"):
+        response.status_code = status.HTTP_200_OK
+        return {"comment": bl}
     _cong_nhiem_vu_binh_luan(profile.user_id)
-    return ket_qua
+    return {"comment": bl}
 
 
 @app.get("/api/chapters/{chapter_id}/comments")
@@ -6243,13 +6466,18 @@ def list_chapter_comments(chapter_id: str, sort: str = "moi",
 @app.post("/api/chapters/{chapter_id}/comments",
           status_code=status.HTTP_201_CREATED)
 def create_chapter_comment(chapter_id: str, payload: ChapterCommentIn,
+                           response: Response,
                            profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    ket_qua = {"comment": _xa_hoi(
+    bl = _xa_hoi(
         social.create_chapter_comment, profile, chapter_id,
         text=payload.text, parent_id=payload.parent_id,
-        timestamp_ms=payload.timestamp_ms, spoiler=payload.spoiler)}
+        timestamp_ms=payload.timestamp_ms, spoiler=payload.spoiler,
+        client_key=payload.client_key)
+    if bl.get("replayed"):
+        response.status_code = status.HTTP_200_OK
+        return {"comment": bl}
     _cong_nhiem_vu_binh_luan(profile.user_id)
-    return ket_qua
+    return {"comment": bl}
 
 
 @app.get("/api/animation/episodes/{episode_id}/comments")
@@ -6267,20 +6495,27 @@ def list_episode_comments(episode_id: str, sort: str = "moi",
 @app.post("/api/animation/episodes/{episode_id}/comments",
           status_code=status.HTTP_201_CREATED)
 def create_episode_comment_route(episode_id: str, payload: CommentIn,
+                                 response: Response,
                                  profile: Profile = Depends(current_profile),
                                  ) -> Dict[str, Any]:
-    ket_qua = {"comment": _xa_hoi(
+    bl = _xa_hoi(
         social.create_episode_comment, profile, episode_id,
-        text=payload.text, parent_id=payload.parent_id)}
+        text=payload.text, parent_id=payload.parent_id,
+        client_key=payload.client_key)
+    if bl.get("replayed"):
+        response.status_code = status.HTTP_200_OK
+        return {"comment": bl}
     _cong_nhiem_vu_binh_luan(profile.user_id)
-    return ket_qua
+    return {"comment": bl}
 
 
 @app.get("/api/comments/{comment_id}/replies")
-def list_replies(comment_id: str, limit: int = 20,
-                 offset: int = 0) -> Dict[str, Any]:
+def list_replies(comment_id: str, limit: int = 20, offset: int = 0,
+                 authorization: Optional[str] = Header(default=None),
+                 ) -> Dict[str, Any]:
+    viewer = optional_profile(authorization)
     return _xa_hoi(social.replies, comment_id, limit=max(1, min(50, limit)),
-                   offset=max(0, offset))
+                   offset=max(0, offset), viewer=viewer)
 
 
 @app.patch("/api/comments/{comment_id}")

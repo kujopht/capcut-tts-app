@@ -289,6 +289,32 @@ def equip_cosmetic(store: Any, user_id: str, cosmetic_key: str) -> CosmeticInven
     return store.get_cosmetic(user_id, cosmetic_key)
 
 
+def unequip_slot(store: Any, user_id: str, slot: str) -> None:
+    """
+    Bo trang bi vat pham DANG TRANG BI o mot VI TRI (`slot`), neu co — dung
+    cho `PUT /api/me/profile` khi nguoi dung gui `frame: null` (Social Play
+    V1). Khong lam gi neu khong co vat pham nao dang trang bi o vi tri do
+    (IDEMPOTENT — goi hai lan khong loi).
+
+    Khong can them ham store rieng: `set_cosmetic_equipped(..., False)` da co
+    san va la thu duy nhat can — ham nay chi la lop TIM ra dung vat pham.
+    """
+    for da_co in store.list_cosmetics(user_id):
+        if not da_co.equipped:
+            continue
+        dn = _dinh_nghia_vat_pham(da_co.cosmetic_key)
+        if dn and dn.slot == slot:
+            store.set_cosmetic_equipped(user_id, da_co.cosmetic_key, False)
+
+
+def cosmetic_slot_of(cosmetic_key: str) -> Optional[str]:
+    """Vi tri (`slot`) cua mot khoa vat pham, hoac `None` neu khong ton tai —
+    dung de kiem `frame` trong `PUT /api/me/profile` THUOC DUNG vi tri
+    `avatar_frame`, khong phai mot vat pham loai khac (huy hieu/hoa van)."""
+    dn = _dinh_nghia_vat_pham(cosmetic_key)
+    return dn.slot if dn else None
+
+
 def open_reward_pack(store: Any, user_id: str, pack_key: str,
                      rng: Any) -> Tuple[Any, bool]:
     """

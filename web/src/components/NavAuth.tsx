@@ -11,7 +11,8 @@ import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 import { NotificationBell } from "@/components/NotificationBell";
 import { StreakBadge } from "@/components/StreakBadge";
-import { Avatar } from "@/components/Avatar";
+import { UserAvatar } from "@/components/UserAvatar";
+import { hoSoHref } from "@/lib/communityFeed";
 import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
 
 /**
@@ -256,11 +257,14 @@ function AccountMenu() {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <Avatar name={name} avatarUrl={profile.avatar_url} className="avatar" />
+        <UserAvatar user={profile} className="avatar" />
         <span className="hint truncate account-name">{name}</span>
       </button>
       {open ? (
         <div className="menu-panel" role="menu" aria-label="Tài khoản">
+          <Link href={hoSoHref(profile) || "/account"} className="menu-item" role="menuitem" onClick={close} prefetch={false}>
+            <span aria-hidden="true">🪪</span> Hồ sơ của tôi
+          </Link>
           <Link href="/account" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">👤</span> Tài khoản
           </Link>

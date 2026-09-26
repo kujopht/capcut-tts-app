@@ -15,6 +15,7 @@ no la doi mot dong; khi no nam rai trong route thi doi no la mot cuoc san lung.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 from dataclasses import dataclass
@@ -55,6 +56,203 @@ class SocialError(ValueError):
 
 class RateLimited(SocialError):
     """Vuot han muc theo thoi gian. Tang route doi thanh 429."""
+
+
+class CapabilityDisabled(SocialError):
+    """
+    Yeu cau dung mot tinh nang Social Play V1 (spoiler/fandom/edited-label/
+    user report/blocks/profile banner-accent-fandoms) trong khi may chu chua
+    bat `FAS_SOCIAL_V1_SCHEMA` — xem `capabilities_for`. Tang route doi thanh
+    409, KHONG PHAI 400: day khong phai loi du lieu nguoi dung nhap, ma la
+    "tinh nang nay chua san sang tren may chu nay".
+
+    KHONG BAO GIO am tham bo qua truong nguoi dung da gui — thay vao do nem
+    loi nay ro rang. Ghi mot thuoc tinh Appwrite chua duoc cap phat lam HONG
+    CA lan ghi do (xem `server/config.py::Settings.social_v1_schema`), nen
+    "bo qua truong" that ra la "vo tinh xoa mat" du lieu ma nguoi dung nghi
+    la da luu.
+    """
+
+
+# -----------------------------------------------------------------------------
+# Social Play V1 — cong nang luc (capability gate)
+# -----------------------------------------------------------------------------
+#
+# Cac thuoc tinh Appwrite moi (spoiler/fandom_id/edited_at/user report/
+# user_blocks/banner_key/accent/fandom_ids) CHUA duoc cap phat tren
+# production — xem `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`. Cho toi khi
+# migration chay va co bat, MOI duong ghi cua tang nay phai TU CHOI ro rang
+# thay vi am tham bo qua truong, va MOI duong ghi Appwrite phai KHONG BAO
+# GIO gui cac thuoc tinh nay.
+
+#: MOT co duy nhat cho CA nhom nang luc nay — khong phai tam bat/tat rieng
+#: tung tinh nang. Ly do: chung cung mot dot migration schema, va bat rieng
+#: le tung cai chi them to hop trang thai ma khong ai thuc su can.
+CAPABILITY_KEYS: Tuple[str, ...] = (
+    "post_spoiler", "post_fandom", "edited_label", "user_reports", "blocks",
+    "profile_banner", "profile_accent", "profile_fandoms",
+)
+
+
+def capabilities_for(*, data_backend: str, social_v1_schema: bool) -> Dict[str, bool]:
+    """
+    Nang luc Social Play V1 dang BAT hay TAT, cho `GET /api/limits`.
+
+    Nhan tham so THO (khong nhan `Settings`) de mo-dun nay khong phai import
+    `server/config.py` — `config.py` da import NGUOC lai `server/social.py`
+    (`_social_limits`), va mot import hai chieu se thanh mot vong lap.
+
+    Kho MOCK (`data_backend == "mock"`) khong co Appwrite that de lam hong,
+    nen luon BAT — day la moi truong phat trien/kiem thu cuc bo. Kho
+    `appwrite` chi BAT khi operator da tu tay xac nhan migration xong
+    (`social_v1_schema=True`).
+    """
+    bat = data_backend == "mock" or bool(social_v1_schema)
+    return {khoa: bat for khoa in CAPABILITY_KEYS}
+
+
+# -----------------------------------------------------------------------------
+# Fandom cong dong — danh sach CO CHON, KHONG phai FandomRegistry
+# -----------------------------------------------------------------------------
+#
+# `server/fandom_registry.py` sinh `fandom_id` NGAU NHIEN moi tien trinh
+# (`new_id("fdm")`) — khong on dinh qua lan khoi dong lai, nen KHONG dung
+# duoc lam slug ben vung cho mot bai dang. Danh sach duoi day la MOT nguon
+# rieng, nho va CO CHU DICH, phan anh `web/src/lib/taxonomy.ts::FANDOM_OPTIONS`
+# — doi mot cai thi phai doi ca hai.
+COMMUNITY_FANDOMS: Tuple[Tuple[str, str], ...] = (
+    ("naruto", "Naruto"),
+    ("one-piece", "One Piece"),
+    ("conan", "Detective Conan"),
+    ("genshin-impact", "Genshin Impact"),
+    ("fairy-tail", "Fairy Tail"),
+    ("bong-ro", "Bóng rổ"),
+)
+
+#: `{slug: nhan}` — tra cuu O(1) o duong doc nhieu (loc bang tin theo fandom).
+_COMMUNITY_FANDOM_LABELS: Dict[str, str] = dict(COMMUNITY_FANDOMS)
+
+
+def community_fandoms_out() -> List[Dict[str, str]]:
+    """Hinh dang `/api/limits` tra ve: `[{"id": slug, "label": ten}, ...]`."""
+    return [{"id": slug, "label": ten} for slug, ten in COMMUNITY_FANDOMS]
+
+
+def validate_fandom_id(raw: str, *, bat_buoc: bool = False) -> str:
+    """
+    Kiem mot slug fandom cong dong. Rong hop le tru khi `bat_buoc=True`.
+
+    KHONG phai kiem cu phap (regex) — day la mot DANH SACH DONG, vi cong dong
+    hien chi ho tro vai fandom da chon truoc. Slug khong nam trong danh sach
+    thi NEM LOI ro rang (400), khong am tham bo qua hay quy ve rong.
+    """
+    slug = (raw or "").strip().lower()
+    if not slug:
+        if bat_buoc:
+            raise SocialError("Thiếu fandom.")
+        return ""
+    if slug not in _COMMUNITY_FANDOM_LABELS:
+        raise SocialError(f"Fandom không hợp lệ: {raw!r}.")
+    return slug
+
+
+def community_fandom_label(slug: str) -> Optional[str]:
+    """Nhan hien thi cua mot slug, hoac `None` neu khong nam trong danh sach."""
+    return _COMMUNITY_FANDOM_LABELS.get((slug or "").strip().lower())
+
+
+# -----------------------------------------------------------------------------
+# Idempotency: bai dang / binh luan
+# -----------------------------------------------------------------------------
+
+#: `client_key` cua client — mot chuoi client tu sinh (vd UUID rut gon) de
+#: nhan dang LAI CUNG mot lan bam gui, ke ca khi request bi gui trung (mang
+#: chap chon, nguoi dung bam nut hai lan). Xem `post_key`/`comment_key`.
+CLIENT_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def post_key(author_user_id: str, client_key: str) -> str:
+    """
+    `post_id` TAT DINH tu (tac gia, client_key) — cho tao bai IDEMPOTENT.
+
+    Tac gia nam TRONG hash nen HAI tac gia khac nhau khong bao gio va cham
+    du dung chung mot `client_key` (vd hai tab cua hai nguoi cung copy mot
+    doan script frontend). Dinh dang `"pst_" + hex[:24]` — CO Y khac quy uoc
+    `_khoa()` o duoi (`"pst" + hex[:28]`, khong gach duoi): day la khoa
+    NGUOI DUNG CO THE THAY (no chinh la `post_id` hien ra trong URL), trong
+    khi `_khoa()` la khoa NOI BO cua cac bang quan he.
+    """
+    return "pst_" + hashlib.sha256(
+        f"{author_user_id}\x1f{client_key}".encode()).hexdigest()[:24]
+
+
+def comment_key(author_user_id: str, target_id: str, client_key: str) -> str:
+    """`comment_id` TAT DINH tu (tac gia, dich, client_key) — xem `post_key`."""
+    return "cmt_" + hashlib.sha256(
+        f"{author_user_id}\x1f{target_id}\x1f{client_key}".encode()
+    ).hexdigest()[:24]
+
+
+# -----------------------------------------------------------------------------
+# Chan / tat tieng nguoi dung
+# -----------------------------------------------------------------------------
+
+
+def block_key(blocker_id: str, blocked_id: str, kind: str) -> str:
+    """`block_id` TAT DINH tu (nguoi chan, nguoi bi chan, loai) — xem
+    `domain.UserBlock`. Bam theo BA phan de "chặn" va "tắt tiếng" cung mot
+    cap nguoi khong va cham thanh mot hang."""
+    return "blk_" + hashlib.sha256(
+        f"{blocker_id}\x1f{blocked_id}\x1f{kind}".encode()).hexdigest()[:24]
+
+
+# -----------------------------------------------------------------------------
+# Bang tin: cursor va tran do sau
+# -----------------------------------------------------------------------------
+
+#: So muc TOI DA duoc xet (kiem tra + loc) cho MOT lan doi bang tin, cho MOI
+#: pham vi (scope) va bo loc. Khong phai so muc TRA VE — loc theo chan/tat
+#: tieng co the bo di vai muc trong so nay. Vuot tran thi dung lai va bao
+#: `depth_capped=True` thay vi quet vo han.
+FEED_MAX_DEPTH = 500
+
+
+def encode_feed_cursor(created_at: str, post_id: str) -> str:
+    """Cursor MO — base64url cua `created_at|post_id` cua muc CUOI CUNG da
+    xet. Khong ma hoa bi mat gi, chi de tranh nguoi dung chinh tay sua no
+    thanh mot chuoi "trong nhu" hop le nhung sai cau truc."""
+    raw = f"{created_at}|{post_id}".encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_feed_cursor(raw: str) -> Tuple[str, str]:
+    """Giai ma cursor. Nem `SocialError` (400) neu khong doc duoc — mot
+    cursor hong khong duoc phep am tham roi ve trang dau, vi do se lam
+    nguoi dung tuong da xem het ma that ra bi lap lai tu dau."""
+    if not raw:
+        raise SocialError("Thiếu cursor.")
+    try:
+        pad = "=" * (-len(raw) % 4)
+        text = base64.urlsafe_b64decode((raw + pad).encode("ascii")).decode("utf-8")
+        created_at, _, post_id = text.partition("|")
+        if not created_at or not post_id:
+            raise ValueError("thieu phan")
+    except Exception as exc:
+        raise SocialError("Cursor không hợp lệ.") from exc
+    return created_at, post_id
+
+
+# -----------------------------------------------------------------------------
+# Ho so: preset mau nhan dien
+# -----------------------------------------------------------------------------
+
+#: Danh sach mau nhan dien trang ca nhan — CO CHON, khong nhan ma HEX tu do
+#: (tranh mot nguoi dat mau khong doc duoc chu tren nen toi/sang cua giao
+#: dien). Rong = mac dinh he thong.
+ACCENT_PRESETS: Tuple[str, ...] = ("aurora", "ember", "jade", "violet", "gold")
+
+#: So fandom TOI DA mot nguoi dung duoc gan cho trang ca nhan cua minh.
+PROFILE_MAX_FANDOMS = 5
 
 
 def clean_text(raw: str, *, toi_da: int, ten: str, bat_buoc: bool = True) -> str:
@@ -372,6 +570,21 @@ def doan_khoa(raw: str) -> str:
     return sach or "_"
 
 
+def content_addressed_key(khong_gian: str, *, user_id: str, data: bytes) -> str:
+    """
+    Khoa doi tuong NOI DUNG-DINH-DIA CHI (Social Play V1): `{khong_gian}/
+    {user_id}/{sha256(data)[:16]}.webp` — dung cho avatar/banner ho so SAU
+    khi da chuan hoa (`server/image_normalize.py`).
+
+    KHAC `object_key()` o duoi (mot khoa CO DINH `anh.{duoi}` moi khong gian):
+    khoa noi dung-dinh-dia-chi tu doi khi ANH doi, nen "xoa anh CU sau khi
+    ghi ho so THANH CONG" (xem `SocialService.update_profile`) khong bao gio
+    xoa nham khoa MOI vua ghi — hai anh khac nhau chac chan ra hai khoa khac
+    nhau, va CUNG mot anh (bam lai upload y het) ra LAI DUNG mot khoa cu.
+    """
+    return f"{khong_gian}/{doan_khoa(user_id)}/{hashlib.sha256(data).hexdigest()[:16]}.webp"
+
+
 def object_key(loai: str, *, user_id: str, subject_id: str,
                duoi: str = "webp") -> str:
     """
@@ -427,6 +640,9 @@ def mo_ta_gioi_han() -> Dict[str, object]:
             ten: {"count": m.so_lan, "minutes": m.phut}
             for ten, m in HAN_MUC_MAC_DINH.items()
         },
+        "community_fandoms": community_fandoms_out(),
+        "profile_accent_presets": list(ACCENT_PRESETS),
+        "profile_max_fandoms": PROFILE_MAX_FANDOMS,
     }
 
 

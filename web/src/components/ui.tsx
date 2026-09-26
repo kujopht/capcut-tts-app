@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import type { JobStatus } from "@/lib/api";
 
 /* ------------------------------------------------------------- dau trang */
@@ -321,7 +322,13 @@ export function ConfirmDialog({
 
   if (!open) return null;
 
-  return (
+  /*
+    `createPortal` ra `document.body`: `.page` mang `transform` (hieu ung vao
+    trang) nen moi `position: fixed` ben trong no bi dinh vi theo `.page`, khong
+    theo man hinh — do that 2026-09-26 (Social & Play V1): lop phu khong phu het
+    man, tam truot tren dien thoai ho day trang. Cung ly do voi `SearchOverlay`.
+  */
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={onBackdrop}>
       <div
         className="modal"
@@ -355,7 +362,8 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

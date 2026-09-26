@@ -12,9 +12,11 @@ sau: `signed_url()` da co san trong Protocol.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import shutil
 import threading
+import time
 from dataclasses import dataclass, replace, is_dataclass
 from pathlib import Path
 from datetime import datetime, timezone
@@ -29,6 +31,7 @@ from typing import (
     Set,
     Tuple,
 )
+from urllib.parse import quote
 
 from server.config import ConfigError, Settings
 from server.domain import (
@@ -1225,16 +1228,33 @@ class LocalStorageAdapter:
 
     mode = "mock"
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, dev_media_base: Optional[str] = None):
         self._root = Path(root)
         self._root.mkdir(parents=True, exist_ok=True)
+        #: Goc URL cong khai cua CHINH backend nay (`FAS_PUBLIC_API_BASE`),
+        #: CHI khi nguoi goi (`build_storage`) da quyet dinh bat tinh nang
+        #: nay (`storage_backend == "local"` VA `is_development`). `None` =
+        #: TAT — `signed_url()` giu nguyen hanh vi cu (tra `None`).
+        self._dev_media_base = (dev_media_base or "").rstrip("/") or None
+        #: Bi mat NGAU NHIEN moi tien trinh — KHONG luu, KHONG doc tu bien
+        #: moi truong: day chi la chu ky cho MOT tien trinh dev cuc bo tu
+        #: xac minh URL no vua phat ra, khong phai mot credential lau dai.
+        self._dev_media_secret = os.urandom(32) if self._dev_media_base else None
 
     def _path(self, key: str) -> Path:
         # Chan duong dan vuot ra ngoai thu muc goc
         safe = key.replace("\\", "/").lstrip("/")
         if ".." in safe.split("/"):
             raise ValueError(f"Object key không hợp lệ: {key}")
-        return self._root / safe
+        dich = self._root / safe
+        # Tren Windows `root / "C:/x"` (hoac "//host/share") BO QUA root va tra
+        # ve chinh duong dan tuyet doi do — kiem lai SAU khi resolve rang dich
+        # van nam TRONG goc (review bao mat Social & Play V1).
+        goc = self._root.resolve()
+        that = dich.resolve()
+        if that != goc and goc not in that.parents:
+            raise ValueError(f"Object key không hợp lệ: {key}")
+        return dich
 
     def put(self, key: str, data: bytes, content_type: str = "audio/mpeg") -> str:
         target = self._path(key)
@@ -1297,12 +1317,44 @@ class LocalStorageAdapter:
     def signed_url(self, key: str, expires_seconds: int = 3600,
                    download_name: Optional[str] = None) -> Optional[str]:
         """
-        Ban cuc bo khong co URL ky san.
+        Ban cuc bo THUONG khong co URL ky san — tra `None` de tang tren biet
+        phai stream qua backend. Khi doi sang R2, ham nay se tra URL ky that
+        va tang tren khong can doi.
 
-        Tra None de tang tren biet phai stream qua backend. Khi doi sang R2,
-        ham nay se tra URL ky that va tang tren khong can doi.
+        NGOAI LE, CHI khi tien trinh nay duoc CO Y BAT (`dev_media_base` khac
+        `None` — xem `build_storage`): tra mot URL HMAC-ky, co han, tro toi
+        `GET /api/dev/media/{key}` cua CHINH backend nay, de anh dai
+        dien/banner/anh bai dang TAI LEN CUC BO hien duoc trong luc kiem thu
+        thi giac. Khong bao gio xay ra o R2/production — ca hai dieu kien bat
+        deu chi dung khi that su la dev cuc bo (xem `build_storage`).
         """
-        return None
+        if not self._dev_media_base or not key:
+            return None
+        het_han = int(time.time()) + max(1, int(expires_seconds))
+        chu_ky = self._dev_media_sig(key, het_han)
+        return (f"{self._dev_media_base}/api/dev/media/{quote(key, safe='')}"
+               f"?exp={het_han}&sig={chu_ky}")
+
+    def _dev_media_sig(self, key: str, exp: int) -> str:
+        thong = f"{key}|{exp}".encode("utf-8")
+        return hmac.new(self._dev_media_secret, thong, hashlib.sha256).hexdigest()
+
+    def verify_dev_media_url(self, key: str, exp: int, sig: str) -> bool:
+        """
+        Xac minh MOT URL media cuc bo (`GET /api/dev/media/{key}` doc ham
+        nay) — het han HOAC chu ky sai deu tra `False`. So sanh chu ky bang
+        `hmac.compare_digest` (HANG SO THOI GIAN).
+
+        Tra `False` VO DIEU KIEN neu tinh nang nay chua duoc bat
+        (`_dev_media_secret is None`) — mot route goi ham nay khi TAT tinh
+        nang (vi du storage that la R2 nhung ai do goi nham) phai luon that
+        bai dong, khong bao gio "tinh co" xac minh dung.
+        """
+        if self._dev_media_secret is None:
+            return False
+        if time.time() > exp:
+            return False
+        return hmac.compare_digest(self._dev_media_sig(key, exp), sig)
 
 
 # -----------------------------------------------------------------------------
@@ -2391,7 +2443,18 @@ def build_storage(settings: Settings) -> StorageAdapter:
         return R2StorageAdapter(settings.r2)
     if settings.storage_backend != "local":
         raise ConfigError(f"STORAGE_BACKEND không hợp lệ: {settings.storage_backend!r}")
-    return LocalStorageAdapter(settings.var_dir / "storage")
+    # URL media cuc bo (Social Play V1, muc 9) — CHI bat khi CA BA dung: kho
+    # la `local` (da biet roi vi ta dang o nhanh nay), moi truong la phat
+    # trien, VA cong tac rieng `dev_media_urls_enabled` (MAC DINH TAT — xem
+    # docstring cua no ve ly do KHONG chi dua vao `is_development`).
+    # R2/production khong bao gio doc `dev_media_base`.
+    dev_media_base = (
+        settings.public_api_base
+        if settings.is_development and settings.dev_media_urls_enabled
+        else None
+    )
+    return LocalStorageAdapter(settings.var_dir / "storage",
+                               dev_media_base=dev_media_base)
 
 
 def build_metadata_store(settings: Settings) -> MetadataStore:

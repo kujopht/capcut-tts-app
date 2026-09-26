@@ -697,8 +697,11 @@ class BaoCaoTest(Nen):
                                target_id=bai["post_id"], reason="tôi-không-thích")
 
     def test_loai_doi_tuong_la_thi_tu_choi(self):
+        # `"user"` gio la mot `target_kind` HOP LE (Social Play V1, capability
+        # `user_reports`) — xem `test_social_play_v1_moderation.py` cho kich
+        # ban do. O day dung mot loai THAT SU khong ton tai.
         with self.assertRaises(SocialError):
-            self.social.report(self.binh, target_kind="user",
+            self.social.report(self.binh, target_kind="story",
                                target_id=self.an.user_id, reason="spam")
 
     def test_bao_cao_binh_luan(self):

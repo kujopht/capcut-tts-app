@@ -68,6 +68,14 @@ class TestRequirementsFile(unittest.TestCase):
                 declared[package], f"{package} phải có ràng buộc phiên bản"
             )
 
+    def test_pillow_duoc_khai_bao_vi_image_normalize_import_luc_khoi_dong(self):
+        """Social & Play V1: `server/image_normalize.py` (import qua `social_service`
+        luc khoi dong) can Pillow. Thieu khai bao = ca backend khong len duoc tren
+        Render, du may lap trinh (co Pillow tu desktop app) chay binh thuong."""
+        declared = _declared_requirements()
+        self.assertIn("pillow", declared, "Pillow phải được khai báo trong server/requirements.txt")
+        self.assertRegex(declared["pillow"], r"[<>=~!]", "Pillow phải có ràng buộc phiên bản")
+
     def test_gui_only_packages_are_not_pulled_into_the_backend(self):
         """Backend khong duoc keo theo phu thuoc cua desktop app."""
         declared = _declared_requirements()

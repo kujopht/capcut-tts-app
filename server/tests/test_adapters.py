@@ -466,6 +466,78 @@ class TestProfileFromRow(unittest.TestCase):
                          ("banners/u1/b.webp", "jade", ["naruto", "one-piece"]))
 
 
+class TestLoi5xxAppwriteKhongThanh401(unittest.TestCase):
+    """Do that (Appwrite 1.9.6 + MongoDB THU, 2026-09-26): 6 request DONG THOI cua cung
+    mot nguoi -> 3 lan `GET /v1/account` tra 500 "Transaction aborted", va backend tra
+    401 cho nguoi dung dang dang nhap hop le (giao dien coi 401 la het phien)."""
+
+    class _ClientGia:
+        def __init__(self, codes):
+            import httpx as _httpx
+
+            self._httpx = _httpx
+            self.codes = list(codes)
+            self.goi = 0
+            self.cookies = type("C", (), {"clear": lambda self: None})()
+
+        def request(self, method, url, **kw):
+            self.goi += 1
+            code = self.codes.pop(0)
+            body = ({"$id": "u1", "email": "a@vidu.vn", "name": "An"} if code == 200
+                    else {"message": "Transaction aborted", "code": code})
+            return self._httpx.Response(code, json=body, request=self._httpx.Request(method, url))
+
+    def _adapter(self, codes):
+        from unittest.mock import patch
+
+        from server.appwrite_adapter import AppwriteIdentityAdapter
+
+        adapter = AppwriteIdentityAdapter(AppwriteSettings(
+            endpoint="https://x.invalid/v1", project_id="p", api_key="k", database_id="db"))
+        gia = self._ClientGia(codes)
+        patch.object(adapter, "_http", return_value=gia).start()
+        patch.object(adapter, "_merge_stored", side_effect=lambda p: p).start()
+        patch("server.appwrite_adapter.time.sleep", return_value=None).start()
+        self.addCleanup(patch.stopall)
+        return adapter, gia
+
+    def test_5xx_la_appwrite_unavailable_khong_phai_loi_dang_nhap(self):
+        from server.adapters import AppwriteUnavailableError
+
+        adapter, _ = self._adapter([500])
+        with self.assertRaises(AppwriteUnavailableError):
+            adapter._request("GET", "/v1/account", session="s", admin=False)
+
+    def test_401_van_la_loi_dang_nhap(self):
+        from server.adapters import AppwriteUnavailableError, AuthError
+
+        adapter, _ = self._adapter([401])
+        with self.assertRaises(AuthError) as ctx:
+            adapter._request("GET", "/v1/account", session="s", admin=False)
+        self.assertNotIsInstance(ctx.exception, AppwriteUnavailableError)
+
+    def test_xac_minh_phien_thu_lai_khi_500_thoang_qua(self):
+        adapter, gia = self._adapter([500, 200])
+        p = adapter.profile_from_token("s")
+        self.assertEqual((p.user_id, gia.goi), ("u1", 2))
+
+    def test_xac_minh_phien_500_mai_thi_503_sau_ba_lan(self):
+        from server.adapters import AppwriteUnavailableError
+
+        adapter, gia = self._adapter([500, 500, 500])
+        with self.assertRaises(AppwriteUnavailableError):
+            adapter.profile_from_token("s")
+        self.assertEqual(gia.goi, 3)
+
+    def test_phien_sai_khong_thu_lai(self):
+        from server.adapters import AuthError
+
+        adapter, gia = self._adapter([401])
+        with self.assertRaises(AuthError):
+            adapter.profile_from_token("s")
+        self.assertEqual(gia.goi, 1)
+
+
 class TestSaveProfileDatetimeCoercion(unittest.TestCase):
     """
     Kiem tra thu hoach TU dot Appwrite optional-datetime audit (sau Phase 6):

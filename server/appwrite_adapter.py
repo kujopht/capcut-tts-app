@@ -11,6 +11,7 @@ NGUYEN TAC:
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
@@ -160,8 +161,13 @@ class AppwriteIdentityAdapter:
             except Exception:
                 body = None
             message = thong_diep_loi_an_toan(body, status_code=response.status_code)
-            if response.status_code in (401, 403):
-                raise AuthError(message)
+            if response.status_code >= 500:
+                # 5xx la loi CUA Appwrite, khong phai nguoi dung sai thong tin — cung ly do voi
+                # nhanh `httpx.HTTPError` o tren: 503, khong phai 401. Do that (Appwrite 1.9.6 +
+                # MongoDB THU, 2026-09-26): nhieu request DONG THOI cua cung mot nguoi lam
+                # `GET /v1/account` tra 500 "Transaction aborted", va truoc day no thanh 401 — giao
+                # dien coi 401 la "phien het han", nen mot cu bam dup co the dang xuat nguoi dung.
+                raise AppwriteUnavailableError(message)
             raise AuthError(message)
 
         if response.status_code == 204 or not response.content:
@@ -275,10 +281,23 @@ class AppwriteIdentityAdapter:
         segments" neu gui nham cho.
 
         Danh tinh LUON lay tu phan hoi cua Appwrite, khong bao gio tu client.
+
+        Thu lai TOI DA hai lan khi Appwrite loi TAM THOI (`AppwriteUnavailableError`:
+        5xx hoac mat ket noi) — day la mot phep DOC, lap lai an toan. Do that: `GET
+        /v1/account` DONG THOI cua cung mot nguoi tren Appwrite 1.9.6 + MongoDB tra 500
+        "Transaction aborted" (3/6 request trong mot lan gui trung dong thoi), lan goi lai
+        ngay sau do thanh cong. 401/403 (phien sai/het han) KHONG bao gio duoc thu lai.
         """
-        data = self._request(
-            "GET", "/v1/account", session=(token or "").strip(), admin=False
-        )
+        for lan in range(3):
+            try:
+                data = self._request(
+                    "GET", "/v1/account", session=(token or "").strip(), admin=False
+                )
+                break
+            except AppwriteUnavailableError:
+                if lan == 2:
+                    raise
+                time.sleep(0.05 * (lan + 1))
         user_id = str(data.get("$id") or "")
         if not user_id:
             raise AuthError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn.")

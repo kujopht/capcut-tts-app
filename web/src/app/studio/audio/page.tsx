@@ -104,25 +104,44 @@ export default function AudioStudio() {
   });
   const { khoiPhuc, theoDoi } = jobs;
 
-  // Fetch public voices unconditionally; fetch user jobs/tracks if authenticated
+  // Danh sach giong CONG KHAI: tai MOT lan, khong phu thuoc phien. Truoc day no
+  // nam chung hieu ung voi `profile`, nen moi lan tai trang goi `/api/voices` HAI
+  // lan (do tren production 2026-09-26), va loi mang bi nuot thanh danh sach rong:
+  // o chon giong trong tron, nut Tao bi khoa ma khong mot loi giai thich nao.
+  const [loiGiong, setLoiGiong] = useState(false);
+  const [lanTaiGiong, setLanTaiGiong] = useState(0);
   useEffect(() => {
     let mounted = true;
     void (async () => {
-      const v = await api.voices().catch(() => ({ voices: [] as Voice[] }));
-      if (!mounted) return;
-      setVoices(v.voices);
-      setVoice((curr) => curr || draft?.giong || defaultVoiceId(v.voices));
-      if (profile) {
-        await refresh();
-        const j = await api.listJobs().catch(() => ({ jobs: [] as TtsJob[] }));
+      try {
+        const v = await api.voices();
         if (!mounted) return;
-        khoiPhuc(j.jobs);
+        setVoices(v.voices);
+        setLoiGiong(false);
+        setVoice((curr) => curr || draft?.giong || defaultVoiceId(v.voices));
+      } catch {
+        if (mounted) setLoiGiong(true);
       }
     })();
     return () => {
       mounted = false;
     };
-  }, [profile, khoiPhuc, draft]);
+  }, [draft, lanTaiGiong]);
+
+  // Job/track cua nguoi dung: chi khi da dang nhap.
+  useEffect(() => {
+    if (!profile) return;
+    let mounted = true;
+    void (async () => {
+      await refresh();
+      const j = await api.listJobs().catch(() => ({ jobs: [] as TtsJob[] }));
+      if (!mounted) return;
+      khoiPhuc(j.jobs);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [profile, khoiPhuc]);
 
   const create = async ({ tieuDe, vanBan, giong, tocDo }: { tieuDe: string; vanBan: string; giong: string; tocDo: string }) => {
     if (dangGui.current) return;
@@ -200,6 +219,15 @@ export default function AudioStudio() {
         </Link>
       </div>
       <div className="audio-create-pane">
+        {loiGiong ? (
+          <p className="hint loi audio-loi-giong" role="alert">
+            Không tải được danh sách giọng đọc — kiểm tra kết nối rồi{" "}
+            <button type="button" className="link-btn" onClick={() => setLanTaiGiong((n) => n + 1)}>
+              thử lại
+            </button>
+            .
+          </p>
+        ) : null}
         <TtsPanel
           key={draft ? "restored-draft" : "fresh"}
           voices={voices}

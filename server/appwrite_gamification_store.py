@@ -21,14 +21,17 @@ kho bat loi do de tra ve y nghia "da co roi" giong het `MockGamificationStore`
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
+import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
 from server.adapters import AppwriteUnavailableError, NotFoundError, raise_for_appwrite_404
 from server.config import AppwriteSettings
+from server.domain import now_iso
 from server.secret_redaction import thong_diep_loi_an_toan
 from server.gamification import (
     id_mo_khoa_thanh_tuu,
@@ -53,6 +56,9 @@ COL_COSMETIC_INVENTORY = "cosmetic_inventory"
 #: `server/gamification_domain.py` (ReadingStreak/QuestProgress).
 COL_READING_STREAKS = "reading_streaks"
 COL_QUEST_PROGRESS = "quest_progress"
+#: Marker CAS cho `award_xp_atomic` — Social & Play V1 Goi C, xem docstring
+#: cua ham do ve VI SAO can bang nay (khong chi transaction la du).
+COL_XP_PROGRESS_CAS = "xp_progress_cas"
 
 #: Ten thuoc tinh THAT SU muon luu — cung vai tro voi `_PERSISTED_FIELDS` o
 #: `appwrite_translation_store.py`. Phai KHOP CHINH XAC voi SCHEMA trong
@@ -225,6 +231,51 @@ def _quest_to_row(q: QuestProgress) -> Dict[str, Any]:
         "claimed": q.claimed,
         "updated_at": q.updated_at,
     }
+
+
+#: So lan thu toi da cua `update_progress_atomic` va thoi gian cho truoc moi lan thu lai — backoff mu
+#: voi jitter DAY DU (0..tran), tran 25 ms x 2^lan, chan tren 800 ms: tong cho ky vong ~1.5 s truoc khi
+#: bo cuoc, du de tach 8+ writer cung ghi MOT nguoi (moi lan thu la 3-4 luot goi Appwrite).
+_SO_LAN_THU_CAS = 9
+
+
+def _cho_truoc_lan_thu(attempt: int, u: float) -> float:
+    """`u` trong [0, 1) — tach khoi `random` de kiem thu duoc."""
+    return u * min(0.8, 0.025 * (2 ** attempt))
+
+
+#: Khoa THEO NGUOI trong tien trinh, dat TRUOC CAS Appwrite: cac writer cung mot nguoi trong MOT tien
+#: trinh (production hien chay MOT tien trinh uvicorn) xep hang thay vi dua nhau tren cung mot hang tien
+#: do — CAS chi con phai phan xu giua cac TIEN TRINH. 256 o khoa co dinh (bam crc32), khong phinh theo
+#: so nguoi dung. RLock: an toan neu mot mutator goi lai kho. Thu tu khoa: khoa quyet toan game
+#: (`games_service._khoa_quyet_toan`) LUON lay TRUOC khoa nay, khong bao gio nguoc lai.
+_KHOA_TIEN_DO = tuple(threading.RLock() for _ in range(256))
+#: Cho khoa TOI DA bay nhieu giay roi di tiep KHONG khoa (CAS van phan xu dung) — khoa bi giu qua cac luot
+#: goi mang, khong duoc de mot Appwrite cham (hoac nguoi chung o khoa, 1/256) bo doi threadpool cua API
+#: (phat hien qua review doc lap).
+_CHO_KHOA_TOI_DA_GIAY = 5.0
+
+
+def _khoa_tien_do(user_id: str) -> "threading.RLock":
+    return _KHOA_TIEN_DO[zlib.crc32(user_id.encode("utf-8")) % len(_KHOA_TIEN_DO)]
+
+
+def xp_progress_cas_row_id(user_id: str, prior_xp: int, prior_state: str = "") -> str:
+    """ID TAT DINH cho marker CAS cua `award_xp_atomic`, tu `(user_id,
+    prior_xp, prior_state)` — sha256 (Appwrite id <=36 ky tu), cung ky thuat
+    voi `gamification.id_xp_entry`. Hai request/worker CUNG doc thay mot
+    TRANG THAI hang tien do se sinh CUNG marker id, nen chi MOT trong hai tao
+    duoc hang — day la khoa chan "lost update" ma transaction MOT MINH khong
+    dam bao (xem docstring `AppwriteGamificationStore.award_xp_atomic`).
+
+    `prior_state` = `$updatedAt` cua hang tien do vua doc (Appwrite tu dat o
+    MOI lan ghi; rong neu hang chua ton tai). Truoc ban sua nay khoa chi la
+    `(user_id, prior_xp)`: XP tung bi GIAM (dieu chinh bu) roi quay lai dung
+    gia tri cu thi marker cu da ton tai va MOI lan cong sau do deu thua commit
+    mai mai — nguoi dung khong bao gio duoc cong XP nua (hoi quy:
+    `test_games_appwrite_contract.test_xp_chinh_ve_gia_tri_cu_khong_lam_ket_marker`)."""
+    khoa = f"{user_id}\x1f{prior_xp}\x1f{prior_state}".encode("utf-8")
+    return f"xc_{hashlib.sha256(khoa).hexdigest()[:24]}"
 
 
 def _quest_from_row(row: Dict[str, Any]) -> QuestProgress:
@@ -438,6 +489,136 @@ class AppwriteGamificationStore:
         ds = [_xp_entry_from_row(r) for r in rows]
         return sorted(ds, key=lambda e: e.created_at)
 
+    def list_xp_events_since(self, user_id: str, since_iso: str) -> List[XpLedgerEntry]:
+        rows = self._list_all(COL_XP_LEDGER, [
+            q_equal("user_id", user_id), q_greater_equal("created_at", since_iso)])
+        ds = [_xp_entry_from_row(r) for r in rows]
+        return sorted(ds, key=lambda e: e.created_at)
+
+    #: Duong ghi tien do NGUYEN TU cho MOI writer (award_xp, claim_quest_reward, equip_title,
+    #: open_reward_pack, quyet toan game). MAC DINH TAT tren Appwrite (`FAS_XP_ATOMIC`, xem
+    #: `server/config.py`) cho toi khi duong nay duoc kiem tren mot project Appwrite THU NGHIEM —
+    #: khi tat, `gamification_service` giu nguyen duong cu (production khong doi hanh vi).
+    xp_atomic = False
+
+    def update_progress_atomic(self, user_id: str, mutator,
+                               ledger_entry: Optional[XpLedgerEntry] = None) -> Optional[UserProgress]:
+        """Xep hang theo nguoi trong tien trinh (`_khoa_tien_do`), roi ghi qua CAS Appwrite — giao thuc
+        day du o `_update_progress_atomic_trong_khoa`.
+
+        DO THAT tren Appwrite 1.9.6 THU (2026-09-26), cung may, cung kich ban: chi co CAS + backoff thi
+        8 luong cung ghi MOT nguoi con 2/24 lan that bai, 16 luong 12/48; khoa theo nguoi xoa phan tranh
+        chap TRONG tien trinh — xem bao cao integration."""
+        khoa = _khoa_tien_do(user_id)
+        co_khoa = khoa.acquire(timeout=_CHO_KHOA_TOI_DA_GIAY)
+        try:
+            return self._update_progress_atomic_trong_khoa(user_id, mutator, ledger_entry)
+        finally:
+            if co_khoa:
+                khoa.release()
+
+    def _update_progress_atomic_trong_khoa(self, user_id: str, mutator,
+                                           ledger_entry: Optional[XpLedgerEntry] = None
+                                           ) -> Optional[UserProgress]:
+        """
+        Doc hang tien do -> `mutator(progress)` -> MOT transaction TablesDB gom:
+
+        ```
+        [create  xp_ledger        rowId = entry_id]              (chi khi co ledger_entry)
+         update  user_progress    rowId = user_id                 (create neu chua co hang)
+         create  xp_progress_cas  rowId = xc_sha256(user|prior_xp|prior_$updatedAt)
+        ```
+
+        Cung ky thuat DA DO tren Appwrite 1.9.6 boi `AppwriteMetadataStore.claim_job`: rowId duy
+        nhat do database cuong che. Hang `xp_progress_cas` bien "hai writer cung doc MOT trang thai
+        hang tien do" thanh "hai writer cung xin tao MOT rowId" -> chi MOT commit duoc, ke ca khi hai
+        transaction KHONG chong lan (transaction mot minh chi bat xung dot dong thoi). Khoa gan voi
+        TRANG THAI hang (`$updatedAt`), khong chi con so XP: XP tung bi chinh ve gia tri cu van cong
+        tiep duoc (hoi quy `test_xp_chinh_ve_gia_tri_cu_khong_lam_ket_marker`).
+
+        Thua commit (nem loi, HOAC tra ve binh thuong ma `status != "committed"`): co `ledger_entry`
+        va hang so cai DA TON TAI -> "da cong roi", tra `None`; con lai -> doc lai trang thai MOI,
+        goi lai `mutator`, thu lai (toi da `_SO_LAN_THU_CAS` lan, backoff mu voi jitter DAY DU) -> het
+        luot: `AppwriteUnavailableError`. `mutator` phai la ham thuan theo `progress` (co the bi goi
+        nhieu lan) va co the nem de huy.
+
+        DO THAT tren Appwrite 1.9.6 + MongoDB THU (2026-09-26): XP LUON dung bang tong cac lan commit
+        (khong mat, khong nhan doi — ca khi 2 TIEN TRINH cung ghi). Nhung ban cu (5 lan, cho 10-50 ms)
+        de 7/24 lan ghi that bai khi 8 luong cung ghi MOT nguoi, 29/48 khi 16 luong — moi lan thu la
+        3-4 luot goi Appwrite, cho qua ngan khong tach duoc cac writer. Xem `_cho_truoc_lan_thu`.
+        """
+        import copy
+        import random
+        import time
+
+        from server.appwrite_store import TRANSACTION_TTL_SECONDS
+
+        for attempt in range(_SO_LAN_THU_CAS):
+            try:
+                hang = self._get(COL_PROGRESS, user_id)
+                progress = _progress_from_row(hang)
+                progress_exists = True
+                prior_state = str(hang.get("$updatedAt") or "")
+            except NotFoundError:
+                progress = UserProgress(user_id=user_id)
+                progress_exists = False
+                prior_state = ""
+            prior_xp = progress.xp
+            moi = mutator(copy.deepcopy(progress))
+
+            operations = []
+            if ledger_entry is not None:
+                operations.append(
+                    {"action": "create", "databaseId": self._db, "tableId": COL_XP_LEDGER,
+                     "rowId": ledger_entry.entry_id,
+                     "data": self._writable(COL_XP_LEDGER, _xp_entry_to_row(ledger_entry))})
+            operations.append(
+                {"action": "update" if progress_exists else "create",
+                 "databaseId": self._db, "tableId": COL_PROGRESS, "rowId": user_id,
+                 "data": self._writable(COL_PROGRESS, _progress_to_row(moi))})
+            operations.append(
+                {"action": "create", "databaseId": self._db, "tableId": COL_XP_PROGRESS_CAS,
+                 "rowId": xp_progress_cas_row_id(user_id, prior_xp, prior_state),
+                 "data": {"user_id": user_id, "prior_xp": prior_xp,
+                          "entry_id": ledger_entry.entry_id if ledger_entry else "",
+                          "created_at": now_iso()}})
+            committed = False
+            try:
+                tx = self._call("POST", "/v1/tablesdb/transactions",
+                                payload={"ttl": TRANSACTION_TTL_SECONDS})
+                tx_id = tx["$id"]
+                self._call("POST", f"/v1/tablesdb/transactions/{tx_id}/operations",
+                           payload={"operations": operations})
+                result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx_id}",
+                                    payload={"commit": True})
+                committed = result.get("status") == "committed"
+            except Exception:
+                committed = False
+
+            if committed:
+                return moi
+
+            # CA hai duong thua (nem loi / status != committed) di qua CUNG mot phep kiem — truoc
+            # ban sua o vong review goi C, nhanh "khong nem loi" bo qua phep kiem va thu lai vo han.
+            if ledger_entry is not None:
+                try:
+                    self._get(COL_XP_LEDGER, ledger_entry.entry_id)
+                    return None  # Hang xp_ledger DA TON TAI -> da cong roi.
+                except NotFoundError:
+                    pass
+            if attempt + 1 < _SO_LAN_THU_CAS:
+                time.sleep(_cho_truoc_lan_thu(attempt, random.random()))
+
+        raise AppwriteUnavailableError(
+            "Không ghi được tiến độ XP sau nhiều lần thử — Appwrite đang xung đột.")
+
+    def award_xp_atomic(self, entry: XpLedgerEntry) -> Optional[UserProgress]:
+        """Ghi MOT entry so cai VA cong XP vao tien do trong MOT transaction — xem
+        `update_progress_atomic`. Trung `entry_id` -> `None`, khong doi gi."""
+        from server.gamification_store import mutator_cong_xp
+
+        return self.update_progress_atomic(entry.user_id, mutator_cong_xp(entry), ledger_entry=entry)
+
     # ======================================================== thanh tuu
 
     def list_unlocked_achievements(self, user_id: str) -> List[UnlockedAchievement]:
@@ -582,7 +763,8 @@ class AppwriteGamificationStore:
         ra: Dict[str, int] = {}
         for row in rows:
             entry = _xp_entry_from_row(row)
-            ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
+            if entry.xp_awarded:  # hang 0 XP (vd `reward_pack_open`) — xem ban mock
+                ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
         return ra
 
     # ======================================================== xoa tai khoan
@@ -639,5 +821,8 @@ def build_gamification_store(settings: Any):
     from server.gamification_store import MockGamificationStore
 
     if getattr(settings, "data_backend", "mock") == "appwrite":
-        return AppwriteGamificationStore(settings.appwrite)
+        kho = AppwriteGamificationStore(settings.appwrite)
+        # Duong ghi nguyen tu chi bat khi cau hinh TUONG MINH (`FAS_XP_ATOMIC=1`) — xem config.py.
+        kho.xp_atomic = bool(getattr(settings, "xp_atomic_enabled", False))
+        return kho
     return MockGamificationStore()

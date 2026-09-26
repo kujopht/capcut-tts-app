@@ -22,10 +22,15 @@ import { PageHeader, SkeletonList, EmptyState, ErrorState } from "@/components/u
 import { IconCrown } from "@/components/Icons";
 import { Avatar } from "@/components/Avatar";
 import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
+import { GameLeaderboard } from "@/components/games/GameLeaderboard";
 
 const PAGE_SIZE = 20;
 
+/** XP tai khoan (all_time/weekly) va DIEM THEO GAME (caro/memory) la cac thang
+    rieng, khong tron — goi C Social & Play V1. */
 type Mode = "all_time" | "weekly";
+type Xem = Mode | "caro" | "memory";
+const XEM_HOP_LE: readonly Xem[] = ["all_time", "weekly", "caro", "memory"];
 
 /** Anh huy hieu hang 1/2/3 (V6 fantasy-assets-v1) — hang 4 tro di khong co
  * huy hieu, chi hien "#N". Loi tai anh se an huy hieu, van con so hang binh
@@ -87,6 +92,17 @@ function HangXepHang({ it }: { it: LeaderboardEntry }) {
 export default function LeaderboardPage() {
   const { profile } = useSession();
   const [mode, setMode] = useState<Mode>("all_time");
+  const [xem, setXem] = useState<Xem>("all_time");
+  // `?view=caro|memory` tu trang game — doc SAU khi hydrate (tranh lech SSR).
+  useEffect(() => {
+    queueMicrotask(() => {
+      const v = new URLSearchParams(window.location.search).get("view") as Xem | null;
+      if (v && XEM_HOP_LE.includes(v)) {
+        setXem(v);
+        if (v === "all_time" || v === "weekly") setMode(v);
+      }
+    });
+  }, []);
   const [page, setPage] = useState(0);
   const [data, setData] = useState<LeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,9 +110,12 @@ export default function LeaderboardPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const latest = useRef(0);
 
-  const doiChe = useCallback((m: Mode) => {
-    setMode(m);
-    setPage(0);
+  const doiChe = useCallback((m: Xem) => {
+    setXem(m);
+    if (m === "all_time" || m === "weekly") {
+      setMode(m);
+      setPage(0);
+    }
   }, []);
 
   const taiLai = useCallback(() => setReloadTick((v) => v + 1), []);
@@ -144,7 +163,7 @@ export default function LeaderboardPage() {
         eyebrow="Cộng đồng"
         icon={<IconCrown size={16} />}
         title="Bảng xếp hạng"
-        lead="Xếp hạng theo XP — đọc, nghe và tương tác cộng đồng để lên hạng."
+        lead="XP tài khoản (đọc, nghe, sáng tác) và điểm từng trò chơi theo mùa — mỗi bảng một thang riêng, không cộng lẫn."
         id="lb-title"
       />
 
@@ -152,8 +171,8 @@ export default function LeaderboardPage() {
         <button
           type="button"
           role="tab"
-          className={mode === "all_time" ? "tab-nut tab-chon" : "tab-nut"}
-          aria-selected={mode === "all_time"}
+          className={xem === "all_time" ? "tab-nut tab-chon" : "tab-nut"}
+          aria-selected={xem === "all_time"}
           onClick={() => doiChe("all_time")}
         >
           Toàn thời gian
@@ -161,15 +180,35 @@ export default function LeaderboardPage() {
         <button
           type="button"
           role="tab"
-          className={mode === "weekly" ? "tab-nut tab-chon" : "tab-nut"}
-          aria-selected={mode === "weekly"}
+          className={xem === "weekly" ? "tab-nut tab-chon" : "tab-nut"}
+          aria-selected={xem === "weekly"}
           onClick={() => doiChe("weekly")}
         >
           Tuần này
         </button>
+        <button
+          type="button"
+          role="tab"
+          className={xem === "caro" ? "tab-nut tab-chon" : "tab-nut"}
+          aria-selected={xem === "caro"}
+          onClick={() => doiChe("caro")}
+        >
+          Caro — theo mùa
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={xem === "memory" ? "tab-nut tab-chon" : "tab-nut"}
+          aria-selected={xem === "memory"}
+          onClick={() => doiChe("memory")}
+        >
+          Memory Runes
+        </button>
       </div>
 
-      {error ? (
+      {xem === "caro" || xem === "memory" ? (
+        <GameLeaderboard key={xem} game={xem} viewerId={profile?.user_id ?? ""} />
+      ) : error ? (
         <ErrorState message={error} onRetry={taiLai} />
       ) : loading && !data ? (
         <SkeletonList count={8} />

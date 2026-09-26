@@ -188,6 +188,12 @@ XP_EVENTS: Dict[str, int] = {
     "listen_milestone_qualified": 5,
     "community_contribution": 5,
     "translation_project_completed": 20,
+    # --- Social & Play V1 Goi C: mini-game (Caro/Gomoku, Memory Runes) -------
+    # Xem `server/games_domain.py`/`server/games_service.py` — server la
+    # trong tai DUY NHAT (board/turn/win/diem/XP), client chi gui hanh dong.
+    "game_match_completed": 2,
+    "game_match_won": 3,
+    "game_run_completed": 2,
 }
 
 

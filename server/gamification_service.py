@@ -10,6 +10,10 @@ khong tao vat pham trung) nam o MOT cho.
 
 from __future__ import annotations
 
+import hashlib
+import random
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from server.domain import now_iso
@@ -28,6 +32,7 @@ from server.gamification import (
     tinh_trang_thanh_tuu,
     title_unlocked,
 )
+from server.gamification_store import cong_xp_vao_tien_do
 from server.gamification_domain import (
     CosmeticInventoryItem,
     QuestProgress,
@@ -48,23 +53,25 @@ class GamificationError(ValueError):
     khac AssertionError/KeyError am tham."""
 
 
+def _nguyen_tu(store: Any) -> bool:
+    """Kho co (va DUOC PHEP dung) duong ghi tien do nguyen tu `update_progress_atomic`?
+
+    Social & Play V1: MOI writer cua hang tien do (`award_xp`, `claim_quest_reward`,
+    `equip_title`, `open_reward_pack`, quyet toan game) phai cung di mot duong — mot writer
+    doc-sua-ghi nguyen hang co the de len XP vua duoc writer khac cong. Kho trong bo nho luon
+    bat; kho Appwrite chi bat khi `FAS_XP_ATOMIC=1` (xem `server/config.py`)."""
+    return bool(getattr(store, "xp_atomic", False)) and hasattr(store, "update_progress_atomic")
+
+
 def _ap_dung_xp(store: Any, user_id: str, xp_amount: int) -> UserProgress:
     """
-    Cong THAT `xp_amount` vao tien do VA cap goi thuong mien phi cho MOI bac
-    vua vuot qua — logic DUNG CHUNG giua `award_xp` (gia tri co dinh tu
-    `XP_EVENTS`) va `claim_quest_reward` (gia tri rieng cua tung nhiem vu).
-    KHONG kiem idempotency o day — goi noi (da qua `store.record_xp_event`)
-    chiu trach nhiem dam bao ham nay chi duoc goi DUNG MOT LAN cho MOI su
-    kien, mot cho de tranh hai noi cong-XP-hai-lan-vi-quen-kiem.
+    DUONG CU (khi `_nguyen_tu` tat): cong THAT `xp_amount` vao tien do VA cap goi thuong mien
+    phi cho MOI bac vua vuot qua. KHONG kiem idempotency o day — goi noi (da qua
+    `store.record_xp_event`) chiu trach nhiem goi DUNG MOT LAN cho MOI su kien. Doc-sua-ghi hai
+    buoc: co the mat mot lan cong neu hai writer chen nhau — ly do ton tai `update_progress_atomic`.
     """
     progress = store.get_progress(user_id)
-    bac_truoc = level_for(progress.xp)
-    progress.xp += xp_amount
-    bac_sau = level_for(progress.xp)
-    if bac_sau.level > bac_truoc.level:
-        # Len (it nhat) mot bac — cap goi thuong mien phi cho MOI bac vua
-        # vuot qua, khong chi mot goi du nhay may bac cung luc.
-        progress.goi_thuong_dang_cho += bac_sau.level - bac_truoc.level
+    cong_xp_vao_tien_do(progress, xp_amount, "")
     return store.save_progress(progress)
 
 
@@ -87,6 +94,9 @@ def award_xp(store: Any, user_id: str, event_type: str, *,
         entry_id=entry_id, user_id=user_id, event_type=event_type,
         source_kind=source_kind, source_id=source_id,
         xp_awarded=XP_EVENTS[event_type])
+    if _nguyen_tu(store):
+        # So cai + tien do trong MOT khoi: khong con khe "da ghi so cai ma chua cong XP".
+        return store.award_xp_atomic(entry)
     if not store.record_xp_event(entry):
         return None  # Su kien nay da duoc cong truoc do — khong lam gi them.
     return _ap_dung_xp(store, user_id, entry.xp_awarded)
@@ -122,11 +132,16 @@ def cap_do_hien_thi(progress: UserProgress) -> dict:
 
 def equip_title(store: Any, user_id: str, title_key: str) -> UserProgress:
     """`title_key` rong = quay ve danh xung MAC DINH theo bac hien tai."""
-    progress = store.get_progress(user_id)
-    if title_key and not title_unlocked(progress.xp, title_key):
-        raise GamificationError("Danh xưng này chưa được mở khoá.")
-    progress.equipped_title_key = title_key
-    return store.save_progress(progress)
+    def dat(progress: UserProgress) -> UserProgress:
+        if title_key and not title_unlocked(progress.xp, title_key):
+            raise GamificationError("Danh xưng này chưa được mở khoá.")
+        progress.equipped_title_key = title_key
+        return progress
+
+    if _nguyen_tu(store):
+        # Doi danh xung KHONG duoc de len XP vua duoc cong o mot request khac.
+        return store.update_progress_atomic(user_id, dat)
+    return store.save_progress(dat(store.get_progress(user_id)))
 
 
 def sync_achievements(store: Any, user_id: str, *, so_truyen_xuat_ban: int,
@@ -289,37 +304,101 @@ def equip_cosmetic(store: Any, user_id: str, cosmetic_key: str) -> CosmeticInven
     return store.get_cosmetic(user_id, cosmetic_key)
 
 
+#: Loai su kien so cai (0 XP) cho MOI lan mo goi thuong tren duong nguyen tu — xem `open_reward_pack`.
+SU_KIEN_MO_GOI = "reward_pack_open"
+
+
+#: Cua so cap bu: chi xet cac lan mo goi trong `CUA_SO_CAP_BU_NGAY` ngay gan nhat — du cho lan thu lai
+#: sau mot crash, va KHONG quet toan bo so cai XP (so cai tang theo moi chuong doc) o moi lan mo goi.
+CUA_SO_CAP_BU_NGAY = 30
+
+
+def _rut_vat_pham(pack: Any, pack_key: str, hat: int) -> Any:
+    """Rut tu `hat` (cung seed -> cung vat pham, giu tinh kiem thu duoc)."""
+    try:
+        return roll_cosmetic(pack, cosmetic_pool_for_pack(pack_key), random.Random(hat))
+    except RewardPackError as exc:
+        raise GamificationError(str(exc)) from exc
+
+
+def hoan_tat_goi_da_mo(store: Any, user_id: str) -> List[Any]:
+    """Cap BU vat pham cho moi lan mo goi DA GHI so cai ma nguoi dung chua co — tra danh sach vua cap bu.
+
+    Sua lan crash GIUA "tru goi + ghi so cai" (mot transaction) va "cap vat pham". Hang so cai luu KHOA
+    VAT PHAM da rut (`goi:vat_pham:nonce`), KHONG luu hat de rut lai: rut lai tren catalog/trong so HIEN
+    TAI se ra vat pham KHAC sau mot lan doi catalog va phat khong vat pham cho moi lan mo cu (phat hien
+    qua review doc lap). `grant_cosmetic` tu chan trung; chay lai bao nhieu lan cung vo hai. Chi xet
+    `CUA_SO_CAP_BU_NGAY` ngay gan nhat; hang so cai van con de doi soat tay neu can."""
+    moc = (datetime.now(timezone.utc) - timedelta(days=CUA_SO_CAP_BU_NGAY)).isoformat()
+    da_co = {c.cosmetic_key for c in store.list_cosmetics(user_id)}
+    cap_bu = []
+    for e in store.list_xp_events_since(user_id, moc):
+        if e.event_type != SU_KIEN_MO_GOI:
+            continue
+        phan = e.source_id.split(":")
+        dinh_nghia = _dinh_nghia_vat_pham(phan[1]) if len(phan) == 3 else None
+        if dinh_nghia is None or dinh_nghia.key in da_co:
+            continue
+        if store.grant_cosmetic(CosmeticInventoryItem(user_id=user_id, cosmetic_key=dinh_nghia.key)) is not None:
+            cap_bu.append(dinh_nghia)
+        da_co.add(dinh_nghia.key)
+    return cap_bu
+
+
 def open_reward_pack(store: Any, user_id: str, pack_key: str,
                      rng: Any) -> Tuple[Any, bool]:
     """
     Mo MOT goi thuong dang cho — tra `(CosmeticDef, da_trung_lap)`.
 
-    Thu tu BAT BUOC: tru `pending_reward_packs` va LUU truoc, roi moi rut
-    vat pham va luu ket qua — "khong mo lai duoc bang cach tai lai trang"
-    dat duoc vi so goi cho da giam NGAY KHI request nay chay, khong phai
-    khi nguoi dung thay ket qua. Mot lan crash giua chung se mat mot goi
-    (nguoi dung thiet), khong bao gio TANG so lan mo duoc — danh doi an
-    toan hon la de client rut nhieu lan.
+    Duong NGUYEN TU (`FAS_XP_ATOMIC`): rut vat pham TRUOC, roi MOT transaction vua tru
+    `pending_reward_packs` vua ghi mot hang so cai 0 XP (`SU_KIEN_MO_GOI`) mang KHOA vat pham vua rut;
+    roi cap vat pham. "Khong mo lai duoc bang cach tai lai trang" van dung (goi giam NGAY trong
+    transaction), va mot lan crash giua hai buoc KHONG con mat goi: lan mo ke tiep (`hoan_tat_goi_da_mo`)
+    cap bu DUNG vat pham da ghi. Do that tren Appwrite 1.9.6 THU (2026-09-26): ban cu (tru goi roi moi
+    rut) crash o giua -> 0 goi, 0 vat pham, mo lai bao "không có gói".
+
+    Duong CU (co tat) giu nguyen hanh vi va danh doi cu: crash giua chung mat mot goi.
     """
     pack = next((p for p in REWARD_PACKS if p.key == pack_key), None)
     if pack is None:
         raise GamificationError("Gói thưởng không tồn tại.")
 
-    progress = store.get_progress(user_id)
-    if progress.goi_thuong_dang_cho <= 0:
-        raise GamificationError("Bạn không có gói thưởng nào để mở.")
-    progress.goi_thuong_dang_cho -= 1
-    store.save_progress(progress)
+    def tru_mot_goi(progress: UserProgress) -> UserProgress:
+        if progress.goi_thuong_dang_cho <= 0:
+            raise GamificationError("Bạn không có gói thưởng nào để mở.")
+        progress.goi_thuong_dang_cho -= 1
+        return progress
 
+    if not _nguyen_tu(store):
+        store.save_progress(tru_mot_goi(store.get_progress(user_id)))
+        try:
+            vat_pham = roll_cosmetic(pack, cosmetic_pool_for_pack(pack_key), rng)
+        except RewardPackError as exc:
+            raise GamificationError(str(exc)) from exc
+        da_luu = store.grant_cosmetic(CosmeticInventoryItem(user_id=user_id, cosmetic_key=vat_pham.key))
+        return vat_pham, da_luu is None
+
+    cap_bu = hoan_tat_goi_da_mo(store, user_id)
+    # Rut TRUOC (tu `rng` — cung seed -> cung vat pham) de KHOA vat pham nam trong chinh transaction tru
+    # goi. `nonce` rieng moi lan mo: hai lan mo dong thoi voi cung seed khong trung hang so cai.
+    vat_pham = _rut_vat_pham(pack, pack_key, rng.getrandbits(64))
+    nonce = secrets.token_hex(6)
+    khoa = "\x1f".join((user_id, SU_KIEN_MO_GOI, pack_key, vat_pham.key, nonce)).encode("utf-8")
+    so_cai = XpLedgerEntry(
+        entry_id=f"pk_{hashlib.sha256(khoa).hexdigest()[:24]}", user_id=user_id,
+        event_type=SU_KIEN_MO_GOI, source_kind="reward_pack",
+        source_id=f"{pack_key}:{vat_pham.key}:{nonce}", xp_awarded=0)
     try:
-        vat_pham = roll_cosmetic(pack, cosmetic_pool_for_pack(pack_key), rng)
-    except RewardPackError as exc:
-        raise GamificationError(str(exc)) from exc
-
-    item = CosmeticInventoryItem(user_id=user_id, cosmetic_key=vat_pham.key)
-    da_luu = store.grant_cosmetic(item)
-    da_trung_lap = da_luu is None
-    return vat_pham, da_trung_lap
+        # Hai request mo goi cung luc khong the cung tru tu MOT gia tri cu, va khong de len XP duoc
+        # cong song song.
+        store.update_progress_atomic(user_id, tru_mot_goi, ledger_entry=so_cai)
+    except GamificationError:
+        if cap_bu:
+            # Het goi nhung vua cap bu lan mo bi crash truoc do: do chinh la ket qua nguoi dung dang cho.
+            return cap_bu[-1], False
+        raise
+    da_luu = store.grant_cosmetic(CosmeticInventoryItem(user_id=user_id, cosmetic_key=vat_pham.key))
+    return vat_pham, da_luu is None
 
 
 # =============================================================================
@@ -416,11 +495,12 @@ def claim_quest_reward(store: Any, user_id: str, quest_key: str,
     """
     Nhan thuong MOT nhiem vu DA HOAN THANH trong KY HIEN TAI.
 
-    Thu tu BAT BUOC, cung triet ly voi `open_reward_pack`: danh dau
-    `claimed=True` va LUU TRUOC, roi moi cong XP/cap vat pham — mot lan
-    crash giua chung se mat phan thuong (nguoi dung phai bao lai), KHONG
-    BAO GIO de client nhan duoc thuong hai lan bang cach goi lai/tai lai
-    trang giua luc dang xu ly.
+    Thu tu (Social & Play V1 — thay thu tu cu "danh dau truoc, cong sau", von lam MAT thuong
+    neu sap giua chung): cong XP -> cap vat pham -> ROI MOI danh dau `claimed`. An toan vi CA
+    HAI buoc dau deu idempotent theo khoa tat dinh: entry so cai `id_thuong_nhiem_vu(user,
+    quest, ky)` va hang vat pham `(user, cosmetic)`. Sap giua chung -> lan goi lai van thay
+    `claimed=False`, cong lai thi so cai tu chan trung, cap lai thi kho tu chan trung, roi danh
+    dau. Hai request cung luc -> ca hai qua phep kiem, nhung chi MOT entry so cai duoc ghi.
     """
     quest = next((q for q in QUEST_CATALOG if q.key == quest_key), None)
     if quest is None:
@@ -432,16 +512,14 @@ def claim_quest_reward(store: Any, user_id: str, quest_key: str,
     if tien_do.claimed:
         raise GamificationError("Bạn đã nhận thưởng nhiệm vụ này rồi.")
 
-    tien_do.claimed = True
-    tien_do.updated_at = now_iso()
-    store.save_quest_progress(tien_do)
-
     if quest.xp_reward > 0:
         entry = XpLedgerEntry(
             entry_id=id_thuong_nhiem_vu(user_id, quest.key, period_key),
             user_id=user_id, event_type="quest_reward", source_kind="quest",
             source_id=f"{quest.key}:{period_key}", xp_awarded=quest.xp_reward)
-        if store.record_xp_event(entry):
+        if _nguyen_tu(store):
+            store.award_xp_atomic(entry)
+        elif store.record_xp_event(entry):
             _ap_dung_xp(store, user_id, entry.xp_awarded)
 
     vat_pham_duoc_cap = None
@@ -455,6 +533,13 @@ def claim_quest_reward(store: Any, user_id: str, quest_key: str,
                 "rarity": dinh_nghia.rarity, "slot": dinh_nghia.slot,
                 "asset_ref": dinh_nghia.asset_ref,
             }
+
+    # Danh dau SAU CUNG, tren ban DOC LAI (giam kha nang de len so dem vua duoc
+    # `record_quest_event` cong o request khac trong luc nay).
+    tien_do = store.get_quest_progress(user_id, quest.key, period_key)
+    tien_do.claimed = True
+    tien_do.updated_at = now_iso()
+    store.save_quest_progress(tien_do)
 
     return {"quest_key": quest.key, "xp_awarded": quest.xp_reward,
             "cosmetic": vat_pham_duoc_cap}

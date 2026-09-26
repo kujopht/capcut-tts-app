@@ -33,6 +33,11 @@ export const HO_ENDPOINT = [
   "comments",
   "creator",
   "feed",
+  // Social & Play V1 goi C — tro choi co MAY CHU lam trong tai (Memory Runes
+  // tinh diem, phong Caro 2 nguoi, bang xep hang theo game/mua). Ho rieng vi
+  // khong thuoc ve truyen/nguoi dung/cong dong; client chi gui hanh dong. Xem
+  // `server/games_service.py`, `docs/reports/SOCIAL_PLAY_V1_C.md`.
+  "games",
   "health",
   // Image Studio V1 (overnight build) — Quick Free/Fanfic Credits/My
   // Pollinations, doc lap voi moi ho khac. Xem

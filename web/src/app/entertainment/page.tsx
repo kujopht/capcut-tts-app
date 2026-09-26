@@ -19,19 +19,21 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { IconSparkles } from "@/components/Icons";
 import { useAudioEngineOptional } from "@/components/AudioEngine";
+import { games as gamesApi } from "@/lib/api";
 import { MUSIC_ENABLED } from "@/lib/features";
+
+import { GAMES, nhanCheDo, nhanXp, type GameInfo } from "@/lib/games";
 
 /** Tải lười: nhạc tắt thì mã trình phát không nằm trong gói JS ban đầu của trang (đo bằng build). */
 const MusicSection = dynamic(
   () => import("@/components/entertainment/MusicSection").then((m) => m.MusicSection),
   { ssr: false },
 );
-import { GAMES, nhanCheDo, type GameInfo } from "@/lib/games";
 
-function TheGame({ g, onChoi, onRoiTrang }: { g: GameInfo; onChoi: (g: GameInfo) => void; onRoiTrang: () => void }) {
+function TheGame({ g, onChoi, onRoiTrang, mayChuBat }: { g: GameInfo; onChoi: (g: GameInfo) => void; onRoiTrang: () => void; mayChuBat: boolean | null }) {
   return (
     <article className="ent-game-card gt-the" style={{ ["--game-color" as string]: g.color }} aria-labelledby={`gt-${g.id}`}>
       <div className="gt-the-dau">
@@ -58,7 +60,7 @@ function TheGame({ g, onChoi, onRoiTrang }: { g: GameInfo; onChoi: (g: GameInfo)
         </div>
         <div>
           <dt>Phần thưởng</dt>
-          <dd>{g.xp ?? "Không tính XP"}</dd>
+          <dd>{nhanXp(g, mayChuBat)}</dd>
         </div>
       </dl>
       <div className="gt-the-nut">
@@ -110,6 +112,11 @@ function KhungGame({ g, onDong, onRoiTrang }: { g: GameInfo; onDong: () => void;
 export default function EntertainmentPage() {
   const engine = useAudioEngineOptional();
   const [dangChoi, setDangChoi] = useState<GameInfo | null>(null);
+  /** `null` = chua biet (dang hoi may chu). */
+  const [mayChuBat, setMayChuBat] = useState<boolean | null>(null);
+  useEffect(() => {
+    gamesApi.config().then((c) => setMayChuBat(!!c.enabled)).catch(() => setMayChuBat(false));
+  }, []);
 
   // Mot chu so huu giong doc: MOI loi mo game (nut trong trang, "Toan man hinh"
   // o tab moi, lien ket sang trang game) deu tam dung loi doc dang phat truoc.
@@ -147,7 +154,7 @@ export default function EntertainmentPage() {
             </h2>
             <div className="ent-games-grid gt-luoi">
               {GAMES.map((g) => (
-                <TheGame key={g.id} g={g} onChoi={moGame} onRoiTrang={tamDungLoiDoc} />
+                <TheGame key={g.id} g={g} onChoi={moGame} onRoiTrang={tamDungLoiDoc} mayChuBat={mayChuBat} />
               ))}
             </div>
           </section>

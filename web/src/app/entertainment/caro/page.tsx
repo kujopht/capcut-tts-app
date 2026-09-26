@@ -174,7 +174,11 @@ function PhongHaiNguoi({ cfg }: { cfg: GamesConfig | null }) {
     trangThaiTruoc.current = st;
     if (vuaBatDau) {
       requestAnimationFrame(() =>
-        document.querySelector(".caro-khung")?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+        document.querySelector(".caro-khung")?.scrollIntoView({
+          block: "nearest",
+          // Giam chuyen dong: nhay thang toi ban, khong truot.
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        }),
       );
     }
   }, [room?.status, room?.match_no]);

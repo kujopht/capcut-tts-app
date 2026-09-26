@@ -9705,6 +9705,17 @@ body.co-mini { padding-bottom: 74px; }
 .mr-mat { display: grid; place-items: center; gap: 4px; height: 100%; }
 .mr-mat svg { width: clamp(22px, 5.5vw, 38px); height: auto; }
 .mr-ten { font-size: clamp(10px, 2.4vw, 13px); font-weight: 700; line-height: 1.1; text-align: center; overflow-wrap: anywhere; }
+/* Sprint 3: phan hoi khi lat/khop — truoc day the doi mat TUC THI, bam nhanh tren
+   dien thoai kho biet the nao vua lat. Chi `transform` (khong doi kich thuoc,
+   khong layout), 180 ms; doi class is-ngua -> is-khop la mot animation MOI nen
+   cap khop duoc "nay" them mot nhip. Tat han o prefers-reduced-motion. */
+@keyframes mr-lat { from { transform: scaleX(0.08); } to { transform: scaleX(1); } }
+@keyframes mr-khop { 0% { transform: scale(1); } 45% { transform: scale(1.06); } 100% { transform: scale(1); } }
+.mr-the.is-ngua { animation: mr-lat 180ms ease-out; }
+.mr-the.is-khop { animation: mr-khop 320ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .mr-the.is-ngua, .mr-the.is-khop { animation: none; }
+}
 
 /* Responsive adjustments */
 @media (max-width: 640px) {

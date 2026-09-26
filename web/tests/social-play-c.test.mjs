@@ -125,6 +125,16 @@ test("vao game thi tam dung loi doc; the/o co nhan doc duoc (khong chi mau)", ()
   assert.match(mb, /<span className="mr-ten">\{r\.ten\}<\/span>/);
 });
 
+test("memory: lat/khop co phan hoi chuyen dong (chi transform), tat o prefers-reduced-motion", () => {
+  const css = read("../src/app/globals.css");
+  assert.match(css, /@keyframes mr-lat \{ from \{ transform: scaleX\(0\.08\); \} to \{ transform: scaleX\(1\); \} \}/);
+  assert.match(css, /\.mr-the\.is-ngua \{ animation: mr-lat 180ms ease-out; \}/);
+  assert.match(css, /\.mr-the\.is-khop \{ animation: mr-khop 320ms ease-out; \}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*\.mr-the\.is-ngua, \.mr-the\.is-khop \{ animation: none; \}/);
+  const caro = read("../src/app/entertainment/caro/page.tsx");
+  assert.match(caro, /prefers-reduced-motion: reduce\)"\)\.matches \? "auto" : "smooth"/);
+});
+
 test("ban caro: 15 hang deu nhau, hang co quan khong cao hon hang trong", () => {
   const css = read("../src/app/globals.css");
   const dau = css.indexOf(".caro-ban {");

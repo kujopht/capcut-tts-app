@@ -118,12 +118,30 @@ const VIDEO: Record<string, string> = {
 };
 
 export interface NguonVideoNen {
+  /** AV1 trong MP4 — trinh duyet giai ma duoc AV1 chon ban nay truoc. */
+  av1: string;
+  /** H.264 du phong cho trinh duyet khong co AV1. */
   mp4: string;
 }
 
-/** `undefined` = chu de chua co live wallpaper — component chi ve poster. */
+/**
+ * SPRINT 3 (2026-09-27) — ban MA HOA LAI cho nen trang tri, o thu muc co
+ * PHIEN BAN `live/v2/` (ban goc 1080p van nam nguyen o `live/`, khong xoa).
+ * Benchmark tren Lightning CPU, SSIM so voi ban goc (phong ve 1920x1080):
+ *
+ *   ban goc H.264 1080p 30fps       tong 42.011 KB (3,5-6,7 MB/tep)
+ *   AV1 1600x900 CRF 50  (`av1`)    tong 12.762 KB  -70%  SSIM tb 0,978 / min 0,970
+ *   H.264 1280x720 CRF 28 (`mp4`)   tong 13.634 KB  -68%  SSIM tb 0,968 / min 0,951
+ *
+ * AV1 900p dep HON H.264 900p CRF 28 (SSIM 0,974) du nho hon 1/3. Cung do dai
+ * vong lap, cung 30fps, khong am thanh. Nen nam duoi mang toi (`--toi`
+ * 0,30-0,50) va be mat kinh, nen 900p/720p du cho khung nhin 1440px.
+ */
 export function videoNen(ten: string): NguonVideoNen | undefined {
   const tep = VIDEO[ten];
   if (!tep) return undefined;
-  return { mp4: `/artwork/fantasy-backgrounds/live/${tep}.mp4` };
+  return {
+    av1: `/artwork/fantasy-backgrounds/live/v2/${tep}-900-av1.mp4`,
+    mp4: `/artwork/fantasy-backgrounds/live/v2/${tep}-720-h264.mp4`,
+  };
 }

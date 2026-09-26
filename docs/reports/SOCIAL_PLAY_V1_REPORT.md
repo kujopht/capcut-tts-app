@@ -6,9 +6,9 @@ Ngày 2026-09-26. Gốc: `main` @ `3f046e8` (sau #228). Ba PR độc lập theo 
 
 | Gói | PR / nhánh | Trạng thái | Chặn production |
 |---|---|---|---|
-| A — Cộng đồng phản hồi nhanh + hồ sơ tuỳ chỉnh | #229 `feat/social-play-a-community` (`9f0e81f`, `07664fe`) | **READY_FOR_OWNER_REVIEW** | Migration Appwrite `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md` + cờ `FAS_SOCIAL_V1_SCHEMA` (mặc định tắt). Truy vấn Appwrite thật: UNVERIFIED |
-| B — Audio Studio, ẩn nhạc có thể bật lại, khung Giải trí | #230 `feat/social-play-b-studio-music` (`351e8da`) | **READY_FOR_OWNER_REVIEW** | Không (chỉ web). Deploy web = nhạc bị ẩn theo cờ build `NEXT_PUBLIC_MUSIC_ENABLED` |
-| C — Mini-game có máy chủ làm trọng tài, XP, bảng xếp hạng theo game | PR C `feat/social-play-c-games` (`88e8b96` + báo cáo), **chồng trên B** | **READY_FOR_OWNER_REVIEW** (backend mock/local) · **MULTIPLAYER_PRODUCTION_BLOCKED** | Migration 6 collection + chuyển đường XP cũ sang `award_xp_atomic` + kiểm trên project Appwrite **thử nghiệm** (chưa có → BLOCKED) |
+| A — Cộng đồng phản hồi nhanh + hồ sơ tuỳ chỉnh | #229 `feat/social-play-a-community` (`9f0e81f`, `07664fe`) | **READY_FOR_OWNER_REVIEW** (mock) · kiểm trên Appwrite thật **BLOCKED** | Migration `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md` + cờ `FAS_SOCIAL_V1_SCHEMA` (mặc định tắt); cần Appwrite **thử nghiệm** để kiểm cursor/lọc fandom/hồ sơ/chặn trên truy vấn thật |
+| B — Audio Studio, ẩn nhạc có thể bật lại, khung Giải trí | #230 `feat/social-play-b-studio-music` (`351e8da`) | **READY_FOR_OWNER_REVIEW — đủ điều kiện release riêng** (kế hoạch release + rollback đã đăng trên PR) | Không (chỉ web). Đường TTS production **chưa** được kiểm bằng E2E Piper cục bộ |
+| C — Mini-game có máy chủ làm trọng tài, XP, bảng xếp hạng theo game | #231 `feat/social-play-c-games` (`88e8b96`, `118b352` + báo cáo), **chồng trên B** | **READY_FOR_OWNER_REVIEW** (mock) · **MULTIPLAYER_PRODUCTION_BLOCKED** | Migration 6 collection; `FAS_XP_ATOMIC` (đã cài, tắt trên Appwrite) cần kiểm trên Appwrite **thử nghiệm** (chưa có → BLOCKED); `FAS_GAMES_V1` giữ tắt trên production |
 
 ## 2. Trước / sau (tóm tắt — ảnh đầy đủ trong báo cáo từng gói, thư mục `docs/reports/anh/social_play_v1/`)
 
@@ -41,6 +41,7 @@ Ngày 2026-09-26. Gốc: `main` @ `3f046e8` (sau #228). Ba PR độc lập theo 
 | Hai người chơi thật + sổ cái (C) | Hai BrowserContext, hai tài khoản thử: 26/26 (trình tự nước: `c_logs/duel_replay.json`); người thắng `game_match_completed` + `game_match_won` (+5), người thua `game_match_completed` (+2); XP tài khoản tăng đúng; nước trùng/cũ/sai lượt/người ngoài/sau khi kết thúc/giả mạo kết quả bị từ chối; mất kết nối → nhận thắng 6/6 |
 | Giữ XP/vật phẩm cũ (C) | XP có sẵn của tài khoản thử (80 từ seed) chỉ tăng đúng phần game; không đổi ngưỡng cấp, không xoá/reset gì; đường XP cũ không bị sửa |
 | Full suite backend (C, Lightning CPU, Python 3.12, lệnh CI) | baseline 4869 / 734 hỏng vs candidate 4964 / 734 hỏng — **cùng tập theo tên, 0 lỗi mới**; commit `88e8b96` khớp 1723/1723 tệp của snapshot đã kiểm |
+| Đường XP nguyên tử + trần dưới tải (C, phần D, commit `118b352`) | Test mục tiêu 212/212; full 4977 / 734 hỏng vs baseline 4869 / 734 — cùng tập, 0 lỗi mới. Đồng thời game + nhiệm vụ + nghe + đổi danh xưng: không mất, không trùng; trần không khoá 8/3 · 40/30 · 8/5 → có khoá 3/3 · 30/30 · 5/5 (cứng trong một tiến trình, mềm nếu nhiều instance) |
 | Web trên nhánh C (chứa B + C, chưa có A) | 1096 bài: 1090 đạt, 0 hỏng, 6 bỏ qua; typecheck/lint/build sạch. Nhánh A: 1088 đạt / 0 hỏng |
 
 ## 5. Hiệu năng
@@ -54,13 +55,14 @@ Ngày 2026-09-26. Gốc: `main` @ `3f046e8` (sau #228). Ba PR độc lập theo 
 ## 6. Schema / migration còn chờ duyệt (không tự chạy)
 
 - A: `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md` — thuộc tính mới cho `posts`/`comments`/`profiles`, enum báo cáo `user`, collection `user_blocks`. Thứ tự: deploy API (cờ tắt) → dry-run → migrate → đối soát → bật cờ → deploy web.
-- C: `docs/migrations/SOCIAL_PLAY_V1_GAMES_SCHEMA.md` — `game_rooms`, `game_room_versions`, `game_runs`, `game_run_versions`, `game_results`, `xp_progress_cas`. Additive, rollback = xoá 6 collection. Điều kiện trước khi bật `FAS_GAMES_V1` trên production: chuyển `award_xp`/`claim_quest_reward` sang `award_xp_atomic`.
+- C: `docs/migrations/SOCIAL_PLAY_V1_GAMES_SCHEMA.md` — `game_rooms`, `game_room_versions`, `game_runs`, `game_run_versions`, `game_results`, `xp_progress_cas`. Additive; rollback = xoá 6 collection. Đường XP cũ đã chuyển sang ghi nguyên tử (sau cờ `FAS_XP_ATOMIC`); bật cờ đó trên production chỉ sau khi kiểm trên Appwrite thử nghiệm.
+- Appwrite thử nghiệm: **chưa có target được phép** (`appwrite-dev.fanfic.world` thực ra là production; project "dev" dùng chung máy production; staging đã retired). Đề xuất cấu hình + quyền tối thiểu: `docs/migrations/SOCIAL_PLAY_V1_TEST_APPWRITE.md` (Appwrite 1.9.6 + MongoDB dùng-một-lần trên Lightning CPU có sẵn, lưu ảnh cục bộ, không R2).
 
 ## 7. Phê duyệt hạ tầng / chi phí
 
 - Không cần hạ tầng mới: phòng chơi dùng FastAPI + kho hiện có (thăm dò HTTP), không WebSocket/Durable Object/worker mới, không bật AWS worker hay Lightning cho phòng chơi.
 - Kiểm thử nặng dùng Lightning CPU Studio **có sẵn** (`scratch-studio-devbox`, CPU, `max_runtime` 1 giờ, đã tắt lại). Còn để lại trên Studio: `sp_c_tests/68dde9ad4bd8` (lần chạy bị nhiễu, giữ làm bằng chứng) và `sp_c_tests/c3844124bdec` (lần chạy chính thức), ~242 MB mỗi thư mục, chưa xoá.
-- Cần phê duyệt: (1) migration A, (2) migration C + chuyển đường XP cũ, (3) một project Appwrite **thử nghiệm** để kiểm đường Appwrite thật.
+- Cần phê duyệt: (1) dựng Appwrite **thử nghiệm** theo `SOCIAL_PLAY_V1_TEST_APPWRITE.md` (hoặc chỉ định target khác được phép), (2) migration A và C trên target đó rồi mới tới production, (3) bật `FAS_XP_ATOMIC` rồi `FAS_GAMES_V1` trên production chỉ sau khi (1)–(2) đạt.
 
 ## 8. Không làm (đúng yêu cầu)
 

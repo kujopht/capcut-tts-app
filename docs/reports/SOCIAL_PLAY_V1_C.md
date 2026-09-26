@@ -17,6 +17,8 @@
 | Quyết toán | — | Đúng một lần, phục hồi được: **lưu quyết định trước** (hàng `game_results` với danh sách entry XP dự định) → cộng XP từ **chính hàng đã lưu** qua `award_xp_atomic` (sổ cái + tiến độ trong một khối) → đánh dấu đã quyết toán. Sập giữa chừng → `settle_pending` (lúc khởi động và khi đọc phòng/lượt) hoàn tất mà không cộng trùng |
 | Bảng xếp hạng | Chỉ XP tài khoản (toàn thời gian/tuần) | + tab **Caro — theo mùa** (thắng 3/hòa 1) và **Memory Runes** (điểm lượt tốt nhất theo độ khó). Mùa = tháng UTC, mùa cũ vẫn xem lại. Phân trang, thứ tự ổn định, "Vị trí của bạn". Không trộn thang điểm giữa các game hay với XP |
 | Quản trị | — | `GET /api/admin/games/rooms/{code}`: toàn bộ nước đi + hàng kết quả + entry sổ cái thật để đối soát. **Điều chỉnh bù có kiểm toán: chưa làm** (mục 5) |
+| Đường ghi XP cũ (commit `118b352`) | `award_xp`, `claim_quest_reward`, `equip_title`, `open_reward_pack` đọc-sửa-ghi nguyên hàng tiến độ → có thể đè mất XP vừa cộng ở request khác; nhận thưởng nhiệm vụ "đánh dấu trước, cộng sau" → sập giữa chừng là mất thưởng | Tất cả đi qua **một** đường `update_progress_atomic`, sau cờ `FAS_XP_ATOMIC` (bật khi mock, **tắt trên Appwrite** tới khi kiểm trên Appwrite thử nghiệm → production giữ nguyên hành vi; cấu hình từ chối bật game trên Appwrite nếu cờ này tắt). Nhận thưởng nhiệm vụ: cộng XP → cấp vật phẩm → đánh dấu (idempotent, không mất, không trùng). Không đổi giá trị XP, ngưỡng, cấp, nhiệm vụ hay vật phẩm |
+| Trần dưới tải đồng thời | Không khoá: 8 ván kết thúc cùng lúc (đọc chậm 20 ms) → **8/3** ván cặp, **40/30** XP ngày, **8/5** lượt Memory | Khoá quyết toán theo người chơi → **3/3, 30/30, 5/5**. Là trần **cứng trong một tiến trình API**; nhiều instance thì vẫn là **trần mềm** — không gọi là hard cap |
 | Cờ | — | `FAS_GAMES_V1`: mặc định BẬT khi mock, TẮT khi `DATA_BACKEND=appwrite`. Tắt thì `/api/games/config` trả `enabled:false`, route khác 404, giao diện nói "máy chủ chưa bật" thay vì nút chết |
 
 ## 2. Ảnh (dữ liệu thử cục bộ, tài khoản `qa_*`)
@@ -54,6 +56,15 @@ Máy Windows thiếu RAM (full suite ngốn RSS đỉnh ~4,3–4,8 GB), nên ki�
 | Full suite **candidate** | 4964 bài — 113 fail + 625 error = **734 hỏng** | 73,2 s | 4 258 MB |
 | So tập hỏng theo **tên từng bài** | **0 bài hỏng mới, 0 bài tự hết hỏng**; 95 bài mới đều đạt | — | — |
 | `compileall server` | exit 0 | 0,1 s | 13 MB |
+
+**Lần chạy sau phần D (đường XP nguyên tử + khoá quyết toán):** snapshot candidate `c260cf4c6b6c63d7…ae2f8`, khớp commit `118b352` (1725/1725 tệp, 1690 chỉ khác CRLF), cùng baseline `84f1eb1b…` và cùng môi trường:
+
+| Bước | Kết quả | Thời gian | RSS đỉnh |
+|---|---|---|---|
+| Test mục tiêu (thêm `test_xp_concurrency`, `test_gamification_service`, `test_account_gamification_routes`, `test_xp_wiring`) | **212/212 OK** | 7,1 s | 75 MB |
+| Full **baseline** | 4869 bài / **734 hỏng** | 71,7 s | 4 434 MB |
+| Full **candidate** | 4977 bài / **734 hỏng** | 76,3 s | 4 724 MB |
+| So tập hỏng theo tên | **0 hỏng mới, 0 tự hết hỏng**; 108 bài mới đều đạt | — | — |
 
 Tập 734 bài hỏng sẵn có ở `main` chủ yếu là `KeyError: 'token'`: bộ đếm rate limit **toàn cục** tích luỹ qua cả suite nên `/api/auth/register` trả 429. Lần chạy đầu, bài route của gói C gọi `limiter.reset()`, vô tình xoá trạng thái đó giữa suite, làm 77 bài khác "tự xanh". Kết quả đó **không được tính**; đã bỏ reset (bài của gói C dùng tài khoản mới nên có khoá rate-limit riêng) và chạy lại — đó là kết quả trong bảng. Không skip/xfail bài nào, không vô hiệu rate limiter.
 
@@ -116,12 +127,16 @@ Trước đó, review của tôi trên mã builder viết đã tìm ra lỗi th�
 
 ## 5. Chưa làm / bị chặn (nói thẳng)
 
-- **MULTIPLAYER_PRODUCTION_BLOCKED**: cần (1) duyệt và chạy migration 6 collection (`docs/migrations/SOCIAL_PLAY_V1_GAMES_SCHEMA.md`), (2) chuyển `award_xp`/`claim_quest_reward` cũ sang `award_xp_atomic` (đường cũ đọc-sửa-ghi vẫn có thể mất một lần cộng khi chạy song song với quyết toán game trên Appwrite), (3) kiểm đường Appwrite trên một **project thử nghiệm** — chưa có project thử nghiệm được phép nên **BLOCKED** (không dùng production).
+- **MULTIPLAYER_PRODUCTION_BLOCKED**:
+  1. Cần duyệt và chạy migration 6 collection (`docs/migrations/SOCIAL_PLAY_V1_GAMES_SCHEMA.md`).
+  2. Đường XP cũ **đã chuyển** sang ghi nguyên tử (commit `118b352`), nhưng đang **tắt trên Appwrite** (`FAS_XP_ATOMIC`) cho tới khi kiểm trên Appwrite thật.
+  3. Chưa có Appwrite **thử nghiệm** được phép nên **BLOCKED**; không dùng production. Cấu hình cần tạo và quyền tối thiểu: `docs/migrations/SOCIAL_PLAY_V1_TEST_APPWRITE.md`.
 - Đường Appwrite (`AppwriteGamesStore`, giao dịch 3 thao tác) chỉ có test hợp đồng với client giả lập — **UNVERIFIED** trên Appwrite thật.
 - Điều chỉnh bù có kiểm toán cho quản trị: chưa làm (chỉ có xem đối soát).
 - Vận chuyển là thăm dò HTTP (1 s khi đang chơi, 2,5 s ở sảnh) — không WebSocket/Durable Object; đủ cho lưu lượng thấp, không cần hạ tầng mới. Bảng xếp hạng theo mùa tổng hợp từ `game_results` của mùa đó mỗi lần gọi — cần bảng tổng hợp nếu lưu lượng lớn.
 - Ô Caro trên màn hình 360–390 px chỉ ~21–24 px (15 cột trên bề ngang điện thoại).
-- Không chống bot tuyệt đối: có trần XP, giới hạn nhịp lật, kiểm độ hợp lý thời gian — ghi đúng như vậy.
+- Không chống bot hay tài khoản phụ tuyệt đối: có trần XP, trần cặp đối thủ, giới hạn nhịp lật, kiểm độ hợp lý thời gian — ghi đúng như vậy.
+- Trần ngày/cặp/lượt là **cứng trong một tiến trình API**, **mềm** nếu chạy nhiều instance (mỗi instance một bộ khoá).
 
 ## 6. Danh sách chấp nhận cho chủ dự án
 

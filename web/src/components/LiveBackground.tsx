@@ -73,6 +73,73 @@ import { useEffect, useRef, useState } from "react";
 export interface LiveBackgroundSource {
   webm?: string;
   mp4?: string;
+  /**
+   * Ban AV1 trong MP4 (nho hon H.264 cung chat luong). Dat TRUOC `mp4`: trinh
+   * duyet khong giai ma duoc AV1 (Safari tren may cu) doc `type` co `codecs`
+   * roi bo qua, tu roi xuong `mp4` H.264 — khong tai byte nao cua ban AV1.
+   */
+  av1?: string;
+}
+
+/** Chuoi `codecs` cua ban AV1 (Main, level 4.0, 8-bit) — khop voi `ffprobe` cua tep da ma hoa. */
+export const AV1_TYPE = 'video/mp4; codecs="av01.0.08M.08"';
+
+/**
+ * SPRINT 3 — VIDEO NEN KHONG DUOC TRANH BANG THONG VOI NOI DUNG.
+ *
+ * Do tren fanfic.world (1440px, 2026-09-27): request `01-home.mp4` (6,7 MB) bat
+ * dau o 1.095 ms, TRUOC LCP (1.976 ms) — nen trang tri dang an bang thong cua
+ * chinh noi dung trang. Nay chi goi `lam` khi: (1) tab dang HIEN, (2) trang da
+ * `load` xong, (3) da qua it nhat `TOI_THIEU_MS` tu luc mount, (4) trinh duyet
+ * ranh (`requestIdleCallback`, toi da 2 s; khong co API thi 1,2 s). Tra ve ham
+ * huy. Poster van hien ngay tu dau nhu cu.
+ *
+ * Vi sao can (3): `load` chi doi tai nguyen TINH; noi dung that den tu API sau
+ * do (do tren ban production cuc bo: `load` 243 ms, LCP 956 ms — chi doi
+ * `load` + ranh thi video van chen truoc LCP o 436 ms). Chuyen trang phia
+ * client thi `load` da xong tu lau, nen moc thoi gian la thu DUY NHAT giu cho
+ * du lieu cua trang moi di truoc video.
+ */
+const TOI_THIEU_MS = 2500;
+
+function choSauKhiTaiXong(lam: () => void): () => void {
+  let huy = false;
+  let idle: number | null = null;
+  let hen: number | null = null;
+  const luc = performance.now();
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  const xong = () => {
+    if (!huy) lam();
+  };
+  const choRanhThat = () => {
+    if (huy) return;
+    if (w.requestIdleCallback) idle = w.requestIdleCallback(xong, { timeout: 2000 });
+    else hen = window.setTimeout(xong, 1200);
+  };
+  const choRanh = () => {
+    if (huy) return;
+    const conLai = TOI_THIEU_MS - (performance.now() - luc);
+    if (conLai > 0) hen = window.setTimeout(choRanhThat, conLai);
+    else choRanhThat();
+  };
+  const khiHien = () => {
+    if (document.hidden || huy) return;
+    document.removeEventListener("visibilitychange", khiHien);
+    if (document.readyState === "complete") choRanh();
+    else window.addEventListener("load", choRanh, { once: true });
+  };
+  if (document.hidden) document.addEventListener("visibilitychange", khiHien);
+  else khiHien();
+  return () => {
+    huy = true;
+    document.removeEventListener("visibilitychange", khiHien);
+    window.removeEventListener("load", choRanh);
+    if (idle !== null) w.cancelIdleCallback?.(idle);
+    if (hen !== null) window.clearTimeout(hen);
+  };
 }
 
 export function LiveBackground({
@@ -129,28 +196,44 @@ export function LiveBackground({
     // khi keo cua so qua man hinh khac ty le DPI, va KHONG lien quan gi toi
     // "man hinh be" theo dung nghia dac ta (xem chu thich V3 o dau tep).
     const qManHinhNho = window.matchMedia("(max-width: 640px)");
+    // Thiet bi CAM UNG la chinh (dien thoai, may tinh bang ca khi ngang
+    // 1024px+): mac dinh chi anh tinh — cung ly do voi man <=640px (bang thong,
+    // pin). Day la tinh nang thiet bi (`hover`/`pointer`), khong phai do rong.
+    const qCamUng = window.matchMedia("(hover: none) and (pointer: coarse)");
+    /*
+      `navigator.connection` la mot API khong chuan (khong co tren Safari)
+      — doc qua ep kieu + optional chaining, MAC DINH cho phep khi trinh
+      duyet khong biet gi ve no (khong the tu choi mot thu khong do luong
+      duoc).
+    */
+    const conn = (navigator as unknown as {
+      connection?: {
+        saveData?: boolean;
+        effectiveType?: string;
+        addEventListener?: (t: "change", f: () => void) => void;
+        removeEventListener?: (t: "change", f: () => void) => void;
+      };
+    }).connection;
 
     /*
-      `queueMicrotask`: goi `setChoPhep` THANG trong than effect la mot
-      setState DONG BO ma quy tac `react-hooks/set-state-in-effect` cam (gay
-      render lien tang) — cung ly do/cung cach sua nhu `NavIndicator.tsx`.
       Gia tri MAC DINH `choPhep=false` (an toan cho SSR: server khong co
-      `window`) roi nang cap NGAY sau khi gan (mot vi tac vu, khong doi mot
-      chu ky ve nao ca).
+      `window`). Lan tinh DAU TIEN doi `choSauKhiTaiXong` (tab hien + trang da
+      `load` + trinh duyet ranh) — xem chu thich ham do; `setChoPhep` luon nam
+      trong callback, khong bao gio DONG BO trong than effect (quy tac
+      `react-hooks/set-state-in-effect`, cung cach sua nhu `NavIndicator.tsx`).
+      Truoc moc do, doi media query KHONG duoc mo video som.
     */
+    let daToiMoc = false;
     const tinhLai = () => {
-      /*
-        `navigator.connection` la mot API khong chuan (khong co tren Safari)
-        — doc qua ep kieu + optional chaining, MAC DINH cho phep khi trinh
-        duyet khong biet gi ve no (khong the tu choi mot thu khong do luong
-        duoc).
-      */
-      const conn = (navigator as unknown as { connection?: { saveData?: boolean } })
-        .connection;
+      if (!daToiMoc) return;
       const tietKiemDuLieu = conn?.saveData === true;
+      // Mang cham theo uoc luong cua trinh duyet: 5-10 MB video nen se an
+      // mat bang thong cua chinh noi dung — giu anh tinh.
+      const mangCham = ["slow-2g", "2g", "3g"].includes(conn?.effectiveType ?? "");
       setChoPhep((truoc) => {
-        const moi = !qGiamChuyenDong.matches && !tietKiemDuLieu
-          && (!qManHinhNho.matches || mobileVideo);
+        const moi = !qGiamChuyenDong.matches && !tietKiemDuLieu && !mangCham
+          && (!qManHinhNho.matches || mobileVideo)
+          && (!qCamUng.matches || mobileVideo);
         if (truoc && !moi) {
           // Chuyen tu DU sang KHONG du dieu kien — don sach de lan sau du
           // dieu kien tro lai la mot khoi dau moi tinh (video se duoc mount
@@ -163,12 +246,20 @@ export function LiveBackground({
         return moi;
       });
     };
-    queueMicrotask(tinhLai);
+    const huyCho = choSauKhiTaiXong(() => {
+      daToiMoc = true;
+      tinhLai();
+    });
     qGiamChuyenDong.addEventListener("change", tinhLai);
     qManHinhNho.addEventListener("change", tinhLai);
+    qCamUng.addEventListener("change", tinhLai);
+    conn?.addEventListener?.("change", tinhLai);
     return () => {
+      huyCho();
       qGiamChuyenDong.removeEventListener("change", tinhLai);
       qManHinhNho.removeEventListener("change", tinhLai);
+      qCamUng.removeEventListener("change", tinhLai);
+      conn?.removeEventListener?.("change", tinhLai);
     };
   }, [coNguon, mobileVideo]);
 
@@ -201,6 +292,23 @@ export function LiveBackground({
   const hienVideo = choPhep && coNguon && !loi;
 
   /*
+    GIAI PHONG khi video bi go (roi trang, doi chu de, het du dieu kien, loi):
+    chi go the khoi DOM thi trinh duyet co the van giu ket noi/bo giai ma toi
+    khi thu gom rac. Go `src` cua moi <source> roi `load()` la cach chuan de
+    HUY tai + tra bo giai ma NGAY.
+  */
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || !hienVideo) return;
+    return () => {
+      el.pause();
+      el.querySelectorAll("source").forEach((s) => s.removeAttribute("src"));
+      el.removeAttribute("src");
+      el.load();
+    };
+  }, [hienVideo]);
+
+  /*
     LOI — thu TAI LAI dung MOT LAN truoc khi ket luan hong vinh vien (V3, xem
     chu thich dau tep). `el.load()` yeu cau trinh duyet nap lai tu chinh cac
     <source> hien co — neu loi la GPU context loss thoang qua (doi man hinh),
@@ -210,6 +318,15 @@ export function LiveBackground({
   */
   const xuLyLoiVideo = () => {
     const el = videoRef.current;
+    /*
+      NHIEU NGUON (Sprint 3: AV1 roi H.264): React goi `onError` ca khi MOT
+      <source> hong. Luc do trinh duyet DANG tu thu nguon ke tiep — `el.error`
+      van rong va `networkState` chua ve NETWORK_NO_SOURCE. Goi `el.load()` o
+      day la bat no chon lai TU DAU (AV1 hong lan nua) roi go ca video, du ban
+      H.264 chua tung duoc thu (do that: chan URL AV1 -> mat video, chi con
+      poster). Chi xu ly khi CHINH video loi hoac da het nguon.
+    */
+    if (el && !el.error && el.networkState !== HTMLMediaElement.NETWORK_NO_SOURCE) return;
     if (el && !daThuLaiRef.current) {
       daThuLaiRef.current = true;
       el.load();
@@ -275,6 +392,7 @@ export function LiveBackground({
               : {}),
           }}
         >
+          {video?.av1 ? <source src={video.av1} type={AV1_TYPE} /> : null}
           {video?.webm ? <source src={video.webm} type="video/webm" /> : null}
           {video?.mp4 ? <source src={video.mp4} type="video/mp4" /> : null}
         </video>

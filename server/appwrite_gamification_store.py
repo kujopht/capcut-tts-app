@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
@@ -241,6 +242,18 @@ _SO_LAN_THU_CAS = 9
 def _cho_truoc_lan_thu(attempt: int, u: float) -> float:
     """`u` trong [0, 1) — tach khoi `random` de kiem thu duoc."""
     return u * min(0.8, 0.025 * (2 ** attempt))
+
+
+#: Khoa THEO NGUOI trong tien trinh, dat TRUOC CAS Appwrite: cac writer cung mot nguoi trong MOT tien
+#: trinh (production hien chay MOT tien trinh uvicorn) xep hang thay vi dua nhau tren cung mot hang tien
+#: do — CAS chi con phai phan xu giua cac TIEN TRINH. 256 o khoa co dinh (bam crc32), khong phinh theo
+#: so nguoi dung. RLock: an toan neu mot mutator goi lai kho. Thu tu khoa: khoa quyet toan game
+#: (`games_service._khoa_quyet_toan`) LUON lay TRUOC khoa nay, khong bao gio nguoc lai.
+_KHOA_TIEN_DO = tuple(threading.RLock() for _ in range(256))
+
+
+def _khoa_tien_do(user_id: str) -> "threading.RLock":
+    return _KHOA_TIEN_DO[zlib.crc32(user_id.encode("utf-8")) % len(_KHOA_TIEN_DO)]
 
 
 def xp_progress_cas_row_id(user_id: str, prior_xp: int, prior_state: str = "") -> str:
@@ -486,6 +499,18 @@ class AppwriteGamificationStore:
 
     def update_progress_atomic(self, user_id: str, mutator,
                                ledger_entry: Optional[XpLedgerEntry] = None) -> Optional[UserProgress]:
+        """Xep hang theo nguoi trong tien trinh (`_khoa_tien_do`), roi ghi qua CAS Appwrite — giao thuc
+        day du o `_update_progress_atomic_trong_khoa`.
+
+        DO THAT tren Appwrite 1.9.6 THU (2026-09-26), cung may, cung kich ban: chi co CAS + backoff thi
+        8 luong cung ghi MOT nguoi con 2/24 lan that bai, 16 luong 12/48; khoa theo nguoi xoa phan tranh
+        chap TRONG tien trinh — xem bao cao integration."""
+        with _khoa_tien_do(user_id):
+            return self._update_progress_atomic_trong_khoa(user_id, mutator, ledger_entry)
+
+    def _update_progress_atomic_trong_khoa(self, user_id: str, mutator,
+                                           ledger_entry: Optional[XpLedgerEntry] = None
+                                           ) -> Optional[UserProgress]:
         """
         Doc hang tien do -> `mutator(progress)` -> MOT transaction TablesDB gom:
 

@@ -380,6 +380,16 @@ class ChoTruocLanThuCasTest(unittest.TestCase):
         self.assertGreater(sum(tran), 1.5)
         self.assertEqual(_cho_truoc_lan_thu(3, 0.0), 0.0)
 
+    def test_khoa_theo_nguoi_on_dinh_va_vao_lai_duoc(self):
+        """Cung nguoi -> CUNG khoa (xep hang writer trong tien trinh truoc CAS); RLock de mot mutator
+        goi lai kho khong tu khoa chet."""
+        from server.appwrite_gamification_store import _khoa_tien_do
+
+        self.assertIs(_khoa_tien_do("usr_a"), _khoa_tien_do("usr_a"))
+        with _khoa_tien_do("usr_a"):
+            with _khoa_tien_do("usr_a"):
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()

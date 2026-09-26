@@ -299,6 +299,7 @@ class MockGamificationStore:
         with self._lock:
             ra: Dict[str, int] = {}
             for entry in self._xp_events.values():
-                if entry.created_at >= since_iso:
+                # Hang 0 XP (vd `reward_pack_open`) khong phai "kiem duoc XP" — khong dua ai vao bang voi 0.
+                if entry.created_at >= since_iso and entry.xp_awarded:
                     ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
             return ra

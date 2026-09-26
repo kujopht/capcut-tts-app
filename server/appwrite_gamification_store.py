@@ -232,6 +232,17 @@ def _quest_to_row(q: QuestProgress) -> Dict[str, Any]:
     }
 
 
+#: So lan thu toi da cua `update_progress_atomic` va thoi gian cho truoc moi lan thu lai — backoff mu
+#: voi jitter DAY DU (0..tran), tran 25 ms x 2^lan, chan tren 800 ms: tong cho ky vong ~1.5 s truoc khi
+#: bo cuoc, du de tach 8+ writer cung ghi MOT nguoi (moi lan thu la 3-4 luot goi Appwrite).
+_SO_LAN_THU_CAS = 9
+
+
+def _cho_truoc_lan_thu(attempt: int, u: float) -> float:
+    """`u` trong [0, 1) — tach khoi `random` de kiem thu duoc."""
+    return u * min(0.8, 0.025 * (2 ** attempt))
+
+
 def xp_progress_cas_row_id(user_id: str, prior_xp: int, prior_state: str = "") -> str:
     """ID TAT DINH cho marker CAS cua `award_xp_atomic`, tu `(user_id,
     prior_xp, prior_state)` — sha256 (Appwrite id <=36 ky tu), cung ky thuat
@@ -493,10 +504,14 @@ class AppwriteGamificationStore:
 
         Thua commit (nem loi, HOAC tra ve binh thuong ma `status != "committed"`): co `ledger_entry`
         va hang so cai DA TON TAI -> "da cong roi", tra `None`; con lai -> doc lai trang thai MOI,
-        goi lai `mutator`, thu lai (toi da 5 lan, jitter nho) -> het luot: `AppwriteUnavailableError`.
-        `mutator` phai la ham thuan theo `progress` (co the bi goi nhieu lan) va co the nem de huy.
+        goi lai `mutator`, thu lai (toi da `_SO_LAN_THU_CAS` lan, backoff mu voi jitter DAY DU) -> het
+        luot: `AppwriteUnavailableError`. `mutator` phai la ham thuan theo `progress` (co the bi goi
+        nhieu lan) va co the nem de huy.
 
-        CANH BAO: CHUA kiem tren Appwrite THAT — chi co test hop dong voi client gia lap.
+        DO THAT tren Appwrite 1.9.6 + MongoDB THU (2026-09-26): XP LUON dung bang tong cac lan commit
+        (khong mat, khong nhan doi — ca khi 2 TIEN TRINH cung ghi). Nhung ban cu (5 lan, cho 10-50 ms)
+        de 7/24 lan ghi that bai khi 8 luong cung ghi MOT nguoi, 29/48 khi 16 luong — moi lan thu la
+        3-4 luot goi Appwrite, cho qua ngan khong tach duoc cac writer. Xem `_cho_truoc_lan_thu`.
         """
         import copy
         import random
@@ -504,7 +519,7 @@ class AppwriteGamificationStore:
 
         from server.appwrite_store import TRANSACTION_TTL_SECONDS
 
-        for attempt in range(5):
+        for attempt in range(_SO_LAN_THU_CAS):
             try:
                 hang = self._get(COL_PROGRESS, user_id)
                 progress = _progress_from_row(hang)
@@ -557,7 +572,8 @@ class AppwriteGamificationStore:
                     return None  # Hang xp_ledger DA TON TAI -> da cong roi.
                 except NotFoundError:
                     pass
-            time.sleep(0.01 * (attempt + 1) + random.random() * 0.01)
+            if attempt + 1 < _SO_LAN_THU_CAS:
+                time.sleep(_cho_truoc_lan_thu(attempt, random.random()))
 
         raise AppwriteUnavailableError(
             "Không ghi được tiến độ XP sau nhiều lần thử — Appwrite đang xung đột.")
@@ -713,7 +729,8 @@ class AppwriteGamificationStore:
         ra: Dict[str, int] = {}
         for row in rows:
             entry = _xp_entry_from_row(row)
-            ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
+            if entry.xp_awarded:  # hang 0 XP (vd `reward_pack_open`) — xem ban mock
+                ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
         return ra
 
     # ======================================================== xoa tai khoan

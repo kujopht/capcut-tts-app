@@ -305,5 +305,81 @@ class DuongCuVaCauHinhTest(unittest.TestCase):
         dataclasses.replace(s, games_v1_enabled=False).validate()
 
 
+class MoGoiSauCrashTest(unittest.TestCase):
+    """Do that tren Appwrite 1.9.6 THU (2026-09-26): crash GIUA tru goi va cap vat pham -> 0 goi,
+    0 vat pham, mo lai bao "không có gói". Nay: lan mo ke tiep cap bu DUNG vat pham do."""
+
+    def _kho(self, xp):
+        kho = MockGamificationStore()
+        kho.award_xp_atomic(XpLedgerEntry(entry_id="xp_lb", user_id="u", event_type="publish_first_novel",
+                                          source_kind="t", source_id="t", xp_awarded=xp))
+        return kho
+
+    def _crash_cap_mot_lan(self, kho):
+        that, lan = kho.grant_cosmetic, {"n": 0}
+
+        def cap(item):
+            if lan["n"] == 0:
+                lan["n"] += 1
+                raise RuntimeError("crash gia lap")
+            return that(item)
+
+        kho.grant_cosmetic = cap
+
+    def _vat_pham_cua_seed(self, seed):
+        from server.gamification import REWARD_PACKS
+
+        return gsv._rut_vat_pham(REWARD_PACKS[0], "goi_len_bac", random.Random(seed).getrandbits(64)).key
+
+    def test_het_goi_mo_lai_nhan_dung_vat_pham_bi_crash(self):
+        kho = self._kho(100)  # len bac 2 -> 1 goi
+        self._crash_cap_mot_lan(kho)
+        with self.assertRaises(RuntimeError):
+            gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(5))
+        self.assertEqual((kho.get_progress("u").goi_thuong_dang_cho, kho.list_cosmetics("u")), (0, []))
+        vat_pham, trung = gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(123))
+        self.assertEqual((vat_pham.key, trung), (self._vat_pham_cua_seed(5), False))
+        self.assertEqual([c.cosmetic_key for c in kho.list_cosmetics("u")], [self._vat_pham_cua_seed(5)])
+        with self.assertRaises(gsv.GamificationError):  # khong co goi thu hai tu hu khong
+            gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(9))
+
+    def test_con_goi_thi_vua_cap_bu_vua_mo_goi_moi(self):
+        kho = self._kho(600)  # bac 3 -> 2 goi
+        self.assertEqual(kho.get_progress("u").goi_thuong_dang_cho, 2)
+        self._crash_cap_mot_lan(kho)
+        with self.assertRaises(RuntimeError):
+            gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(5))
+        moi, _ = gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(6))
+        co = {c.cosmetic_key for c in kho.list_cosmetics("u")}
+        self.assertEqual(kho.get_progress("u").goi_thuong_dang_cho, 0)
+        self.assertEqual(co, {self._vat_pham_cua_seed(5), moi.key})
+
+    def test_so_cai_mo_goi_0_xp_khong_vao_bang_tuan_khong_doi_xp(self):
+        kho = self._kho(100)
+        gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(1))
+        self.assertEqual(kho.get_progress("u").xp, 100)
+        self.assertEqual(kho.xp_earned_since("2000-01-01"), {"u": 100})
+        kho2 = MockGamificationStore()
+        tien_do = kho2.get_progress("v")
+        tien_do.goi_thuong_dang_cho = 1
+        kho2.save_progress(tien_do)
+        gsv.open_reward_pack(kho2, "v", "goi_len_bac", random.Random(1))
+        self.assertEqual(kho2.xp_earned_since("2000-01-01"), {})
+
+
+class ChoTruocLanThuCasTest(unittest.TestCase):
+    """Do that Appwrite 1.9.6 THU: 5 lan thu cho 10-50 ms -> 7/24 lan ghi hong khi 8 luong cung ghi."""
+
+    def test_backoff_mu_co_tran_va_du_lan_thu(self):
+        from server.appwrite_gamification_store import _SO_LAN_THU_CAS, _cho_truoc_lan_thu
+
+        self.assertGreaterEqual(_SO_LAN_THU_CAS, 8)
+        tran = [_cho_truoc_lan_thu(i, 0.999999) for i in range(_SO_LAN_THU_CAS)]
+        self.assertEqual(tran, sorted(tran))
+        self.assertLessEqual(max(tran), 0.8)
+        self.assertGreater(sum(tran), 1.5)
+        self.assertEqual(_cho_truoc_lan_thu(3, 0.0), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

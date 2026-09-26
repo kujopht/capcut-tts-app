@@ -250,54 +250,11 @@ function LoginForm() {
           {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}
         </button>
 
-        {process.env.NODE_ENV !== "production" ? (
-          <div style={{ marginTop: "0.75rem", paddingTop: "0.75rem", borderTop: "1px dashed rgba(255,255,255,0.15)", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            <button
-              type="button"
-              className="btn btn-secondary btn-block"
-              style={{ fontSize: "0.85rem", opacity: 0.95 }}
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                setError("");
-                setEmail("kujopht@gmail.com");
-                setPassword("Password123!");
-                try {
-                  await signIn("kujopht@gmail.com", "Password123!");
-                  toast.ok("Đã đăng nhập tài khoản test (kujopht@gmail.com)");
-                } catch (c) {
-                  setError(errorMessage(c));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              ⚡ Đăng nhập Test: kujopht@gmail.com (kujo)
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-block"
-              style={{ fontSize: "0.85rem", opacity: 0.95 }}
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                setError("");
-                setEmail("reader@fanfic.vn");
-                setPassword("Password123!");
-                try {
-                  await signIn("reader@fanfic.vn", "Password123!");
-                  toast.ok("Đã đăng nhập tài khoản test (reader@fanfic.vn)");
-                } catch (c) {
-                  setError(errorMessage(c));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              ⚡ Đăng nhập Test: reader@fanfic.vn (Phúc Nguyễn)
-            </button>
-          </div>
-        ) : null}
+        {/*
+          Khong con nut "Đăng nhập Test" gan cung email + mat khau. Ban truoc
+          chi hien o dev, nhung mat khau van nam trong ma nguon va CUNG chuoi do
+          lot vao bundle production qua trang /library (do 2026-09-25).
+        */}
       </form>
 
       <p className="hint auth-foot">

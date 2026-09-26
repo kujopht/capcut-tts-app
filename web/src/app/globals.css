@@ -9631,9 +9631,13 @@ body.co-mini { padding-bottom: 74px; }
 /* Canh ban <= chieu cao khung nhin tru thanh trang thai phia tren -> cuon toi la
    thay TRON ban (1366x768: ~598px; dien thoai: theo be rong). */
 .caro-khung { width: 100%; max-width: min(600px, calc(100dvh - 170px)); margin-inline: auto; scroll-margin-top: 90px; }
+/* Hang phai khai bao TUONG MINH: de hang ngam (auto) thi o co quan co chieu cao
+   noi tai (SVG 78%) con o trong = 0, va phan du cua aspect-ratio chia DEU cho moi
+   hang -> hang co quan cao gap doi hang trong (do duoc: 19px vs 38px o 390px). */
 .caro-ban {
   display: grid;
   grid-template-columns: repeat(15, minmax(0, 1fr));
+  grid-template-rows: repeat(15, minmax(0, 1fr));
   gap: 1px;
   padding: 1px;
   border-radius: var(--r2);
@@ -9645,6 +9649,7 @@ body.co-mini { padding-bottom: 74px; }
   display: grid;
   place-items: center;
   min-width: 0;
+  min-height: 0;
   padding: 0;
   border: 0;
   background: #e9d3a4;

@@ -124,3 +124,13 @@ test("vao game thi tam dung loi doc; the/o co nhan doc duoc (khong chi mau)", ()
   const mb = read("../src/components/games/MemoryBoard.tsx");
   assert.match(mb, /<span className="mr-ten">\{r\.ten\}<\/span>/);
 });
+
+test("ban caro: 15 hang deu nhau, hang co quan khong cao hon hang trong", () => {
+  const css = read("../src/app/globals.css");
+  const dau = css.indexOf(".caro-ban {");
+  const ban = css.slice(dau, css.indexOf("}", dau));
+  assert.match(ban, /grid-template-columns: repeat\(15, minmax\(0, 1fr\)\);/);
+  assert.match(ban, /grid-template-rows: repeat\(15, minmax\(0, 1fr\)\);/, "hang ngam auto lam hang co quan cao gap doi");
+  const dauO = css.indexOf(".caro-o {");
+  assert.match(css.slice(dauO, css.indexOf("}", dauO)), /min-height: 0;/);
+});

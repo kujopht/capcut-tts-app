@@ -250,6 +250,10 @@ def _cho_truoc_lan_thu(attempt: int, u: float) -> float:
 #: so nguoi dung. RLock: an toan neu mot mutator goi lai kho. Thu tu khoa: khoa quyet toan game
 #: (`games_service._khoa_quyet_toan`) LUON lay TRUOC khoa nay, khong bao gio nguoc lai.
 _KHOA_TIEN_DO = tuple(threading.RLock() for _ in range(256))
+#: Cho khoa TOI DA bay nhieu giay roi di tiep KHONG khoa (CAS van phan xu dung) — khoa bi giu qua cac luot
+#: goi mang, khong duoc de mot Appwrite cham (hoac nguoi chung o khoa, 1/256) bo doi threadpool cua API
+#: (phat hien qua review doc lap).
+_CHO_KHOA_TOI_DA_GIAY = 5.0
 
 
 def _khoa_tien_do(user_id: str) -> "threading.RLock":
@@ -505,8 +509,13 @@ class AppwriteGamificationStore:
         DO THAT tren Appwrite 1.9.6 THU (2026-09-26), cung may, cung kich ban: chi co CAS + backoff thi
         8 luong cung ghi MOT nguoi con 2/24 lan that bai, 16 luong 12/48; khoa theo nguoi xoa phan tranh
         chap TRONG tien trinh — xem bao cao integration."""
-        with _khoa_tien_do(user_id):
+        khoa = _khoa_tien_do(user_id)
+        co_khoa = khoa.acquire(timeout=_CHO_KHOA_TOI_DA_GIAY)
+        try:
             return self._update_progress_atomic_trong_khoa(user_id, mutator, ledger_entry)
+        finally:
+            if co_khoa:
+                khoa.release()
 
     def _update_progress_atomic_trong_khoa(self, user_id: str, mutator,
                                            ledger_entry: Optional[XpLedgerEntry] = None

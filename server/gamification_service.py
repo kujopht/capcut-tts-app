@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import random
 import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from server.domain import now_iso
@@ -307,9 +308,13 @@ def equip_cosmetic(store: Any, user_id: str, cosmetic_key: str) -> CosmeticInven
 SU_KIEN_MO_GOI = "reward_pack_open"
 
 
+#: Cua so cap bu: chi xet cac lan mo goi trong `CUA_SO_CAP_BU_NGAY` ngay gan nhat — du cho lan thu lai
+#: sau mot crash, va KHONG quet toan bo so cai XP (so cai tang theo moi chuong doc) o moi lan mo goi.
+CUA_SO_CAP_BU_NGAY = 30
+
+
 def _rut_vat_pham(pack: Any, pack_key: str, hat: int) -> Any:
-    """Rut TAT DINH tu `hat` — cung `hat` luon ra cung vat pham, nen lan cap bu sau crash rut lai dung
-    vat pham cua lan mo do."""
+    """Rut tu `hat` (cung seed -> cung vat pham, giu tinh kiem thu duoc)."""
     try:
         return roll_cosmetic(pack, cosmetic_pool_for_pack(pack_key), random.Random(hat))
     except RewardPackError as exc:
@@ -317,26 +322,26 @@ def _rut_vat_pham(pack: Any, pack_key: str, hat: int) -> Any:
 
 
 def hoan_tat_goi_da_mo(store: Any, user_id: str) -> List[Any]:
-    """Cap BU vat pham cho moi lan mo goi DA GHI so cai ma chua co vat pham — tra danh sach vua cap bu.
+    """Cap BU vat pham cho moi lan mo goi DA GHI so cai ma nguoi dung chua co — tra danh sach vua cap bu.
 
-    Sua lan crash GIUA "tru goi + ghi so cai" (mot transaction) va "cap vat pham": hang so cai giu
-    `hat` cua lan mo, rut lai TAT DINH ra dung vat pham, `grant_cosmetic` tu chan trung. Chay lai bao
-    nhieu lan cung vo hai. MOT truy van so cai + MOT truy van kho, chi ghi cho vat pham con thieu."""
+    Sua lan crash GIUA "tru goi + ghi so cai" (mot transaction) va "cap vat pham". Hang so cai luu KHOA
+    VAT PHAM da rut (`goi:vat_pham:nonce`), KHONG luu hat de rut lai: rut lai tren catalog/trong so HIEN
+    TAI se ra vat pham KHAC sau mot lan doi catalog va phat khong vat pham cho moi lan mo cu (phat hien
+    qua review doc lap). `grant_cosmetic` tu chan trung; chay lai bao nhieu lan cung vo hai. Chi xet
+    `CUA_SO_CAP_BU_NGAY` ngay gan nhat; hang so cai van con de doi soat tay neu can."""
+    moc = (datetime.now(timezone.utc) - timedelta(days=CUA_SO_CAP_BU_NGAY)).isoformat()
     da_co = {c.cosmetic_key for c in store.list_cosmetics(user_id)}
     cap_bu = []
-    for e in store.list_xp_events(user_id):
+    for e in store.list_xp_events_since(user_id, moc):
         if e.event_type != SU_KIEN_MO_GOI:
             continue
-        pack_key, _, hat_hex = e.source_id.partition(":")
-        pack = next((p for p in REWARD_PACKS if p.key == pack_key), None)
-        if pack is None or not hat_hex:
+        phan = e.source_id.split(":")
+        dinh_nghia = _dinh_nghia_vat_pham(phan[1]) if len(phan) == 3 else None
+        if dinh_nghia is None or dinh_nghia.key in da_co:
             continue
-        vat_pham = _rut_vat_pham(pack, pack_key, int(hat_hex.split(":")[0], 16))
-        if vat_pham.key in da_co:
-            continue
-        if store.grant_cosmetic(CosmeticInventoryItem(user_id=user_id, cosmetic_key=vat_pham.key)) is not None:
-            cap_bu.append(vat_pham)
-        da_co.add(vat_pham.key)
+        if store.grant_cosmetic(CosmeticInventoryItem(user_id=user_id, cosmetic_key=dinh_nghia.key)) is not None:
+            cap_bu.append(dinh_nghia)
+        da_co.add(dinh_nghia.key)
     return cap_bu
 
 
@@ -345,12 +350,12 @@ def open_reward_pack(store: Any, user_id: str, pack_key: str,
     """
     Mo MOT goi thuong dang cho — tra `(CosmeticDef, da_trung_lap)`.
 
-    Duong NGUYEN TU (`FAS_XP_ATOMIC`): MOT transaction vua tru `pending_reward_packs` vua ghi mot hang
-    so cai 0 XP (`SU_KIEN_MO_GOI`) mang `hat` ngau nhien cua lan mo; roi rut TAT DINH tu `hat` va cap
-    vat pham. "Khong mo lai duoc bang cach tai lai trang" van dung (goi giam NGAY trong transaction), va
-    mot lan crash giua hai buoc KHONG con mat goi: lan mo ke tiep (`hoan_tat_goi_da_mo`) cap bu dung vat
-    pham do. Do that tren Appwrite 1.9.6 THU (2026-09-26): ban cu (tru goi roi moi rut) crash o giua ->
-    0 goi, 0 vat pham, mo lai bao "không có gói".
+    Duong NGUYEN TU (`FAS_XP_ATOMIC`): rut vat pham TRUOC, roi MOT transaction vua tru
+    `pending_reward_packs` vua ghi mot hang so cai 0 XP (`SU_KIEN_MO_GOI`) mang KHOA vat pham vua rut;
+    roi cap vat pham. "Khong mo lai duoc bang cach tai lai trang" van dung (goi giam NGAY trong
+    transaction), va mot lan crash giua hai buoc KHONG con mat goi: lan mo ke tiep (`hoan_tat_goi_da_mo`)
+    cap bu DUNG vat pham da ghi. Do that tren Appwrite 1.9.6 THU (2026-09-26): ban cu (tru goi roi moi
+    rut) crash o giua -> 0 goi, 0 vat pham, mo lai bao "không có gói".
 
     Duong CU (co tat) giu nguyen hanh vi va danh doi cu: crash giua chung mat mot goi.
     """
@@ -374,14 +379,15 @@ def open_reward_pack(store: Any, user_id: str, pack_key: str,
         return vat_pham, da_luu is None
 
     cap_bu = hoan_tat_goi_da_mo(store, user_id)
-    # `hat` lay tu `rng` (cung seed -> cung vat pham, giu tinh kiem thu duoc); `nonce` rieng moi lan mo de
-    # hai lan mo dong thoi voi cung seed khong trung hang so cai.
-    hat, nonce = rng.getrandbits(64), secrets.token_hex(6)
-    khoa = "\x1f".join((user_id, SU_KIEN_MO_GOI, pack_key, f"{hat:016x}", nonce)).encode("utf-8")
+    # Rut TRUOC (tu `rng` — cung seed -> cung vat pham) de KHOA vat pham nam trong chinh transaction tru
+    # goi. `nonce` rieng moi lan mo: hai lan mo dong thoi voi cung seed khong trung hang so cai.
+    vat_pham = _rut_vat_pham(pack, pack_key, rng.getrandbits(64))
+    nonce = secrets.token_hex(6)
+    khoa = "\x1f".join((user_id, SU_KIEN_MO_GOI, pack_key, vat_pham.key, nonce)).encode("utf-8")
     so_cai = XpLedgerEntry(
         entry_id=f"pk_{hashlib.sha256(khoa).hexdigest()[:24]}", user_id=user_id,
         event_type=SU_KIEN_MO_GOI, source_kind="reward_pack",
-        source_id=f"{pack_key}:{hat:016x}:{nonce}", xp_awarded=0)
+        source_id=f"{pack_key}:{vat_pham.key}:{nonce}", xp_awarded=0)
     try:
         # Hai request mo goi cung luc khong the cung tru tu MOT gia tri cu, va khong de len XP duoc
         # cong song song.
@@ -391,7 +397,6 @@ def open_reward_pack(store: Any, user_id: str, pack_key: str,
             # Het goi nhung vua cap bu lan mo bi crash truoc do: do chinh la ket qua nguoi dung dang cho.
             return cap_bu[-1], False
         raise
-    vat_pham = _rut_vat_pham(pack, pack_key, hat)
     da_luu = store.grant_cosmetic(CosmeticInventoryItem(user_id=user_id, cosmetic_key=vat_pham.key))
     return vat_pham, da_luu is None
 

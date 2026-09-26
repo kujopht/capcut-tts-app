@@ -354,6 +354,20 @@ class MoGoiSauCrashTest(unittest.TestCase):
         self.assertEqual(kho.get_progress("u").goi_thuong_dang_cho, 0)
         self.assertEqual(co, {self._vat_pham_cua_seed(5), moi.key})
 
+    def test_doi_catalog_khong_cap_them_vat_pham_cho_lan_mo_cu(self):
+        """Review doc lap: neu cap bu RUT LAI tu hat tren catalog HIEN TAI, mot lan doi catalog se phat
+        khong vat pham cho moi lan mo cu. Cap bu phai dung KHOA vat pham da ghi."""
+        from unittest.mock import patch
+
+        from server.gamification import COSMETIC_CATALOG
+
+        kho = self._kho(600)  # 2 goi
+        a, _ = gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(5))
+        with patch.object(gsv, "cosmetic_pool_for_pack", lambda _k: tuple(reversed(COSMETIC_CATALOG))):
+            b, _ = gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(6))
+            self.assertEqual(gsv.hoan_tat_goi_da_mo(kho, "u"), [])
+        self.assertEqual({c.cosmetic_key for c in kho.list_cosmetics("u")}, {a.key, b.key})
+
     def test_so_cai_mo_goi_0_xp_khong_vao_bang_tuan_khong_doi_xp(self):
         kho = self._kho(100)
         gsv.open_reward_pack(kho, "u", "goi_len_bac", random.Random(1))
@@ -389,6 +403,33 @@ class ChoTruocLanThuCasTest(unittest.TestCase):
         with _khoa_tien_do("usr_a"):
             with _khoa_tien_do("usr_a"):
                 pass
+
+    def test_khoa_bi_giu_lau_thi_van_ghi_duoc_qua_cas(self):
+        """Khoa bi mot luong khac giu qua han -> writer KHONG treo vo han, di tiep qua CAS."""
+        from unittest.mock import patch
+
+        from server import appwrite_gamification_store as ags
+
+        fake = _FakeTxAppwrite()
+        kho = _gami_store(fake)
+        kho.xp_atomic = True
+        giu, tha = threading.Event(), threading.Event()
+
+        def giu_khoa():
+            with ags._khoa_tien_do("u1"):
+                giu.set()
+                tha.wait(5)
+
+        t = threading.Thread(target=giu_khoa)
+        t.start()
+        giu.wait(5)
+        try:
+            with patch.object(ags, "_CHO_KHOA_TOI_DA_GIAY", 0.05):
+                gsv.award_xp(kho, "u1", "publish_first_novel", source_kind="n", source_id="n1")
+            self.assertEqual(fake.rows["user_progress"]["u1"]["xp"], 50)
+        finally:
+            tha.set()
+            t.join(5)
 
 
 if __name__ == "__main__":

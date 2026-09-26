@@ -23,6 +23,7 @@ import {
   type LyricWord,
 } from "@/lib/lyricsData";
 import { audioFocus, UU_TIEN } from "@/lib/audioFocus";
+import { MUSIC_ENABLED } from "@/lib/features";
 
 export type { LyricLine, LyricWord };
 
@@ -313,6 +314,9 @@ class MusicStore {
   };
 
   private startTrack(resume = false) {
+    // Nhac dang TAM AN (`lib/features.ts`): khong tao AudioContext/<audio>,
+    // khong tai tep nao, khong phat — du ai goi `play()` tu mot loi vao cu.
+    if (!MUSIC_ENABLED) return;
     this.initAudio();
     if (!this.ctx || !this.masterGain) return;
 
@@ -410,6 +414,8 @@ class MusicStore {
   }
 
   public togglePlay = () => {
+    // Nhac tam an: khong bao gio chuyen sang "dang phat" (UI se noi doi).
+    if (!MUSIC_ENABLED) return;
     this.isPlaying = !this.isPlaying;
     if (this.isPlaying) {
       this.startTrack(true);
@@ -420,6 +426,7 @@ class MusicStore {
   };
 
   public play = () => {
+    if (!MUSIC_ENABLED) return;
     if (!this.isPlaying) {
       this.isPlaying = true;
       this.startTrack(true);
@@ -553,13 +560,18 @@ export const musicStore = new MusicStore();
   `AudioEngine` con goi thang `musicStore.pause()`. Nhanh "duck" da noi san
   de san pham nhac sau nay chi phai doi MOT dong `CHINH_SACH`, khong cham
   toi dong co truyen.
-*/
-audioFocus.dangKy("ambient", {
-  uuTien: UU_TIEN.ambient,
-  khiBiCat: (kieu) => (kieu === "duck" ? musicStore.haAmLuong(true) : musicStore.pause()),
-  khiDuocTraLai: () => musicStore.haAmLuong(false),
-});
 
-if (typeof window !== "undefined") {
-  (window as any).musicStore = musicStore;
+  Nhac TAT (`lib/features.ts`): KHONG dang ky kenh, KHONG lo ra `window` —
+  khong gi co the goi no phat.
+*/
+if (MUSIC_ENABLED) {
+  audioFocus.dangKy("ambient", {
+    uuTien: UU_TIEN.ambient,
+    khiBiCat: (kieu) => (kieu === "duck" ? musicStore.haAmLuong(true) : musicStore.pause()),
+    khiDuocTraLai: () => musicStore.haAmLuong(false),
+  });
+
+  if (typeof window !== "undefined") {
+    (window as any).musicStore = musicStore;
+  }
 }

@@ -18,6 +18,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { DockSoundwaveFrame } from "@/components/DockSoundwaveFrame";
 import { musicStore } from "@/lib/musicStore";
+import { MUSIC_ENABLED } from "@/lib/features";
 
 /** Cuon qua bay nhieu pixel thi coi la "da roi dinh trang". */
 const NGUONG = 8;
@@ -36,7 +37,7 @@ export function SiteHeader({ children }: { children: React.ReactNode }) {
     const doc = () => setDaCuon(window.scrollY > NGUONG);
     doc();
     window.addEventListener("scroll", doc, { passive: true });
-    if (typeof window !== "undefined") {
+    if (MUSIC_ENABLED && typeof window !== "undefined") {
       (window as unknown as { __musicStore: unknown }).__musicStore = musicStore;
     }
     return () => window.removeEventListener("scroll", doc);
@@ -53,7 +54,8 @@ export function SiteHeader({ children }: { children: React.ReactNode }) {
       data-music-playing={isPlaying ? "true" : undefined}
       style={headerStyle}
     >
-      <DockSoundwaveFrame />
+      {/* Nhac tam an (`lib/features.ts`): khong gan khung song nhac. */}
+      {MUSIC_ENABLED ? <DockSoundwaveFrame /> : null}
       {children}
     </header>
   );

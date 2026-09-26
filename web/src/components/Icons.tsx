@@ -75,6 +75,17 @@ export function IconHeadphones(p: Props) {
   );
 }
 
+/** Tay cam — "giai tri / mini-game" (Social & Play V1, khi nhac tam an). */
+export function IconGamepad(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M7.5 7 h9 a4.5 4.5 0 0 1 4.4 3.6 l0.9 4.6 a2.6 2.6 0 0 1 -4.5 2.2 L15.6 15.5 H8.4 l-1.7 1.9 a2.6 2.6 0 0 1 -4.5 -2.2 l0.9 -4.6 A4.5 4.5 0 0 1 7.5 7 Z" />
+      <path d="M7.5 10 v3 M6 11.5 h3" />
+      <path d="M15.5 10.5 h0.01 M17.5 12.5 h0.01" />
+    </Svg>
+  );
+}
+
 /** Cuon phim — "video/phu de" (Subtitle Studio, overnight Phase 4). */
 export function IconFilm(p: Props) {
   return (

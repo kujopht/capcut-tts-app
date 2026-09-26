@@ -58,6 +58,7 @@ import {
 } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
+import { MUSIC_ENABLED } from "@/lib/features";
 import { getReaderTags } from "@/lib/taxonomy";
 import {
   novelHasAudio,
@@ -80,6 +81,7 @@ import {
   IconCrown,
   IconFilm,
   IconFlame,
+  IconGamepad,
   IconHeadphones,
   IconLibrary,
   IconMegaphone,
@@ -881,13 +883,17 @@ export default function HomePage() {
               <span className="home-util-desc">Tủ sách &amp; tuyển tập</span>
             </div>
           </Link>
+          {/* Nhac tam an (`lib/features.ts`): the nay tro thanh loi vao Giai tri
+              (mini-game, bang xep hang) thay vi hua mot kho nhac chua co. */}
           <Link href="/entertainment" className="home-util-card" prefetch={false}>
             <div className="home-util-icon home-util-icon-audio">
-              <IconHeadphones size={20} />
+              {MUSIC_ENABLED ? <IconHeadphones size={20} /> : <IconGamepad size={20} />}
             </div>
             <div className="home-util-text">
-              <strong className="home-util-name">Âm Nhạc</strong>
-              <span className="home-util-desc">Fantasy ambient &amp; bài hát</span>
+              <strong className="home-util-name">{MUSIC_ENABLED ? "Âm Nhạc" : "Giải trí"}</strong>
+              <span className="home-util-desc">
+                {MUSIC_ENABLED ? "Fantasy ambient & bài hát" : "Mini-game & bảng xếp hạng"}
+              </span>
             </div>
           </Link>
           <Link href="/studio" className="home-util-card" prefetch={false}>

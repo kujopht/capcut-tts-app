@@ -10,6 +10,7 @@ import { ContentAtmosphere } from "@/components/ContentAtmosphere";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { LiveLyricTicker } from "@/components/LiveLyricTicker";
+import { MUSIC_ENABLED } from "@/lib/features";
 import { Logo } from "@/components/Logo";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
@@ -109,7 +110,8 @@ export default function RootLayout({
                 </Link>
                 <NavLinks />
                 <span className="spacer nav-spacer-left" />
-                <LiveLyricTicker />
+                {/* Nhac tam an (`lib/features.ts`): khong gan dong loi bai hat. */}
+                {MUSIC_ENABLED ? <LiveLyricTicker /> : null}
                 <span className="spacer" />
                 <SiteSearch />
                 <NavAuth />

@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { TtsPanel } from "@/components/media/TtsPanel";
-import { AudioPlayer } from "@/components/AudioPlayer";
+import { RecentAudioCard } from "@/components/studio/RecentAudioCard";
 import { api, getToken, videoStudio, type Profile, type TtsJob, type VideoAudioChoice, type Voice } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { tieuDeTuVanBan } from "@/lib/tieuDe";
 import { defaultVoiceId } from "@/lib/voices";
 import { ensureStudioNovel } from "@/lib/workspace";
 import { useJobTracker } from "@/lib/useJobTracker";
@@ -64,6 +65,17 @@ export default function AudioStudio() {
   const [recent, setRecent] = useState<VideoAudioChoice[]>([]);
 
   const sessionWaiters = useRef<Array<(p: Profile | null) => void>>([]);
+  /**
+   * CHONG TAO TRUNG (Social & Play V1):
+   *   * `dangGui` khoa ngay trong cung nhip bam — `setCreating` cua React chua kip
+   *     ve lai thi cu bam thu hai da chay qua phan dau cua ham;
+   *   * `lanTruoc` giu CHUONG da tao cho dung (tieu de, van ban, giong, toc do) do: bam lai / thu
+   *     lai sau that bai dung LAI chuong do, va may chu tra lai dung job dang
+   *     cho/dang chay (dau van tay noi dung) thay vi tong hop giong LAN HAI tren
+   *     mot chuong moi. Job `failed` thi may chu cho tao job moi — dung y "Thử lại".
+   */
+  const dangGui = useRef(false);
+  const lanTruoc = useRef<{ khoa: string; chapterId: string } | null>(null);
 
   useEffect(() => {
     if (!sessionLoading) {
@@ -113,6 +125,16 @@ export default function AudioStudio() {
   }, [profile, khoiPhuc, draft]);
 
   const create = async ({ tieuDe, vanBan, giong, tocDo }: { tieuDe: string; vanBan: string; giong: string; tocDo: string }) => {
+    if (dangGui.current) return;
+    dangGui.current = true;
+    try {
+      await taoThat({ tieuDe, vanBan, giong, tocDo });
+    } finally {
+      dangGui.current = false;
+    }
+  };
+
+  const taoThat = async ({ tieuDe, vanBan, giong, tocDo }: { tieuDe: string; vanBan: string; giong: string; tocDo: string }) => {
     let activeProfile = profile;
     if (sessionLoading) {
       setCreating(true);
@@ -145,9 +167,19 @@ export default function AudioStudio() {
     try {
       setCreating(true);
       setNotice("");
-      const novel = await ensureStudioNovel();
-      const chapter = await api.createChapter(novel.novel_id, tieuDe || vanBan.slice(0, 40), vanBan, 1);
-      const r = await api.createJob(chapter.chapter.chapter_id, giong, tocDo);
+      const tieuDeThat = tieuDe || tieuDeTuVanBan(vanBan);
+      // Khoa gom CA giong + toc do (review cheo PR B): the "Audio gan day" phat/tai
+      // theo chapter_id, nen doi giong/toc do voi cung van ban phai ra CHUONG MOI —
+      // chi bam lai / thu lai y het moi dung lai chuong cu.
+      const khoa = [tieuDeThat, vanBan, giong, tocDo].join("␟");
+      let chapterId = lanTruoc.current?.khoa === khoa ? lanTruoc.current.chapterId : "";
+      if (!chapterId) {
+        const novel = await ensureStudioNovel();
+        const chapter = await api.createChapter(novel.novel_id, tieuDeThat, vanBan, 1);
+        chapterId = chapter.chapter.chapter_id;
+        lanTruoc.current = { khoa, chapterId };
+      }
+      const r = await api.createJob(chapterId, giong, tocDo);
       theoDoi(r.job);
     } catch (e) {
       setCreating(false);
@@ -198,16 +230,10 @@ export default function AudioStudio() {
               </Link>
             </div>
           ) : recent.length === 0 ? (
-            <p className="hint" style={{ marginTop: "var(--s2)" }}>Chưa có bản audio nào.</p>
+            /* Trong THAT: khong dung mot trinh phat gia 0:00 / --:--. */
+            <p className="hint audio-gan-day-trong">Chưa có bản audio nào. Bản bạn tạo xong sẽ hiện ở đây.</p>
           ) : (
-            recent.map((a) => (
-              <article className="audio-item" key={a.track_id}>
-                <AudioPlayer chapterId={a.chapter_id} title={a.chapter_title} compact />
-                <Link className="btn btn-sm" href={`/studio/media?audio=${encodeURIComponent(a.track_id)}`} prefetch={false}>
-                  Chỉnh với video
-                </Link>
-              </article>
-            ))
+            recent.map((a) => <RecentAudioCard key={a.track_id} a={a} voices={voices} />)
           )}
         </div>
       </section>

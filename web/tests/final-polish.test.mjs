@@ -23,7 +23,9 @@ const trangMedia = () => read("../src/app/studio/media/page.tsx");
 const home = () => read("../src/app/page.tsx");
 const api = () => read("../src/lib/api.ts");
 const css = () => read("../src/app/globals.css");
-const novel = () => read("../src/app/novels/[id]/page.tsx");
+// Sprint 2: muc luc tach sang `ChapterList` — "trang truyen" = trang + muc luc.
+const novel = () =>
+  read("../src/app/novels/[id]/page.tsx") + "\n" + read("../src/components/novel/ChapterList.tsx");
 const chapter = () => read("../src/app/chapters/[id]/page.tsx");
 
 function rule(selector) {

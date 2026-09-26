@@ -61,7 +61,7 @@ export function SiteSearch() {
         className="site-search tim-nut"
         onClick={() => setMo(true)}
         aria-haspopup="dialog"
-        aria-label="Tìm kiếm truyện, tác giả, animation"
+        aria-label="Tìm truyện, tác giả, fandom"
       >
         <svg
           className="tim-nut-icon"
@@ -78,7 +78,9 @@ export function SiteSearch() {
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
-        <span className="tim-nut-chu">Tìm truyện, tác giả, Animation…</span>
+        {/* Sprint 2: "fandom" thay "Animation" — nguoi doc tim theo vu tru
+            truyen nhieu hon; Animation van tim duoc (danh muc trong hop tim). */}
+        <span className="tim-nut-chu">Tìm truyện, tác giả, fandom…</span>
         <kbd className="tim-phim" aria-hidden="true">
           /
         </kbd>

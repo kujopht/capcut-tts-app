@@ -141,7 +141,8 @@ test("khong pha M2/M3/M4", () => {
   // tiet truyen da chuyen thanh lien ket sang `/listen/[id]` — kiem tra do
   // nam o `ui.test.mjs` ("trang chi tiet truyen KHONG con mo trinh phat...").
   assert.match(read("../src/components/studio/VietTruyen.tsx"), /api\.reorderChapters\(/);
-  assert.match(read("../src/app/novels/[id]/page.tsx"), /chapter\.audio_outdated \?/);
+  // Sprint 2: hang muc luc cua trang truyen nam o `ChapterList`.
+  assert.match(read("../src/components/novel/ChapterList.tsx"), /chapter\.audio_outdated \?/);
   // Canh bao "audio co the khong con khop" di cung trinh phat — tu sprint
   // doc/nghe la che do Nghe cua trang chuong thong nhat (`/listen/[id]` chi
   // con la chuyen huong).

@@ -95,6 +95,12 @@ export interface ChapterExperienceProps {
   initialPrefs: TuyChonCheDo;
   /** `?autoplay=1` — yeu cau phat TUONG MINH tren URL. */
   urlRequestsPlay: boolean;
+  /**
+   * `?resume=1` — nguoi doc bam "Đọc tiếp"/"Nghe tiếp" o Thu vien hoac trang
+   * truyen: da chon tiep tuc roi, nen AP vi tri da luu ngay thay vi hoi lai
+   * bang dai "Tiếp tục đọc/nghe". Khong co ban ghi thi khong lam gi.
+   */
+  autoResume?: boolean;
   prev: ChuongLienKe | null;
   next: ChuongLienKe | null;
   /** Chu chuong — de chi duong "Tạo lại audio" khi audio da cu (M4). */
@@ -166,6 +172,7 @@ export function ChapterExperience(props: ChapterExperienceProps) {
     initialMode,
     initialPrefs,
     urlRequestsPlay,
+    autoResume = false,
     prev,
     next,
     ownerId,
@@ -428,6 +435,24 @@ export function ChapterExperience(props: ChapterExperienceProps) {
     setTheoTay("theo");
   }, [deXuat, d, chapterId, chapterTitle, thongTin, mode, prefs, luuPrefs]);
 
+  /*
+    `?resume=1`: nguoi doc DA chon "Đọc tiếp"/"Nghe tiếp"/"Tiếp tục" o Thu vien
+    hoac trang truyen — ap vi tri da luu ngay, khong bat bam them lan nua. Co vi
+    tri nghe thi uu tien nghe (giong doc keo chu theo); chi co vi tri doc thi
+    cuon toi doan do. Co gac CHI dat khi hen gio thuc su chay: neu effect bi don
+    truoc (phu thuoc doi), lan chay sau hen lai.
+  */
+  const daTuTiepTuc = useRef(false);
+  useEffect(() => {
+    if (!autoResume || daTuTiepTuc.current || !deXuat) return;
+    const k = window.setTimeout(() => {
+      daTuTiepTuc.current = true;
+      if (deXuat.nghe) tiepTucNghe();
+      else tiepTucDoc();
+    }, 60);
+    return () => window.clearTimeout(k);
+  }, [autoResume, deXuat, tiepTucDoc, tiepTucNghe]);
+
   /* ------------------------------------------------------------- hien chu? */
 
   // Chu hien (du dai) o Doc va Doc+Nghe; o Nghe tuy khung.
@@ -546,7 +571,13 @@ export function ChapterExperience(props: ChapterExperienceProps) {
       }
       // Chua cuon toi cot chu: vi tri doc la 0.
       const doan = cotChu.current.getBoundingClientRect().top > tren ? 0 : kq;
-      ghiTienDo(khoLuu(), chapterId, novelId, { doan, tongDoan: ps.length, cheDo: mode }, Date.now());
+      ghiTienDo(
+        khoLuu(),
+        chapterId,
+        novelId,
+        { doan, tongDoan: ps.length, cheDo: mode, tenTruyen: novelTitle, tenChuong: chapterTitle },
+        Date.now(),
+      );
     };
     const nhip = () => {
       if (!khung) {
@@ -567,7 +598,7 @@ export function ChapterExperience(props: ChapterExperienceProps) {
       if (khung) cancelAnimationFrame(khung);
       window.clearTimeout(henLuu);
     };
-  }, [tinhNut, hienChuDay, chapterId, novelId, mode]);
+  }, [tinhNut, hienChuDay, chapterId, novelId, mode, novelTitle, chapterTitle]);
 
   // Doan doi hoac theo doi doi cung phai tinh lai nut (khong cho cuon).
   useEffect(() => {
@@ -584,8 +615,14 @@ export function ChapterExperience(props: ChapterExperienceProps) {
     const dungLai = !t.dangPhat;
     if (!dungLai && Math.abs(giay - giayDaLuu.current) < 5) return;
     giayDaLuu.current = giay;
-    ghiTienDo(khoLuu(), chapterId, novelId, { giay, thoiLuong: t.thoiLuong, cheDo: mode }, Date.now());
-  }, [laBaiNay, t.daBatDau, t.thoiDiem, t.dangPhat, t.thoiLuong, chapterId, novelId, mode]);
+    ghiTienDo(
+      khoLuu(),
+      chapterId,
+      novelId,
+      { giay, thoiLuong: t.thoiLuong, cheDo: mode, tenTruyen: novelTitle, tenChuong: chapterTitle },
+      Date.now(),
+    );
+  }, [laBaiNay, t.daBatDau, t.thoiDiem, t.dangPhat, t.thoiLuong, chapterId, novelId, mode, novelTitle, chapterTitle]);
 
   /* ------------------------------------------ trinh phat lon con thay khong */
 
@@ -728,7 +765,7 @@ export function ChapterExperience(props: ChapterExperienceProps) {
         </div>
       ) : null}
 
-      {deXuat ? (
+      {deXuat && !autoResume ? (
         <div className="reader-resume" role="region" aria-label="Tiếp tục từ lần trước">
           <span className="reader-resume-text">
             {deXuat.nghe && deXuat.doc

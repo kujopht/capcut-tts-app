@@ -43,6 +43,7 @@ export function FollowButton({
   initialCount,
   compact = false,
   label = "Theo dõi",
+  phu = false,
   onChange,
 }: {
   kind: "user" | "story";
@@ -51,8 +52,17 @@ export function FollowButton({
   initialCount?: number;
   compact?: boolean;
   label?: string;
+  /**
+   * Nut PHU (vien, khong tim dac) — dung khi canh do da co mot hanh dong
+   * chinh, vd trang truyen: "Đọc tiếp" moi la viec chinh (Sprint 2).
+   */
+  phu?: boolean;
   onChange?: (following: boolean, count: number) => void;
 }) {
+  // Giu nguyen hanh vi cu (`compact` chi doi nut "đăng nhập để theo dõi");
+  // `phu` doi nut tim dac thanh nut vien o CA hai truong hop.
+  const nutChinh = phu ? "btn btn-outline btn-sm" : "btn btn-primary btn-sm";
+  const nutKhach = compact ? "btn btn-ghost btn-sm" : nutChinh;
   const { profile } = useSession();
   const pathname = usePathname();
   const [dangTheoDoi, setDangTheoDoi] = useState(initialFollowing);
@@ -96,7 +106,7 @@ export function FollowButton({
   if (!profile) {
     return (
       <Link
-        className={compact ? "btn btn-ghost btn-sm" : "btn btn-primary btn-sm"}
+        className={nutKhach}
         href={loginHref(pathname)}
       >
         {label}
@@ -111,7 +121,7 @@ export function FollowButton({
         className={
           dangTheoDoi
             ? "btn btn-ghost btn-sm dang-theo-doi"
-            : "btn btn-primary btn-sm"
+            : nutChinh
         }
         aria-pressed={dangTheoDoi}
         disabled={dangGoi}

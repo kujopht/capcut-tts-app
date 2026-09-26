@@ -47,9 +47,11 @@ test("tien do tac pham (`status`) TACH khoi trang thai xuat ban (`state`)", () =
   // Hai khai niem khac nhau: mot truyen da HOAN THANH van co the la BAN NHAP.
   assert.match(code, /novel\.status/, "khong ve tien do tac pham");
   assert.match(code, /nhanTienDo/, "thieu ham doi `status` sang nhan tieng Viet");
-  // Badge cu ve state phai con nguyen.
-  assert.match(code, /novel\.state === "published"/,
-    "mat badge trang thai xuat ban ban dau");
+  // `state` van duoc ve — Sprint 2 chi con hien khi la BAN NHAP ("Đã xuất
+  // bản" dung tren moi truyen cong khai thi khong noi gi va day ten xuong).
+  assert.match(code, /novel\.state !== "published"/,
+    "mat nhan trang thai xuat ban");
+  assert.match(code, /Bản nháp/);
 });
 
 test("`status` la lạ thi hien NGUYEN VAN, khong bi nuot", () => {

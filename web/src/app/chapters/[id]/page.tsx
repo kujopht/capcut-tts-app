@@ -93,7 +93,7 @@ export default async function ChapterPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ mode?: string; autoplay?: string }>;
+  searchParams?: Promise<{ mode?: string; autoplay?: string; resume?: string }>;
 }) {
   const { id } = await params;
   const sp = searchParams ? await searchParams : {};
@@ -124,8 +124,8 @@ export default async function ChapterPage({
           icon="🔍"
           title="Không tìm thấy chương này"
           action={
-            <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
-              Về trang khám phá
+            <Link className="btn btn-primary" href="/library" prefetch={false}>
+              Về Thư viện
             </Link>
           }
         />
@@ -202,6 +202,8 @@ export default async function ChapterPage({
     coChu: doanVan.length > 0,
   });
   const urlRequestsPlay = sp.autoplay === "1" || sp.autoplay === "true";
+  // "Đọc tiếp"/"Nghe tiếp" tu Thu vien / trang truyen (`lib/novelProgress.ts`).
+  const autoResume = sp.resume === "1";
 
   return (
     <ChapterInteractiveReader
@@ -279,6 +281,7 @@ export default async function ChapterPage({
         initialMode={initialMode}
         initialPrefs={prefs}
         urlRequestsPlay={urlRequestsPlay}
+        autoResume={autoResume}
         prev={lienKe(chuongTruoc)}
         next={lienKe(chuongSau)}
         ownerId={chapter.owner_id}

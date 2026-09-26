@@ -103,10 +103,19 @@ test("Taxonomy: getReaderTags khong bao gio tra ve the ky thuat", () => {
   assert.deepEqual(getReaderTags(novelGeneric, 3), []);
 });
 
-test("Homepage: dải khám phá vũ trụ có đủ các fandom chính quy", () => {
-  assert.match(homeSrc, /One Piece/);
-  assert.match(homeSrc, /Naruto/);
-  assert.match(homeSrc, /Conan/);
-  assert.match(homeSrc, /Fairy Tail/);
-  assert.match(homeSrc, /Bóng rổ/);
+test("Homepage: dải khám phá vũ trụ lấy fandom từ DỮ LIỆU THẬT, không dẫn tới trang rỗng", () => {
+  /*
+    Product UX Sprint 2: ban truoc dat cung nam chip; "Fairy Tail" va "Bóng rổ"
+    dan toi trang RONG (kho doc duoc khong co truyen nao cua hai vu tru do —
+    do that 2026-09-25). Nay chip = fandom CO truyen (`chipFandom` tren anh
+    chup kho), dan toi Thu vien da loc; mat mang thi roi ve danh sach du phong.
+  */
+  assert.match(homeSrc, /<FandomStrip \/>/);
+  const strip = fs.readFileSync(new URL("../src/components/FandomStrip.tsx", import.meta.url), "utf8");
+  assert.match(strip, /chipFandom\(/);
+  assert.match(strip, /href=\{`\/library\?fandom=\$\{encodeURIComponent\(c\.ten\)\}`\}/);
+  for (const f of ["Naruto", "One Piece", "Detective Conan", "Genshin Impact"]) {
+    assert.ok(strip.includes(`"${f}"`), `thiếu fandom dự phòng ${f}`);
+  }
+  assert.ok(!homeSrc.includes("/fanfic?q=Fairy+Tail"), "chip cũ dẫn tới trang rỗng còn sót");
 });

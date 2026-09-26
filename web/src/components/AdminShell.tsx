@@ -266,26 +266,33 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 function TuChoi({ daDangNhap, loi }: { daDangNhap: boolean; loi: string }) {
   const chuaDangNhap =
     !daDangNhap || loi.includes("đăng nhập") || loi.includes("401");
+  // Sprint 2: dat trong MOT the kinh — ban truoc dong goi y xam nam thang tren
+  // tranh nen nhieu chi tiet, gan nhu khong doc duoc (QA 390/1366px).
   return (
     <div className="page auth-page">
-      <header className="auth-head">
-        <h1 className="page-title">Khu vực quản trị</h1>
-        <p className="hint">
-          {chuaDangNhap
-            ? "Bạn cần đăng nhập bằng tài khoản có quyền quản trị."
-            : "Tài khoản này không có quyền quản trị."}
-        </p>
-      </header>
-      <div className="row" style={{ justifyContent: "center" }}>
-        {chuaDangNhap ? (
-          <Link className="btn btn-primary" href="/login?next=/admin" prefetch={false}>
-            Đăng nhập
-          </Link>
-        ) : (
-          <Link className="btn" href="/" prefetch={false}>
-            Về trang chủ
-          </Link>
-        )}
+      <div className="admin-gate kinh">
+        <header className="auth-head">
+          <span className="admin-gate-icon" aria-hidden="true">
+            <IconShield size={22} />
+          </span>
+          <h1 className="page-title">Khu vực quản trị</h1>
+          <p className="admin-gate-hint">
+            {chuaDangNhap
+              ? "Bạn cần đăng nhập bằng tài khoản có quyền quản trị."
+              : "Tài khoản này không có quyền quản trị."}
+          </p>
+        </header>
+        <div className="row" style={{ justifyContent: "center" }}>
+          {chuaDangNhap ? (
+            <Link className="btn btn-primary" href="/login?next=/admin" prefetch={false}>
+              Đăng nhập
+            </Link>
+          ) : (
+            <Link className="btn" href="/" prefetch={false}>
+              Về trang chủ
+            </Link>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -68,6 +68,7 @@ import {
 import { Avatar } from "@/components/Avatar";
 import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
 import { NovelCover } from "@/components/NovelCover";
+import { FandomStrip } from "@/components/FandomStrip";
 import {
   CelestialDivider,
   MotifManuscript,
@@ -326,8 +327,12 @@ function HomeHeroShowcase({
                       <div className="showcase-item-meta clamp-1">
                         <span className="fandom-chip">{fandom}</span>
                         <span className="chapters">{chapterCount}</span>
+                        {/* Bieu tuong thay chu "Audio": cot nay hep, nhan chu
+                            bi cat thanh "Au" o 1366px (QA Sprint 2). */}
                         {hasAudio && (
-                          <span className="badge badge-brand badge-sm">Audio</span>
+                          <span className="showcase-audio" title="Có audio" aria-label="Có audio" role="img">
+                            <IconHeadphones size={13} />
+                          </span>
                         )}
                       </div>
                     </div>
@@ -911,23 +916,9 @@ export default function HomePage() {
         <h2 className="section-title section-title-icon" id="home-kham-pha-vu-tru">
           <IconCompass size={19} /> Khám phá theo vũ trụ
         </h2>
-        <div className="story-tags" aria-label="Vũ trụ fanfic">
-          <Link href="/fanfic?tag=fandom:One Piece" className="chip" prefetch={false}>
-            One Piece
-          </Link>
-          <Link href="/fanfic?tag=fandom:Naruto" className="chip" prefetch={false}>
-            Naruto
-          </Link>
-          <Link href="/fanfic?q=Conan" className="chip" prefetch={false}>
-            Conan
-          </Link>
-          <Link href="/fanfic?q=Fairy+Tail" className="chip" prefetch={false}>
-            Fairy Tail
-          </Link>
-          <Link href="/fanfic?q=B%C3%B3ng+R%E1%BB%95" className="chip" prefetch={false}>
-            Bóng rổ
-          </Link>
-        </div>
+        {/* Sprint 2: chip tu du lieu that (fandom CO truyen) -> Thu vien da loc.
+            Ban truoc co "Fairy Tail"/"Bóng rổ" dan toi trang rong. */}
+        <FandomStrip />
       </section>
 
       {/*

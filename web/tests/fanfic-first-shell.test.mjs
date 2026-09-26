@@ -124,8 +124,12 @@ test("muc dieu huong 'Trang chu' khop CHINH XAC, khong dung startsWith", () => {
   //
   // Phep so khop da chuyen len mot cho: `dangXem` duoc tinh MOT lan cho ca
   // `aria-current` lan vien thuoc dieu huong. Rang buoc thi y nguyen.
+  //
+  // Sprint 2: phep so khop chuyen vao `lib/navActive.ts` (trang truyen/chuong
+  // sang "Thư viện") — hanh vi co bai kiem rieng o `nav-active.test.mjs`.
   const nav = read("../src/components/NavAuth.tsx");
-  assert.match(nav, /l\.href === "\/"\s*\n?\s*\?\s*pathname === "\/"/);
+  assert.match(nav, /const dangXem = mucDangXem\(pathname\);/);
+  assert.match(read("../src/lib/navActive.ts"), /if \(pathname === "\/"\) return "\/";/);
   assert.match(nav, /const active = link\.href === dangXem;/);
 });
 
@@ -174,13 +178,23 @@ test("tim kiem khong nhan ban duong LOC thu hai", () => {
       - no KHONG tu loc o trinh duyet;
       - va no luon co duong giao lai cho `/fanfic?q=` de xem day du.
   */
+  /*
+    Product UX Sprint 2: overlay hien them GOI Y TUC THI (fandom / tac gia /
+    ten truyen) tu anh chup kho (`lib/searchSuggest.ts`) trong luc backend con
+    tra loi — do that, vai giay moi truy van, va backend KHONG tim theo tac gia.
+    Do la loi tat, KHONG phai danh sach ket qua thu hai: logic khop nam trong
+    MOT module thuan co bai kiem rieng (`tests/search-suggest.test.mjs`), ket
+    qua day du van cua `browseNovels`, va trang ket qua day du la Thu vien
+    (`/library?q=`, nut tren thanh dieu huong) thay cho `/fanfic?q=`.
+  */
   const overlay = read("../src/components/SearchOverlay.tsx");
   assert.match(overlay, /api\.browseNovels\(\{ query: tu/,
     "overlay không dùng lại đường tìm của backend");
-  assert.match(overlay, /\/fanfic\?q=\$\{encodeURIComponent\(tu\)\}/,
-    "overlay không giao lại cho trang Khám phá");
+  assert.match(overlay, /\/library\?q=\$\{encodeURIComponent\(tu\)\}/,
+    "overlay không giao lại cho trang Thư viện");
+  assert.match(overlay, /goiYTimKiem\(/, "gợi ý tức thì phải đi qua module thuần");
   assert.ok(!/\.filter\(/.test(overlay),
-    "overlay tự lọc ở trình duyệt — đó là đường lọc thứ hai");
+    "overlay tự lọc ở trình duyệt ngoài module gợi ý — đó là đường lọc thứ hai");
 
   // Va o header van chi la mot cai nut mo overlay, khong tu tim gi ca.
   const search = read("../src/components/SiteSearch.tsx");

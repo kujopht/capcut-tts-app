@@ -131,6 +131,8 @@ test("trang chuong: 'Tiếp tục nghe' chi phat SAU KHI BAM; khong moi khi dang
   assert.match(src, /Tiếp tục đọc/);
   assert.match(src, /Tiếp tục nghe/);
   // Luu tien do: vi tri doc (theo doan) + vi tri audio (moi 5s va khi dung).
-  assert.match(src, /ghiTienDo\(khoLuu\(\), chapterId, novelId, \{ doan, tongDoan: ps\.length, cheDo: mode \}/);
+  // Sprint 2: ban ghi kem them ten truyen/chuong (tuy chon) cho dai "Đang đọc
+  // dở" o Thu vien — loi goi xuong dong, nen cho phep khoang trang.
+  assert.match(src, /ghiTienDo\(\s*khoLuu\(\),\s*chapterId,\s*novelId,\s*\{ doan, tongDoan: ps\.length, cheDo: mode/);
   assert.match(src, /Math\.abs\(giay - giayDaLuu\.current\) < 5/);
 });

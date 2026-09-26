@@ -484,3 +484,45 @@ export function IconTextHide(p: Props) {
     </Svg>
   );
 }
+
+/** Kinh lup — tim kiem (Sprint 2: o tim Thu vien). */
+export function IconSearch(p: Props) {
+  return (
+    <Svg {...p}>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M16 16l4.5 4.5" />
+    </Svg>
+  );
+}
+
+/** Bon o — xem dang luoi. */
+export function IconGrid(p: Props) {
+  return (
+    <Svg {...p}>
+      <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" />
+    </Svg>
+  );
+}
+
+/** Ba thanh truot — bo loc. */
+export function IconSliders(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+      <circle cx="15" cy="7" r="2" />
+      <circle cx="9" cy="17" r="2" />
+    </Svg>
+  );
+}
+
+/** Dau nhan — bo mot bo loc / dong. */
+export function IconClose(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+    </Svg>
+  );
+}

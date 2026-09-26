@@ -190,6 +190,16 @@ Test cũ cập nhật **có chủ đích** (12 tệp, mỗi chỗ ghi lý do tro
 | `/fanfic` và `/library` chồng chức năng | Hai trang khám phá; Sprint 2 đưa tìm kiếm, liên kết trang truyện và chip fandom về `/library` | Quyết định sản phẩm: chuyển hướng `/fanfic` → `/library` (URL cũ `?tag=fandom:X` đã được `/library` hiểu) |
 | Tab "Sách & Tuyển tập" | Vẫn là trang giữ chỗ trung thực (chưa có ấn phẩm) | Quyết định sản phẩm: giữ hay ẩn tới khi có nội dung |
 
+## 7b. PHÁT HÀNH (sáng 2026-09-26)
+
+| Hạng mục | Trước khi sửa | Sau khi sửa |
+|---|---|---|
+| PR #225 (bảo mật) | OPEN; mật khẩu đăng-nhập-nhanh gắn cứng trong `main` và bundle production | **Merged `d3370c4`** (admin-bypass; backend đỏ y hệt main 734/4869, tập hỏng trùng nhau). `main` không còn chuỗi credential trong `web/src` |
+| Tài khoản phải đổi mật khẩu | — | `kujopht@gmail.com` và `reader@fanfic.vn` (giá trị cũ còn trong bundle production đang chạy và lịch sử git; không ghi lại ở đây) |
+| PR #226 so với `main` mới | Xếp chồng trên #225 | Đã merge `main` vào nhánh (`0c48580`); xung đột `library/page.tsx` giữ bản Sprint 2 (không có đăng nhập nhanh). Diff ròng: chỉ `web/` + báo cáo này |
+| Kiểm lại | — | web 1072 pass / 0 fail / 6 skip; tsc 0; ESLint 0 lỗi; `next build` OK; `cf:build` OK, 0 `localhost` của app; CI web + gitleaks PASS; backend đỏ y hệt main `d3370c4` (734/4869, khác nhau = rỗng) |
+| QA admin khi đã đăng nhập | Dự định trên bản cục bộ | **Không làm trên localhost**: admin đăng nhập bằng Google OAuth, callback/origin OAuth chỉ cấu hình cho `fanfic.world`. Không tạo mật khẩu tạm, không tạo tài khoản, không bypass. QA admin chuyển sang **production sau deploy**, bằng phiên Google sẵn có của chủ sở hữu; hỏng nặng thì rollback. Việc theo dõi: issue **#227 DEV-OAUTH** (không làm trong đợt này) |
+
 ## 8. MORNING ACTION
 
 1. Review PR #226 + trang ảnh BEFORE/AFTER (artifact riêng tư): https://claude.ai/artifact/Vtjgqpmc1NLjwtPkGPBuX2

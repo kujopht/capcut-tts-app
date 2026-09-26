@@ -6,9 +6,11 @@ Ngày 2026-09-26. Gốc: `main` @ `3f046e8` (sau #228). Ba PR độc lập theo 
 
 | Gói | PR / nhánh | Trạng thái | Chặn production |
 |---|---|---|---|
-| A — Cộng đồng phản hồi nhanh + hồ sơ tuỳ chỉnh | #229 `feat/social-play-a-community` (`9f0e81f`, `07664fe`) | **READY_FOR_OWNER_REVIEW** (mock) · kiểm trên Appwrite thật **BLOCKED** | Migration `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md` + cờ `FAS_SOCIAL_V1_SCHEMA` (mặc định tắt); cần Appwrite **thử nghiệm** để kiểm cursor/lọc fandom/hồ sơ/chặn trên truy vấn thật |
-| B — Audio Studio, ẩn nhạc có thể bật lại, khung Giải trí | #230 `feat/social-play-b-studio-music` (`351e8da`) | **READY_FOR_OWNER_REVIEW — đủ điều kiện release riêng** (kế hoạch release + rollback đã đăng trên PR) | Không (chỉ web). Đường TTS production **chưa** được kiểm bằng E2E Piper cục bộ |
-| C — Mini-game có máy chủ làm trọng tài, XP, bảng xếp hạng theo game | #231 `feat/social-play-c-games` (`88e8b96`, `118b352` + báo cáo), **chồng trên B** | **READY_FOR_OWNER_REVIEW** (mock) · **MULTIPLAYER_PRODUCTION_BLOCKED** | Migration 6 collection; `FAS_XP_ATOMIC` (đã cài, tắt trên Appwrite) cần kiểm trên Appwrite **thử nghiệm** (chưa có → BLOCKED); `FAS_GAMES_V1` giữ tắt trên production |
+| A — Cộng đồng phản hồi nhanh + hồ sơ tuỳ chỉnh | #229 `feat/social-play-a-community` (đầu `399f5fb`) | **READY_FOR_OWNER_REVIEW** · Appwrite thử nghiệm **47/47** sau 3 bản sửa tích hợp | Migration production chưa chạy (đề xuất ở `SOCIAL_PLAY_V1_APPWRITE_INTEGRATION.md` §6); `FAS_SOCIAL_V1_SCHEMA` giữ tắt |
+| B — Audio Studio, ẩn nhạc có thể bật lại, khung Giải trí | #230 → **đã merge** `eea7dad` | Chờ chủ dự án deploy production + smoke trực tiếp | Không (chỉ web). Sinh TTS production **chưa** được kiểm |
+| C — Mini-game có máy chủ làm trọng tài, XP, bảng xếp hạng theo game | #231 `feat/social-play-c-games` (đầu `01cbac3`, gốc `main@eea7dad`) | **READY_FOR_OWNER_REVIEW** · Appwrite thử nghiệm: XP 11/11 + HTTP 17/17, game 20/22 (2 lỗi harness, đọc lại 10/10) · **MULTIPLAYER_PRODUCTION_BLOCKED** | Migration production chưa chạy; `FAS_XP_ATOMIC`/`FAS_GAMES_V1` giữ tắt trên production; trần thưởng cứng trong một tiến trình, mềm khi nhiều instance |
+
+Kiểm thử tích hợp A + C trên Appwrite 1.9.6 + MongoDB dùng-một-lần (đã huỷ): `SOCIAL_PLAY_V1_APPWRITE_INTEGRATION.md`.
 
 ## 2. Trước / sau (tóm tắt — ảnh đầy đủ trong báo cáo từng gói, thư mục `docs/reports/anh/social_play_v1/`)
 
@@ -56,7 +58,7 @@ Ngày 2026-09-26. Gốc: `main` @ `3f046e8` (sau #228). Ba PR độc lập theo 
 
 - A: `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md` — thuộc tính mới cho `posts`/`comments`/`profiles`, enum báo cáo `user`, collection `user_blocks`. Thứ tự: deploy API (cờ tắt) → dry-run → migrate → đối soát → bật cờ → deploy web.
 - C: `docs/migrations/SOCIAL_PLAY_V1_GAMES_SCHEMA.md` — `game_rooms`, `game_room_versions`, `game_runs`, `game_run_versions`, `game_results`, `xp_progress_cas`. Additive; rollback = xoá 6 collection. Đường XP cũ đã chuyển sang ghi nguyên tử (sau cờ `FAS_XP_ATOMIC`); bật cờ đó trên production chỉ sau khi kiểm trên Appwrite thử nghiệm.
-- Appwrite thử nghiệm: **chưa có target được phép** (`appwrite-dev.fanfic.world` thực ra là production; project "dev" dùng chung máy production; staging đã retired). Đề xuất cấu hình + quyền tối thiểu: `docs/migrations/SOCIAL_PLAY_V1_TEST_APPWRITE.md` (Appwrite 1.9.6 + MongoDB dùng-một-lần trên Lightning CPU có sẵn, lưu ảnh cục bộ, không R2).
+- Appwrite thử nghiệm: đã dựng theo `docs/migrations/SOCIAL_PLAY_V1_TEST_APPWRITE.md` (Appwrite 1.9.6 + MongoDB rs0 dùng-một-lần trên Lightning CPU có sẵn, chỉ loopback, lưu ảnh cục bộ, không R2), chạy migration A + C trên DB có dữ liệu cũ, kiểm xong rồi **huỷ** — kết quả và đề xuất migration/rollback production: `SOCIAL_PLAY_V1_APPWRITE_INTEGRATION.md`.
 
 ## 7. Phê duyệt hạ tầng / chi phí
 

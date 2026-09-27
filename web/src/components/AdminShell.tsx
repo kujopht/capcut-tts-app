@@ -27,6 +27,7 @@ import { ApiError, adminApi, type AdminRole, type AuthorStatus } from "@/lib/api
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { Loading } from "@/components/ui";
+import { SUPPORT_ENABLED } from "@/lib/features";
 import {
   IconBook,
   IconChart,
@@ -77,6 +78,9 @@ interface NhomDieuHuong {
  */
 const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
   { muc: [{ href: "/admin", nhan: "Dashboard", icon: IconCompass }] },
+  // Fanfic AI Support: "mo len la biet web dang loi gi" — dung ngay duoi
+  // Dashboard. Tat co thi khong co muc nay (va trang tra 404).
+  ...(SUPPORT_ENABLED ? [{ muc: [{ href: "/admin/support", nhan: "Hỗ trợ & sự cố", icon: IconInbox }] }] : []),
   { muc: [{ href: "/admin/users", nhan: "Users", icon: IconUser, vaiToiThieu: "admin" }] },
   { muc: [{ href: "/admin/community", nhan: "Cộng đồng", icon: IconMegaphone }] },
   {

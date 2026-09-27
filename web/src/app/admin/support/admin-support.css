@@ -1,0 +1,100 @@
+/*
+ * Trung tam ho tro (/admin/support) — CHI dung token co san trong globals.css.
+ * Nap boi chinh trang nay; tat co thi trang 404 va tep khong vao dau ca.
+ */
+.ht-tong { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s2); }
+.ht-o { display: flex; flex-direction: column; gap: 2px; padding: var(--s3); }
+.ht-o-so { font-size: var(--t-xl, 22px); font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.ht-o-can .ht-o-so { color: var(--warn); }
+.ht-ghi-chu { margin: 0; font-size: var(--t-xs); }
+
+.ht-luoi { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 460px); gap: var(--s4); align-items: start; }
+.ht-cot-ct { position: sticky; top: 84px; max-height: calc(100dvh - 100px); overflow-y: auto; scrollbar-width: thin; }
+.ht-tab { gap: 6px; flex-wrap: wrap; align-items: center; }
+.ht-lam-moi { margin-left: auto; }
+/* Do that 1440px: 5 cot deu cat chu "Mọi phân hệ" / placeholder — tu xuong hang. */
+.ht-loc { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s2); }
+.ht-loc .input { min-width: 0; }
+
+.ht-ds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.ht-muc, .ht-bc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: var(--s3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r3);
+  background: var(--bg-2);
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ht-muc:hover, .ht-bc:hover:not(:disabled) { border-color: var(--line-strong); }
+.ht-muc-dang { border-color: var(--brand-line); background: var(--brand-soft); }
+.ht-muc:focus-visible, .ht-bc:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ht-muc-dau { gap: 6px; flex-wrap: wrap; align-items: center; }
+.ht-muc-luc { margin-left: auto; font-size: 11px; }
+.ht-muc-tieu-de {
+  color: var(--text);
+  font-size: var(--t-sm);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ht-muc-meta, .ht-bc .hint { font-size: var(--t-xs); overflow-wrap: anywhere; }
+.ht-muc code, .ht-bc code, .ht-ct code { font-size: 11px; }
+.ht-bc-chu { color: var(--text); font-size: var(--t-sm); overflow-wrap: anywhere; }
+
+/* Muc do: cung mau voi badge-* cua design system. */
+.ht-md-critical { color: var(--danger); background: var(--danger-soft); border-color: #f8717166; font-weight: 700; }
+.ht-md-high { color: var(--danger); background: var(--danger-soft); border-color: #f8717140; }
+.ht-md-medium { color: var(--warn); background: var(--warn-soft); border-color: #fbbf2440; }
+.ht-md-low { color: var(--info); background: var(--info-soft); border-color: #60a5fa40; }
+
+.ht-trong { display: flex; align-items: center; gap: var(--s2); padding: var(--s4); }
+.ht-ct { padding: var(--s4); }
+.ht-lui { display: none; align-self: flex-start; }
+.ht-ct-tieu-de { margin: 0; font-size: var(--t-md); color: var(--text); overflow-wrap: anywhere; }
+.ht-so { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s2); margin: 0; }
+.ht-build { margin: 0; font-size: var(--t-xs); overflow-wrap: anywhere; }
+.ht-so div { padding: var(--s2); border: 1px solid var(--line-soft); border-radius: var(--r2); }
+.ht-so dt { font-size: 11px; color: var(--text-3); }
+.ht-so dd { margin: 0; color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+.ht-hanh-dong { gap: 6px; flex-wrap: wrap; }
+.ht-loi { color: var(--danger); margin: 0; }
+.ht-nhap { padding: var(--s3); border: 1px dashed var(--line); border-radius: var(--r2); }
+.ht-nhap-than { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; resize: vertical; }
+.ht-kiem, .ht-dong, .ht-tg { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: var(--t-sm); }
+.ht-kiem li { display: flex; gap: var(--s2); align-items: flex-start; }
+.ht-kiem-dau {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 20px; height: 20px; border-radius: var(--r-full); font-size: 11px; font-weight: 700;
+  background: var(--bg-3); color: var(--text-2);
+}
+.ht-kiem-ok .ht-kiem-dau { background: var(--ok-soft); color: var(--ok); }
+.ht-kiem-warn .ht-kiem-dau { background: var(--warn-soft); color: var(--warn); }
+.ht-kiem-fail .ht-kiem-dau, .ht-kiem-denied .ht-kiem-dau { background: var(--danger-soft); color: var(--danger); }
+.ht-dong li, .ht-tg li { overflow-wrap: anywhere; color: var(--text); }
+.ht-tg li { padding-left: var(--s3); border-left: 2px solid var(--line); }
+.ht-mono li { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text-2); }
+
+@media (max-width: 1100px) {
+  .ht-tong { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ht-luoi { grid-template-columns: minmax(0, 1fr); }
+  .ht-cot-ct { position: static; max-height: none; overflow: visible; }
+  .ht-loc { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Mot cot: chon mot su co thi chi hien chi tiet (Back / "Danh sach" quay lai). */
+  .ht-co-chon .ht-cot-ds, .ht-co-chon .ht-tong, .ht-co-chon .ht-ghi-chu { display: none; }
+  .ht:not(.ht-co-chon) .ht-cot-ct { display: none; }
+  .ht-lui { display: inline-flex; }
+}
+@media (max-width: 640px) {
+  .ht-tong { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ht-loc { grid-template-columns: minmax(0, 1fr); }
+  .ht-tab .btn, .ht-hanh-dong .btn, .ht-lui, .ht-loc .input { min-height: 44px; }
+  .ht-muc, .ht-bc { min-height: 44px; }
+}

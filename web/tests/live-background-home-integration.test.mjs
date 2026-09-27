@@ -50,7 +50,7 @@ test("videoNen la NGUON DUY NHAT — component KHONG hard-code duong dan .mp4 na
   assert.ok(!/\.mp4/.test(s), "PageBackground.tsx tự ghép chuỗi đường dẫn .mp4 — phải đi qua videoNen() ở backgrounds.ts");
 });
 
-test("videoNen: du CA 8 chu de, moi chu de mot tep .mp4 THAT ton tai tren dia, khong trung duong dan", () => {
+test("videoNen: du CA 8 chu de, moi chu de co ban v2 (AV1 + H.264) THAT ton tai tren dia, khong trung duong dan", () => {
   const src = backgrounds();
   const khoiVideo = src.slice(src.indexOf("const VIDEO"), src.indexOf("const VIDEO") + src.slice(src.indexOf("const VIDEO")).indexOf("\n};"));
   const duongDan = new Set();
@@ -61,8 +61,10 @@ test("videoNen: du CA 8 chu de, moi chu de mot tep .mp4 THAT ton tai tren dia, k
     const tep = m[1];
     assert.ok(!duongDan.has(tep), `hai chủ đề dùng trùng file "${tep}" — mỗi chủ đề phải có video riêng`);
     duongDan.add(tep);
-    const fileUrl = new URL(`${tep}.mp4`, THU_MUC_LIVE);
-    assert.ok(existsSync(fileUrl), `không tồn tại: public/artwork/fantasy-backgrounds/live/${tep}.mp4`);
+    // Tu Sprint 3, videoNen() tra ve ban v2 — chinh hai tep nay moi la tep runtime.
+    for (const bien of [`v2/${tep}-900-av1.mp4`, `v2/${tep}-720-h264.mp4`]) {
+      assert.ok(existsSync(new URL(bien, THU_MUC_LIVE)), `không tồn tại: public/artwork/fantasy-backgrounds/live/${bien}`);
+    }
   }
   assert.equal(duongDan.size, 8, "phải có đúng 8 video, một cho mỗi chủ đề");
 });

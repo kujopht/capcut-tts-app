@@ -97,8 +97,9 @@ export const MAN_HINH_NHO = "(max-width: 640px)";
  * Live Wallpaper — rollout V4 (2026-08), CA 8 chu de. Video do NGUOI DUNG tu
  * tao thu cong tu chinh 8 buc tranh tinh o tren (khong qua Pollinations,
  * khong AI sinh) — xem bao cao rollout cho kiem tra chat luong/vong lap day
- * du. Ban runtime (H.264, 1920x1080, 30fps, khong am thanh) nam o
- * `/artwork/fantasy-backgrounds/live/`; ban goc (master) KHONG nam trong
+ * du. Ban runtime hien tai la `live/v2/` (xem `videoNen` ben duoi); ban
+ * H.264 1080p cu cua rollout V4 da go khoi `public/` (chi con trong lich su
+ * git), vi khong trang nao dung toi. Ban goc (master) KHONG nam trong
  * repo (giu o `Downloads/donelive`, tep goc HEVC 2560x1440 60fps qua nang
  * cho web — xem bao cao ma-hoa).
  *
@@ -126,7 +127,7 @@ export interface NguonVideoNen {
 
 /**
  * SPRINT 3 (2026-09-27) — ban MA HOA LAI cho nen trang tri, o thu muc co
- * PHIEN BAN `live/v2/` (ban goc 1080p van nam nguyen o `live/`, khong xoa).
+ * PHIEN BAN `live/v2/` (ban 1080p cu da go khoi `public/`, con trong lich su git).
  * Benchmark tren Lightning CPU, SSIM so voi ban goc (phong ve 1920x1080):
  *
  *   ban goc H.264 1080p 30fps       tong 42.011 KB (3,5-6,7 MB/tep)

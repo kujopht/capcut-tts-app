@@ -82,3 +82,28 @@ ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_secret_redaction.py:j
 #    phai feature/) nen 8 commit cua no CHUA TUNG duoc gitleaks quet lan nao
 #    truoc PR hop nhat nay.
 ff6437b1df9e2f45c537bda41ce7db1b8d473483:tests/test_router_control_room.py:appwrite-api-key:341
+#
+# 8) server/tests/test_support_v1.py, commit a199870 (PR #241, Fanfic AI
+#    Support V1) — fixture tong hop cua bai test BO LAM SACH va BO LOC DAU RA,
+#    bai test ton tai de CHUNG MINH `server/support/sanitize.py` /
+#    `safety.loc_dau_ra` che bi mat, nen no BAT BUOC phai co chuoi hinh dang
+#    khoa. Ra soat tay tung dong (2026-09-28):
+#      * dong 91 (jwt): JWT kieu vi du cua jwt.io — header {"alg":"HS256"},
+#        payload {"sub":"1234567890"}, chu ky tong hop;
+#      * dong 92 (generic-api-key): "sk-live-" + day dem 0-9 a-f A-F;
+#      * dong 133 va 302 (generic-api-key): AWS_SECRET_ACCESS_KEY=abcd1234efgh
+#        — 12 ky tu gia;
+#      * dong 254 (generic-api-key): chuoi canh bao co y ten
+#        "sk-live-KHOA-GIA-PHAI-KHONG-LO-0123" (khoa gia phai khong lo).
+#    Khong co gia tri that nao.
+#
+#    CAY LAM VIEC HIEN TAI DA SACH (cung cach muc 7): fixture gio duoc GHEP LUC
+#    CHAY tu cac manh roi (JWT_GIA, KG, CANH, GT_GIA dau tep), chuoi luc chay
+#    khong doi. Muc nay chi che dau van tay LICH SU cua a199870 — commit da day
+#    len origin/feat/support-ai-v1, khong force-push. Chuoi khong con o HEAD
+#    nen squash-merge ve sau KHONG sinh dau van tay moi cho tep nay.
+a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:jwt:91
+a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:generic-api-key:92
+a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:generic-api-key:133
+a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:generic-api-key:254
+a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:generic-api-key:302

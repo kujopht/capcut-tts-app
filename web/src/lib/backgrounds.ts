@@ -80,6 +80,20 @@ export function anhNen(ten: string): string {
 }
 
 /**
+ * Ban DIEN THOAI (rong 960px, ~110-160 KB thay vi 340-470 KB) — dung tam ma
+ * CSS `--anh-nho` ve duoi `MAN_HINH_NHO`. Poster `<img>` cua LiveBackground va
+ * phep nap truoc khi chuyen trang phai chon CUNG tam voi CSS, neu khong dien
+ * thoai tai CA HAI tam (do tren fanfic.world o 390px: 436 KB + 151 KB).
+ */
+export function anhNenNho(ten: string): string {
+  const tep = TEP[ten] ?? TEP[MAC_DINH];
+  return `/artwork/fantasy-backgrounds/${tep}-sm.webp`;
+}
+
+/** Cung diem gay voi khoi `@media (max-width: 640px)` dat `--anh-nho` trong globals.css. */
+export const MAN_HINH_NHO = "(max-width: 640px)";
+
+/**
  * Live Wallpaper — rollout V4 (2026-08), CA 8 chu de. Video do NGUOI DUNG tu
  * tao thu cong tu chinh 8 buc tranh tinh o tren (khong qua Pollinations,
  * khong AI sinh) — xem bao cao rollout cho kiem tra chat luong/vong lap day

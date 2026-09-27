@@ -77,6 +77,7 @@ export interface LiveBackgroundSource {
 
 export function LiveBackground({
   poster,
+  posterNho,
   video,
   mobileVideo = false,
   videoMask,
@@ -84,6 +85,12 @@ export function LiveBackground({
 }: {
   /** Anh tinh — LUON hien, khong phu thuoc video co tai duoc hay khong. */
   poster: string;
+  /**
+   * Ban poster cho man <=640px (cung tam CSS `--anh-nho` ve o do). Bo trong =
+   * moi man dung `poster`. Co no thi dien thoai chi tai MOT tam nho thay vi
+   * tam lon + tam nho (do tren fanfic.world o 390px: 436 KB + 151 KB).
+   */
+  posterNho?: string;
   /**
    * Nguon video, hai dinh dang. Bo trong (`undefined`) nghia la CHUA co tai
    * san — component chi ve poster, hoan toan giong nen tinh hom nay.
@@ -214,20 +221,23 @@ export function LiveBackground({
 
   return (
     <div className={className} style={{ position: "relative", overflow: "hidden" }}>
-      {/* eslint-disable-next-line @next/next/no-img-element -- nen trang tri toan man hinh, khong phai anh noi dung; NovelCover/StoryCoverFallback trong repo cung dung mau tuong tu. */}
-      <img
-        src={poster}
-        alt=""
-        aria-hidden="true"
-        className="live-bg-poster"
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-        }}
-      />
+      <picture>
+        {posterNho ? <source media="(max-width: 640px)" srcSet={posterNho} /> : null}
+        {/* `<img>` thuong, khong `next/image`: nen trang tri toan man hinh, khong phai anh noi dung (quy tac no-img-element khong bat `<img>` trong `<picture>`). */}
+        <img
+          src={poster}
+          alt=""
+          aria-hidden="true"
+          className="live-bg-poster"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+          }}
+        />
+      </picture>
       {hienVideo ? (
         <video
           ref={videoRef}

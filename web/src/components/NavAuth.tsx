@@ -262,10 +262,10 @@ function AccountMenu() {
       </button>
       {open ? (
         <div className="menu-panel" role="menu" aria-label="Tài khoản">
-          <Link href="/account" className="menu-item" role="menuitem" onClick={close}>
+          <Link href="/account" className="menu-item" role="menuitem" onClick={close} prefetch={false}>
             <span aria-hidden="true">👤</span> Tài khoản
           </Link>
-          <Link href="/leaderboard" className="menu-item" role="menuitem" onClick={close}>
+          <Link href="/leaderboard" className="menu-item" role="menuitem" onClick={close} prefetch={false}>
             <span aria-hidden="true">👑</span> Bảng xếp hạng
           </Link>
           {/*

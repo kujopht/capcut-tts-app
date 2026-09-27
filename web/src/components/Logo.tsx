@@ -1,47 +1,33 @@
 /**
- * Nhan dien thuong hieu Fanfic Audio Studio.
+ * Nhan dien thuong hieu Fanfic World.
  *
- * Y TUONG: mot trang sach mo, va song am vuon len tu gay sach. Mot bieu tuong
- * duy nhat cho CA Audio Studio lan Fanfic — khong tach thanh hai thuong hieu.
+ * Logo lay tu HAI anh chu du an chon (2026-09): mot cuon sach mo, dai anh
+ * sang va ngoi sao vuon len tu trang sach.
  *
- * Hinh ve nguyen ban, chi gom hinh khoi co ban (ba thanh bo tron + hai hinh
- * thang lam trang sach). Khong dung anh hay logo cua ai.
+ *   - Icon vuong bo goc  -> `public/brand/icon-*.png`, `app/favicon.ico`,
+ *     `app/apple-icon.png`, icon maskable — moi cho icon vuong nho.
+ *   - Bieu tuong + chu   -> `public/brand/logo-emblem.webp` +
+ *     `logo-wordmark.webp` — logo trong giao dien (header, footer).
  *
- * DE DOC O KICH THUOC NHO: chi 5 hinh khoi, khong chi tiet mong. O 16px van
- * thay duoc "song am tren mot cuon sach".
+ * Anh goc co nen trang va chu "fanfic" mau navy dam; ban dung o day da tach
+ * nen (trong suot) va doi "fanfic" sang mau sang, vi site chi co nen toi —
+ * ".world" giu nguyen gradient cua ban goc.
  */
 
-/** Toa do goc cua bieu tuong trong luoi 32x32, dung chung cho moi bien the. */
-export const GLYPH_VIEWBOX = "0 0 32 32";
-
-/** Mau thuong hieu — trung voi token trong globals.css. */
-export const BRAND = {
-  from: "#7c8cff",
-  to: "#4dd6c1",
-  ink: "#0b0d12",
+/** Duong dan tai san — mot nguon duy nhat cho moi noi dung logo. */
+export const BRAND_ASSETS = {
+  icon: "/brand/icon-192.png",
+  emblem: "/brand/logo-emblem.webp",
+  wordmark: "/brand/logo-wordmark.webp",
 } as const;
 
-/** Rieng phan hinh: ba thanh song am + hai trang sach. */
-function Glyph({ color = "currentColor" }: { color?: string }) {
-  return (
-    <g fill={color} stroke={color} strokeLinejoin="round">
-      {/* Song am vuon len tu gay sach — thanh giua cao nhat, nam ngay tren gay */}
-      <rect x="8.4" y="9.2" width="3.2" height="4.4" rx="1.6" stroke="none" />
-      <rect x="14.4" y="3.4" width="3.2" height="10.2" rx="1.6" stroke="none" />
-      <rect x="20.4" y="7.2" width="3.2" height="6.4" rx="1.6" stroke="none" />
-      {/* Hai trang sach mo, chum vao gay o giua */}
-      <path d="M4.6 16.4 14.6 18 14.6 26.8 4.6 25.2Z" strokeWidth="1.8" />
-      <path d="M27.4 16.4 17.4 18 17.4 26.8 27.4 25.2Z" strokeWidth="1.8" />
-    </g>
-  );
-}
+/** Ti le rong/cao THAT cua anh, de dat width/height (khong nhay bo cuc). */
+const EMBLEM_RATIO = 209 / 160;
+const WORDMARK_RATIO = 483 / 96;
+/** Chieu cao chu so voi bieu tuong trong ban xep ngang. */
+const WORDMARK_SCALE = 0.66;
 
-/**
- * Bieu tuong vuong: o bo tron mau thuong hieu, hinh mau muc dam.
- *
- * O tu mang san do tuong phan nen dung duoc tren CA nen sang lan nen toi ma
- * khong can doi mau.
- */
+/** Icon vuong (o bo goc) — cho icon nho trong giao dien, vd trang dang nhap. */
 export function LogoMark({
   size = 32,
   title,
@@ -49,61 +35,25 @@ export function LogoMark({
   size?: number;
   title?: string;
 }) {
-  const gradientId = `fas-brand-${size}`;
   return (
-    <svg
+    // eslint-disable-next-line @next/next/no-img-element -- icon tinh nho, kich thuoc co dinh, khong can Next/Image
+    <img
+      src={BRAND_ASSETS.icon}
       width={size}
       height={size}
-      viewBox={GLYPH_VIEWBOX}
-      role={title ? "img" : "presentation"}
-      aria-label={title}
+      alt={title ?? ""}
       aria-hidden={title ? undefined : true}
-    >
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor={BRAND.from} />
-          <stop offset="1" stopColor={BRAND.to} />
-        </linearGradient>
-      </defs>
-      <rect width="32" height="32" rx="9" fill={`url(#${gradientId})`} />
-      <g transform="translate(4.81 5.12) scale(0.7)">
-        <Glyph color={BRAND.ink} />
-      </g>
-    </svg>
+      className="logo-mark"
+      draggable={false}
+    />
   );
 }
 
 /**
- * Ban mot mau: chi co hinh, khong o nen, lay mau tu `currentColor`.
+ * Logo day du: bieu tuong + chu "fanfic.world", xep ngang.
  *
- * Dung khi can in mot mau hoac dat tren nen da co mau — tu dong hop voi ca
- * nen sang lan nen toi vi thua ke mau chu xung quanh.
- */
-export function LogoGlyph({
-  size = 32,
-  title,
-}: {
-  size?: number;
-  title?: string;
-}) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={GLYPH_VIEWBOX}
-      role={title ? "img" : "presentation"}
-      aria-label={title}
-      aria-hidden={title ? undefined : true}
-    >
-      <Glyph />
-    </svg>
-  );
-}
-
-/**
- * Logo day du: bieu tuong + ten san pham.
- *
- * Ten dung `currentColor` nen doi theo nen sang/toi ma khong can hai file.
+ * `size` la chieu cao bieu tuong; chu cao bang `WORDMARK_SCALE` lan.
+ * Ten doc man hinh la "Fanfic World" (ten san pham), dat tren anh chu.
  */
 export function Logo({
   size = 30,
@@ -112,26 +62,29 @@ export function Logo({
   size?: number;
   showText?: boolean;
 }) {
-  /*
-    "Fanfic World", khong con "Fanfic Audio Studio".
-
-    Audio Studio tung la CA san pham. Gio no la MOT module trong Fanfic
-    Studio (#197), con san pham la mot nen tang doc/nghe/xem — khu quan tri
-    da goi dung ten do tu lau ("Fanfic World"), chi rieng thuong hieu o
-    ngoai la con ket lai o cai ten cu.
-
-    Dong phu van bi an trong header (`.site-header .brand-text-sub`), nen
-    thanh dieu huong van doc la "Fanfic" — dung nhu truoc, va dung voi
-    huong: thuong hieu ngan la "Fanfic", danh tinh san pham day du la
-    "Fanfic World".
-  */
   if (!showText) return <LogoMark size={size} title="Fanfic World" />;
+  const cao = Math.round(size * WORDMARK_SCALE);
   return (
-    <>
-      <LogoMark size={size} />
-      <span>
-        Fanfic <span className="brand-text-sub">World</span>
-      </span>
-    </>
+    <span className="logo-lockup">
+      {/* eslint-disable-next-line @next/next/no-img-element -- logo tinh, kich thuoc co dinh */}
+      <img
+        src={BRAND_ASSETS.emblem}
+        width={Math.round(size * EMBLEM_RATIO)}
+        height={size}
+        alt=""
+        aria-hidden="true"
+        className="brand-emblem"
+        draggable={false}
+      />
+      {/* eslint-disable-next-line @next/next/no-img-element -- logo tinh, kich thuoc co dinh */}
+      <img
+        src={BRAND_ASSETS.wordmark}
+        width={Math.round(cao * WORDMARK_RATIO)}
+        height={cao}
+        alt="Fanfic World"
+        className="brand-wordmark"
+        draggable={false}
+      />
+    </span>
   );
 }

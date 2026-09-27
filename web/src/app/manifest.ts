@@ -25,10 +25,12 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/brand/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/brand/icon-512.png", sizes: "512x512", type: "image/png" },
       {
-        src: "/brand/icon-512.png",
+        // Ban RIENG cho `maskable`: nen phu kin, noi dung nam trong vung an
+        // toan 80% — Android tu cat theo hinh dang cua may ma khong mat mep
+        // sach. `icon-512.png` co goc trong suot nen khong dung duoc o day.
+        src: "/brand/icon-maskable-512.png",
         sizes: "512x512",
         type: "image/png",
-        // `maskable` de Android tu bo goc theo hinh dang cua may
         purpose: "maskable",
       },
     ],

@@ -1562,24 +1562,27 @@ main { overflow-x: clip; }
   color: #ffffff;
   transform: translateY(-1px);
 }
-.brand svg { flex: 0 0 auto; }
-.brand svg {
-  transition: filter 0.3s var(--ease), transform 0.3s var(--ease);
-  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.2));
-}
-.brand:hover svg {
-  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.6));
-  transform: scale(1.03);
-}
-.brand-text-sub { color: var(--text-3); font-weight: 500; }
 /*
-  An trong CHINH header (van dung o cho khac, vd `.auth-head`): dock noi gio
-  chi cao 52px va can moi pixel ngang cho `.nav-links`/`.tim-nut`/`.nav-right`
-  cung mot hang. Ten "Fanfic" tren logo da du de nhan dien thuong hieu; dong
-  phu ("Audio Studio"...) khong mang thong tin dieu huong nen la muc dau tien
-  bo di khi chat.
+  Logo la ANH (bieu tuong + chu "fanfic.world", xem `components/Logo.tsx`).
+  Khong co, khong keo gian: width/height cua the <img> la kich thuoc that.
 */
-.site-header .brand-text-sub { display: none; }
+.logo-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+.brand img, .logo-lockup img { flex: 0 0 auto; display: block; }
+/* Vong tron cua bieu tuong la navy dam — tren nen toi can mot quang tim nhe
+   de con thay hinh tron, khong phai de trang tri. */
+.brand-emblem {
+  transition: filter 0.3s var(--ease), transform 0.3s var(--ease);
+  filter: drop-shadow(0 0 3px rgba(150, 130, 255, 0.4));
+}
+.brand:hover .brand-emblem {
+  filter: drop-shadow(0 0 7px rgba(170, 150, 255, 0.65));
+  transform: scale(1.04);
+}
 
 .nav-links { display: flex; align-items: center; gap: var(--s1); }
 .nav-link {
@@ -3278,7 +3281,7 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 .nav-right { gap: var(--s2); flex-wrap: nowrap; flex-shrink: 0; }
 /*
   An ten tai khoan CHI trong header (van hien o `/account`, o day chi la nut
-  avatar): cung ly do voi `.brand-text-sub` — dock 52px het cho ngang khi da
+  avatar): dock 52px het cho ngang khi da
   co Cong cu/streak/chuong/avatar. Danh tinh KHONG mat het: avatar van la
   anh/ten viet tat that su cua nguoi dung (khong phai icon chung), nut co
   `title`/`aria-label` "Tai khoan cua {ten}" de xac nhan qua hover/doc man
@@ -6722,11 +6725,6 @@ body.co-mini { padding-bottom: 74px; }
      Bo ten tai khoan di la du: anh dai dien van con, va ten van hien ngay
      trong menu khi mo ra. */
   .account-name { display: none; }
-  /* Duoi 380px, rieng ten thuong hieu cung khong du cho canh khu tai khoan.
-     Bo chu phu, giu "Fanfic" va bieu tuong. */
-  @media (max-width: 380px) {
-    .brand-text-sub { display: none; }
-  }
 
   /*
     KHONG DINH tren dien thoai.

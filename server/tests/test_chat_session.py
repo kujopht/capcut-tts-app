@@ -33,6 +33,7 @@ from server.chat_tencent import (
     gen_user_sig,
 )
 from server.rate_limit import TIER_A, TIER_B, SlidingWindowRateLimiter, classify_request
+from server.rate_limit import limiter as rate_limit_limiter
 from server.secret_redaction import loc_bo_de_qui
 
 KHOA_GIA = "khoa-gia-chi-de-test-0123456789abcdef0123456789abcdef"
@@ -137,13 +138,20 @@ class ChatRouteCase(unittest.TestCase):
         server_main.identity = MockIdentityAdapter()
         server_main.store = MockMetadataStore()
         server_main._han_muc_phien_chat = SlidingWindowRateLimiter()
+        # Bo dem Tier cua middleware la TOAN TIEN TRINH: chay ca bo test thi
+        # cac bai truoc da tieu het han muc cua IP "testclient" — xoa de bai
+        # nay khong phu thuoc thu tu chay (CI tung tra 429 o day).
+        rate_limit_limiter.reset()
         self.client = TestClient(server_main.app)
 
     def auth(self, token: str) -> Dict[str, str]:
         return {"Authorization": f"Bearer {token}"}
 
     def user(self, email: str, username: str = "") -> str:
-        tok = self.client.post("/api/auth/register", json={"email": email, "password": "matkhau123"}).json()["token"]
+        # Tao thang qua adapter (nhu `test_creator_service`), khong qua
+        # `/api/auth/register` — route do co han muc Tier A theo IP.
+        server_main.identity.register(email, "matkhau123", email.split("@")[0])
+        tok = server_main.identity.login(email, "matkhau123")
         if username:
             r = self.client.put("/api/creator/username", headers=self.auth(tok), json={"username": username})
             self.assertEqual(r.status_code, 200, r.text)

@@ -21,21 +21,25 @@ const CHU_DE = ["home", "explore", "reader", "studio", "write", "library", "acco
 const THU_MUC_LIVE = new URL("../public/artwork/fantasy-backgrounds/live/", import.meta.url);
 const THU_MUC_TINH = new URL("../public/artwork/fantasy-backgrounds/", import.meta.url);
 
-test("moi 8 video runtime deu la H.264 + khong am thanh + kich thuoc hop ly (kiem tra tren dia, khong doan)", () => {
+test("moi 8 chu de co du 2 video runtime v2 + chu ky MP4 + kich thuoc hop ly (kiem tra tren dia, khong doan)", () => {
   /*
     Khong goi ffprobe tu bai test (khong muon phu thuoc mot binary ngoai lung
     tung trong CI) — thay vao do kiem tra CHU KY TEP MP4 (box `ftyp`) va gioi
     han kich thuoc nhu mot luoi an toan tho: mot lan ai do vo tinh chep de
     tep HEVC/qua nang vao thay vi ban da ma hoa lai se bi bat o day.
+    Tu Sprint 3, tep runtime la ban `live/v2/` (AV1 + H.264 du phong); codec
+    tung ban duoc kiem o `background-media-sprint3.test.mjs`.
   */
-  const gioiHanMB = 12; // ban da ma hoa: 3.6-6.9MB thuc te, chua ai gan 12MB
+  const gioiHanMB = 12; // ban v2 thuc te 1,1-2,1 MB
   for (const tep of ["01-home", "02-explore", "03-reader", "04-studio", "05-write", "06-library", "07-account", "08-auth"]) {
-    const url = new URL(`${tep}.mp4`, THU_MUC_LIVE);
-    assert.ok(existsSync(url), `thiếu video runtime: ${tep}.mp4`);
-    const kt = statSync(url);
-    const mb = kt.size / 1024 / 1024;
-    assert.ok(mb > 0.5 && mb < gioiHanMB,
-      `${tep}.mp4 nặng ${mb.toFixed(1)}MB — nằm ngoài khoảng hợp lý (0.5-${gioiHanMB}MB), có thể chưa mã hoá lại từ bản HEVC gốc`);
+    for (const bien of [`v2/${tep}-900-av1.mp4`, `v2/${tep}-720-h264.mp4`]) {
+      const url = new URL(bien, THU_MUC_LIVE);
+      assert.ok(existsSync(url), `thiếu video runtime: ${bien}`);
+      const mb = statSync(url).size / 1024 / 1024;
+      assert.ok(mb > 0.5 && mb < gioiHanMB,
+        `${bien} nặng ${mb.toFixed(1)}MB — nằm ngoài khoảng hợp lý (0.5-${gioiHanMB}MB), có thể chưa mã hoá lại từ bản HEVC gốc`);
+      assert.equal(readFileSync(url).subarray(4, 8).toString("latin1"), "ftyp", `${bien} không phải MP4`);
+    }
   }
 });
 

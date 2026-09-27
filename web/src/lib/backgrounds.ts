@@ -80,11 +80,26 @@ export function anhNen(ten: string): string {
 }
 
 /**
+ * Ban DIEN THOAI (rong 960px, ~110-160 KB thay vi 340-470 KB) — dung tam ma
+ * CSS `--anh-nho` ve duoi `MAN_HINH_NHO`. Poster `<img>` cua LiveBackground va
+ * phep nap truoc khi chuyen trang phai chon CUNG tam voi CSS, neu khong dien
+ * thoai tai CA HAI tam (do tren fanfic.world o 390px: 436 KB + 151 KB).
+ */
+export function anhNenNho(ten: string): string {
+  const tep = TEP[ten] ?? TEP[MAC_DINH];
+  return `/artwork/fantasy-backgrounds/${tep}-sm.webp`;
+}
+
+/** Cung diem gay voi khoi `@media (max-width: 640px)` dat `--anh-nho` trong globals.css. */
+export const MAN_HINH_NHO = "(max-width: 640px)";
+
+/**
  * Live Wallpaper — rollout V4 (2026-08), CA 8 chu de. Video do NGUOI DUNG tu
  * tao thu cong tu chinh 8 buc tranh tinh o tren (khong qua Pollinations,
  * khong AI sinh) — xem bao cao rollout cho kiem tra chat luong/vong lap day
- * du. Ban runtime (H.264, 1920x1080, 30fps, khong am thanh) nam o
- * `/artwork/fantasy-backgrounds/live/`; ban goc (master) KHONG nam trong
+ * du. Ban runtime hien tai la `live/v2/` (xem `videoNen` ben duoi); ban
+ * H.264 1080p cu cua rollout V4 da go khoi `public/` (chi con trong lich su
+ * git), vi khong trang nao dung toi. Ban goc (master) KHONG nam trong
  * repo (giu o `Downloads/donelive`, tep goc HEVC 2560x1440 60fps qua nang
  * cho web — xem bao cao ma-hoa).
  *
@@ -104,12 +119,30 @@ const VIDEO: Record<string, string> = {
 };
 
 export interface NguonVideoNen {
+  /** AV1 trong MP4 — trinh duyet giai ma duoc AV1 chon ban nay truoc. */
+  av1: string;
+  /** H.264 du phong cho trinh duyet khong co AV1. */
   mp4: string;
 }
 
-/** `undefined` = chu de chua co live wallpaper — component chi ve poster. */
+/**
+ * SPRINT 3 (2026-09-27) — ban MA HOA LAI cho nen trang tri, o thu muc co
+ * PHIEN BAN `live/v2/` (ban 1080p cu da go khoi `public/`, con trong lich su git).
+ * Benchmark tren Lightning CPU, SSIM so voi ban goc (phong ve 1920x1080):
+ *
+ *   ban goc H.264 1080p 30fps       tong 42.011 KB (3,5-6,7 MB/tep)
+ *   AV1 1600x900 CRF 50  (`av1`)    tong 12.762 KB  -70%  SSIM tb 0,978 / min 0,970
+ *   H.264 1280x720 CRF 28 (`mp4`)   tong 13.634 KB  -68%  SSIM tb 0,968 / min 0,951
+ *
+ * AV1 900p dep HON H.264 900p CRF 28 (SSIM 0,974) du nho hon 1/3. Cung do dai
+ * vong lap, cung 30fps, khong am thanh. Nen nam duoi mang toi (`--toi`
+ * 0,30-0,50) va be mat kinh, nen 900p/720p du cho khung nhin 1440px.
+ */
 export function videoNen(ten: string): NguonVideoNen | undefined {
   const tep = VIDEO[ten];
   if (!tep) return undefined;
-  return { mp4: `/artwork/fantasy-backgrounds/live/${tep}.mp4` };
+  return {
+    av1: `/artwork/fantasy-backgrounds/live/v2/${tep}-900-av1.mp4`,
+    mp4: `/artwork/fantasy-backgrounds/live/v2/${tep}-720-h264.mp4`,
+  };
 }

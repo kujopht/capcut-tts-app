@@ -726,6 +726,16 @@ export function setToken(token: string | null): void {
   else window.localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * Bo nghe loi API (Fanfic AI Support) — CHI goi khi mang hong hoac may chu 5xx.
+ * Mac dinh `null`: khong co tinh nang Support thi day la mot phep so sanh.
+ * Duoc gan boi `components/support/SupportCollectorMount.tsx` khi co bat.
+ */
+let khiApiHong: ((path: string, status: number, code?: string) => void) | null = null;
+export function datBoNgheLoiApi(fn: typeof khiApiHong): void {
+  khiApiHong = fn;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
@@ -736,6 +746,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch {
+    khiApiHong?.(path, 0);
     /*
       Cau nay NGUOI DUNG doc, khong phai nguoi phat trien.
 
@@ -765,6 +776,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* giu thong bao mac dinh */
     }
+    if (response.status >= 500) khiApiHong?.(path, response.status, code);
     throw new ApiError(message, response.status, code);
   }
 
@@ -4412,3 +4424,60 @@ export const GROQ_CONSOLE_KEYS_URL = "https://console.groq.com/keys";
     `/keys` on dinh) — dung goc de tranh 404 neu console doi giao dien, chi
     goc `/` la thu duy nhat Cerebras xac nhan on dinh. */
 export const CEREBRAS_CONSOLE_KEYS_URL = "https://cloud.cerebras.ai";
+
+/* ------------------------------------------------------------------ */
+/* Fanfic AI Support V1 — xem server/support/, components/support/     */
+/* ------------------------------------------------------------------ */
+
+export type SupportCheck = {
+  tool: string;
+  status: "ok" | "warn" | "fail" | "unknown" | "denied";
+  summary: string;
+};
+
+export type SupportFinding = {
+  code: string;
+  subsystem: string;
+  severity: string;
+  text: string;
+  next: string;
+  owner_needed: boolean;
+};
+
+export type SupportAskResponse = {
+  answer: string;
+  mode: "qa" | "report";
+  ai_mode: "ai" | "diagnostic_only";
+  ai_available: boolean;
+  diagnostic_id: string;
+  checks: SupportCheck[];
+  findings: SupportFinding[];
+  denied: string[];
+  can_escalate: boolean;
+  suggest_escalate: boolean;
+};
+
+export type SupportStatus = { enabled: boolean; ai_available: boolean; persistence: string; modes: string[] };
+
+export type SupportAskIn = {
+  mode: "qa" | "report";
+  message: string;
+  session_id: string;
+  context: Record<string, unknown>;
+};
+
+export const supportApi = {
+  status: () => request<SupportStatus>("/api/support/status"),
+  ask: (body: SupportAskIn) =>
+    request<SupportAskResponse>("/api/support/ask", { method: "POST", body: JSON.stringify(body) }),
+  report: (body: { summary: string; session_id: string; context: Record<string, unknown>; diagnostic_id?: string }) =>
+    request<{ report_id: string; status: string; message: string }>("/api/support/reports", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  reportStatus: (reportId: string, sessionId: string) =>
+    request<{ report_id: string; status: string; summary: string; route: string; created_at: number }>(
+      `/api/support/reports/${encodeURIComponent(reportId)}`,
+      { headers: { "X-Support-Session": sessionId } },
+    ),
+};

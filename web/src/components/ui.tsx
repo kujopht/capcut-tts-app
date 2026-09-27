@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { JobStatus } from "@/lib/api";
+import { SupportHint } from "@/components/support/SupportHint";
 
 /* ------------------------------------------------------------- dau trang */
 
@@ -155,6 +156,8 @@ export function ErrorState({
           Thử lại
         </button>
       ) : null}
+      {/* Fanfic AI Support: tat co thi khong render gi. */}
+      <SupportHint code="load_error" />
     </div>
   );
 }

@@ -10,7 +10,9 @@ import { ContentAtmosphere } from "@/components/ContentAtmosphere";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { LiveLyricTicker } from "@/components/LiveLyricTicker";
-import { MUSIC_ENABLED } from "@/lib/features";
+import { MUSIC_ENABLED, SUPPORT_ENABLED } from "@/lib/features";
+import { SupportCollectorMount } from "@/components/support/SupportCollectorMount";
+import { SupportErrorBoundary } from "@/components/support/SupportErrorBoundary";
 import { Logo } from "@/components/Logo";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
@@ -119,8 +121,13 @@ export default function RootLayout({
             </SiteHeader>
 
             <main id="main">
-              <ContentAtmosphere>{children}</ContentAtmosphere>
+              {/* Fanfic AI Support: TAT co thi khong boc gi — trang hong hien
+                  dung nhu truoc, khong trinh nghe loi nao duoc gan. */}
+              <ContentAtmosphere>
+                {SUPPORT_ENABLED ? <SupportErrorBoundary>{children}</SupportErrorBoundary> : children}
+              </ContentAtmosphere>
             </main>
+            {SUPPORT_ENABLED ? <SupportCollectorMount /> : null}
 
             {/*
               Footer CHI dan toi cac route CO THAT trong `src/app/`. Cac muc
@@ -168,6 +175,11 @@ export default function RootLayout({
                   <Link href="/account" className="footer-link" prefetch={false}>
                     Tài khoản
                   </Link>
+                  {SUPPORT_ENABLED ? (
+                    <Link href="/support" className="footer-link" prefetch={false}>
+                      Trợ giúp &amp; báo lỗi
+                    </Link>
+                  ) : null}
                 </nav>
               </div>
 

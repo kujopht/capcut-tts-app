@@ -25,6 +25,7 @@ import {
   IconPrevChapter,
 } from "./Icons";
 import { formatBytes } from "./ui";
+import { SupportHint } from "./support/SupportHint";
 
 export function ChapterPlayer({
   novelId,
@@ -49,6 +50,8 @@ export function ChapterPlayer({
       <div className="alert alert-error" role="alert">
         <span aria-hidden="true">⛔</span>
         <span>{t.loi}</span>
+        {/* Fanfic AI Support: tat co thi khong render gi. */}
+        <SupportHint code="audio_media" mode="listen" compact />
       </div>
     );
   }

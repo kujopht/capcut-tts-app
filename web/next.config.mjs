@@ -1,9 +1,27 @@
+import { execSync } from "node:child_process";
+
+/**
+ * Ma ban build web (Fanfic AI Support: "ban nao dang loi" trong bao cao/su co).
+ * KHONG phai bi mat — chi la ma commit ngan. Thu tu: bien moi truong (CI) ->
+ * `git rev-parse` -> "unknown" (vd build tu tarball khong co .git).
+ */
+function maBuild() {
+  if (process.env.NEXT_PUBLIC_BUILD_SHA) return process.env.NEXT_PUBLIC_BUILD_SHA;
+  try {
+    return execSync("git rev-parse --short=10 HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Backend giu moi bi mat. Bien duy nhat lo ra trinh duyet la URL API.
+  // Backend giu moi bi mat. Ngoai URL API, trinh duyet chi thay them MA BUILD
+  // (ma commit ngan, khong phai bi mat).
   env: {
     NEXT_PUBLIC_API_BASE: process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000",
+    NEXT_PUBLIC_BUILD_SHA: maBuild(),
   },
 
   /**

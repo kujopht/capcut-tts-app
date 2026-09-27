@@ -76,6 +76,10 @@ export const HO_ENDPOINT = [
   // duoi `/api/video/...`: mot du an Studio tro toi CA SAU loai tai san, va
   // video chi la mot trong so do. Xem `server/studio_project.py`.
   "studio",
+  // Fanfic AI Support V1 — hoi dap/chan doan CHI DOC + bao cao SUP-xxxx + bo
+  // thu loi client. Ho RIENG: khach (chua dang nhap) cung dung duoc, va khong
+  // cham du lieu truyen/chuong nao ngoai qua cong cu chi doc. Xem server/support/.
+  "support",
   // Subtitle Studio (overnight Phase 4, V6) — cong cu CUC BO, dich tung dong
   // qua registry chung nhung KHONG tao TranslationProject/job rieng, nen ho
   // rieng thay vi nam duoi `/api/translate/...`.

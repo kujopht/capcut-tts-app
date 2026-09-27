@@ -13,7 +13,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { StreakBadge } from "@/components/StreakBadge";
 import { Avatar } from "@/components/Avatar";
 import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
-import { MUSIC_ENABLED } from "@/lib/features";
+import { MUSIC_ENABLED, SUPPORT_ENABLED } from "@/lib/features";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -276,6 +276,11 @@ function AccountMenu() {
           {profile.is_admin ? (
             <Link href="/admin" className="menu-item" role="menuitem" onClick={close}>
               <span aria-hidden="true">🛡</span> Quản trị
+            </Link>
+          ) : null}
+          {SUPPORT_ENABLED ? (
+            <Link href="/support" className="menu-item" role="menuitem" onClick={close} prefetch={false}>
+              <span aria-hidden="true">🛟</span> Trợ giúp &amp; báo lỗi
             </Link>
           ) : null}
           <div className="menu-sep" role="separator" />

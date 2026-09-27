@@ -9066,3 +9066,63 @@ def studio_render_status(
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy job.")
     return {"job": job.to_dict()}
+
+
+# -----------------------------------------------------------------------------
+# Fanfic AI Support V1 — hoi dap + chan doan CHI DOC + bao cao (xem server/support/)
+# -----------------------------------------------------------------------------
+# Co `FAS_SUPPORT_V1=1` (mac dinh TAT: moi route ngoai /status tra 503). Cong
+# cu chan doan chi nhan cac ham DOC duoi day — khong ham nao ghi, xoa, goi mang.
+
+from server.support.routes import build_support_router, build_support_runtime  # noqa: E402
+from server.support.tools import SupportDeps  # noqa: E402
+
+
+def _support_job_chuong(chapter_id: str) -> Optional[str]:
+    """Trang thai job TTS DANG CHO/DANG CHAY cua mot chuong (None neu khong co)."""
+    for trang_thai in (JobStatus.RUNNING, JobStatus.PENDING):
+        for job in store.list_jobs_by_status(trang_thai):
+            if getattr(job, "chapter_id", None) == chapter_id:
+                return trang_thai.value
+    return None
+
+
+def _support_suc_khoe() -> Dict[str, Any]:
+    mo_ta = settings.describe()
+    return {"version": app.version, "commit_sha": os.environ.get("RENDER_GIT_COMMIT"),
+            "data_backend": mo_ta.get("data_backend"), "storage_backend": mo_ta.get("storage_backend")}
+
+
+def _support_kiem_metadata() -> bool:
+    """Cung phep DOC ma `/api/ready` dung; nem = hong."""
+    store.list_jobs_by_status(JobStatus.RUNNING)
+    return True
+
+
+def _support_kiem_kho() -> bool:
+    next(iter(storage.list_objects(prefix="audio/__readiness__/")), None)
+    return True
+
+
+def _support_co_tinh_nang() -> Dict[str, Any]:
+    return {"studio": True, "reader": True, "community": True, "login": True, "audio": True,
+            # Worker rieng (inline_worker=False) khong do duoc tu day -> "khong ro".
+            "tts_worker": True if settings.inline_worker else None,
+            "support_ai": support_runtime.engine.ai_available}
+
+
+#: Lambda tra `store`/`storage` LUC GOI (khong phai bound method luc import):
+#: test thay `server.main.store` bang kho gia thi cong cu cung thay theo.
+support_runtime = build_support_runtime(
+    SupportDeps(
+        get_novel=lambda i: store.get_novel(i), get_chapter=lambda i: store.get_chapter(i),
+        list_chapters=lambda i: store.list_chapters(i), track_for_chapter=lambda i: store.track_for_chapter(i),
+        job_status_for_chapter=_support_job_chuong, storage_exists=lambda k: storage.exists(k),
+        may_read=_may_read, can_read_chapter=_can_read_chapter,
+        health_info=_support_suc_khoe,
+        check_metadata=_support_kiem_metadata, check_storage=_support_kiem_kho,
+        feature_flags=_support_co_tinh_nang, not_found_errors=(NotFoundError,),
+    ),
+    settings.llm_gateway,
+)
+app.include_router(build_support_router(support_runtime, resolve_viewer=optional_profile))

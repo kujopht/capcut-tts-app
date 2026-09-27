@@ -7,11 +7,14 @@ import { ChatErrorState, ChatNetBanner } from "./ChatErrorState";
 import { ConversationList } from "./ConversationList";
 
 export function InboxPopover({ onClose }: { onClose: () => void }) {
-  const { status, openDrawer } = useChat();
+  const { status, openDrawer, unreadTotal } = useChat();
   return (
     <div className="menu-panel chat-inbox" role="dialog" aria-label="Tin nhắn">
       <div className="chat-inbox-dau">
-        <strong className="hint">Tin nhắn</strong>
+        <strong className="chat-inbox-tieu-de">
+          Tin nhắn
+          {unreadTotal > 0 ? <span className="hint"> · {unreadTotal} chưa đọc</span> : null}
+        </strong>
         <Link href="/messages" className="btn btn-ghost btn-sm" prefetch={false} onClick={onClose}>
           Mở trang Tin nhắn
         </Link>

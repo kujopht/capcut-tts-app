@@ -17,11 +17,11 @@ import { Suspense, useEffect, useRef } from "react";
 import { EmptyState, Loading, PageHeader } from "@/components/ui";
 import { useSession } from "@/lib/session";
 import { useChat } from "@/components/chat/ChatProvider";
-import { ChatAvatar, tenHien } from "@/components/chat/ChatAvatar";
+import { ChatAvatar, danhXung, tenHien } from "@/components/chat/ChatAvatar";
 import { ChatComposer } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { ChatErrorState, ChatNetBanner } from "@/components/chat/ChatErrorState";
-import { ChatThread } from "@/components/chat/ChatThread";
+import { ChatThread, KhungCho } from "@/components/chat/ChatThread";
 import { ChatUserHeader } from "@/components/chat/ChatUserHeader";
 import { ConversationList } from "@/components/chat/ConversationList";
 
@@ -105,8 +105,12 @@ function KhongGianTinNhan() {
                 <ChatUserHeader identity={it} />
               </div>
               <ChatNetBanner status={status} />
-              {coNoiDung ? <ChatThread peerId={peer} /> : <div className="chat-tin-hop"><ChatErrorState status={status} /></div>}
-              <ChatComposer peerId={peer} peerName={it?.found ? ten : undefined} autoFocus />
+              {coNoiDung ? <ChatThread peerId={peer} /> : status === "connecting" ? <KhungCho /> : (
+                <div className="chat-tin-hop chat-tin-hop-rong"><ChatErrorState status={status} /></div>
+              )}
+              {status === "error" || status === "kicked" ? null : (
+                <ChatComposer peerId={peer} peerName={it?.found ? ten : undefined} autoFocus />
+              )}
             </>
           ) : (
             <ChatEmptyState
@@ -122,9 +126,7 @@ function KhongGianTinNhan() {
               <ChatAvatar identity={it} size="lg" />
               <strong className="chat-ttin-ten">{ten}</strong>
               {it.found && it.username ? <span className="hint">@{it.username}</span> : null}
-              {it.found && it.level ? (
-                <span className="hint">Lv. {it.level}{it.equipped_title ? ` · ${it.equipped_title}` : ""}</span>
-              ) : null}
+              {danhXung(it) ? <span className="hint">{danhXung(it)}</span> : null}
               {it.found && it.username ? (
                 <Link href={`/u/${it.username}`} className="btn btn-outline btn-sm" prefetch={false}>
                   Xem hồ sơ

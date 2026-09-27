@@ -1,10 +1,11 @@
 /**
- * Dau cuoc tro chuyen: avatar + ten + "Lv. N · danh xung". Bam vao la mo HO SO
- * FANFIC (`/u/username`) — khong bao gio mot trang ho so cua Tencent.
+ * Dau cuoc tro chuyen: avatar + ten + "✦ danh hieu · Lv. N" (cung dong voi
+ * trang ca nhan). Bam vao la mo HO SO FANFIC (`/u/username`) — khong bao gio
+ * mot trang ho so cua Tencent.
  */
 import Link from "next/link";
 import type { ChatIdentity } from "@/lib/api";
-import { ChatAvatar, tenHien } from "./ChatAvatar";
+import { ChatAvatar, danhXung, tenHien } from "./ChatAvatar";
 
 export function ChatUserHeader({
   identity,
@@ -17,9 +18,7 @@ export function ChatUserHeader({
 }) {
   const ten = tenHien(identity);
   const hoSo = identity?.found && identity.username ? `/u/${identity.username}` : null;
-  const phu = identity?.found && identity.level
-    ? `Lv. ${identity.level}${identity.equipped_title ? ` · ${identity.equipped_title}` : ""}`
-    : null;
+  const phu = danhXung(identity);
   const than = (
     <>
       <ChatAvatar identity={identity} size="md" />

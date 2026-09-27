@@ -8,6 +8,12 @@
  */
 
 /* ------------------------------------------------------------- nen chung */
+/* Vung cuon trong chat: thanh cuon mong theo mau giao dien, khong phai thanh
+   xam co mui ten mac dinh cua Windows. */
+.chat-tin-hop, .chat-cot-ds, .chat-cot-ttin, .chat-inbox, .chat-soan-o {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
 .chat-nut {
   display: inline-flex;
   align-items: center;
@@ -158,6 +164,8 @@ a.chat-uh-nguoi:hover .chat-uh-ten { text-decoration: underline; }
   border-bottom: 1px solid var(--line-soft);
   margin-bottom: var(--s1);
 }
+.chat-inbox-tieu-de { font-size: var(--t-sm); color: var(--text); font-weight: 650; }
+.chat-inbox-tieu-de .hint { font-weight: 500; }
 
 /* ------------------------------------------------------------ tin nhan */
 .chat-tin-khung { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -170,7 +178,20 @@ a.chat-uh-nguoi:hover .chat-uh-ten { text-decoration: underline; }
   display: flex;
   flex-direction: column;
 }
-.chat-tin-hop-trong { align-items: center; justify-content: center; gap: var(--s2); color: var(--text-2); font-size: var(--t-sm); }
+/*
+  Neo tin o DAY khung nhu ung dung nhan tin: vach dem co gian an het cho trong
+  khi it tin, tu co ve 0 khi tin tran — khong dung `justify-content: flex-end`
+  vi no lam mat kha nang cuon len dau o mot so trinh duyet.
+*/
+.chat-tin-hop::before { content: ""; flex: 1 1 auto; }
+.chat-tin-hop-rong { justify-content: center; }
+.chat-tin-hop-rong::before { display: none; }
+.chat-tin.chat-sk { width: 78%; }
+.chat-sk-bong { display: block; height: 34px; border-radius: 16px; }
+.chat-tin-out .chat-sk-bong { margin-left: auto; }
+.chat-ds-sk { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3); }
+.chat-ds-sk .sk-tron { width: 30px; height: 30px; border-radius: var(--r-full); flex: 0 0 auto; }
+.chat-ds-sk .chat-ds-chu { gap: 6px; }
 .chat-tin-cu { display: flex; justify-content: center; padding-bottom: var(--s2); }
 .chat-tin-o { display: flex; flex-direction: column; }
 .chat-tin-ngay {
@@ -196,9 +217,16 @@ a.chat-uh-nguoi:hover .chat-uh-ten { text-decoration: underline; }
 .chat-tin-in .chat-tin-bong { background: var(--bg-3); color: var(--text); border: 1px solid var(--line-soft); border-bottom-left-radius: 6px; }
 .chat-tin-out .chat-tin-bong { background: linear-gradient(135deg, var(--brand-deep), var(--brand)); color: #fff; border-bottom-right-radius: 6px; }
 .chat-tin-la { font-style: italic; opacity: 0.8; }
+.chat-tin-in .chat-tin-bong.chat-tin-emoji,
+.chat-tin-out .chat-tin-bong.chat-tin-emoji {
+  padding: 0 2px;
+  background: none;
+  border: 0;
+  font-size: 34px;
+  line-height: 1.2;
+}
 .chat-tin-loi .chat-tin-bong { outline: 1px solid var(--danger); outline-offset: 1px; }
 .chat-tin-duoi { display: flex; align-items: center; gap: var(--s2); margin-top: 2px; font-size: 11px; color: var(--text-3); }
-.chat-tin-noi .chat-tin-gio { display: none; }
 .chat-tin-tt { color: var(--text-3); }
 .chat-tin-hong { color: var(--danger); }
 .chat-tin-thu-lai {
@@ -336,7 +364,9 @@ body:has(.mini) .chat-drawer-thu { bottom: 96px; }
 .chat-khong-gian {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr) 280px;
-  height: max(520px, calc(100dvh - 200px));
+  /* Do that: luoi bat dau o y~208px (header noi + tieu de). 228px = 208 + le
+     day 20px — o soan tin luon nam trong man hinh, khong phai cuon trang. */
+  height: max(520px, calc(100dvh - 228px));
   border: 1px solid var(--line-strong);
   border-radius: var(--r4);
   background: var(--glass-strong);

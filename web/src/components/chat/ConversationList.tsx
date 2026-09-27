@@ -22,6 +22,21 @@ export function ConversationList({
   const { conversations, identityOf, status } = useChat();
   const ds: ChatConversation[] = limit ? conversations.slice(0, limit) : conversations;
 
+  if (status === "connecting") {
+    return (
+      <ul className="chat-ds" aria-hidden="true">
+        {[0, 1, 2].map((i) => (
+          <li key={i} className="chat-ds-sk">
+            <span className="sk sk-tron" />
+            <span className="chat-ds-chu">
+              <span className="sk sk-text" style={{ width: `${[58, 44, 66][i]}%` }} />
+              <span className="sk sk-text" style={{ width: `${[82, 70, 76][i]}%` }} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    );
+  }
   if (status !== "ready" && status !== "reconnecting" && status !== "offline") return null;
   if (!ds.length) {
     return (
@@ -33,7 +48,19 @@ export function ConversationList({
   }
 
   return (
-    <ul className={`chat-ds${compact ? " chat-ds-gon" : ""}`} aria-label="Cuộc trò chuyện">
+    <ul
+      className={`chat-ds${compact ? " chat-ds-gon" : ""}`}
+      aria-label="Cuộc trò chuyện"
+      onKeyDown={(e) => {
+        // Mui ten len/xuong di giua cac cuoc tro chuyen (Tab van di binh thuong).
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        const nut = [...e.currentTarget.querySelectorAll<HTMLButtonElement>(".chat-ds-muc")];
+        const i = nut.indexOf(document.activeElement as HTMLButtonElement);
+        if (i < 0) return;
+        e.preventDefault();
+        nut[(i + (e.key === "ArrowDown" ? 1 : nut.length - 1)) % nut.length]?.focus();
+      }}
+    >
       {ds.map((c) => {
         const it = identityOf(c.peerId);
         const ten = tenHien(it);

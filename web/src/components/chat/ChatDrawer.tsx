@@ -15,7 +15,7 @@ import { useChat } from "./ChatProvider";
 import { ChatAvatar, tenHien } from "./ChatAvatar";
 import { ChatComposer } from "./ChatComposer";
 import { ChatErrorState, ChatNetBanner } from "./ChatErrorState";
-import { ChatThread } from "./ChatThread";
+import { ChatThread, KhungCho } from "./ChatThread";
 import { ChatUserHeader } from "./ChatUserHeader";
 import { UnreadBadge } from "./UnreadBadge";
 
@@ -82,8 +82,11 @@ export function ChatDrawer() {
       </ChatUserHeader>
       <ChatErrorState status={status} compact />
       <ChatNetBanner status={status} />
-      {coNoiDung ? <ChatThread peerId={drawer.peerId} /> : <div className="chat-tin-hop" />}
-      <ChatComposer peerId={drawer.peerId} peerName={it?.found ? ten : undefined} />
+      {coNoiDung ? <ChatThread peerId={drawer.peerId} /> : status === "connecting" ? <KhungCho /> : <div className="chat-tin-hop" />}
+      {/* Loi / bi day sang tab khac: khong gui duoc — khong bay mot o soan vo dung. */}
+      {status === "error" || status === "kicked" ? null : (
+        <ChatComposer peerId={drawer.peerId} peerName={it?.found ? ten : undefined} />
+      )}
     </section>
   );
 }

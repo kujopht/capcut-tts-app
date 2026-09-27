@@ -13,8 +13,37 @@ import { useChat } from "./ChatProvider";
 import { ChatEmptyState } from "./ChatEmptyState";
 
 const gio = (ms: number) => new Date(ms).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
-const ngay = (ms: number) => new Date(ms).toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "numeric", year: "numeric" });
 const cungNgay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
+/** Vach ngay nhu ung dung nhan tin: "Hôm nay", "Hôm qua", roi thu + ngay (bo nam neu la nam nay). */
+function ngay(ms: number): string {
+  const bay = Date.now();
+  if (cungNgay(ms, bay)) return "Hôm nay";
+  if (cungNgay(ms, bay - 86_400_000)) return "Hôm qua";
+  const cungNam = new Date(ms).getFullYear() === new Date(bay).getFullYear();
+  return new Date(ms).toLocaleDateString("vi-VN", {
+    weekday: "long", day: "numeric", month: "numeric", ...(cungNam ? {} : { year: "numeric" }),
+  });
+}
+/** Tin CHI co 1-3 emoji -> hien to, khong bong (nhu ung dung nhan tin). */
+const CHI_EMOJI = /^(?:\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}])*\s*){1,3}$/u;
+const chiEmoji = (t: string) => CHI_EMOJI.test(t.trim());
+
+/** Tin noi tiep nhau (cung nguoi, cung ngay, cach nhau < 3 phut) gom thanh mot cum. */
+const cungCum = (a: ChatMessage, b: ChatMessage) =>
+  a.flow === b.flow && cungNgay(a.time, b.time) && Math.abs(b.time - a.time) < 3 * 60 * 1000;
+
+/** Khung cho trong luc ket noi/tai lich su: vai bong tin xen ke hai phia. */
+export function KhungCho() {
+  return (
+    <div className="chat-tin-hop" role="status" aria-label="Đang tải tin nhắn">
+      {["in", "out", "in", "out"].map((f, i) => (
+        <div key={i} className={`chat-tin chat-sk chat-tin-${f}`} aria-hidden="true">
+          <span className="sk chat-sk-bong" style={{ width: `${[62, 44, 70, 38][i]}%` }} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function TrangThaiTin({ m, onRetry }: { m: ChatMessage; onRetry: () => void }) {
   if (m.status === "sending") return <span className="chat-tin-tt" aria-live="polite">Đang gửi…</span>;
@@ -62,6 +91,15 @@ export function ChatThread({ peerId }: { peerId: string }) {
     oCuoi.current = true;
   }, [peerId]);
 
+  // Lich su VUA tai xong (hoac doi nguoi) -> ve tin moi nhat. Khong the chi dua
+  // vao `idCuoi`: tin den truc tiep truoc khi lich su tai xong da la tin cuoi,
+  // lich su chen vao PHIA TRUOC nen `idCuoi` khong doi va khung dung o DAU —
+  // do that tren Chrome QA (cuoc tro chuyen mo ra o tin cu nhat).
+  const daTai = !!th?.loaded;
+  useLayoutEffect(() => {
+    if (daTai) xuongCuoi();
+  }, [daTai, peerId, xuongCuoi]);
+
   const onScroll = () => {
     const el = hop.current;
     if (!el) return;
@@ -69,17 +107,12 @@ export function ChatThread({ peerId }: { peerId: string }) {
     if (oCuoi.current && coTinMoi) setCoTinMoi(false);
   };
 
-  if (!th || !th.loaded) {
-    return (
-      <div className="chat-tin-hop chat-tin-hop-trong" role="status">
-        <span className="spinner" aria-hidden="true" /> Đang tải tin nhắn…
-      </div>
-    );
-  }
+  if (!th || !th.loaded) return <KhungCho />;
 
   return (
     <div className="chat-tin-khung">
-      <div className="chat-tin-hop" ref={hop} onScroll={onScroll} role="log" aria-live="polite" aria-label="Tin nhắn">
+      <div className={`chat-tin-hop${items.length ? "" : " chat-tin-hop-rong"}`} ref={hop} onScroll={onScroll}
+        role="log" aria-live="polite" aria-label="Tin nhắn">
         {th.cursor ? (
           <div className="chat-tin-cu">
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadOlder(peerId)} disabled={th.loadingOlder}>
@@ -92,17 +125,25 @@ export function ChatThread({ peerId }: { peerId: string }) {
         ) : (
           items.map((m, i) => {
             const truoc = items[i - 1];
+            const sau = items[i + 1];
             const moNgay = !truoc || !cungNgay(truoc.time, m.time);
-            const noiTiep = !!truoc && !moNgay && truoc.flow === m.flow && m.time - truoc.time < 3 * 60 * 1000;
+            const noiTiep = !!truoc && cungCum(truoc, m);
+            // Gio chi o tin CUOI cua cum (nhu ung dung nhan tin); trang thai
+            // gui/hong thi luon hien o dung tin do.
+            const cuoiCum = !sau || !cungCum(m, sau);
+            const coTrangThai = m.status === "sending" || m.status === "failed";
             return (
               <div key={m.id} className="chat-tin-o">
                 {moNgay ? <div className="chat-tin-ngay"><span>{ngay(m.time)}</span></div> : null}
                 <div className={`chat-tin chat-tin-${m.flow}${noiTiep ? " chat-tin-noi" : ""}${m.status === "failed" ? " chat-tin-loi" : ""}`}>
-                  <div className={`chat-tin-bong${m.unsupported ? " chat-tin-la" : ""}`}>{m.text}</div>
-                  <div className="chat-tin-duoi">
-                    <time className="chat-tin-gio" dateTime={new Date(m.time).toISOString()}>{gio(m.time)}</time>
-                    <TrangThaiTin m={m} onRetry={() => retry(peerId, m.id)} />
-                  </div>
+                  <div className={`chat-tin-bong${m.unsupported ? " chat-tin-la" : ""}${!m.unsupported && chiEmoji(m.text) ? " chat-tin-emoji" : ""}`}
+                    title={cuoiCum ? undefined : gio(m.time)}>{m.text}</div>
+                  {cuoiCum || coTrangThai ? (
+                    <div className="chat-tin-duoi">
+                      {cuoiCum ? <time className="chat-tin-gio" dateTime={new Date(m.time).toISOString()}>{gio(m.time)}</time> : null}
+                      <TrangThaiTin m={m} onRetry={() => retry(peerId, m.id)} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );

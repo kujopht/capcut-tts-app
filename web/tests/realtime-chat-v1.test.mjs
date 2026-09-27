@@ -206,6 +206,38 @@ test("danh tinh la cua Fanfic: ten/avatar lay tu /api/chat/identities, khong tu 
   assert.match(hoSo, /`\/u\/\$\{identity\.username\}`/, "bấm tên phải mở hồ sơ FANFIC");
 });
 
+test("hoi thoai mo ra o TIN MOI NHAT ca khi tin truc tiep den truoc lich su (do that tren Chrome QA)", () => {
+  const t = codeOnly(read("components/chat/ChatThread.tsx"));
+  // Chi dua vao id tin cuoi thi khong du: lich su chen PHIA TRUOC, id cuoi khong doi.
+  assert.match(t, /const daTai = !!th\?\.loaded;\s*useLayoutEffect\(\(\) => \{\s*if \(daTai\) xuongCuoi\(\);\s*\}, \[daTai, peerId, xuongCuoi\]\);/);
+});
+
+test("lam muot tin nhan: vach ngay Hôm nay/Hôm qua, gio o tin CUOI cum, emoji lon, khung cho", () => {
+  const t = codeOnly(read("components/chat/ChatThread.tsx"));
+  assert.match(t, /if \(cungNgay\(ms, bay\)\) return "Hôm nay";/);
+  assert.match(t, /if \(cungNgay\(ms, bay - 86_400_000\)\) return "Hôm qua";/);
+  assert.match(t, /const cuoiCum = !sau \|\| !cungCum\(m, sau\);/);
+  assert.match(t, /chiEmoji\(m\.text\) \? " chat-tin-emoji" : ""/);
+  assert.match(t, /export function KhungCho\(\)/);
+  const css = read("app/chat.css");
+  // Neo tin o day ma van cuon duoc: vach dem co gian, KHONG justify-content: flex-end.
+  assert.match(css, /\.chat-tin-hop::before \{ content: ""; flex: 1 1 auto; \}/);
+  assert.ok(!/\.chat-tin-hop \{[^}]*justify-content: flex-end/.test(css));
+  // /messages vua man hinh (do: luoi bat dau ~208px).
+  assert.match(css, /height: max\(520px, calc\(100dvh - 228px\)\);/);
+});
+
+test("khong bay o soan vo dung khi loi/bi day; danh xung cung thu tu voi trang ca nhan", () => {
+  for (const f of ["components/chat/ChatDrawer.tsx", "app/messages/page.tsx"]) {
+    assert.match(codeOnly(read(f)), /\{status === "error" \|\| status === "kicked" \? null : \(\s*<ChatComposer/, f);
+  }
+  const avt = codeOnly(read("components/chat/ChatAvatar.tsx"));
+  assert.match(avt, /`✦ \$\{it\.equipped_title\} · Lv\. \$\{it\.level\}`/);
+  assert.match(codeOnly(read("app/u/[username]/page.tsx")), /\{gam\.equipped_title\} · Lv\. \{gam\.level\}/);
+  // Nguoi khong xac dinh: "?" trung tinh, khong phai chu cai dau "NG".
+  assert.match(avt, /name=\{identity && !identity\.found \? "\?" : tenHien\(identity\)\}/);
+});
+
 test("nut Nhan tin o ho so: khong cho khach, khong cho chinh minh", () => {
   const trang = codeOnly(read("app/u/[username]/page.tsx"));
   assert.match(trang, /\{xh\.is_self \? null : \(\s*<StartChatButton/);

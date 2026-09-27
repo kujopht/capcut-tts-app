@@ -729,7 +729,7 @@ export function setToken(token: string | null): void {
 /**
  * Bo nghe loi API (Fanfic AI Support) — CHI goi khi mang hong hoac may chu 5xx.
  * Mac dinh `null`: khong co tinh nang Support thi day la mot phep so sanh.
- * Duoc gan boi `components/support/SupportCollectorMount.tsx` khi co bat.
+ * Duoc gan boi `ganBoThuLoi()` o `components/support/lazy.ts` khi co bat.
  */
 let khiApiHong: ((path: string, status: number, code?: string) => void) | null = null;
 export function datBoNgheLoiApi(fn: typeof khiApiHong): void {

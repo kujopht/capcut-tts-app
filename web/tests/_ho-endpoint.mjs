@@ -29,6 +29,10 @@ export const HO_ENDPOINT = [
   "audio",
   "auth",
   "chapters",
+  // Fanfic Chat V1 (Tencent Chat) — `POST /api/chat/session` cap UserSig phia
+  // may chu, `POST /api/chat/identities` tra danh tinh FANFIC cua nguoi trong
+  // hoi thoai. Xem `server/chat_tencent.py`.
+  "chat",
   // --- tang xa hoi ---
   "comments",
   "creator",

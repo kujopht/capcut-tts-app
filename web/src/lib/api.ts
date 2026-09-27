@@ -4412,3 +4412,44 @@ export const GROQ_CONSOLE_KEYS_URL = "https://console.groq.com/keys";
     `/keys` on dinh) — dung goc de tranh 404 neu console doi giao dien, chi
     goc `/` la thu duy nhat Cerebras xac nhan on dinh. */
 export const CEREBRAS_CONSOLE_KEYS_URL = "https://cloud.cerebras.ai";
+
+// =============================================================================
+// FANFIC CHAT V1 — Tencent Chat. Xem `server/main.py` khu "FANFIC CHAT V1" va
+// `components/chat/ChatProvider.tsx`.
+//
+// CHI `ChatProvider` goi hai ham nay, va chi khi nguoi dung THAT SU mo tin
+// nhan — doc/nghe truyen khong bao gio xin phien chat (MAU cua Tencent tinh
+// theo lan dang nhap SDK).
+// =============================================================================
+
+/** Phien Tencent Chat ngan han — UserSig do MAY CHU ky; khong co khoa nao o day. */
+export interface ChatSessionResponse {
+  sdkAppId: number;
+  userId: string;
+  userSig: string;
+  /** Mili-giay (so thang voi `Date.now()`). */
+  expiresAt: number;
+  environment: string;
+}
+
+/** Danh tinh FANFIC cua mot nguoi trong hoi thoai (khong bao gio lay tu Tencent). */
+export interface ChatIdentity {
+  found: boolean;
+  chat_user_id?: string;
+  user_id?: string;
+  username?: string | null;
+  display_name?: string;
+  avatar_url?: string | null;
+  level?: number;
+  equipped_title?: string;
+  avatar_frame?: CosmeticItem | null;
+}
+
+export const chatApi = {
+  session: () => request<ChatSessionResponse>("/api/chat/session", { method: "POST" }),
+  identities: (body: { chat_user_ids?: string[]; usernames?: string[] }) =>
+    request<{ items: ChatIdentity[]; you: string }>("/api/chat/identities", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+};

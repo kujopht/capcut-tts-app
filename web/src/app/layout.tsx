@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import "./globals.css";
+import "./chat.css";
 import { SessionProvider } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { NavAuth, NavLinks } from "@/components/NavAuth";
@@ -14,6 +15,8 @@ import { MUSIC_ENABLED } from "@/lib/features";
 import { Logo } from "@/components/Logo";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
+import { ChatProvider } from "@/components/chat/ChatProvider";
+import { ChatDrawer } from "@/components/chat/ChatDrawer";
 
 // Mo ta cu noi ve viec tao audio truoc tien. San pham nay la nen tang doc va
 // nghe fanfic; Audio Studio la cong cu phu. Mo ta cung phai noi theo thu tu do.
@@ -71,6 +74,13 @@ export default function RootLayout({
       <body suppressHydrationWarning>
         <SessionProvider>
           <ToastProvider>
+          {/*
+            Fanfic Chat V1 — bao NGOAI `{children}` nhu dong co audio: ket noi
+            va khung chat song xuyen route. KHONG tu mo chat: chi khi nguoi
+            dung bam Tin nhan / vao /messages / bam "Nhắn tin" (xem
+            `components/chat/ChatProvider.tsx`).
+          */}
+          <ChatProvider>
           {/*
             Dong co phat TOAN CUC — bao NGOAI `{children}`, nen dieu huong
             giua cac trang (chi thay `{children}`) khong lam no unmount. Day
@@ -198,7 +208,10 @@ export default function RootLayout({
                 dang phat, hoac khi dang o chinh trang doc chuong do (trang
                 do da co trinh phat lon + thanh nho theo cuon rieng). */}
             <GlobalMiniPlayer />
+            {/* Khung chat ben phai (desktop) — tu an khi chua mo hoi thoai nao va o /messages. */}
+            <ChatDrawer />
           </AudioEngineProvider>
+          </ChatProvider>
           </ToastProvider>
         </SessionProvider>
       </body>

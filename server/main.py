@@ -73,6 +73,7 @@ from server.gamification_service import (
     cong_khai_cap_do,
     cong_khai_thanh_tuu,
     cong_khai_vat_pham_dang_trang_bi,
+    cong_khai_vat_pham_dang_trang_bi_hang_loat,
     equip_cosmetic,
     equip_title,
     leaderboard_all_time,
@@ -244,7 +245,14 @@ from server.image_service import (
     ImageStudioService,
     UnknownOrDisabledModel,
 )
-from server.rate_limit import RateLimitMiddleware
+from server.rate_limit import RateLimitMiddleware, SlidingWindowRateLimiter
+from server.chat_tencent import (
+    ChatNotConfigured,
+    TencentChatSettings,
+    cap_phien as cap_phien_chat,
+    chat_user_id,
+    fanfic_user_id_tu_chat,
+)
 
 app = FastAPI(
     title="Fanfic Audio Studio API",
@@ -4164,6 +4172,131 @@ def public_profile_route(
                 gamification_store, ho_so.user_id),
         }
     return {"profile": data}
+
+
+# =============================================================================
+# FANFIC CHAT V1 — Tencent Chat (IM). Xem `server/chat_tencent.py`.
+#
+# Hai route, ca hai CHI cho nguoi da dang nhap:
+#   POST /api/chat/session     -> {sdkAppId, userId, userSig, expiresAt}
+#   POST /api/chat/identities  -> danh tinh FANFIC cua nguoi trong hoi thoai
+#
+# Trinh duyet chi goi `session` khi nguoi dung THAT SU mo tin nhan (xem
+# `web/src/components/chat/ChatProvider.tsx`) — doc/nghe truyen khong bao gio
+# tao phien chat, nen khong tinh vao MAU cua Tencent.
+# =============================================================================
+
+#: Han muc RIENG cho viec cap UserSig, chat hon Tier A cua middleware. Mot
+#: trinh duyet xin 1 phien khi mo tin nhan + 1 moi lan TAI LAI trang (tu mo
+#: lai) + 1 moi ~2 gio. QA that cho thay 10 / 5 phut bi cham boi mot nguoi mo
+#: vai tab va tai lai vai lan — 20 van du chan mot vong lap loi (vong lap goi
+#: hang tram lan) ma khong lam phien nguoi dung that.
+_han_muc_phien_chat = SlidingWindowRateLimiter()
+CHAT_PHIEN_TOI_DA = 20
+CHAT_PHIEN_CUA_SO_GIAY = 300.0
+
+
+@app.post("/api/chat/session")
+def chat_session(response: Response,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Cap phien Tencent Chat ngan han. UserSig duoc ky PHIA MAY CHU; khoa bi mat
+    khong bao gio roi khoi tien trinh nay.
+
+    503 `chat_not_configured` khi moi truong da chon thieu cau hinh — KHONG
+    tra mot phien rong/gia. 429 `chat_rate_limited` kem `Retry-After`.
+    """
+    duoc, _con, cho = _han_muc_phien_chat.check(
+        f"chat_session:{profile.user_id}", CHAT_PHIEN_TOI_DA, CHAT_PHIEN_CUA_SO_GIAY)
+    if not duoc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            {"code": "chat_rate_limited",
+             "message": "Bạn mở tin nhắn quá nhiều lần. Thử lại sau ít phút."},
+            headers={"Retry-After": str(max(1, int(cho)))})
+    try:
+        phien = cap_phien_chat(TencentChatSettings.from_env(), profile.user_id)
+    except ChatNotConfigured as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            {"code": "chat_not_configured", "message": str(exc)}) from exc
+    # Chu ky dang nhap — khong de trinh duyet/proxy nao giu lai.
+    response.headers["Cache-Control"] = "no-store"
+    return phien
+
+
+class ChatIdentitiesIn(BaseModel):
+    chat_user_ids: List[Annotated[str, StringConstraints(min_length=1, max_length=32)]] = Field(
+        default_factory=list, max_length=50)
+    usernames: List[Annotated[str, StringConstraints(min_length=1, max_length=40)]] = Field(
+        default_factory=list, max_length=10)
+
+
+def _the_chat(p: Profile, progress: Any, vat_pham: List[dict]) -> Dict[str, Any]:
+    """
+    Danh tinh FANFIC hien trong tin nhan — cung nguon voi `/u/[username]`
+    (`cong_khai_cap_do` + vat pham DANG trang bi). Nickname/avatar ben Tencent
+    KHONG BAO GIO la nguon su that. Khong co email.
+    """
+    cap = cong_khai_cap_do(progress)
+    khung = next((c for c in vat_pham if c.get("slot") == "avatar_frame"), None)
+    return {
+        "found": True,
+        "chat_user_id": chat_user_id(p.user_id),
+        "user_id": p.user_id,
+        "username": p.username or None,
+        "display_name": p.display_name or p.username or "Người dùng Fanfic",
+        "avatar_url": creators.avatar_url(p),
+        "level": cap["level"],
+        "equipped_title": cap["equipped_title"],
+        "avatar_frame": khung,
+    }
+
+
+@app.post("/api/chat/identities")
+def chat_identities(payload: ChatIdentitiesIn,
+                    profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Tra danh tinh Fanfic cho danh sach userID chat (hoi thoai) va/hoac
+    username (bat dau nhan tin tu trang ho so). Muc khong tim thay tra
+    `found: false` thay vi bien mat — giao dien phai noi that la "khong ro".
+
+    HANG LOAT: MOT truy van ho so + MOT tien do + MOT vat pham cho ca lo (toi
+    da 50 hoi thoai), khong phai ~4 vong mang moi nguoi.
+
+    Ho so da xoa / chua tao: adapter Appwrite nem `AuthError` cho MOI ma >=400
+    (ke ca 404) — mot nguoi nhu vay KHONG duoc lam 500 ca hop thu cua nguoi
+    kia. `AppwriteUnavailableError` (lop con cua `AuthError`) thi DE DI TIEP:
+    ha tang sap la 503 cho ca request, khong phai "khong tim thay".
+    """
+
+    def doc(f: Any, mac_dinh: Any) -> Any:
+        try:
+            return f()
+        except AppwriteUnavailableError:
+            raise
+        except (NotFoundError, AuthError):
+            return mac_dinh
+
+    theo_cid = {cid: fanfic_user_id_tu_chat(cid) for cid in dict.fromkeys(payload.chat_user_ids)}
+    uids = [u for u in dict.fromkeys(theo_cid.values()) if u]
+    ho_so: Dict[str, Profile] = doc(lambda: identity.profiles_by_ids(uids), {}) if uids else {}
+    theo_ten = {ten: doc(lambda ten=ten: identity.profile_by_username(ten), None)
+                for ten in dict.fromkeys(payload.usernames)}
+    tat_ca = {p.user_id: p for p in [*ho_so.values(), *[x for x in theo_ten.values() if x]]}
+    tien_do = doc(lambda: gamification_store.get_progress_by_ids(list(tat_ca)), {}) if tat_ca else {}
+    vat_pham = doc(lambda: cong_khai_vat_pham_dang_trang_bi_hang_loat(gamification_store, list(tat_ca)),
+                   {}) if tat_ca else {}
+
+    def the(p: Profile) -> Dict[str, Any]:
+        # Nguoi chua co tien do nao vang mat khoi lo -> doc ban mac dinh (bac 1).
+        prog = tien_do.get(p.user_id) or gamification_store.get_progress(p.user_id)
+        return _the_chat(p, prog, vat_pham.get(p.user_id, []))
+
+    items: List[Dict[str, Any]] = [
+        the(ho_so[uid]) if uid and uid in ho_so else {"found": False, "chat_user_id": cid}
+        for cid, uid in theo_cid.items()]
+    items += [the(p) if p is not None else {"found": False, "username": ten} for ten, p in theo_ten.items()]
+    return {"items": items, "you": chat_user_id(profile.user_id)}
 
 
 @app.get("/api/search/people")

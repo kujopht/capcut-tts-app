@@ -736,7 +736,9 @@ export function datBoNgheLoiApi(fn: typeof khiApiHong): void {
   khiApiHong = fn;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Xuat ra cho `lib/support/api.ts` — mot tinh nang TAT co mac dinh khong duoc
+    them byte nao vao module dung chung nay cua moi trang. */
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   const token = getToken();
@@ -4424,60 +4426,3 @@ export const GROQ_CONSOLE_KEYS_URL = "https://console.groq.com/keys";
     `/keys` on dinh) — dung goc de tranh 404 neu console doi giao dien, chi
     goc `/` la thu duy nhat Cerebras xac nhan on dinh. */
 export const CEREBRAS_CONSOLE_KEYS_URL = "https://cloud.cerebras.ai";
-
-/* ------------------------------------------------------------------ */
-/* Fanfic AI Support V1 — xem server/support/, components/support/     */
-/* ------------------------------------------------------------------ */
-
-export type SupportCheck = {
-  tool: string;
-  status: "ok" | "warn" | "fail" | "unknown" | "denied";
-  summary: string;
-};
-
-export type SupportFinding = {
-  code: string;
-  subsystem: string;
-  severity: string;
-  text: string;
-  next: string;
-  owner_needed: boolean;
-};
-
-export type SupportAskResponse = {
-  answer: string;
-  mode: "qa" | "report";
-  ai_mode: "ai" | "diagnostic_only";
-  ai_available: boolean;
-  diagnostic_id: string;
-  checks: SupportCheck[];
-  findings: SupportFinding[];
-  denied: string[];
-  can_escalate: boolean;
-  suggest_escalate: boolean;
-};
-
-export type SupportStatus = { enabled: boolean; ai_available: boolean; persistence: string; modes: string[] };
-
-export type SupportAskIn = {
-  mode: "qa" | "report";
-  message: string;
-  session_id: string;
-  context: Record<string, unknown>;
-};
-
-export const supportApi = {
-  status: () => request<SupportStatus>("/api/support/status"),
-  ask: (body: SupportAskIn) =>
-    request<SupportAskResponse>("/api/support/ask", { method: "POST", body: JSON.stringify(body) }),
-  report: (body: { summary: string; session_id: string; context: Record<string, unknown>; diagnostic_id?: string }) =>
-    request<{ report_id: string; status: string; message: string }>("/api/support/reports", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  reportStatus: (reportId: string, sessionId: string) =>
-    request<{ report_id: string; status: string; summary: string; route: string; created_at: number }>(
-      `/api/support/reports/${encodeURIComponent(reportId)}`,
-      { headers: { "X-Support-Session": sessionId } },
-    ),
-};

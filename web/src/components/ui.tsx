@@ -6,9 +6,14 @@
  * Moi trang deu dung lai o day, khong tu ve lai button/card/badge rieng.
  */
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef } from "react";
 import type { JobStatus } from "@/lib/api";
-import { SupportHint } from "@/components/support/SupportHint";
+import { SUPPORT_ENABLED } from "@/lib/features";
+
+// Fanfic AI Support: nap LUOI — tat co thi khong mot byte nao cua SupportHint vao
+// bundle cua moi trang (xem ghi chu o app/layout.tsx).
+const SupportHint = dynamic(() => import("@/components/support/SupportHint").then((m) => m.SupportHint), { ssr: false });
 
 /* ------------------------------------------------------------- dau trang */
 
@@ -157,7 +162,7 @@ export function ErrorState({
         </button>
       ) : null}
       {/* Fanfic AI Support: tat co thi khong render gi. */}
-      <SupportHint code="load_error" />
+      {SUPPORT_ENABLED ? <SupportHint code="load_error" /> : null}
     </div>
   );
 }

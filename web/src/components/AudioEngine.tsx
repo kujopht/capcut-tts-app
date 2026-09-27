@@ -70,8 +70,16 @@ import {
 // Xuat lai de hai trinh phat chi phai import tu MOT cho.
 export { dongHo } from "@/lib/time";
 import { errorMessage } from "@/lib/session";
-// Fanfic AI Support: `ghiLoi` khong lam gi khi tat co.
-import { ghiLoi } from "@/lib/support/collector";
+
+/**
+ * Fanfic AI Support: bao loi phat audio cho bo thu loi QUA MOT MOC TOAN CUC, khong
+ * import `lib/support/collector` — import tinh keo bo thu loi vao bundle cua MOI
+ * trang ngay ca khi tat co. Bo thu loi tu gan `window.__fanficSupport` khi duoc
+ * cai (chi khi bat co); tat co thi moc khong ton tai va dong nay khong lam gi.
+ */
+function ghiLoi(e: { kind: "media_error"; code: string; message: string }): void {
+  if (typeof window !== "undefined") window.__fanficSupport?.ghiLoi(e);
+}
 
 export interface TrangThaiAudio {
   /** Chuong dang la bai TOAN CUC hien tai, hoac `null` khi chua ai bam nghe

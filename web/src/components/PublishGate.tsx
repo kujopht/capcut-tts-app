@@ -97,6 +97,7 @@ export function CongXuatBan({
     <Link
       className="btn btn-primary btn-sm"
       href="/creator/apply?next=/write"
+      prefetch={false}
     >
       {status === "rejected" ? "Gửi lại đơn tác giả" : "Đăng ký tác giả"}
     </Link>

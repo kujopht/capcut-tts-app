@@ -35,11 +35,13 @@ test("khong tu tao issue GitHub: chi ban nhap + lien ket quan tri tu bam", () =>
   assert.match(p, /Bản nháp — chưa tạo gì trên GitHub/);
 });
 
-test("goi dung API quan tri (quyen do may chu kiem)", () => {
-  const api = codeOnly(read("lib/api.ts"));
+test("goi dung API quan tri (quyen do may chu kiem) — o lib/support/adminApi.ts, KHONG o lib/api.ts dung chung", () => {
+  const api = codeOnly(read("lib/support/adminApi.ts"));
   for (const d of ["/api/admin/support/summary", "/api/admin/support/incidents", "/api/admin/support/reports"]) {
     assert.ok(api.includes(d), d);
   }
+  // lib/api.ts vao bundle MOI trang; Support tat co mac dinh -> khong mot duong dan nao o do.
+  assert.ok(!/api\/admin\/support/.test(codeOnly(read("lib/api.ts"))), "lib/api.ts chua API quan tri Support");
   assert.match(api, /\/api\/admin\/support\/incidents\/\$\{encodeURIComponent\(id\)\}\/status/);
   assert.match(api, /\/api\/admin\/support\/incidents\/\$\{encodeURIComponent\(id\)\}\/issue-draft/);
 });

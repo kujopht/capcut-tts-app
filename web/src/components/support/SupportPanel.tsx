@@ -12,7 +12,8 @@
  */
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, supportApi, type SupportAskResponse, type SupportCheck } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { supportApi, type SupportAskResponse, type SupportCheck } from "@/lib/support/api";
 import { useSession } from "@/lib/session";
 import { layBoiCanh, phienHoTro, type SupportContext } from "@/lib/support/context";
 import { maLoiCuoi } from "@/lib/support/collector";

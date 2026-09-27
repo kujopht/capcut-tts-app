@@ -36,8 +36,11 @@ test("co TAT mac dinh, doc tu MOT cho", () => {
 
 test("tat co: layout khong gan bo thu loi / ranh gioi loi; loi vao deu co dieu kien; /support 404", () => {
   const layout = codeOnly(read("app/layout.tsx"));
-  assert.match(layout, /\{SUPPORT_ENABLED \? <SupportErrorBoundary>\{children\}<\/SupportErrorBoundary> : children\}/);
-  assert.match(layout, /\{SUPPORT_ENABLED \? <SupportCollectorMount \/> : null\}/);
+  assert.match(layout, /\{SUPPORT_ENABLED \? <SupportBoundaryGate>\{children\}<\/SupportBoundaryGate> : children\}/);
+  assert.match(layout, /\{SUPPORT_ENABLED \? <SupportCollectorGate \/> : null\}/);
+  const cong = codeOnly(read("components/SupportGate.tsx"));
+  assert.match(cong, /return SUPPORT_ENABLED \? <BoThuLoi \/> : null;/);
+  assert.match(cong, /return SUPPORT_ENABLED \? <RanhGioiLoi>\{children\}<\/RanhGioiLoi> : <>\{children\}<\/>;/);
   assert.match(layout, /\{SUPPORT_ENABLED \? \(\s*<Link href="\/support"/);
   assert.match(codeOnly(read("components/NavAuth.tsx")), /\{SUPPORT_ENABLED \? \(\s*<Link href="\/support"/);
   assert.match(codeOnly(read("app/support/page.tsx")), /if \(!SUPPORT_ENABLED\) notFound\(\);/);
@@ -45,6 +48,38 @@ test("tat co: layout khong gan bo thu loi / ranh gioi loi; loi vao deu co dieu k
   const bo = codeOnly(read("lib/support/collector.ts"));
   assert.match(bo, /if \(!SUPPORT_ENABLED \|\| typeof window === "undefined"\) return;/, "ghiLoi phai khong lam gi khi tat");
   assert.match(bo, /if \(!SUPPORT_ENABLED \|\| daCai \|\| typeof window === "undefined"\) return;/, "khong gan trinh nghe khi tat");
+});
+
+test("tat co = 0 byte tren trang thuong: ngoai thu muc Support, KHONG import tinh ma Support", () => {
+  // Do that tren ban build: import tinh (ke ca trong nhanh `SUPPORT_ENABLED ? … : null`)
+  // keo ~3 KB gzip ma tro vao MOI trang — trinh rut gon khong gap hang so qua
+  // ranh gioi module. Ngoai `components/support`, `lib/support`, `app/support`,
+  // `app/admin/support`: chi `next/dynamic` TRONG CLIENT component, hoac moc
+  // `window.__fanficSupport`.
+  const ngoai = moiTep(SRC).filter((p) => !/[\\/](support)[\\/]/.test(p) && /\.tsx?$/.test(p));
+  for (const p of ngoai) {
+    const c = codeOnly(readFileSync(p, "utf8"));
+    assert.ok(!/^import[^;]*from\s+["'][^"']*\/support\/[^"']*["']/m.test(c), `${p} import tinh ma Support`);
+    // `dynamic()` trong SERVER component van thanh client entry cua route -> tai o
+    // MOI trang (do that: chunk ~3.6 KB o `/` khi tat). Chi client component duoc.
+    if (/import\(\s*["'][^"']*\/support\//.test(c)) {
+      assert.match(c, /^\s*["']use client["'];/, `${p} nap luoi Support nhung khong phai client component`);
+    }
+  }
+  const layout = codeOnly(read("app/layout.tsx"));
+  assert.ok(!/next\/dynamic/.test(layout), "layout (server component) khong duoc dynamic() ma Support");
+  assert.match(layout, /import \{ SupportBoundaryGate, SupportCollectorGate \} from "@\/components\/SupportGate";/);
+  const cong = codeOnly(read("components/SupportGate.tsx"));
+  assert.match(cong, /const BoThuLoi = dynamic\(\s*\(\) => import\("\.\/support\/SupportCollectorMount"\)/);
+  assert.match(cong, /const RanhGioiLoi = dynamic\(\(\) => import\("\.\/support\/SupportErrorBoundary"\)/);
+  // API Support khong nam trong `lib/api.ts` (module dung chung cua MOI trang).
+  assert.ok(!/api\/support\//.test(codeOnly(read("lib/api.ts"))), "lib/api.ts chua duong dan /api/support/");
+  assert.match(read("lib/support/api.ts"), /export const supportApi = \{/);
+  for (const f of ["components/ui.tsx", "components/ChapterPlayer.tsx"]) {
+    assert.match(codeOnly(read(f)), /const SupportHint = dynamic\(\(\) => import\("[^"]*support\/SupportHint"\)/, f);
+  }
+  assert.match(codeOnly(read("components/AudioEngine.tsx")), /window\.__fanficSupport\?\.ghiLoi\(e\)/);
+  assert.match(codeOnly(read("lib/support/collector.ts")), /window\.__fanficSupport = \{ ghiLoi \};/);
 });
 
 test("CSS Support chi nap o trang /support (khong qua ui.tsx cua moi trang)", () => {

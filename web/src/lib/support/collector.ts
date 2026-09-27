@@ -19,6 +19,13 @@ import { duongDanAnToan, maLoi, sachChuoi } from "./sanitize";
 
 export type LoaiLoi = "js_error" | "unhandled_rejection" | "api_error" | "media_error" | "render_error";
 
+declare global {
+  interface Window {
+    /** Moc cho code KHONG muon import module nay (vd AudioEngine) — chi co khi da cai. */
+    __fanficSupport?: { ghiLoi: (e: { kind: LoaiLoi; code: string; message?: string; route?: string }) => void };
+  }
+}
+
 type SuKien = { kind: LoaiLoi; code: string; message: string; route: string; build: string; browser: string; device: string };
 
 export const GIOI_HAN = { hangDoi: 20, moiLo: 10, soLo: 3, byte: 8000, henMs: 4000 } as const;
@@ -87,6 +94,7 @@ async function guiLo(): Promise<void> {
 export function caiBoThuLoi(): void {
   if (!SUPPORT_ENABLED || daCai || typeof window === "undefined") return;
   daCai = true;
+  window.__fanficSupport = { ghiLoi };
   window.addEventListener("error", (e) => {
     // Chi loi CUA TRANG: bo loi tu tien ich trinh duyet va tep khac nguon.
     const nguon = (e as ErrorEvent).filename || "";

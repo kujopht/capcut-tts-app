@@ -15,16 +15,16 @@
  */
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { ApiError } from "@/lib/api";
+import { supportApi } from "@/lib/support/api";
 import {
-  ApiError,
   adminSupportApi,
-  supportApi,
   type SupportIncident,
   type SupportIncidentDetail,
   type SupportIncidentStatus,
   type SupportReportRow,
   type SupportSummary,
-} from "@/lib/api";
+} from "@/lib/support/adminApi";
 import { khiNao } from "@/lib/time";
 import { DanhSachTrangThai } from "@/components/AdminShell";
 import "./admin-support.css";

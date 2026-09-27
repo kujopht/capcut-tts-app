@@ -373,6 +373,35 @@ class TestLoiClientVaKho(_Co):
         self.assertIn("reopened", [t["kind"] for t in s.get_incident(iid).timeline])
 
 
+# ============================================================ loi tim thay qua QA hien thi
+class TestLoiTuQaHienThi(_Co):
+    """Ba loi CHI lo ra khi dung giao dien that tren Chrome QA (2026-09-28)."""
+
+    def test_hoi_studio_tu_trang_support_bao_can_dang_nhap(self):
+        d = self.ask("Sao tôi không vào được Studio?", context={"route": "/support"}).json()
+        self.assertIn("login_required", [f["code"] for f in d["findings"]])
+        self.assertIn("Studio cần đăng nhập", d["answer"])
+        self.assertNotIn("/support", [c.get("summary") for c in d["checks"]])
+
+    def test_su_co_da_biet_chi_gan_khi_dung_phan_he(self):
+        for i in range(3):
+            self.client.post("/api/support/client-errors", json={"session_id": f"phienqa{i}AAAAAAAAAAA", "events": [
+                {"kind": "media_error", "code": "audio_media", "route": "/chapters/chp_x", "message": "media error 4"}]})
+        studio = self.ask("Sao tôi không vào được Studio?", context={"route": "/support"}).json()
+        self.assertNotIn("known_incident", [f["code"] for f in studio["findings"]], "khong gan su co audio cho cau hoi Studio")
+        audio = self.ask("audio không phát được", context={"route": "/chapters/chp_x"}).json()
+        self.assertIn("known_incident", [f["code"] for f in audio["findings"]])
+
+    def test_loi_client_va_bao_cao_cung_ma_la_mot_su_co(self):
+        self.client.post("/api/support/client-errors", json={"session_id": SID_A, "events": [
+            {"kind": "media_error", "code": "audio_media", "route": "/chapters/chp_a", "message": "media error 4 after refresh"}]})
+        self.client.post("/api/support/reports", json={"summary": "Bấm nghe thì báo lỗi", "session_id": SID_B,
+                                                       "context": {"route": "/chapters/chp_b", "last_error_code": "audio_media"}})
+        ds = self.rt.store.list_incidents()["items"]
+        self.assertEqual(len(ds), 1, [i["title"] for i in ds])
+        self.assertEqual((ds[0]["event_count"], ds[0]["report_count"], ds[0]["subsystem"]), (2, 1, "audio"))
+
+
 # ============================================================ sua theo review doc lap
 class TestSuaTheoReview(_Co):
     """Review bao mat doc lap (Antigravity Claude Opus, 2026-09-28) — moi phat hien

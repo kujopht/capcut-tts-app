@@ -228,7 +228,9 @@ export function SupportPanel({ boiCanhDau, cheDoDau = "qa" }: { boiCanhDau: Part
         {ban ? (
           <div className="ho-tro-dang" role="status"><span className="spinner" aria-hidden="true" /> Đang kiểm tra…</div>
         ) : null}
-        <div ref={cuoi} />
+        {/* scroll-margin: o soan dinh day (sticky) khong duoc che phan cuoi cau
+            tra loi vua cuon toi — do that o 390px. */}
+        <div ref={cuoi} style={{ scrollMarginBottom: 150 }} />
       </div>
 
       {loi ? (

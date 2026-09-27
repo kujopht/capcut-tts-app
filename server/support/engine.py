@@ -77,13 +77,44 @@ def _co(t: str, *tu: str) -> bool:
     return any(x in t for x in tu)
 
 
+#: Ma loi CHUNG CHUNG — hai loi JS khac nhau deu la "js_error", nen voi nhom nay
+#: dau van tay phai dua vao THONG BAO da chuan hoa. Ma cu the (`audio_media`,
+#: `api_5xx`...) thi chinh ma la thu gom nhom: su kien client VA bao cao cua
+#: nguoi dung cho cung mot loi phai roi vao MOT su co (do that tren Chrome QA:
+#: truoc day mot loi audio thanh HAI su co vi hai phia lay khoa khac nhau).
+MA_CHUNG = {"js_error", "unhandled_rejection", "render_error", "user_report", ""}
+
+
+def khoa_gom(ma: str, thong_bao: str) -> str:
+    return chuan_hoa_loi(thong_bao) if ma in MA_CHUNG else ma
+
+
+def he_nghi_ngo(tin_nhan: str, ctx: "SupportContext") -> set:
+    """Phan he NGUOI DUNG dang noi toi (tu khoa + ma loi + trang) — dung de chi
+    gan "su co da biet" khi DUNG phan he, khong gan bua cho moi cau hoi."""
+    t = bo_dau(tin_nhan)
+    he = set()
+    if _co(t, "audio", "nghe", "am thanh", "khong phat", "giong doc", "tua") or ctx.last_error_code.startswith("audio"):
+        he.add("audio")
+    if _co(t, "studio", "viet truyen", "tao audio", "dich truyen") or ctx.route.startswith("/studio"):
+        he.add("studio")
+    if _co(t, "dang nhap", "login", "dang xuat", "het han", "phien"):
+        he.add("auth")
+    if ctx.last_error_code in MA_LOI_PHAN_HE:
+        he.add(MA_LOI_PHAN_HE[ctx.last_error_code])
+    if ctx.route.startswith(("/chapters", "/novels", "/library")):
+        he.add("reader")
+    return he
+
+
 def lap_ke_hoach(tin_nhan: str, ctx: SupportContext) -> List[Tuple[str, Dict[str, Any]]]:
     """Danh sach (cong cu, tham so) — TAT DINH, tu ngu canh + tu khoa (da bo dau)."""
     t = bo_dau(tin_nhan)
     ke: List[Tuple[str, Dict[str, Any]]] = [("check_api_health", {}), ("check_current_build", {})]
     am_thanh = _co(t, "audio", "nghe", "am thanh", "khong phat", "khong chay", "giong doc", "tua", "loa") \
         or ctx.last_error_code.startswith("audio")
-    if ctx.route and ctx.route != "/?":
+    # Kiem trang NGUOI DUNG dang gap loi — chinh trang /support thi vo ich.
+    if ctx.route and ctx.route not in ("/?", "/support"):
         ke.append(("check_route", {"route": ctx.route_raw or ctx.route}))
     if ctx.chapter_id:
         ke.append(("check_chapter", {"chapter_id": ctx.chapter_id}))
@@ -95,8 +126,9 @@ def lap_ke_hoach(tin_nhan: str, ctx: SupportContext) -> List[Tuple[str, Dict[str
         ke.append(("check_novel", {"novel_id": ctx.novel_id}))
     if _co(t, "studio", "viet truyen", "tao audio", "dich truyen") or ctx.route.startswith("/studio"):
         ke.append(("check_feature_status", {"feature": "studio"}))
-        if not any(k == "check_route" for k, _ in ke):
-            ke.append(("check_route", {"route": "/studio"}))
+        # LUON kiem /studio khi nguoi dung nhac Studio (vd dang o /support hoi
+        # "sao toi khong vao duoc Studio?") — bo trung o duoi lo phan con lai.
+        ke.append(("check_route", {"route": "/studio"}))
     if am_thanh:
         ke.append(("check_feature_status", {"feature": "tts_worker"}))
     if _co(t, "dang nhap", "login", "dang xuat", "het han", "phien"):
@@ -113,7 +145,7 @@ def lap_ke_hoach(tin_nhan: str, ctx: SupportContext) -> List[Tuple[str, Dict[str
     return ra[:TOI_DA_CONG_CU]
 
 
-def chan_doan(ket_qua: List[Dict[str, Any]], ctx: SupportContext) -> List[Dict[str, Any]]:
+def chan_doan(ket_qua: List[Dict[str, Any]], ctx: SupportContext, he_nghi: Optional[set] = None) -> List[Dict[str, Any]]:
     """Quy tac -> phat hien. Moi phat hien: code, subsystem, severity, text (cho
     nguoi dung), next (buoc tiep theo), confident (du chac de coi la 'AI da chan
     doan'), owner_needed (can chu du an xu ly)."""
@@ -131,10 +163,14 @@ def chan_doan(ket_qua: List[Dict[str, Any]], ctx: SupportContext) -> List[Dict[s
              "Máy chủ đang gặp sự cố ở " + (" và ".join({"metadata": "kho dữ liệu", "storage": "kho audio"}[k] for k in hong) or "một phụ thuộc") + ".",
              "Đây không phải lỗi của bạn. Hãy thử lại sau ít phút; mình có thể gửi báo cáo cho quản trị viên.",
              owner=True)
-    r = theo.get("check_route")
-    if r and r["data"].get("requires_login") and not r["data"].get("logged_in"):
-        them("login_required", "auth", "low", "Trang này cần đăng nhập mà bạn đang chưa đăng nhập.",
-             "Bấm Đăng nhập ở góc trên, rồi mở lại trang.")
+    # MOI ket qua check_route (co the co hai: trang dang mo + /studio), khong
+    # chi ket qua cuoi trong `theo`.
+    for r in [x for x in ket_qua if x["tool"] == "check_route"]:
+        if r["data"].get("requires_login") and not r["data"].get("logged_in"):
+            vung = "Studio" if r["data"].get("area") == "studio" else "Trang này"
+            them("login_required", "auth", "low", f"{vung} cần đăng nhập mà bạn đang chưa đăng nhập.",
+                 "Bấm Đăng nhập ở góc trên, rồi mở lại trang.")
+            break
     ch = theo.get("check_chapter")
     if ch and ch["status"] == "fail":
         them("chapter_missing", "reader", "medium", "Không tìm thấy chương này, hoặc chương chưa được xuất bản.",
@@ -167,10 +203,14 @@ def chan_doan(ket_qua: List[Dict[str, Any]], ctx: SupportContext) -> List[Dict[s
         them("tts_worker_off", "audio", "medium", "Hàng đợi tạo audio đang chờ bộ xử lý.", "Quản trị viên cần kiểm tra bộ xử lý TTS.", owner=True, confident=False)
     inc = theo.get("get_recent_public_incidents")
     if inc and inc["data"].get("incidents"):
-        cua_he = [i for i in inc["data"]["incidents"] if i["subsystem"] in {f["subsystem"] for f in ph} or not ph]
+        # CHI khi dung phan he dang nghi (tu phat hien + tu khoa/ma loi/trang) —
+        # truoc day moi cau hoi deu duoc gan "co the lien quan" (do that tren QA).
+        nghi = {f["subsystem"] for f in ph} | set(he_nghi or ())
+        cua_he = [i for i in inc["data"]["incidents"] if i["subsystem"] in nghi]
         if cua_he:
             them("known_incident", cua_he[0]["subsystem"], cua_he[0]["severity"],
-                 "Quản trị viên đã ghi nhận một sự cố đang mở có thể liên quan.", "Đội ngũ đang xử lý; bạn không cần báo lại.", confident=False)
+                 "Gần đây cũng có người khác gặp lỗi tương tự ở phần này và đã báo cho quản trị viên.",
+                 "Nếu lỗi của bạn khác đi, cứ gửi báo cáo kèm mô tả.", confident=False)
     return ph
 
 
@@ -227,7 +267,7 @@ class SupportEngine:
         ok = self.owner_key(viewer, session_id)
         ke = lap_ke_hoach(cau, ctx)
         ket_qua = [self.tb.chay(ten, a, viewer=viewer, owner_key=ok) for ten, a in ke]
-        ph = chan_doan(ket_qua, ctx)
+        ph = chan_doan(ket_qua, ctx, he_nghi_ngo(cau, ctx))
         tra_loi, che_do_ai = cau_tra_loi_tat_dinh(ph, tu_choi), "diagnostic_only"
         if self.gateway is not None:
             du_kien = {"checks": [{"tool": r["tool"], "status": r["status"], "summary": r["summary"]} for r in ket_qua],
@@ -269,13 +309,16 @@ class SupportEngine:
             # bang chung client tu gui.
             ke = lap_ke_hoach(summary, ctx)
             ket_qua = [self.tb.chay(ten, a, viewer=viewer, owner_key=ok) for ten, a in ke]
-            ph = chan_doan(ket_qua, ctx)
+            ph = chan_doan(ket_qua, ctx, he_nghi_ngo(summary, ctx))
             run = DiagnosticRun(diagnostic_id="", owner_key=ok, context=ctx.an_toan(), checks=ket_qua,
                                 findings=ph, subsystem=phan_he_chinh(ph, ctx), denied=phan_loai(summary),
                                 ai_mode="diagnostic_only")
-        he = run.subsystem if run.subsystem in PHAN_HE else "unknown"
-        loi_goc = ctx.last_error_code or (run.findings[0]["code"] if run.findings else "user_report")
-        chu_ky = chuan_hoa_loi(loi_goc)
+        # Cung KHOA voi `nhan_loi_client`: ma loi cu the -> chinh ma + phan he CUA
+        # MA (khong phai phan he cua phat hien dau tien), de bao cao va loi client
+        # cua cung mot loi roi vao CUNG mot su co.
+        ma = ctx.last_error_code or (run.findings[0]["code"] if run.findings else "user_report")
+        he = MA_LOI_PHAN_HE.get(ctx.last_error_code) or (run.subsystem if run.subsystem in PHAN_HE else "unknown")
+        chu_ky = khoa_gom(ma, summary)
         van_tay = dau_van_tay(ctx.route, chu_ky, he)
         bang_chung = [f"{r['tool']}: {r['status']} — {r['summary']}" for r in run.checks]
         tai_hien = [f"Trang: {ctx.route}", f"Trình duyệt/thiết bị: {ctx.browser}/{ctx.device}"
@@ -303,11 +346,12 @@ class SupportEngine:
             route = chuan_hoa_route(sach_chuoi(str(e.get("route") or ""), 200))
             he = MA_LOI_PHAN_HE.get(code, "web")
             loi = chuan_hoa_loi(e.get("message") or code)
-            van_tay = dau_van_tay(route, loi, he)
+            van_tay = dau_van_tay(route, khoa_gom(code, e.get("message") or code), he)
             if van_tay in thay:
                 continue
             thay.add(van_tay)
-            sach.append(ClientErrorEvent(kind=kind, route=route, message=loi, code=code, subsystem=he,
+            hien = loi if code in MA_CHUNG else f"{code}: {loi}"
+            sach.append(ClientErrorEvent(kind=kind, route=route, message=hien, code=code, subsystem=he,
                                          build=ban_build(e.get("build")), browser=trinh_duyet(e.get("browser")),
                                          device=thiet_bi(e.get("device")), owner_key=ok, fingerprint=van_tay))
         self.store.add_client_events(sach)

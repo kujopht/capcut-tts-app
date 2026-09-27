@@ -13,6 +13,7 @@ giong nhau la 1 su co voi `event_count = 50`, khong phai 50 su co.
 """
 from __future__ import annotations
 
+import re
 import secrets
 import threading
 import time
@@ -271,8 +272,12 @@ class InMemorySupportStore:
     def create_report(self, rep: SupportReport) -> SupportReport:
         with self._lock:
             rep.created_at = self._clock()
-            inc = self._su_co(rep.fingerprint, title=rep.error_signature or rep.summary[:120],
-                              subsystem=rep.subsystem, route=rep.route, signature=rep.error_signature)
+            # Chu ky la mot MA tran (vd "audio_media") thi ghep them loi nguoi dung
+            # ta de tieu de su co doc duoc.
+            tieu_de = (f"{rep.error_signature} — {rep.summary[:100]}"
+                       if re.match(r"^[a-z0-9_.-]{1,48}$", rep.error_signature or "") else (rep.error_signature or rep.summary[:120]))
+            inc = self._su_co(rep.fingerprint, title=tieu_de, subsystem=rep.subsystem, route=rep.route,
+                              signature=rep.error_signature)
             rep.incident_id = inc.incident_id
             self._reports[rep.report_id] = rep
             inc.report_ids.append(rep.report_id)

@@ -71,6 +71,16 @@ import {
 export { dongHo } from "@/lib/time";
 import { errorMessage } from "@/lib/session";
 
+/**
+ * Fanfic AI Support: bao loi phat audio cho bo thu loi QUA MOT MOC TOAN CUC, khong
+ * import `lib/support/collector` — import tinh keo bo thu loi vao bundle cua MOI
+ * trang ngay ca khi tat co. Bo thu loi tu gan `window.__fanficSupport` khi duoc
+ * cai (chi khi bat co); tat co thi moc khong ton tai va dong nay khong lam gi.
+ */
+function ghiLoi(e: { kind: "media_error"; code: string; message: string }): void {
+  if (typeof window !== "undefined") window.__fanficSupport?.ghiLoi(e);
+}
+
 export interface TrangThaiAudio {
   /** Chuong dang la bai TOAN CUC hien tai, hoac `null` khi chua ai bam nghe
       gi. Cac component so sanh gia tri nay voi chapterId CUA RIENG chung de
@@ -225,6 +235,7 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
         return true;
       } catch {
         setLoi("Không tải được audio. Vui lòng kiểm tra kết nối mạng.");
+        ghiLoi({ kind: "media_error", code: "audio_url", message: "refresh audio url failed" });
         return false;
       }
     },
@@ -246,7 +257,10 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
     a.play()
       .then(() => setDaBatDau(true))
       .catch((e) => {
-        if (laLoiPhatThat(e)) setLoi("Trình duyệt không cho phát audio này.");
+        if (laLoiPhatThat(e)) {
+          setLoi("Trình duyệt không cho phát audio này.");
+          ghiLoi({ kind: "media_error", code: "audio_media", message: e instanceof Error ? e.name : "play rejected" });
+        }
       });
   }, [tep, lamMoiUrl]);
 
@@ -388,7 +402,10 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
         setTep(xong);
       })
       .catch((cause) => {
-        if (!huy) setLoi(errorMessage(cause));
+        if (!huy) {
+          setLoi(errorMessage(cause));
+          ghiLoi({ kind: "media_error", code: "audio_url", message: "resolve audio failed" });
+        }
       });
     return () => {
       huy = true;
@@ -583,6 +600,7 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
           if (!thuLai) {
             console.error(`[AudioEngine] Đã thử làm mới ${soLanLamMoi.current} lần nhưng vẫn lỗi. Dừng thử lại để tránh vòng lặp vô hạn.`);
             setLoi("Không thể phát file âm thanh này sau nhiều lần thử làm mới. Vui lòng kiểm tra lại kết nối mạng hoặc thử lại sau.");
+            ghiLoi({ kind: "media_error", code: "audio_media", message: `media error ${a.error?.code ?? ""} after refresh` });
             return;
           }
           soLanLamMoi.current = soLanMoi;
@@ -590,6 +608,7 @@ export function AudioEngineProvider({ children }: { children: React.ReactNode })
           const thanhCong = await lamMoiUrl(viTri, dangChay);
           if (!thanhCong) {
             setLoi("Không phát được audio. Liên kết có thể đã hết hạn.");
+            ghiLoi({ kind: "media_error", code: "audio_expired", message: "audio link refresh failed" });
           }
         }}
       />

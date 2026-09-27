@@ -25,6 +25,9 @@ import {
   IconPrevChapter,
 } from "./Icons";
 import { formatBytes } from "./ui";
+import { SUPPORT_ENABLED } from "@/lib/features";
+// Fanfic AI Support: cong nap LUOI (xem ghi chu o components/SupportGate.tsx).
+import { SupportHintGate } from "./SupportGate";
 
 export function ChapterPlayer({
   novelId,
@@ -49,6 +52,8 @@ export function ChapterPlayer({
       <div className="alert alert-error" role="alert">
         <span aria-hidden="true">⛔</span>
         <span>{t.loi}</span>
+        {/* Fanfic AI Support: tat co thi khong render gi. */}
+        {SUPPORT_ENABLED ? <SupportHintGate code="audio_media" mode="listen" compact /> : null}
       </div>
     );
   }

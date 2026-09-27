@@ -726,7 +726,19 @@ export function setToken(token: string | null): void {
   else window.localStorage.removeItem(TOKEN_KEY);
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * Bo nghe loi API (Fanfic AI Support) — CHI goi khi mang hong hoac may chu 5xx.
+ * Mac dinh `null`: khong co tinh nang Support thi day la mot phep so sanh.
+ * Duoc gan boi `ganBoThuLoi()` o `components/support/lazy.ts` khi co bat.
+ */
+let khiApiHong: ((path: string, status: number, code?: string) => void) | null = null;
+export function datBoNgheLoiApi(fn: typeof khiApiHong): void {
+  khiApiHong = fn;
+}
+
+/** Xuat ra cho `lib/support/api.ts` — mot tinh nang TAT co mac dinh khong duoc
+    them byte nao vao module dung chung nay cua moi trang. */
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   const token = getToken();
@@ -736,6 +748,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch {
+    khiApiHong?.(path, 0);
     /*
       Cau nay NGUOI DUNG doc, khong phai nguoi phat trien.
 
@@ -765,6 +778,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* giu thong bao mac dinh */
     }
+    if (response.status >= 500) khiApiHong?.(path, response.status, code);
     throw new ApiError(message, response.status, code);
   }
 

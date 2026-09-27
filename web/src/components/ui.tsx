@@ -8,6 +8,10 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { JobStatus } from "@/lib/api";
+import { SUPPORT_ENABLED } from "@/lib/features";
+// Fanfic AI Support: cong nap LUOI — tat co thi khong tai ma Support nao
+// (xem ghi chu o components/SupportGate.tsx).
+import { SupportHintGate } from "@/components/SupportGate";
 
 /* ------------------------------------------------------------- dau trang */
 
@@ -155,6 +159,8 @@ export function ErrorState({
           Thử lại
         </button>
       ) : null}
+      {/* Fanfic AI Support: tat co thi khong render gi. */}
+      {SUPPORT_ENABLED ? <SupportHintGate code="load_error" /> : null}
     </div>
   );
 }

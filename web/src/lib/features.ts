@@ -20,3 +20,12 @@
  * được bằng cách sửa localStorage.
  */
 export const MUSIC_ENABLED = process.env.NEXT_PUBLIC_MUSIC_ENABLED === "1";
+
+/**
+ * `SUPPORT_ENABLED` — Fanfic AI Support V1 (trang `/support`, nut "AI kiểm tra
+ * giúp tôi" o trang loi, bo thu loi client). TẮT mặc định. Tắt thì: không có
+ * lối vào nào, `/support` trả 404, KHÔNG gắn trình nghe lỗi, KHÔNG gửi request
+ * nào — build ra y hệt trước khi có tính năng này. Máy chủ còn một cờ riêng
+ * (`FAS_SUPPORT_V1=1`); bật web mà máy chủ tắt thì trang báo "chưa bật".
+ */
+export const SUPPORT_ENABLED = process.env.NEXT_PUBLIC_SUPPORT_ENABLED === "1";

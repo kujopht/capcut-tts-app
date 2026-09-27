@@ -310,6 +310,10 @@ test("footer chi tro toi route CO THAT", () => {
     // doi + cho doc do. Khac `/studio/library`, von la thu vien AUDIO cua
     // nguoi sang tac; xem ghi chu tren `LINKS` trong `NavAuth.tsx`.
     "/library",
+    // Fanfic AI Support V1 (`src/app/support/page.tsx`) — lien ket chi hien khi
+    // `NEXT_PUBLIC_SUPPORT_ENABLED=1`; tat co thi trang tra 404 va footer khong
+    // co lien ket nay.
+    "/support",
   ]);
   for (const href of hrefs) {
     assert.ok(co_that.has(href), `footer trỏ tới route không tồn tại: ${href}`);

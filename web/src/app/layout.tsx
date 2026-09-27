@@ -10,10 +10,17 @@ import { ContentAtmosphere } from "@/components/ContentAtmosphere";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { LiveLyricTicker } from "@/components/LiveLyricTicker";
-import { MUSIC_ENABLED } from "@/lib/features";
+import { MUSIC_ENABLED, SUPPORT_ENABLED } from "@/lib/features";
 import { Logo } from "@/components/Logo";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
+/*
+  Fanfic AI Support: KHONG import tinh `components/support/*` o day. Day la server
+  component — moi client component no import (ke ca qua `next/dynamic`) thanh
+  client entry, tai o MOI trang du TAT co (do that tren ban build). Cong nho nay
+  giu `import()` trong mot client component, nen tat co thi khong tai gi.
+*/
+import { SupportBoundaryGate, SupportCollectorGate } from "@/components/SupportGate";
 
 // Mo ta cu noi ve viec tao audio truoc tien. San pham nay la nen tang doc va
 // nghe fanfic; Audio Studio la cong cu phu. Mo ta cung phai noi theo thu tu do.
@@ -119,8 +126,13 @@ export default function RootLayout({
             </SiteHeader>
 
             <main id="main">
-              <ContentAtmosphere>{children}</ContentAtmosphere>
+              {/* Fanfic AI Support: TAT co thi khong boc gi — trang hong hien
+                  dung nhu truoc, khong trinh nghe loi nao duoc gan. */}
+              <ContentAtmosphere>
+                {SUPPORT_ENABLED ? <SupportBoundaryGate>{children}</SupportBoundaryGate> : children}
+              </ContentAtmosphere>
             </main>
+            {SUPPORT_ENABLED ? <SupportCollectorGate /> : null}
 
             {/*
               Footer CHI dan toi cac route CO THAT trong `src/app/`. Cac muc
@@ -168,6 +180,11 @@ export default function RootLayout({
                   <Link href="/account" className="footer-link" prefetch={false}>
                     Tài khoản
                   </Link>
+                  {SUPPORT_ENABLED ? (
+                    <Link href="/support" className="footer-link" prefetch={false}>
+                      Trợ giúp &amp; báo lỗi
+                    </Link>
+                  ) : null}
                 </nav>
               </div>
 

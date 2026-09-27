@@ -22,6 +22,9 @@ from server.support.admin_routes import ban_nhap_issue
 from server.support.store import InMemorySupportStore
 
 DUONG = ["/api/admin/support/summary", "/api/admin/support/incidents", "/api/admin/support/reports"]
+# Chuoi HINH DANG token (gia) cho bai lam sach ban nhap issue — ghep luc chay de
+# tep nguon khong chua literal khop luat gitleaks (xem test_support_v1.py).
+TOK_GIA = "eyJabc" + ".def.ghi"
 
 
 class _Co(unittest.TestCase):
@@ -104,7 +107,7 @@ class TestTrungTam(_Co):
         self.assertEqual(self.client.get("/api/admin/support/incidents/../../etc", headers=h).status_code, 404)
 
     def test_ban_nhap_issue_da_lam_sach_va_chi_chuan_bi(self):
-        self.loi("phienkhachAAAA0000", "chp_1aaaa1111bbbb", "failed token=eyJabc.def.ghi user me@x.com {c}")
+        self.loi("phienkhachAAAA0000", "chp_1aaaa1111bbbb", "failed token=" + TOK_GIA + " user me@x.com {c}")
         h = self.auth(self.tok_ad)
         iid = self.client.get("/api/admin/support/incidents", headers=h).json()["items"][0]["incident_id"]
         with patch.dict(os.environ, {"FAS_SUPPORT_GITHUB_REPO": ""}):

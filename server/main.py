@@ -9126,3 +9126,9 @@ support_runtime = build_support_runtime(
     settings.llm_gateway,
 )
 app.include_router(build_support_router(support_runtime, resolve_viewer=optional_profile))
+
+# Trung tam ho tro cho quan tri (/admin/support) — doc su co gom nhom, doi
+# trang thai, ban nhap issue. Quyen = `admin_profile` (OWNER/ADMIN/MODERATOR).
+from server.support.admin_routes import build_support_admin_router  # noqa: E402
+
+app.include_router(build_support_admin_router(support_runtime, admin_dep=admin_profile))

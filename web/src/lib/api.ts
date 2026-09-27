@@ -2298,6 +2298,19 @@ export interface ContentQueueSummary {
   by_overall: Partial<Record<ContentQueueOverall, number>>;
 }
 
+/**
+ * Trạng thái `FAS_GAMES_V1` (PR #229/#231, CHƯA triển khai trên bản API đang
+ * chạy hiện tại — trả 404). KHÔNG nằm trong `adminApi`: đây không phải một
+ * route `/api/admin/*` (bài test `admin.test.mjs` đối soát "mọi hàm trong
+ * adminApi đều nằm dưới /api/admin/" — đặt nhầm vào đó sẽ tự làm sai điều đó
+ * ngay khi route thật triển khai với tiền tố khác). Hình dạng phản hồi THẬT
+ * chưa tồn tại trong mã ở đây nên kiểu trả về CỐ Ý để lỏng
+ * (`Record<string, unknown>`); `/admin/games` và `/admin/features` tự hiển
+ * thị khoá/giá trị có thật, không đoán tên trường.
+ */
+export const gamesConfig = () =>
+  request<Record<string, unknown>>("/api/games/config");
+
 export const adminApi = {
   overview: () => request<AdminOverview>("/api/admin/overview"),
 
@@ -3072,6 +3085,15 @@ export interface ServerLimits {
     }
   >;
   rate: Record<string, { count: number; minutes: number }>;
+  /**
+   * Cờ tính năng phía máy chủ (SOCIAL schema/XP atomic/games…) — CHƯA có
+   * trên bản API đang chạy ở nhánh này (`undefined`), và theo kế hoạch sẽ là
+   * `null` trên production cho tới khi PR #229/#231 triển khai. Trang
+   * `/admin/features` đọc trường này CHUNG cho mọi cờ tương lai thay vì đặt
+   * tên từng khoá cụ thể — hình dạng thật của đối tượng này chưa tồn tại
+   * trong mã đang chạy nên không có gì để chép cứng vào đây.
+   */
+  capabilities?: Record<string, boolean> | null;
 }
 
 export const social = {

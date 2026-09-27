@@ -91,8 +91,8 @@ ff6437b1df9e2f45c537bda41ce7db1b8d473483:tests/test_router_control_room.py:appwr
 #      * dong 91 (jwt): JWT kieu vi du cua jwt.io — header {"alg":"HS256"},
 #        payload {"sub":"1234567890"}, chu ky tong hop;
 #      * dong 92 (generic-api-key): "sk-live-" + day dem 0-9 a-f A-F;
-#      * dong 133 va 302 (generic-api-key): AWS_SECRET_ACCESS_KEY=abcd1234efgh
-#        — 12 ky tu gia;
+#      * dong 133 va 302 (generic-api-key): bien AWS secret access key gan mot
+#        gia tri gia 12 ky tu (chu cai + so dem);
 #      * dong 254 (generic-api-key): chuoi canh bao co y ten
 #        "sk-live-KHOA-GIA-PHAI-KHONG-LO-0123" (khoa gia phai khong lo).
 #    Khong co gia tri that nao.
@@ -107,3 +107,8 @@ a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:generic
 a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:generic-api-key:133
 a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:generic-api-key:254
 a199870fe273ab69106e5ec9e45d6c4aa6d4cd39:server/tests/test_support_v1.py:generic-api-key:302
+#
+#    Ban dau cua chinh muc 8 (commit 6992de1) chep NGUYEN VAN mot trong cac
+#    fixture tren vao dong giai thich 94 va bi bat lai (generic-api-key). Dong
+#    do da duoc viet lai khong con literal; dau van tay lich su cua no:
+6992de1f11e3cf6a1f130a68bd0343eb83568a1e:.gitleaksignore:generic-api-key:94

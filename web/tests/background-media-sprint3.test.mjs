@@ -12,17 +12,20 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8").replace(/\
 const LIVE = new URL("../public/artwork/fantasy-backgrounds/live/", import.meta.url);
 const TEP = ["01-home", "02-explore", "03-reader", "04-studio", "05-write", "06-library", "07-account", "08-auth"];
 
-test("ban v2 du 8 chu de, nhe hon ban goc it nhat 60%, ban goc van con", () => {
-  let goc = 0;
+/*
+  Tong byte 8 ban goc H.264 1080p (`live/01-home.mp4` … `live/08-auth.mp4`), do truoc khi go chung khoi
+  `public/` — khong con tep nao de doc, nen ghi lai thanh hang so. Ban goc van nam trong lich su git.
+*/
+const GOC_BYTE = 43_021_184;
+
+test("ban v2 du 8 chu de, nhe hon ban goc it nhat 60%", () => {
+  const goc = GOC_BYTE;
   let av1 = 0;
   let h264 = 0;
   for (const t of TEP) {
-    const g = new URL(`${t}.mp4`, LIVE);
     const a = new URL(`v2/${t}-900-av1.mp4`, LIVE);
     const h = new URL(`v2/${t}-720-h264.mp4`, LIVE);
-    assert.ok(existsSync(g), `mất bản gốc ${t}.mp4 (không được xoá)`);
     assert.ok(existsSync(a) && existsSync(h), `thiếu bản v2 của ${t}`);
-    goc += statSync(g).size;
     av1 += statSync(a).size;
     h264 += statSync(h).size;
     assert.ok(statSync(a).size < 2.4 * 1024 * 1024, `${t}-900-av1.mp4 quá nặng`);
@@ -35,6 +38,14 @@ test("ban v2 du 8 chu de, nhe hon ban goc it nhat 60%, ban goc van con", () => {
   }
   assert.ok(av1 < goc * 0.4, `AV1 ${Math.round(av1 / 1024)} KB không nhẹ hơn đủ so với gốc ${Math.round(goc / 1024)} KB`);
   assert.ok(h264 < goc * 0.4, `H.264 dự phòng ${Math.round(h264 / 1024)} KB không nhẹ hơn đủ`);
+});
+
+test("ban goc 1080p KHONG con trong public/ — khong code nao dung, khong duoc deploy lai", () => {
+  for (const t of TEP) {
+    assert.ok(!existsSync(new URL(`${t}.mp4`, LIVE)), `bản gốc ${t}.mp4 lại nằm trong public/ — nó sẽ bị deploy dù không trang nào dùng`);
+  }
+  const lib = read("../src/lib/backgrounds.ts");
+  assert.ok(!/live\/\$\{tep\}\.mp4/.test(lib), "backgrounds.ts lại trỏ tới bản gốc live/<tep>.mp4");
 });
 
 test("videoNen tro toi v2: AV1 + H.264 du phong, van trong live/", () => {

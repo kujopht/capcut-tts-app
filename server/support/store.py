@@ -138,6 +138,15 @@ class DiagnosticRun:
     created_at: float = field(default_factory=time.time)
 
 
+def _cat_bo_dem(c: Counter, giu: int = 50) -> None:
+    """Build/route la chuoi client gui (da kiem mau nhung KHONG thuoc tap dong):
+    qua 2*giu muc thi chi giu `giu` muc nhieu nhat (review doc lap, 2026-09-28)."""
+    if len(c) > 2 * giu:
+        top = dict(c.most_common(giu))
+        c.clear()
+        c.update(top)
+
+
 def muc_do_cho(inc: Incident) -> str:
     """Muc do TAT DINH — so nguoi bi anh huong + loai loi + phan he."""
     n = len(inc.affected)
@@ -225,6 +234,8 @@ class InMemorySupportStore:
                 inc.browsers[ev.browser] += 1
                 inc.devices[ev.device] += 1
                 inc.kinds[ev.kind] += 1
+                _cat_bo_dem(inc.routes)
+                _cat_bo_dem(inc.builds)
                 if inc.status == "resolved":
                     inc.status = "open"
                     self._dong_thoi_gian(inc, ev.at, "reopened", f"Lỗi xuất hiện lại sau khi đã đóng (build {ev.build}).")
@@ -276,6 +287,8 @@ class InMemorySupportStore:
             inc.browsers[rep.browser] += 1
             inc.devices[rep.device] += 1
             inc.kinds["report"] += 1
+            _cat_bo_dem(inc.routes)
+            _cat_bo_dem(inc.builds)
             inc.last_checks, inc.last_findings = rep.checks, rep.findings
             inc.evidence = (inc.evidence + rep.evidence)[-20:]
             inc.reproduction = (inc.reproduction + rep.reproduction)[-10:]

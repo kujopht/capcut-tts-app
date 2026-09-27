@@ -14,7 +14,10 @@ HAN MUC rieng theo CHU (nguoi dung / phien khach) VA theo IP, cong them tang
 chung cua `server/rate_limit.py` (POST = Tier B).
 """
 import os
+import re
 import secrets
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Annotated, Any, Callable, List, Literal, Optional
 
@@ -32,7 +35,15 @@ HAN_MUC = {
     "ask": (12, 40),          # (theo chu, theo IP) / 10 phut
     "report": (5, 20),
     "client_errors": (20, 60),
+    # Review doc lap (Antigravity Claude Opus, 2026-09-28): route DOC trang thai
+    # bao cao cung phai co tran, khong thi do ma SUP-xxxx ton CPU vo han.
+    "report_status": (30, 60),
 }
+#: Toi da 4 luot chan doan chay CUNG LUC cho ca tien trinh — luot thu 5 cho
+#: toi da 5 giay roi nhan 503 `support_busy` (review doc lap: tranh nghen pool
+#: cong cu khi nhieu nguoi hoi cung luc).
+_DONG_THOI = threading.BoundedSemaphore(4)
+_SESSION = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 
 Session = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,64}$")]
 S11 = Annotated[str, StringConstraints(max_length=11)]
@@ -117,7 +128,9 @@ def build_support_runtime(deps: SupportDeps, llm_settings: Any, *, env=None) -> 
 
 def _ip(request: Request) -> str:
     # `cf-connecting-ip` do Cloudflare dat (client khong gia duoc qua Cloudflare);
-    # KHONG dung X-Forwarded-For o day — ai cung tu dat duoc header do.
+    # KHONG dung X-Forwarded-For o day — ai cung tu dat duoc header do. Cung
+    # cach voi `server/rate_limit.py`. Ngoai Cloudflare (dev), moi request cung
+    # mot proxy se chung mot o han muc theo IP — han muc THEO CHU van dung.
     return request.headers.get("cf-connecting-ip", "").strip() or (request.client.host if request.client else "unknown")
 
 
@@ -139,6 +152,16 @@ def build_support_router(rt: SupportRuntime, *, resolve_viewer: Callable[[Option
                                     {"code": "support_rate_limited", "message": "Bạn gửi hơi nhiều — thử lại sau ít phút."},
                                     headers={"Retry-After": str(max(1, int(sau)))})
 
+    @contextmanager
+    def _cho_luot():
+        if not _DONG_THOI.acquire(timeout=5):
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                {"code": "support_busy", "message": "Trợ lý đang bận — thử lại sau vài giây."})
+        try:
+            yield
+        finally:
+            _DONG_THOI.release()
+
     @r.get("/api/support/status")
     def support_status() -> dict:
         bat = enabled()
@@ -151,8 +174,9 @@ def build_support_router(rt: SupportRuntime, *, resolve_viewer: Callable[[Option
         _bat()
         viewer = resolve_viewer(authorization)
         _han_muc("ask", rt.engine.owner_key(viewer, payload.session_id), _ip(request))
-        return rt.engine.hoi(viewer=viewer, session_id=payload.session_id, message=payload.message,
-                             context=payload.context.model_dump(), mode=payload.mode)
+        with _cho_luot():
+            return rt.engine.hoi(viewer=viewer, session_id=payload.session_id, message=payload.message,
+                                 context=payload.context.model_dump(), mode=payload.mode)
 
     @r.post("/api/support/reports", status_code=status.HTTP_201_CREATED)
     def support_report(payload: ReportIn, request: Request,
@@ -160,18 +184,24 @@ def build_support_router(rt: SupportRuntime, *, resolve_viewer: Callable[[Option
         _bat()
         viewer = resolve_viewer(authorization)
         _han_muc("report", rt.engine.owner_key(viewer, payload.session_id), _ip(request))
-        rep = rt.engine.bao_cao(viewer=viewer, session_id=payload.session_id, summary=payload.summary,
-                                context=payload.context.model_dump(), diagnostic_id=payload.diagnostic_id)
+        with _cho_luot():
+            rep = rt.engine.bao_cao(viewer=viewer, session_id=payload.session_id, summary=payload.summary,
+                                    context=payload.context.model_dump(), diagnostic_id=payload.diagnostic_id)
         return {"report_id": rep.report_id, "status": rep.status,
                 "message": f"Đã gửi cho quản trị viên — mã {rep.report_id}."}
 
     @r.get("/api/support/reports/{report_id}")
-    def support_report_status(report_id: str, x_support_session: Optional[str] = Header(default=None),
+    def support_report_status(report_id: str, request: Request, x_support_session: Optional[str] = Header(default=None),
                               authorization: Optional[str] = Header(default=None)) -> dict:
         _bat()
         viewer = resolve_viewer(authorization)
-        rep = rt.store.get_report(report_id)
+        # Khach PHAI co session hop le (cung mau voi luc tao bao cao) — thieu/sai
+        # thi khong suy ra mot owner_key co dinh nao ca (review doc lap).
+        if viewer is None and not _SESSION.match(x_support_session or ""):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo.")
         chu = rt.engine.owner_key(viewer, x_support_session or "")
+        _han_muc("report_status", chu, _ip(request))
+        rep = rt.store.get_report(report_id)
         # 404 cho CA "khong co" lan "khong phai cua ban" — khong do duoc ma nguoi khac.
         if rep is None or rep.owner_key != chu:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo.")

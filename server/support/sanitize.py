@@ -42,7 +42,9 @@ def sach_chuoi(s: Optional[str], toi_da: int = 500) -> str:
     query chua token), roi cac mau bi mat, roi email/IP, cuoi cung cat do dai."""
     if not s:
         return ""
-    t = _DIEU_KHIEN.sub(" ", str(s))
+    # Cat TRUOC khi chay regex: cac mau co lookahead la O(n^2) o truong hop xau;
+    # chan dau vao o 2*toi_da (>= 2000) giu moi lan lam sach o muc micro giay.
+    t = _DIEU_KHIEN.sub(" ", str(s)[: max(2 * toi_da, 2000)])
     t = _URL.sub(_url_sach, t)
     t = _BEARER.sub(f"Bearer {DA_CHE}", t)
     t = _JWT.sub(DA_CHE, t)

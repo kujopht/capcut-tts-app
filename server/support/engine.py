@@ -220,6 +220,9 @@ class SupportEngine:
     def hoi(self, *, viewer: Any, session_id: str, message: str, context: Dict[str, Any], mode: str) -> Dict[str, Any]:
         ctx = SupportContext.tu_client(context)
         cau = sach_chuoi(message, 1000)
+        # CO Y phan loai tren chuoi THO (van bi chan 1000 ky tu boi pydantic):
+        # lam sach xoa query/URL la lam mat dau hieu "goi URL" can nhan dien.
+        # Chuoi tho KHONG di dau khac — mo hinh, kho va phan hoi chi thay `cau`.
         tu_choi = phan_loai(message)
         ok = self.owner_key(viewer, session_id)
         ke = lap_ke_hoach(cau, ctx)

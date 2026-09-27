@@ -27,9 +27,10 @@ from server.support.sanitize import chuan_hoa_route, sach_chuoi
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 THOI_GIAN_TOI_DA_GIAY = 3.0
-#: Toi da 4 phep kiem dong thoi cho CA tien trinh — mot cong cu treo khong
-#: chiem them luong moi luot hoi.
-_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="support-tool")
+#: Pool CUA CA tien trinh. Kich thuoc > so luot chan doan dong thoi toi da
+#: (`routes._DONG_THOI` = 4) de mot cong cu treo (het 3 giay, luong van chay
+#: nen) khong lam cac luot khac het gio oan (review doc lap, 2026-09-28).
+_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="support-tool")
 
 #: Bang route NOI BO — chi de tra loi "trang nay la gi, can dang nhap khong".
 BANG_ROUTE: Dict[str, Dict[str, Any]] = {

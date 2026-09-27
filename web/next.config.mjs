@@ -61,6 +61,26 @@ const nextConfig = {
 
   async headers() {
     return [
+      /*
+        CHONG CLICKJACKING: chi chinh fanfic.world duoc nhung trang cua minh
+        vao iframe. Truoc day production khong gui header nao, nen bat ky site
+        nao cung nhung duoc ca `/admin` roi phu mot lop trong suot len nut.
+
+        `frame-ancestors 'self'` la cach chuan (CSP 2). CSP nay CHI co mot
+        chi thi, khong co `default-src`/`script-src` — no khong chan script,
+        anh, font hay API nao, chi quyet dinh ai duoc lam khung cha.
+        `X-Frame-Options: SAMEORIGIN` la lop du phong cho trinh duyet cu khong
+        hieu `frame-ancestors`; trinh duyet moi co ca hai thi bo qua XFO.
+        Ca hai deu cho phep iframe CUNG origin (vd. `/entertainment` nhung
+        `/games/.../index.html`), chan moi origin khac.
+      */
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        ],
+      },
       {
         source: "/audio/:path*",
         headers: [

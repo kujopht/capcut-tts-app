@@ -24,12 +24,10 @@ import {
   IconNextChapter,
   IconPrevChapter,
 } from "./Icons";
-import dynamic from "next/dynamic";
 import { formatBytes } from "./ui";
 import { SUPPORT_ENABLED } from "@/lib/features";
-
-// Fanfic AI Support: nap LUOI (xem ghi chu o app/layout.tsx).
-const SupportHint = dynamic(() => import("./support/SupportHint").then((m) => m.SupportHint), { ssr: false });
+// Fanfic AI Support: cong nap LUOI (xem ghi chu o components/SupportGate.tsx).
+import { SupportHintGate } from "./SupportGate";
 
 export function ChapterPlayer({
   novelId,
@@ -55,7 +53,7 @@ export function ChapterPlayer({
         <span aria-hidden="true">⛔</span>
         <span>{t.loi}</span>
         {/* Fanfic AI Support: tat co thi khong render gi. */}
-        {SUPPORT_ENABLED ? <SupportHint code="audio_media" mode="listen" compact /> : null}
+        {SUPPORT_ENABLED ? <SupportHintGate code="audio_media" mode="listen" compact /> : null}
       </div>
     );
   }

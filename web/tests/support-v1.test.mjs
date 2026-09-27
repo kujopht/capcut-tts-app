@@ -38,9 +38,9 @@ test("tat co: layout khong gan bo thu loi / ranh gioi loi; loi vao deu co dieu k
   const layout = codeOnly(read("app/layout.tsx"));
   assert.match(layout, /\{SUPPORT_ENABLED \? <SupportBoundaryGate>\{children\}<\/SupportBoundaryGate> : children\}/);
   assert.match(layout, /\{SUPPORT_ENABLED \? <SupportCollectorGate \/> : null\}/);
+  // Cong: hai cho nap (goi y + bo thu loi) deu dung lai ngay khi tat co.
   const cong = codeOnly(read("components/SupportGate.tsx"));
-  assert.match(cong, /return SUPPORT_ENABLED \? <BoThuLoi \/> : null;/);
-  assert.match(cong, /return SUPPORT_ENABLED \? <RanhGioiLoi>\{children\}<\/RanhGioiLoi> : <>\{children\}<\/>;/);
+  assert.equal((cong.match(/if \(!SUPPORT_ENABLED\) return;/g) ?? []).length, 2);
   assert.match(layout, /\{SUPPORT_ENABLED \? \(\s*<Link href="\/support"/);
   assert.match(codeOnly(read("components/NavAuth.tsx")), /\{SUPPORT_ENABLED \? \(\s*<Link href="\/support"/);
   assert.match(codeOnly(read("app/support/page.tsx")), /if \(!SUPPORT_ENABLED\) notFound\(\);/);
@@ -51,34 +51,38 @@ test("tat co: layout khong gan bo thu loi / ranh gioi loi; loi vao deu co dieu k
 });
 
 test("tat co = 0 byte tren trang thuong: ngoai thu muc Support, KHONG import tinh ma Support", () => {
-  // Do that tren ban build: import tinh (ke ca trong nhanh `SUPPORT_ENABLED ? … : null`)
-  // keo ~3 KB gzip ma tro vao MOI trang — trinh rut gon khong gap hang so qua
-  // ranh gioi module. Ngoai `components/support`, `lib/support`, `app/support`,
-  // `app/admin/support`: chi `next/dynamic` TRONG CLIENT component, hoac moc
-  // `window.__fanficSupport`.
+  // Ba dieu DO THAT tren ban build (so voi main @ 4318e38, cung env):
+  //  1. import tinh (ke ca trong nhanh `SUPPORT_ENABLED ? … : null`) keo ma tro vao
+  //     MOI trang — trinh rut gon khong gap hang so qua ranh gioi module;
+  //  2. `dynamic()` trong SERVER component (layout) van thanh client entry -> tai o
+  //     MOI trang (~3.6 KB o `/` khi tat);
+  //  3. `next/dynamic` tu no keo runtime ~6 KB tho vao MOI trang.
+  // Nen: ngoai thu muc Support chi co MOT diem `import()` — o `components/SupportGate.tsx`
+  // (client component) — va moc `window.__fanficSupport`.
   const ngoai = moiTep(SRC).filter((p) => !/[\\/](support)[\\/]/.test(p) && /\.tsx?$/.test(p));
+  const diemNap = [];
   for (const p of ngoai) {
     const c = codeOnly(readFileSync(p, "utf8"));
     assert.ok(!/^import[^;]*from\s+["'][^"']*\/support\/[^"']*["']/m.test(c), `${p} import tinh ma Support`);
-    // `dynamic()` trong SERVER component van thanh client entry cua route -> tai o
-    // MOI trang (do that: chunk ~3.6 KB o `/` khi tat). Chi client component duoc.
-    if (/import\(\s*["'][^"']*\/support\//.test(c)) {
-      assert.match(c, /^\s*["']use client["'];/, `${p} nap luoi Support nhung khong phai client component`);
-    }
+    // `typeof import("…")` chi la KIEU (bi xoa khi bien dich) — khong phai diem nap.
+    for (const m of c.matchAll(/(?<!typeof )import\(\s*["']([^"']*\/support\/[^"']*)["']/g)) diemNap.push(`${p.replace(/\\/g, "/").split("/src/")[1]}:${m[1]}`);
   }
-  const layout = codeOnly(read("app/layout.tsx"));
-  assert.ok(!/next\/dynamic/.test(layout), "layout (server component) khong duoc dynamic() ma Support");
-  assert.match(layout, /import \{ SupportBoundaryGate, SupportCollectorGate \} from "@\/components\/SupportGate";/);
-  const cong = codeOnly(read("components/SupportGate.tsx"));
-  assert.match(cong, /const BoThuLoi = dynamic\(\s*\(\) => import\("\.\/support\/SupportCollectorMount"\)/);
-  assert.match(cong, /const RanhGioiLoi = dynamic\(\(\) => import\("\.\/support\/SupportErrorBoundary"\)/);
+  assert.deepEqual(diemNap, ["components/SupportGate.tsx:./support/lazy"], "chi MOT diem nap luoi Support");
+  const cong = readFileSync(join(SRC, "components", "SupportGate.tsx"), "utf8");
+  assert.match(cong, /^"use client";/, "diem nap phai la client component");
+  for (const f of ["app/layout.tsx", "components/SupportGate.tsx", "components/ui.tsx", "components/ChapterPlayer.tsx"]) {
+    assert.ok(!/next\/dynamic/.test(codeOnly(read(f))), `${f} dung next/dynamic (runtime ~6 KB vao moi trang)`);
+  }
+  assert.match(codeOnly(read("app/layout.tsx")), /import \{ SupportBoundaryGate, SupportCollectorGate \} from "@\/components\/SupportGate";/);
+  for (const f of ["components/ui.tsx", "components/ChapterPlayer.tsx"]) {
+    assert.match(codeOnly(read(f)), /import \{ SupportHintGate \} from "[^"]*SupportGate";/, f);
+  }
   // API Support khong nam trong `lib/api.ts` (module dung chung cua MOI trang).
   assert.ok(!/api\/support\//.test(codeOnly(read("lib/api.ts"))), "lib/api.ts chua duong dan /api/support/");
   assert.match(read("lib/support/api.ts"), /export const supportApi = \{/);
-  for (const f of ["components/ui.tsx", "components/ChapterPlayer.tsx"]) {
-    assert.match(codeOnly(read(f)), /const SupportHint = dynamic\(\(\) => import\("[^"]*support\/SupportHint"\)/, f);
-  }
+  // Loi render/audio di qua moc toan cuc, khong import bo thu loi.
   assert.match(codeOnly(read("components/AudioEngine.tsx")), /window\.__fanficSupport\?\.ghiLoi\(e\)/);
+  assert.match(codeOnly(cong), /window\.__fanficSupport\?\.ghiLoi\(\{/);
   assert.match(codeOnly(read("lib/support/collector.ts")), /window\.__fanficSupport = \{ ghiLoi \};/);
 });
 
@@ -89,7 +93,7 @@ test("CSS Support chi nap o trang /support (khong qua ui.tsx cua moi trang)", ()
 });
 
 test("khong tham do: khong setInterval; bo thu loi co gioi han cung va loc trung", () => {
-  for (const p of tepHoTro()) {
+  for (const p of [...tepHoTro(), join(SRC, "components", "SupportGate.tsx")]) {
     assert.ok(!/setInterval\s*\(/.test(codeOnly(readFileSync(p, "utf8"))), `${p} dung setInterval`);
   }
   const bo = codeOnly(read("lib/support/collector.ts"));
@@ -106,7 +110,7 @@ test("bo nghe loi API: chi mang hong / 5xx; bo qua chinh /api/support/*", () => 
   const api = codeOnly(read("lib/api.ts"));
   assert.match(api, /khiApiHong\?\.\(path, 0\);/);
   assert.match(api, /if \(response\.status >= 500\) khiApiHong\?\.\(path, response\.status, code\);/);
-  assert.match(codeOnly(read("components/support/SupportCollectorMount.tsx")), /if \(path\.startsWith\("\/api\/support\/"\)\) return;/);
+  assert.match(codeOnly(read("components/support/lazy.ts")), /if \(path\.startsWith\("\/api\/support\/"\)\) return;/);
 });
 
 test("lam sach phia client (chay that): token, URL ky, JWT, email, query", () => {
@@ -146,9 +150,13 @@ test("hoi thoai: status goi MOT lan, IME tieng Viet khong gui nua chu, khong tu 
 });
 
 test("diem vao dung cho: trang loi chung, trinh phat audio, loi render", () => {
-  assert.match(codeOnly(read("components/ui.tsx")), /<SupportHint code="load_error" \/>/);
-  assert.match(codeOnly(read("components/ChapterPlayer.tsx")), /<SupportHint code="audio_media" mode="listen" compact \/>/);
-  assert.match(codeOnly(read("components/support/SupportErrorBoundary.tsx")), /<SupportHint code="render_error" \/>/);
+  assert.match(codeOnly(read("components/ui.tsx")), /<SupportHintGate code="load_error" \/>/);
+  assert.match(codeOnly(read("components/ChapterPlayer.tsx")), /<SupportHintGate code="audio_media" mode="listen" compact \/>/);
+  const cong = codeOnly(read("components/SupportGate.tsx"));
+  assert.match(cong, /<SupportHintGate code="render_error" \/>/);
+  // Phan du phong loi render dung duoc NGAY ca khi chunk Support khong tai duoc.
+  assert.match(cong, /<strong>Trang này gặp lỗi khi hiển thị<\/strong>/);
+  assert.match(cong, /onClick=\{\(\) => this\.setState\(\{ loi: false, duong: "" \}\)\}/);
   const am = codeOnly(read("components/AudioEngine.tsx"));
   for (const ma of ["audio_url", "audio_media", "audio_expired"]) assert.ok(am.includes(`code: "${ma}"`), ma);
 });

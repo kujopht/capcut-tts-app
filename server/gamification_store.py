@@ -17,6 +17,7 @@ MOT MIXIN doc lap — khong dung chung bang voi `tts_jobs`/`translation_*`.
 
 from __future__ import annotations
 
+import copy
 import threading
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -30,6 +31,26 @@ from server.gamification_domain import (
     XpLedgerEntry,
     bao_cao_xoa_gamification,
 )
+
+
+def cong_xp_vao_tien_do(progress: UserProgress, xp: int, updated_at: str) -> UserProgress:
+    """Cong `xp` + cap goi thuong mien phi cho MOI bac vua vuot — HAM THUAN, dung chung cho kho
+    trong bo nho, kho Appwrite va `gamification_service._ap_dung_xp`."""
+    from server.gamification import level_for
+
+    bac_truoc = level_for(progress.xp)
+    progress.xp += xp
+    bac_sau = level_for(progress.xp)
+    if bac_sau.level > bac_truoc.level:
+        progress.goi_thuong_dang_cho += bac_sau.level - bac_truoc.level
+    if updated_at:
+        progress.updated_at = updated_at
+    return progress
+
+
+def mutator_cong_xp(entry: XpLedgerEntry):
+    """Mutator cho `update_progress_atomic`: cong XP cua MOT entry so cai."""
+    return lambda p: cong_xp_vao_tien_do(p, entry.xp_awarded, entry.created_at)
 
 
 class MockGamificationStore:
@@ -85,6 +106,46 @@ class MockGamificationStore:
         with self._lock:
             ds = [e for e in self._xp_events.values() if e.user_id == user_id]
         return sorted(ds, key=lambda e: e.created_at)
+
+    def list_xp_events_since(self, user_id: str, since_iso: str) -> List[XpLedgerEntry]:
+        """`list_xp_events` LOC theo moc thoi gian — dung cho tran XP hang
+        ngay cua mini-game (Social & Play V1 Goi C): cong tong `xp_awarded`
+        cua moi su kien `event_type` bat dau bang `"game_"` tu dau ngay UTC."""
+        with self._lock:
+            ds = [e for e in self._xp_events.values()
+                  if e.user_id == user_id and e.created_at >= since_iso]
+        return sorted(ds, key=lambda e: e.created_at)
+
+    #: Duong ghi tien do NGUYEN TU cho MOI writer (award_xp, claim_quest_reward, equip_title,
+    #: open_reward_pack, quyet toan game) — xem `gamification_service._nguyen_tu`. Kho trong bo nho
+    #: luon ho tro; dat False trong test de chay lai duong cu.
+    xp_atomic = True
+
+    def update_progress_atomic(self, user_id: str, mutator,
+                               ledger_entry: Optional[XpLedgerEntry] = None) -> Optional[UserProgress]:
+        """
+        Doc -> `mutator(ban sao progress)` -> (ghi `ledger_entry` neu co) -> luu, TRONG MOT lan giu
+        RLock: khong writer nao chen vao giua duoc. `ledger_entry` trung `entry_id` -> tra `None`,
+        KHONG doi gi (idempotent). `mutator` co the nem (vd `GamificationError`) de huy — khi do
+        khong co gi duoc ghi.
+        """
+        with self._lock:
+            if ledger_entry is not None and ledger_entry.entry_id in self._xp_events:
+                return None
+            cu = self._progress.get(user_id) or UserProgress(user_id=user_id)
+            moi = mutator(copy.deepcopy(cu))
+            if ledger_entry is not None:
+                self._xp_events[ledger_entry.entry_id] = ledger_entry
+            self._progress[user_id] = moi
+            return moi
+
+    def award_xp_atomic(self, entry: XpLedgerEntry) -> Optional[UserProgress]:
+        """
+        Ghi MOT su kien XP VA ap dung vao tien do (cap goi thuong khi vuot bac) NHU MOT KHOI
+        NGUYEN TU. Trung `entry_id` -> tra `None`, KHONG thay doi gi. Cong thuc len bac:
+        `cong_xp_vao_tien_do` (giong `gamification_service._ap_dung_xp`).
+        """
+        return self.update_progress_atomic(entry.user_id, mutator_cong_xp(entry), ledger_entry=entry)
 
     # ======================================================== thanh tuu
 
@@ -238,6 +299,7 @@ class MockGamificationStore:
         with self._lock:
             ra: Dict[str, int] = {}
             for entry in self._xp_events.values():
-                if entry.created_at >= since_iso:
+                # Hang 0 XP (vd `reward_pack_open`) khong phai "kiem duoc XP" — khong dua ai vao bang voi 0.
+                if entry.created_at >= since_iso and entry.xp_awarded:
                     ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
             return ra

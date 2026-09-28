@@ -58,7 +58,7 @@ test("trang Giai tri: trinh phat nhac CHI khi bat; the trang chu khong hua kho n
 test("the game noi that: che do, so nguoi, thoi luong, XP", () => {
   assert.ok(GAMES.length >= 2);
   for (const g of GAMES) {
-    assert.ok(["solo", "phong"].includes(g.cheDo), g.id);
+    assert.ok(["solo", "phong", "may-va-phong"].includes(g.cheDo), g.id);
     assert.ok(g.nguoiChoi && g.thoiLuong, g.id);
     assert.ok(g.xp === null || typeof g.xp === "string", g.id);
     assert.ok(g.iframe || g.href, g.id);
@@ -67,7 +67,8 @@ test("the game noi that: che do, so nguoi, thoi luong, XP", () => {
   assert.ok(GAMES.filter((g) => g.iframe).every((g) => g.xp === null));
   assert.equal(nhanCheDo("solo"), "Chơi đơn");
   const p = read("../src/app/entertainment/page.tsx");
-  assert.match(p, /<dd>\{g\.xp \?\? "Không tính XP"\}<\/dd>/);
+  // Goi C: dong "Phan thuong" doc tu cau hinh SONG cua may chu (nhanXp), game tinh van "Không tính XP".
+  assert.match(p, /<dd>\{nhanXp\(g, mayChuBat\)\}<\/dd>/);
   // iframe CHI gan khi mo; mo game thi tam dung loi doc dang phat.
   assert.match(p, /\{dangChoi \? \(\s*<KhungGame/);
   assert.match(p, /if \(engine\?\.trangThai\.dangPhat\) engine\.dieuKhien\.tamDung\(\);/);

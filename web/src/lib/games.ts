@@ -10,7 +10,7 @@
  * với máy chủ — nên KHÔNG tính XP và nói rõ như vậy.
  */
 
-export type CheDoGame = "solo" | "phong";
+export type CheDoGame = "solo" | "phong" | "may-va-phong";
 
 export interface GameInfo {
   id: string;
@@ -29,9 +29,38 @@ export interface GameInfo {
   iframe?: string;
   /** Trang riêng của game (React, có máy chủ). */
   href?: string;
+  /** XP phụ thuộc máy chủ: máy chủ tắt tính năng (`/api/games/config`) thì thẻ
+      phải nói "Không tính XP", không hứa theo `xp`. */
+  xpCanMayChu?: boolean;
 }
 
 export const GAMES: readonly GameInfo[] = [
+  {
+    id: "memory-runes",
+    title: "Memory Runes",
+    desc: "Lật thẻ tìm cặp rune giống nhau. Luyện tập tự do, hoặc đăng nhập để tính điểm — máy chủ giữ kín bố cục.",
+    icon: "🔮",
+    color: "#f5c46b",
+    cheDo: "solo",
+    nguoiChoi: "1",
+    thoiLuong: "1–4 phút",
+    xp: "+2 XP mỗi lượt hợp lệ (cần đăng nhập)",
+    href: "/entertainment/memory",
+    xpCanMayChu: true,
+  },
+  {
+    id: "caro",
+    title: "Caro 15×15",
+    desc: "Năm quân liên tiếp là thắng. Luyện với máy, hoặc tạo phòng riêng mời một người bạn bằng mã.",
+    icon: "⭕",
+    color: "#7dd3fc",
+    cheDo: "may-va-phong",
+    nguoiChoi: "1 (với máy) hoặc 2",
+    thoiLuong: "5–15 phút",
+    xp: "Phòng 2 người: +2 XP, thắng thêm +3",
+    href: "/entertainment/caro",
+    xpCanMayChu: true,
+  },
   {
     id: "cyber-snake",
     title: "Cyber Serpent 3D",
@@ -59,5 +88,14 @@ export const GAMES: readonly GameInfo[] = [
 ];
 
 export function nhanCheDo(c: CheDoGame): string {
-  return c === "solo" ? "Chơi đơn" : "Phòng 2 người";
+  if (c === "solo") return "Chơi đơn";
+  if (c === "phong") return "Phòng 2 người";
+  return "Với máy · Phòng 2 người";
+}
+
+/** Dòng "Phần thưởng" thật trên thẻ, theo cấu hình SỐNG của máy chủ. */
+export function nhanXp(g: GameInfo, mayChuBat: boolean | null): string {
+  if (!g.xp) return "Không tính XP";
+  if (g.xpCanMayChu && mayChuBat === false) return "Không tính XP (máy chủ chưa bật)";
+  return g.xp;
 }

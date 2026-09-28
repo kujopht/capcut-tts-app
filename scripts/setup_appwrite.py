@@ -1554,6 +1554,173 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         ],
     },
     # ================================================================
+    # Social & Play V1 Goi C (mini-game: Caro/Gomoku, Memory Runes) — THIET
+    # KE, ADDITIVE, production CHUA duoc migrate. Sau collection RIENG,
+    # doc lap voi bon collection gamification o tren (chi goi
+    # `gamification_store.award_xp_atomic`/`list_xp_events_since`, khong
+    # ghi truc tiep vao bang cua no). Xem
+    # `docs/migrations/SOCIAL_PLAY_V1_GAMES_SCHEMA.md` cho day du (dry-run,
+    # rollback/forward recovery, thu tu trien khai, quyen).
+    #
+    # ROLLBACK: xoa ca sau collection — khong anh huong du lieu dang dung
+    # (kho dang chay la `MockGamesStore` trong bo nho, hanh vi mac dinh
+    # `games_v1_enabled=False` khi `DATA_BACKEND=appwrite` cho toi khi
+    # `FAS_GAMES_V1=1` duoc dat SAU khi da doi soat).
+    # ================================================================
+
+    # Phong Caro/Gomoku — xem `games_domain.Room`. `documentId = room_id`.
+    "game_rooms": {
+        "name": "Game Rooms",
+        "attributes": [
+            ("code", "string", True, 8),
+            ("game", "string", True, 16),
+            ("rule_version", "string", True, 32),
+            ("host_id", "string", True, 64),
+            ("seat_x", "string", False, 64),
+            ("seat_o", "string", False, 64),
+            ("ready_x", "boolean", False, None),
+            ("ready_o", "boolean", False, None),
+            ("status", "string", True, 16),
+            ("match_no", "integer", True, None),
+            ("board", "string", True, 225),
+            # JSON `[[index, seat], ...]` — xem `Room.moves`. 8000 ky tu du
+            # cho toan bo mot ván 15x15 (toi da 225 nuoc).
+            ("moves", "string", False, 8000),
+            ("turn", "string", False, 4),
+            ("winner", "string", False, 8),
+            ("win_line", "string", False, 500),
+            ("end_reason", "string", False, 16),
+            ("last_seen_x", "string", False, 32),
+            ("last_seen_o", "string", False, 32),
+            ("rematch_x", "boolean", False, None),
+            ("rematch_o", "boolean", False, None),
+            ("settlement", "string", True, 16),
+            ("started_at", "string", False, 32),
+            ("finished_at", "string", False, 32),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+            ("version", "integer", True, None),
+        ],
+        "indexes": [
+            ("code_idx", "key", ["code"]),
+            ("status_idx", "key", ["status"]),
+            ("settlement_idx", "key", ["settlement"]),
+            ("updated_idx", "key", ["updated_at"]),
+        ],
+    },
+    # Marker CAS cho `AppwriteGamesStore.save_room` — cung ky thuat voi
+    # hang khoa cua `AppwriteMetadataStore.claim_job` (`server/
+    # appwrite_store.py`): `documentId = f"{room_id}-v{version}"`, Appwrite
+    # tu choi tao hang trung id la co che compare-and-set THAT, khong phai
+    # doc-roi-ghi. KHONG bao gio doc/ghi truc tiep tu route — chi
+    # `save_room` cham toi.
+    "game_room_versions": {
+        "name": "Game Room Versions",
+        "attributes": [
+            ("room_id", "string", True, 64),
+            ("version", "integer", True, None),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("room_idx", "key", ["room_id"]),
+        ],
+    },
+    # Luot Memory Runes — xem `games_domain.MemoryRun`. `documentId = run_id`.
+    # `layout` la LOP BAI THAT — quyen KHONG duoc cap read cho client (xem
+    # muc "Quyen" trong tai lieu migration), chi backend doc qua API key.
+    "game_runs": {
+        "name": "Game Runs",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("difficulty", "string", True, 16),
+            ("rows", "integer", True, None),
+            ("cols", "integer", True, None),
+            ("layout", "string", True, 200),
+            ("matched", "string", False, 500),
+            ("open_index", "integer", False, None),
+            # JSON `[[index, server_ms], ...]` — xem `MemoryRun.flips`.
+            ("flips", "string", False, 8000),
+            ("moves", "integer", True, None),
+            ("status", "string", True, 16),
+            ("started_at", "string", True, 32),
+            ("finished_at", "string", False, 32),
+            ("score", "integer", True, None),
+            ("season", "string", True, 8),
+            ("rule_version", "string", True, 32),
+            ("settlement", "string", True, 16),
+            ("version", "integer", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
+            ("status_idx", "key", ["status"]),
+            ("settlement_idx", "key", ["settlement"]),
+        ],
+    },
+    # Marker CAS cho `AppwriteGamesStore.save_run` — BANG RIENG voi
+    # `game_room_versions` (khong dung chung mot bang, xem dac ta §7 "your
+    # call"): tranh mot id `f"{x}-v{n}"` vo tinh trung giua mot room_id va
+    # mot run_id (hai khong gian id doc lap, `rm_...` vs `mr_...`, nhung
+    # tach bang la kien co hon dua vao quy uoc tien to khong bao gio doi).
+    "game_run_versions": {
+        "name": "Game Run Versions",
+        "attributes": [
+            ("run_id", "string", True, 64),
+            ("version", "integer", True, None),
+        ],
+        "indexes": [
+            ("run_idx", "key", ["run_id"]),
+        ],
+    },
+    # Ket qua/thuong DA SETTLE — xem `games_domain.GameResult`. `documentId
+    # = "gr_" + sha256(result_id)[:24]` (result_id that co dang
+    # "{source_id}|{user_id}", chua ky tu `|` va co the dai hon 36 —
+    # KHONG hop le lam id Appwrite truc tiep); `result_id` doc duoc van
+    # luu nguyen trong truong `result_id` de doi soat.
+    "game_results": {
+        "name": "Game Results",
+        "attributes": [
+            ("result_id", "string", True, 128),
+            ("game", "string", True, 16),
+            ("season", "string", True, 8),
+            ("user_id", "string", True, 64),
+            ("opponent_id", "string", False, 64),
+            ("outcome", "string", True, 16),
+            ("points", "integer", True, None),
+            ("difficulty", "string", False, 16),
+            ("xp_awarded", "integer", True, None),
+            ("xp_entries", "string", False, 1000),
+            ("reasons", "string", False, 1000),
+            ("validated", "boolean", True, None),
+            ("rule_version", "string", True, 32),
+            ("source_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("game_season_idx", "key", ["game", "season"]),
+            ("user_created_idx", "key", ["user_id", "created_at"]),
+            ("source_idx", "key", ["source_id"]),
+        ],
+    },
+    # Marker CAS cho `AppwriteGamificationStore.award_xp_atomic` (dung CHUNG
+    # cho MOI nguon XP atomic, khong chi mini-game) — xem docstring day du
+    # o `appwrite_gamification_store.py::xp_progress_cas_row_id`.
+    # `documentId = "xc_" + sha256(f"{user_id}|{prior_xp}")[:24]`: hai
+    # request/worker CUNG doc thay CUNG `prior_xp` (du KHONG chong lan
+    # transaction) se tranh nhau MOT rowId, chan "lost update" ma rieng
+    # transaction khong dam bao duoc giua hai giao dich TUAN TU.
+    "xp_progress_cas": {
+        "name": "XP Progress CAS",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("prior_xp", "integer", True, None),
+            ("entry_id", "string", True, 128),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # ================================================================
     # Image Studio V1 (overnight build) — THIET KE, CHUA co adapter Appwrite
     # that (chay tren `MockWalletStore`/`MockByopConnectionStore`/
     # `MockImageLibraryStore` trong bo nho, xem `server/image_*.py`).
@@ -1919,6 +2086,29 @@ class Setup:
                 ) from exc
             return None
 
+    def _doc_muc_that(self, base: str, loai: str, key: str,
+                      han_chot: float) -> Optional[Dict]:
+        """Doc TRUC TIEP MOT thuoc tinh/index — `GET {base}/attributes/{key}`
+        hoac `GET {base}/indexes/{key}` — KHONG qua tai lieu collection
+        (`GET {base}`). Tra None khi loi mang thoang qua (xem
+        `_goi_doc_thoi_thu_lai`).
+
+        VI SAO KHONG DOC COLLECTION (do that, Appwrite 1.9.6 + MongoDB tu luu
+        tru, project THU `fas-socialplay-test`, 2026-09-26): sau khi worker da
+        xu ly xong `createAttribute` (hang doi 179/179 thanh cong, 0 dang xu
+        ly, 0 hong), `GET {base}` VAN tra `novels.rights_mode` = 'processing'
+        trong khi `GET {base}/attributes/rights_mode`, `GET {base}/attributes`
+        va chinh tai lieu trong MongoDB deu la 'available'. Khoa cache Redis cua
+        tai lieu collection giu ban cu voi TTL -1 (khong bao gio het han). Day la
+        mot cuoc dua cache-aside: vong cho doc collection tu DB ngay truoc khi
+        worker doi trang thai, worker xoa cache, roi ban cu duoc ghi lai vao
+        cache SAU lan xoa. Cache chi duoc lam moi o lan thay doi schema KE TIEP
+        cua collection do — ma script lai dang dung cho chinh thuoc tinh nay
+        truoc khi lam thay doi ke tiep, nen ba lan chay lai lien tiep deu het
+        120s o cung mot cho. Doc tung muc thi di duong khac, khong vuong cache
+        do. Rat co the day cung la ban chat cua su co 2026-08-21 ben duoi."""
+        return self._goi_doc_thoi_thu_lai(f"{base}/{loai}/{key}", han_chot)
+
     def _cho_thuoc_tinh_san_sang(self, base: str, key: str,
                                  *, timeout_giay: float = 120.0) -> None:
         """Cho DUY NHAT MOT thuoc tinh dat 'available', backoff mu tang dan
@@ -1935,16 +2125,14 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
-            if hien is None:
+            thuoc_tinh = self._doc_muc_that(base, "attributes", key, han_chot)
+            if thuoc_tinh is None:
                 # Loi mang thoang qua, da trong ngan sach thoi gian — thu lai,
                 # KHONG coi la "thuoc tinh bien mat".
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
                 continue
-            thuoc_tinh = next((a for a in hien.get("attributes", [])
-                               if a.get("key") == key), None)
-            if thuoc_tinh is None:
+            if thuoc_tinh.get("key") != key:
                 raise SystemExit(
                     f"Thuộc tính '{key}' biến mất khỏi {base} trong lúc chờ "
                     "sẵn sàng — không nên xảy ra, kiểm tra thủ công."
@@ -1980,13 +2168,12 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
-            if hien is None:
+            idx = self._doc_muc_that(base, "indexes", key, han_chot)
+            if idx is None:
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
                 continue
-            idx = next((i for i in hien.get("indexes", []) if i.get("key") == key), None)
-            if idx is None:
+            if idx.get("key") != key:
                 raise SystemExit(
                     f"Index '{key}' biến mất khỏi {base} trong lúc chờ sẵn sàng."
                 )
@@ -2078,9 +2265,10 @@ class Setup:
         'available' thay vì để Appwrite trả lỗi 400 mơ hồ 'not yet
         available' không nói rõ thuộc tính nào."""
         import time
-        hien = self._goi_doc_thoi_thu_lai(base, time.monotonic() + 30.0) or {}
-        trang_thai = {a.get("key"): a.get("status")
-                      for a in hien.get("attributes", [])}
+        # Tung thuoc tinh MOT, khong qua tai lieu collection — xem `_doc_muc_that`.
+        han_chot = time.monotonic() + 30.0
+        trang_thai = {k: (self._doc_muc_that(base, "attributes", k, han_chot) or {}).get("status")
+                      for k in keys}
         chua_san_sang = [k for k in keys if trang_thai.get(k) != "available"]
         if chua_san_sang:
             raise SystemExit(

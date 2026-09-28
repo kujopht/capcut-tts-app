@@ -63,7 +63,7 @@ from server.creator import (
     suggest_username,
 )
 from server.creator_service import CreatorService
-from server.gamification import COSMETIC_CATALOG, LEVEL_TIERS, REWARD_PACKS
+from server.gamification import COSMETIC_CATALOG, LEVEL_TIERS, REWARD_PACKS, XP_EVENTS
 from server.gamification_service import (
     GamificationError,
     achievements_hien_thi as thanh_tuu_hien_thi,
@@ -84,6 +84,9 @@ from server.gamification_service import (
     streak_hien_thi,
 )
 from server.appwrite_gamification_store import build_gamification_store
+from server import games_service
+from server.games_domain import MEMORY_DIFFICULTIES
+from server.games_store import build_games_store
 from server.appwrite_animation_store import build_animation_store
 from server.appwrite_bulk_import_store import build_bulk_import_store
 from server.appwrite_trusted_source_store import build_trusted_source_store
@@ -310,6 +313,20 @@ creators = CreatorService(identity, store, storage)
 #: voi `store` (novels/chapters/tts) va `translation_store` — xem
 #: `server/gamification_store.py`.
 gamification_store = build_gamification_store(settings)
+
+#: Kho mini-game (Social & Play V1 Goi C: Caro/Gomoku, Memory Runes) — MOT
+#: the hien, DOC LAP hoan toan voi `store`/`gamification_store` (ba bang
+#: RIENG: `game_rooms`, `game_runs`, `game_results`). Dung chung
+#: `gamification_store` CHI de goi `award_xp_atomic`/`list_xp_events_since`
+#: (khong ghi truc tiep vao cac bang cua no) — xem `server/games_service.py`.
+games_store = build_games_store(settings)
+
+#: Phuc hoi settlement CON TREO tu lan chay truoc (crash giua finish va
+#: settle) — best-effort, KHONG BAO GIO lam sap khoi dong (xem dac ta §4).
+try:
+    games_service.settle_pending(games_store, gamification_store)
+except Exception:
+    pass
 
 #: Kho Animation (V6, overnight Phase 5) — MOT the hien, DOC LAP hoan toan
 #: voi `store` (novels/chapters/tts) — xem docstring dau
@@ -4038,6 +4055,276 @@ def leaderboard(mode: str = "all_time", limit: int = 20, offset: int = 0,
                                 viewer_id=viewer_id)
 
 
+# -----------------------------------------------------------------------------
+# Mini-game (Social & Play V1 Goi C: Caro/Gomoku, Memory Runes) — §6 cua
+# `SP_C_BACKEND_SPEC.md`. Khi `settings.games_v1_enabled` TAT: `/api/games/
+# config` van tra `{"enabled": false}`, MOI route khac o day tra 404 qua
+# `_require_games_enabled` (Depends, chay TRUOC than route).
+# -----------------------------------------------------------------------------
+
+
+class GameRoomCreateIn(BaseModel):
+    game: str = "caro"
+
+
+class GameRoomJoinIn(BaseModel):
+    code: str
+
+
+class GameReadyIn(BaseModel):
+    ready: bool = True
+
+
+class GameMoveIn(BaseModel):
+    index: int
+    move_no: int
+
+
+class MemoryStartIn(BaseModel):
+    difficulty: str
+
+
+class MemoryFlipIn(BaseModel):
+    index: int
+    seq: int
+
+
+def _require_games_enabled() -> None:
+    if not settings.games_v1_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tính năng trò chơi chưa bật.")
+
+
+def _games_call(fn, *args, **kwargs):
+    """Goi tang `games_service` va doi `GameError` (mang san `status_code`
+    ro nghia) thanh `HTTPException` — MOT cho, cung triet ly voi `_xa_hoi`
+    o duoi cho social."""
+    try:
+        return fn(*args, **kwargs)
+    except games_service.GameError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    except NotFoundError as exc:
+        # Ma phong/luot khong ton tai (kho nem NotFoundError) -> 404 ro nghia,
+        # khong de lot thanh 500.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+def _game_code(code: str) -> str:
+    return (code or "").strip().upper()
+
+
+@app.get("/api/games/config")
+def games_config() -> Dict[str, Any]:
+    if not settings.games_v1_enabled:
+        return {"enabled": False}
+    from server.games_domain import (
+        DAILY_GAME_XP_CAP, DISCONNECT_GRACE_SECONDS,
+        MAX_REWARDED_PER_PAIR_PER_DAY, MAX_REWARDED_RUNS_PER_DAY, RULE_CARO,
+        RULE_MEMORY, season_key as _mua_giai_key,
+    )
+
+    return {
+        "enabled": True,
+        "season": _mua_giai_key(now_iso()),
+        "rule_versions": {"caro": RULE_CARO, "memory": RULE_MEMORY},
+        "rewards": {
+            "match_completed": XP_EVENTS["game_match_completed"],
+            "match_won": XP_EVENTS["game_match_won"],
+            "run_completed": XP_EVENTS["game_run_completed"],
+        },
+        "caps": {
+            "daily_game_xp": DAILY_GAME_XP_CAP,
+            "per_pair_per_day": MAX_REWARDED_PER_PAIR_PER_DAY,
+            "runs_per_day": MAX_REWARDED_RUNS_PER_DAY,
+        },
+        "disconnect_grace_seconds": DISCONNECT_GRACE_SECONDS,
+        "poll_ms": {"lobby": 2500, "playing": 1000},
+        "memory": {
+            "difficulties": {
+                key: {"rows": rows, "cols": cols, "pairs": pairs}
+                for key, (rows, cols, pairs) in MEMORY_DIFFICULTIES.items()
+            },
+        },
+    }
+
+
+@app.post("/api/games/memory/runs")
+def games_start_memory_run(
+    payload: MemoryStartIn, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    run = _games_call(games_service.start_run, games_store, profile.user_id,
+                      payload.difficulty)
+    return {"run": games_service.memory_run_public_view(games_store, run)}
+
+
+@app.get("/api/games/memory/runs/{run_id}")
+def games_get_memory_run(
+    run_id: str, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    run = _games_call(games_service.get_run, games_store, gamification_store,
+                      profile.user_id, run_id)
+    return {"run": games_service.memory_run_public_view(games_store, run)}
+
+
+@app.post("/api/games/memory/runs/{run_id}/flip")
+def games_flip_memory_run(
+    run_id: str, payload: MemoryFlipIn, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    run, flip = _games_call(games_service.flip, games_store, gamification_store,
+                            profile.user_id, run_id, payload.index, payload.seq)
+    return {"run": games_service.memory_run_public_view(games_store, run),
+            "flip": flip}
+
+
+@app.post("/api/games/memory/runs/{run_id}/abandon")
+def games_abandon_memory_run(
+    run_id: str, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    run = _games_call(games_service.abandon_run, games_store, profile.user_id, run_id)
+    return {"run": games_service.memory_run_public_view(games_store, run)}
+
+
+@app.post("/api/games/rooms")
+def games_create_room(
+    payload: GameRoomCreateIn, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.create_room, games_store, profile.user_id)
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.post("/api/games/rooms/join")
+def games_join_room(
+    payload: GameRoomJoinIn, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.join_room, games_store, profile.user_id,
+                       _game_code(payload.code))
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.get("/api/games/rooms/{code}")
+def games_get_room(
+    code: str, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.get_room, games_store, gamification_store,
+                       _game_code(code))
+    # `touch`: cap nhat `last_seen_*` cho NGUOI GOI neu ho dang ngoi mot ghe
+    # — presence CHI cho nguoi ngoi (dac ta §2), khong bump `version`.
+    seat = room.seat_of(profile.user_id)
+    if seat:
+        games_store.touch_seat(room.room_id, seat, now_iso())
+        room = games_store.get_room(room.room_id)
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.post("/api/games/rooms/{code}/ready")
+def games_room_ready(
+    code: str, payload: GameReadyIn, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.set_ready, games_store, profile.user_id,
+                       _game_code(code), payload.ready)
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.post("/api/games/rooms/{code}/move")
+def games_room_move(
+    code: str, payload: GameMoveIn, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.play_move, games_store, gamification_store,
+                       profile.user_id, _game_code(code), payload.index,
+                       payload.move_no)
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.post("/api/games/rooms/{code}/resign")
+def games_room_resign(
+    code: str, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.resign, games_store, gamification_store,
+                       profile.user_id, _game_code(code))
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.post("/api/games/rooms/{code}/claim-timeout")
+def games_room_claim_timeout(
+    code: str, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.claim_timeout, games_store, gamification_store,
+                       profile.user_id, _game_code(code))
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.post("/api/games/rooms/{code}/rematch")
+def games_room_rematch(
+    code: str, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.rematch, games_store, profile.user_id,
+                       _game_code(code))
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.post("/api/games/rooms/{code}/leave")
+def games_room_leave(
+    code: str, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    room = _games_call(games_service.leave, games_store, gamification_store,
+                       profile.user_id, _game_code(code))
+    return {"room": games_service.room_public_view(
+        identity, storage, games_store, room, profile.user_id)}
+
+
+@app.get("/api/games/leaderboard")
+def games_leaderboard_route(
+    game: str = "caro", season: str = "", difficulty: str = "",
+    limit: int = 20, offset: int = 0,
+    authorization: Optional[str] = Header(default=None),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    from server.games_domain import season_key as _mua_giai_key
+
+    if game not in ("caro", "memory"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Trò chơi không hợp lệ.")
+    if difficulty and difficulty not in MEMORY_DIFFICULTIES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Độ khó không hợp lệ.")
+    gioi_han = max(1, min(100, limit))
+    do_lech = max(0, offset)
+    nguoi_xem = optional_profile(authorization)
+    viewer_id = nguoi_xem.user_id if nguoi_xem else ""
+    mua_giai = season.strip() or _mua_giai_key(now_iso())
+    return games_service.leaderboard(
+        games_store, identity, storage, game=game, season=mua_giai,
+        difficulty=difficulty if game == "memory" else "", limit=gioi_han,
+        offset=do_lech, viewer_id=viewer_id)
+
+
+@app.get("/api/games/me/history")
+def games_my_history(
+    limit: int = 20, profile: Profile = Depends(current_profile),
+    _enabled: None = Depends(_require_games_enabled),
+) -> Dict[str, Any]:
+    gioi_han = max(1, min(100, limit))
+    return {"items": games_service.history(games_store, profile.user_id, gioi_han)}
+
+
 @app.get("/api/creator/ranks")
 def creator_ranks() -> Dict[str, Any]:
     """
@@ -4828,6 +5115,33 @@ def admin_profile(profile: Profile = Depends(current_profile)) -> Profile:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Khu vực quản trị.")
     return profile
+
+
+@app.get("/api/admin/games/rooms/{code}")
+def admin_games_room(code: str, admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """Xem TOAN BO mot phong (kem nuoc di + hang ket qua + entry XP that su
+    da ghi) cho quan tri doi soat — dac ta §6. Dieu chinh bu (compensating
+    adjustment) chua co pham vi o day, xem `docs/migrations/
+    SOCIAL_PLAY_V1_GAMES_SCHEMA.md` muc "Ngoai pham vi"."""
+    from dataclasses import asdict
+
+    if not settings.games_v1_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tính năng trò chơi chưa bật.")
+    room = games_store.get_room_by_code(_game_code(code))
+    if room is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phòng.")
+    results = games_store.list_results_for_source(room.match_id)
+    xp_ledger: Dict[str, Any] = {}
+    for r in results:
+        entry_ids = {e["entry_id"] for e in r.xp_entries}
+        xp_ledger[r.user_id] = [
+            e.to_dict() for e in gamification_store.list_xp_events(r.user_id)
+            if e.entry_id in entry_ids]
+    return {
+        "room": asdict(room),
+        "results": [r.to_dict() for r in results],
+        "xp_ledger": xp_ledger,
+    }
 
 
 def owner_profile(profile: Profile = Depends(current_profile)) -> Profile:

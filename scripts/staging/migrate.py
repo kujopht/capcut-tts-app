@@ -38,8 +38,10 @@ PHAM_VI: Dict[str, List[str]] = {
     # `author_stats`: dang bai cap nhat thong ke tac gia NGAY sau khi ghi bai — thieu bang nay thi
     # bai VAN duoc tao nhung request tra 503 (do that tren staging 2026-09-28).
     "nen": ["profiles", "author_stats"],
+    # `novels`: bang tin loc theo fandom (#229) doc truyen de xet bai `story_update` theo fandom cua
+    # truyen — thieu bang nay thi `GET /api/feed?fandom=` tra 503 (do that tren staging 2026-09-28).
     "community_229": ["posts", "post_likes", "comments", "notifications", "content_reports",
-                      "user_blocks", "user_follows", "story_follows", "moderation_events"],
+                      "user_blocks", "user_follows", "story_follows", "moderation_events", "novels"],
     "xp": ["user_progress", "cosmetic_inventory", "xp_ledger", "achievement_unlocks", "reading_streaks",
            "quest_progress", "xp_progress_cas"],
     "games_231": ["game_rooms", "game_room_versions", "game_runs", "game_run_versions", "game_results"],

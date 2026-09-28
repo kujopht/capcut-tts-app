@@ -133,6 +133,9 @@ def lap_ke_hoach(tin_nhan: str, ctx: SupportContext) -> List[Tuple[str, Dict[str
         ke.append(("check_feature_status", {"feature": "tts_worker"}))
     if _co(t, "dang nhap", "login", "dang xuat", "het han", "phien"):
         ke.append(("check_feature_status", {"feature": "login"}))
+    # Doi chieu Sentry CHI khi co ma loi that tu ngu canh (tu khoa do may chu chon, khong phai tin nhan).
+    if ctx.last_error_code:
+        ke.append(("get_recent_sentry_issues", {"code": ctx.last_error_code, "route": ctx.route, "build": ctx.build}))
     ke.append(("get_recent_public_incidents", {}))
     ke.append(("get_sanitized_client_errors", {}))
     # Bo trung, giu thu tu, cat tran.
@@ -201,6 +204,13 @@ def chan_doan(ket_qua: List[Dict[str, Any]], ctx: SupportContext, he_nghi: Optio
     tw = [x for x in ket_qua if x["tool"] == "check_feature_status" and x["data"].get("feature") == "tts_worker"]
     if tw and tw[0]["data"].get("enabled") is False and au and au["data"].get("job_status") in ("pending", "running"):
         them("tts_worker_off", "audio", "medium", "Hàng đợi tạo audio đang chờ bộ xử lý.", "Quản trị viên cần kiểm tra bộ xử lý TTS.", owner=True, confident=False)
+    se = theo.get("get_recent_sentry_issues")
+    if se and se["status"] == "warn":
+        he = sorted(he_nghi or ()) or ["web"]
+        them("error_tracked", he[0], "medium",
+             "Hệ thống giám sát lỗi đã ghi nhận lỗi này" + (" trên đúng bản build bạn đang dùng" if se["data"].get("cung_build") else "") + ".",
+             "Quản trị viên đã có dữ liệu chi tiết để xử lý; bạn vẫn có thể gửi báo cáo kèm mô tả.",
+             confident=False, owner=True)
     inc = theo.get("get_recent_public_incidents")
     if inc and inc["data"].get("incidents"):
         # CHI khi dung phan he dang nghi (tu phat hien + tu khoa/ma loi/trang) —

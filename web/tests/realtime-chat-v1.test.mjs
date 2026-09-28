@@ -201,6 +201,8 @@ test("7. di dong khong tran: dock an, bang/khung co tran chieu rong, mot cot", (
   // Be rong cua so CSS phai khop noi tinh "bao nhieu cua so vua man hinh" (lib/chat/dock.ts).
   assert.match(css, /--chat-win-w: 336px;/);
   assert.match(css, /@media \(max-width: 1279px\) \{ \.chat-win \{ --chat-win-w: 304px; \} \}/);
+  // Cua so 304 px: cap + danh xung MOT dong (do that tren Chrome o 1024 px: tung tach hai dong).
+  assert.match(css, /\.chat-uh-phu \.cap-do-gon \{ display: flex; flex-wrap: nowrap;/);
 });
 
 test("dock: 3 cua so hien toi da (desktop), 1 (may tinh bang), 0 (di dong); moi nhat o dau; tran; phuc hoi", () => {
@@ -309,8 +311,11 @@ test("review doc lap: dang xuat giua chung khong gan phien nguoi truoc cho nguoi
   assert.match(moChat, /if \(status === "kicked"\) return false;/);
   // Qua han tai dong co: quen promise + go ChatEngine de "Thu lai" tai lai that.
   assert.match(p, /choDongCoRef\.current = null;\s*setCanDongCo\(false\);\s*tuChoi\(new Error\("sdk_load_timeout"\)\)/);
-  // Danh tinh loi: hoan 60 s, khong goi lai lien tuc.
-  assert.match(p, /bay - \(hongDanhTinhRef\.current\.get\(id\) \?\? 0\) > 60_000/);
+  // Danh tinh loi: TU hoi lai co lui dan (3 s -> 10 s -> 30 s -> 60 s) — khong goi lai lien tuc, cung khong de
+  // "?" tren cua so toi khi co su kien khac (do that tren Chrome QA).
+  assert.match(p, /const HOI_LAI_DANH_TINH_MS = \[3_000, 10_000, 30_000, 60_000\];/);
+  assert.match(p, /bay >= \(hongDanhTinhRef\.current\.get\(id\)\?\.den \?\? 0\)/);
+  assert.match(p, /if \(profileIdRef\.current && profileIdRef\.current === nguoi\) hoiDanhTinhRef\.current\?\.\(phan\);/);
 });
 
 test("o soan tin: Enter gui, Shift+Enter xuong dong, KHONG gui khi bo go tieng Viet dang soan", () => {

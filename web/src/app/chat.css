@@ -117,6 +117,11 @@ a.chat-uh-nguoi:hover .chat-uh-ten { text-decoration: underline; }
 .chat-uh-chu { display: flex; flex-direction: column; min-width: 0; }
 .chat-uh-ten { font-size: var(--t-base); color: var(--text); }
 .chat-uh-phu { font-size: var(--t-xs); }
+/* Dau cua so hep (304 px, 5 nut): cap + danh xung MOT dong, danh xung cat "…" — `.cap-do-gon` mac dinh
+   xuong dong (do that o 1024 px: "Lv. 1" / "Lữ Khách" tach hai dong). */
+.chat-uh-phu .cap-do-gon { display: flex; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+.chat-uh-phu .cap-do-gon > * { min-width: 0; white-space: nowrap; }
+.chat-uh-phu .cap-do-danh-xung { overflow: hidden; text-overflow: ellipsis; }
 .chat-uh-nut { display: inline-flex; gap: var(--s1); flex: 0 0 auto; }
 
 /* ------------------------------------------ menu "⋯": tat tieng / chan */

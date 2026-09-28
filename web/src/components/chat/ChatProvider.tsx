@@ -223,6 +223,8 @@ function docCo(): boolean {
 }
 
 const KHONG_CO_CUA_SO: DockWindow[] = [];
+/** Hoi lai danh tinh sau loi: lan 1, 2, 3, >= 4. */
+const HOI_LAI_DANH_TINH_MS = [3_000, 10_000, 30_000, 60_000];
 
 /** Cua so + nhap cua TAB nay — `sessionStorage` (moi tab mot dock rieng, dong tab la het). */
 const KHOA_DOCK = "fanfic.chat.dock";
@@ -307,8 +309,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const hengioRef = useRef<number | null>(null);
   const dangNhapLaiRef = useRef<number[]>([]);
   const dangHoiDanhTinhRef = useRef<Set<string>>(new Set());
-  /** id -> luc hoi danh tinh HONG gan nhat; hoan 60 s de mot loi khong thanh vong lap goi lai. */
-  const hongDanhTinhRef = useRef<Map<string, number>>(new Map());
+  /**
+   * id -> {lan hong lien tiep, luc duoc hoi lai}. Mot loi thoang qua (503 cua Appwrite, 429) KHONG duoc de "?"
+   * tren cua so toi khi co su kien khac: tu hoi lai sau 3 s -> 10 s -> 30 s -> 60 s (do that tren Chrome QA:
+   * mot lan hong de "?" ca phut). Luot hoi TU DONG dung hoan nay — khong thanh vong lap dap may chu.
+   */
+  const hongDanhTinhRef = useRef<Map<string, { lan: number; den: number }>>(new Map());
+  const hoiDanhTinhRef = useRef<((ids: string[]) => void) | null>(null);
   /**
    * THE HE phien Fanfic. Tang moi lan dang xuat/doi tai khoan: moi luot mo
    * chat/dang nhap lai dang do dang (dang cho phien, tai chunk SDK, login)
@@ -369,7 +376,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const bay = Date.now();
     const can = [...new Set(ids)].filter(
       (id) => id && !identitiesRef.current[id] && !dangHoiDanhTinhRef.current.has(id)
-        && bay - (hongDanhTinhRef.current.get(id) ?? 0) > 60_000,
+        && bay >= (hongDanhTinhRef.current.get(id)?.den ?? 0),
     );
     if (!can.length) return;
     for (const id of can) dangHoiDanhTinhRef.current.add(id);
@@ -379,6 +386,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       chatApi
         .identities({ chat_user_ids: phan })
         .then((r) => {
+          for (const id of phan) hongDanhTinhRef.current.delete(id);
           setIdentities((cu) => {
             const moi = { ...cu };
             r.items.forEach((it, i) => {
@@ -390,14 +398,24 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         .catch(() => {
           // Moi su kien hoi thoai goi lai ham nay: khong hoan thi mot lo loi
           // se bi gui lai lien tuc va an vao han muc chung cua may chu.
-          const luc = Date.now();
-          for (const id of phan) hongDanhTinhRef.current.set(id, luc);
+          const lan = Math.max(...phan.map((id) => hongDanhTinhRef.current.get(id)?.lan ?? 0)) + 1;
+          const cho = HOI_LAI_DANH_TINH_MS[Math.min(lan, HOI_LAI_DANH_TINH_MS.length) - 1];
+          const den = Date.now() + cho;
+          for (const id of phan) hongDanhTinhRef.current.set(id, { lan, den });
+          const nguoi = profileIdRef.current;
+          window.setTimeout(() => {
+            // Da dang xuat / doi tai khoan trong luc cho -> bo.
+            if (profileIdRef.current && profileIdRef.current === nguoi) hoiDanhTinhRef.current?.(phan);
+          }, cho + 50);
         })
         .finally(() => {
           for (const id of phan) dangHoiDanhTinhRef.current.delete(id);
         });
     }
   }, []);
+  useEffect(() => {
+    hoiDanhTinhRef.current = hoiDanhTinh;
+  }, [hoiDanhTinh]);
 
   /* ------------------------------------------------------ dong co (chunk SDK) */
   /** Render `ChatEngine` va cho no giao ham tao transport; hong/qua han -> reject. */

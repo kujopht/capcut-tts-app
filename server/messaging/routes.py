@@ -151,6 +151,11 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
     async def stream(request: Request, authorization: Optional[str] = Header(default=None)):
         sv = _bat()
         p = await run_in_threadpool(resolve_profile, authorization)
+        # Tach credential PHONG THU (khong dua vao viec resolve_profile da kiem dinh dang).
+        phan = (authorization or "").split(" ", 1)
+        credential = phan[1].strip() if len(phan) == 2 and phan[0].lower() == "bearer" else ""
+        if not credential:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Cần đăng nhập.")
         _han_muc("stream", p.user_id)
         with khoa_luong:
             if dang_mo.get(p.user_id, 0) >= LUONG_DONG_THOI_TOI_DA:
@@ -158,9 +163,8 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
                                     {"code": "chat_too_many_streams", "message": "Đang mở quá nhiều tab tin nhắn."},
                                     headers={"Retry-After": "30"})
             dang_mo[p.user_id] = dang_mo.get(p.user_id, 0) + 1
-        # Credential cho Realtime = CHINH session cua nguoi goi (da xac minh o tren) — de Appwrite tu loc
-        # theo quyen doc. Khong bao gio ghi ra log / tra lai trinh duyet.
-        credential = authorization.split(" ", 1)[1].strip()
+        # `credential` = CHINH session cua nguoi goi (da xac minh o tren) — de Appwrite tu loc theo quyen
+        # doc. Khong bao gio ghi ra log / tra lai trinh duyet.
 
         def tra_cho():
             with khoa_luong:

@@ -142,6 +142,7 @@ Trên Chrome, bài test cũng xác nhận trình duyệt **chỉ gọi web và A
 4. **Chặn của chat tách khỏi `user_blocks` của Community (#229).** Khi #229 vào `main`: gộp thành một chính sách chặn chung (cắm vào `ChatService` qua hợp đồng kho).
 5. **Hộp thư chỉ tải 50 hội thoại gần nhất**; tổng chưa đọc tính trên 50 hội thoại đó.
 6. Hai lần gửi rất sát nhau có thể làm bản xem trước tạm thời là tin áp chót, tới lần ghi sau. Số chưa đọc thì luôn đếm lại chính xác khi đọc.
+7. Trần 8 luồng đồng thời tính **theo từng instance**. Có N worker thì một người giữ được tối đa 8×N luồng. Hạn mức 12 lần mở mỗi phút là lớp chặn chung giữa các instance. Review bảo mật độc lập (Antigravity Claude Opus) đã chấp nhận điểm này (LOW).
 
 ## Bật trên production (CHƯA làm; cần chủ dự án duyệt)
 

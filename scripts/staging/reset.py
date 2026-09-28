@@ -32,25 +32,29 @@ def _xoa_tai_khoan(cfg, apply: bool) -> int:
         if not ds:
             return so
         if not apply:
-            return len(ds) + so
+            # `xac_minh_song` da chung minh MOI tai khoan deu tong hop -> `total` la so se xoa.
+            return int((body or {}).get("total") or len(ds))
         for u in ds:
             guard.goi(cfg, "DELETE", f"/users/{u['$id']}")
             so += 1
 
 
 def _xoa_document(cfg, apply: bool) -> int:
+    """Xoa HANG qua TablesDB (`/tablesdb/{db}/tables/{t}/rows`). KHONG dung API Databases cu o day: khoa
+    staging (Cloud 2.3) chi co scope TablesDB -> API cu tra 401 o tien trinh cha (khong co lop dich) —
+    do that 2026-09-28 (`GET profiles lỗi 401`)."""
     so = 0
     for cid in moi_collection():
-        base = f"/databases/{cfg.database_id}/collections/{cid}/documents"
+        base = f"/tablesdb/{cfg.database_id}/tables/{cid}/rows"
         while True:
             st, body = guard.goi(cfg, "GET", base + "?queries[]=" + quote(guard._json_query("limit", [100])))
             if st == 404:
                 break
             if st != 200:
                 raise SystemExit(f"GET {cid} lỗi {st}")
-            ds = (body or {}).get("documents", [])
+            ds = (body or {}).get("rows", [])
             if not ds or not apply:
-                so += len(ds)
+                so += int((body or {}).get("total") or len(ds)) if not apply else len(ds)
                 break
             for d in ds:
                 guard.goi(cfg, "DELETE", f"{base}/{d['$id']}")

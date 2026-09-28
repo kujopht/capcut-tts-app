@@ -7,7 +7,7 @@ import { ChatErrorState, ChatNetBanner } from "./ChatErrorState";
 import { ConversationList } from "./ConversationList";
 
 export function InboxPopover({ onClose }: { onClose: () => void }) {
-  const { status, openDrawer, unreadTotal } = useChat();
+  const { status, openChat, unreadTotal } = useChat();
   return (
     <div className="menu-panel chat-inbox" role="dialog" aria-label="Tin nhắn">
       <div className="chat-inbox-dau">
@@ -25,7 +25,7 @@ export function InboxPopover({ onClose }: { onClose: () => void }) {
         compact
         limit={8}
         onSelect={(peerId) => {
-          openDrawer(peerId);
+          openChat(peerId);
           onClose();
         }}
       />

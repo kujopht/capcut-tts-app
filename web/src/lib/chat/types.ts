@@ -47,6 +47,16 @@ export interface ChatMessage {
   unsupported?: boolean;
   /** Ma loi cua nha cung cap khi `status === "failed"` (de hien, khong de doan). */
   failCode?: number;
+  /** "sticker": `sticker` la anh nhan dan (tin CHI mang ma, anh o kho tai san); `text` = nhan thay the. */
+  kind?: "text" | "sticker";
+  sticker?: StickerRef | null;
+}
+
+/** Mot nhan dan trong tin / bo chon — `url` do MAY CHU dung (tai san tinh hoac R2). */
+export interface StickerRef {
+  id: string;
+  url: string;
+  alt: string;
 }
 
 export interface ChatConversation {
@@ -93,6 +103,8 @@ export interface ChatTransport {
   history(conversationId: string, cursor?: string | null): Promise<HistoryPage>;
   /** Tra ve tin da tao (trang thai "sending"); cap nhat qua `onStatus`. */
   sendText(peerId: string, text: string, onStatus: (m: ChatMessage) => void): ChatMessage;
+  /** Nhan dan: CHI gui ma; may chu kiem ma + mo khoa. Tuy chon: transport khong ho tro thi an nut. */
+  sendSticker?(peerId: string, sticker: StickerRef, onStatus: (m: ChatMessage) => void): ChatMessage;
   resend(messageId: string, onStatus: (m: ChatMessage) => void): void;
   markRead(conversationId: string): Promise<void>;
   /** Tat/bat tieng MOT hoi thoai. Tuy chon: transport khong ho tro thi giao dien an nut. */

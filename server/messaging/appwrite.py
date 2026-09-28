@@ -61,7 +61,8 @@ def row_to_message(r: Dict[str, Any]) -> Message:
     return Message(id=str(r.get("$id") or ""), conversation_id=str(r.get("conversation_id") or ""),
                    sender_id=str(r.get("sender_id") or ""), recipient_id=str(r.get("recipient_id") or ""),
                    client_id=str(r.get("client_id") or ""), text=str(r.get("text") or ""),
-                   created_at=iso_ms(str(r.get("created_at") or "")), kind=str(r.get("kind") or "text"))
+                   created_at=iso_ms(str(r.get("created_at") or "")), kind=str(r.get("kind") or "text"),
+                   sticker_id=str(r.get("sticker_id") or ""))
 
 
 def row_to_member(r: Dict[str, Any]) -> Member:
@@ -87,8 +88,12 @@ def _row_to_block(r: Dict[str, Any]) -> Block:
 
 
 def _message_data(m: Message) -> Dict[str, Any]:
-    return {"conversation_id": m.conversation_id, "sender_id": m.sender_id, "recipient_id": m.recipient_id,
-            "client_id": m.client_id, "text": m.text, "created_at": m.created_at, "kind": m.kind}
+    d = {"conversation_id": m.conversation_id, "sender_id": m.sender_id, "recipient_id": m.recipient_id,
+         "client_id": m.client_id, "text": m.text, "created_at": m.created_at, "kind": m.kind}
+    # CHI tin nhan dan mang `sticker_id`: tin chu van ghi duoc vao bang CHUA co cot nay (tuong thich nguoc).
+    if m.kind == "sticker":
+        d["sticker_id"] = m.sticker_id
+    return d
 
 
 def _member_data(m: Member) -> Dict[str, Any]:

@@ -37,7 +37,7 @@ export default function MessagesPage() {
 
 function KhongGianTinNhan() {
   const { profile, loading } = useSession();
-  const { moChat, status, openThread, identityOf } = useChat();
+  const { moChat, status, openThread, identityOf, setPageThread } = useChat();
   const params = useSearchParams();
   const router = useRouter();
   const peer = params.get("c");
@@ -57,6 +57,12 @@ function KhongGianTinNhan() {
     daMoPeerRef.current = peer;
     openThread(peer);
   }, [peer, coNoiDung, openThread]);
+
+  // Tin DEN cuoc dang mo o trang nay -> da doc (provider biet "dang xem" cua trang qua day).
+  useEffect(() => {
+    setPageThread(peer);
+    return () => setPageThread(null);
+  }, [peer, setPageThread]);
 
   if (!CHAT_V1_ENABLED) {
     return (

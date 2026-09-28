@@ -91,6 +91,22 @@ export function ChatThread({ peerId }: { peerId: string }) {
     oCuoi.current = true;
   }, [peerId]);
 
+  // "Tai tin cu hon": tin chen vao PHIA TREN — giu nguyen dong dang doc (bu phan chieu cao moi them),
+  // khong de khung nhay ve tin cu nhat.
+  const caoTruocRef = useRef<number | null>(null);
+  const idDau = items.length ? items[0].id : null;
+  useLayoutEffect(() => {
+    const el = hop.current;
+    const truoc = caoTruocRef.current;
+    caoTruocRef.current = null;
+    if (!el || truoc === null) return;
+    el.scrollTop += el.scrollHeight - truoc;
+  }, [idDau]);
+  const taiCu = () => {
+    caoTruocRef.current = hop.current?.scrollHeight ?? null;
+    loadOlder(peerId);
+  };
+
   // Lich su VUA tai xong (hoac doi nguoi) -> ve tin moi nhat. Khong the chi dua
   // vao `idCuoi`: tin den truc tiep truoc khi lich su tai xong da la tin cuoi,
   // lich su chen vao PHIA TRUOC nen `idCuoi` khong doi va khung dung o DAU —
@@ -115,7 +131,7 @@ export function ChatThread({ peerId }: { peerId: string }) {
         role="log" aria-live="polite" aria-label="Tin nhắn">
         {th.cursor ? (
           <div className="chat-tin-cu">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadOlder(peerId)} disabled={th.loadingOlder}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={taiCu} disabled={th.loadingOlder}>
               {th.loadingOlder ? "Đang tải…" : "Tải tin cũ hơn"}
             </button>
           </div>
@@ -136,8 +152,15 @@ export function ChatThread({ peerId }: { peerId: string }) {
               <div key={m.id} className="chat-tin-o">
                 {moNgay ? <div className="chat-tin-ngay"><span>{ngay(m.time)}</span></div> : null}
                 <div className={`chat-tin chat-tin-${m.flow}${noiTiep ? " chat-tin-noi" : ""}${m.status === "failed" ? " chat-tin-loi" : ""}`}>
-                  <div className={`chat-tin-bong${m.unsupported ? " chat-tin-la" : ""}${!m.unsupported && chiEmoji(m.text) ? " chat-tin-emoji" : ""}`}
-                    title={cuoiCum ? undefined : gio(m.time)}>{m.text}</div>
+                  {m.kind === "sticker" && m.sticker ? (
+                    <div className="chat-tin-nd" title={cuoiCum ? m.sticker.alt : `${m.sticker.alt} · ${gio(m.time)}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element -- anh tinh nho tu kho tai san */}
+                      <img src={m.sticker.url} alt={m.sticker.alt} width={112} height={112} loading="lazy" draggable={false} />
+                    </div>
+                  ) : (
+                    <div className={`chat-tin-bong${m.unsupported ? " chat-tin-la" : ""}${!m.unsupported && m.kind !== "sticker" && chiEmoji(m.text) ? " chat-tin-emoji" : ""}`}
+                      title={cuoiCum ? undefined : gio(m.time)}>{m.text}</div>
+                  )}
                   {cuoiCum || coTrangThai ? (
                     <div className="chat-tin-duoi">
                       {cuoiCum ? <time className="chat-tin-gio" dateTime={new Date(m.time).toISOString()}>{gio(m.time)}</time> : null}

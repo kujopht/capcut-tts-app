@@ -37,12 +37,31 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type { TaiTransport } from "./ChatEngine";
-import { ApiError, chatApi, type ChatIdentity, type ChatSessionResponse } from "@/lib/api";
+import {
+  ApiError,
+  chatApi,
+  social,
+  type ChatIdentity,
+  type ChatSessionResponse,
+  type StickerPackDto,
+} from "@/lib/api";
 import { CHAT_V1_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import { dem, ghiLyDo, ghiSdk, ghiTrangThai } from "@/lib/chat/metrics";
+import {
+  dangXem,
+  docDock,
+  docNhap,
+  dongCuaSo,
+  ghiDock,
+  moCuaSo,
+  soCuaSoHien,
+  thuNhoCuaSo,
+  type DockWindow,
+} from "@/lib/chat/dock";
 import {
   conversationIdFor,
   type ChatConversation,
@@ -51,6 +70,7 @@ import {
   type ChatStatus,
   type ChatTransport,
   type KickReason,
+  type StickerRef,
   type TransportHandlers,
 } from "@/lib/chat/types";
 
@@ -106,11 +126,6 @@ export interface ThreadState {
   loadingOlder: boolean;
 }
 
-export interface DrawerState {
-  peerId: string;
-  minimized: boolean;
-}
-
 interface ChatValue {
   status: ChatStatus;
   errorCode: ChatErrorCode | null;
@@ -120,7 +135,15 @@ interface ChatValue {
   unreadTotal: number;
   threads: Record<string, ThreadState>;
   identities: Record<string, ChatIdentity>;
-  drawer: DrawerState | null;
+  /**
+   * Cac cua so chat dang mo (Chat Dock desktop), `dock[0]` = moi nhat (sat mep phai). Rong o `/messages`
+   * (khong gian day du thay the). Song xuyen route va sau khi tai lai trang (`sessionStorage`).
+   */
+  dock: DockWindow[];
+  /** So cua so HIEN duoc theo be rong man hinh (0 = di dong: dung `/messages`). Phan con lai vao ngan tran. */
+  maxVisible: number;
+  /** Nguoi dung CHU DONG mo/khoi phuc mot cua so -> dua tieu diem vao o soan cua no (phuc hoi thi khong). */
+  focusRequest: { peerId: string; n: number } | null;
   drafts: Record<string, string>;
   /** Mo chat (idempotent). `lyDo` duoc ghi vao bo dem lazy-login. */
   moChat: (lyDo: string) => Promise<boolean>;
@@ -128,12 +151,23 @@ interface ChatValue {
   dungOTabNay: () => void;
   thuLai: () => void;
   openThread: (peerId: string) => void;
+  /** Tai danh tinh + lich su (neu chua) ma KHONG danh dau da doc. */
+  ensureThread: (peerId: string) => void;
+  /** Trang /messages dang ky nguoi dang mo (`null` khi roi trang). */
+  setPageThread: (peerId: string | null) => void;
   /** Nut "Nhan tin" o ho so: tim nguoi theo username roi mo hoi thoai. */
   nhanTinVoi: (username: string) => Promise<void>;
-  openDrawer: (peerId: string) => void;
-  minimizeDrawer: (min: boolean) => void;
-  closeDrawer: () => void;
+  /** Mo (hoac dua len dau + bo thu nho) cua so cua mot nguoi. Di dong: dua sang `/messages?c=`. */
+  openChat: (peerId: string) => void;
+  minimizeChat: (peerId: string, min: boolean) => void;
+  closeChat: (peerId: string) => void;
   send: (peerId: string, text: string) => void;
+  /** Nhan dan: CHI gui ma (may chu kiem mo khoa). `false` = transport khong ho tro -> an nut. */
+  canSticker: boolean;
+  sendSticker: (peerId: string, sticker: StickerRef) => void;
+  /** Catalog nhan dan cua NGUOI XEM — tai LUOI lan dau mo bo chon; `null` = chua tai, `[]` = rong/loi. */
+  stickerPacks: StickerPackDto[] | null;
+  loadStickers: () => void;
   retry: (peerId: string, messageId: string) => void;
   loadOlder: (peerId: string) => void;
   markRead: (peerId: string) => void;
@@ -144,6 +178,8 @@ interface ChatValue {
   /** Transport co ho tro tat tieng / chan khong — khong thi giao dien an nut. */
   canMute: boolean;
   canBlock: boolean;
+  /** Bao cao NGUOI DUNG (`ReportDialog` cua Social, capability `user_reports` tu `/api/limits`). */
+  canReport: boolean;
   /** Hop thu da tai tu may chu it nhat MOT lan — truoc do `isMuted` chua biet trang thai that. */
   inboxLoaded: boolean;
   /** Danh sach nguoi minh da chan da tai (hoac tai hong — may chu van tu choi 403, nen khong treo nut). */
@@ -186,6 +222,39 @@ function docCo(): boolean {
   }
 }
 
+const KHONG_CO_CUA_SO: DockWindow[] = [];
+
+/** Cua so + nhap cua TAB nay — `sessionStorage` (moi tab mot dock rieng, dong tab la het). */
+const KHOA_DOCK = "fanfic.chat.dock";
+const KHOA_NHAP = "fanfic.chat.drafts";
+
+function docPhien(khoa: string): string | null {
+  try {
+    return window.sessionStorage.getItem(khoa);
+  } catch {
+    return null;
+  }
+}
+
+function ghiPhien(khoa: string, gt: string | null): void {
+  try {
+    if (gt === null) window.sessionStorage.removeItem(khoa);
+    else window.sessionStorage.setItem(khoa, gt);
+  } catch {
+    /* sessionStorage bi chan — chi mat phuc hoi sau khi tai lai trang */
+  }
+}
+
+function dangKyDoiKichThuoc(bao: () => void): () => void {
+  window.addEventListener("resize", bao);
+  return () => window.removeEventListener("resize", bao);
+}
+
+/** So cua so hien duoc theo be rong CSS that (khong setState trong effect: `useSyncExternalStore`). */
+function useSoCuaSoHien(): number {
+  return useSyncExternalStore(dangKyDoiKichThuoc, () => soCuaSoHien(window.innerWidth), () => 0);
+}
+
 function datCo(bat: boolean): void {
   try {
     if (bat) window.sessionStorage.setItem(CO_PHIEN, "1");
@@ -215,12 +284,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [threads, setThreads] = useState<Record<string, ThreadState>>({});
   const [identities, setIdentities] = useState<Record<string, ChatIdentity>>({});
-  const [drawer, setDrawer] = useState<DrawerState | null>(null);
+  const [dock, setDock] = useState<DockWindow[]>([]);
+  const maxVisible = useSoCuaSoHien();
+  const [focusRequest, setFocusRequest] = useState<{ peerId: string; n: number } | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [chan, setChan] = useState<Record<string, true>>({});
   /** Tat tieng mot hoi thoai CHUA co tin (chua nam trong hop thu) — co tin roi thi hop thu la nguon that. */
   const [tatTieng, setTatTieng] = useState<Record<string, boolean>>({});
-  const [khaNang, setKhaNang] = useState({ mute: false, block: false });
+  const [khaNang, setKhaNang] = useState({ mute: false, block: false, sticker: false });
+  const [goiNhanDan, setGoiNhanDan] = useState<StickerPackDto[] | null>(null);
+  const dangTaiNhanDanRef = useRef(false);
+  const [coBaoCao, setCoBaoCao] = useState(false);
   const [daTaiHopThu, setDaTaiHopThu] = useState(false);
   const [daTaiChan, setDaTaiChan] = useState(false);
   /** `true` = da den luc render `ChatEngine` (tai chunk SDK). Chi bat trong `moChat`. */
@@ -244,15 +318,46 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const theHeRef = useRef(0);
   const dangNhapLaiDangChayRef = useRef(false);
   const identitiesRef = useRef(identities);
-  const drawerRef = useRef(drawer);
+  const dockRef = useRef(dock);
+  const threadsRef = useRef(threads);
+  /** Cuoc dang tai lich su lan dau — xoa khi tai xong/hong (xem `napLichSu`). */
+  const dangTaiRef = useRef<Set<string>>(new Set());
+  const maxVisibleRef = useRef(maxVisible);
+  const pathnameRef = useRef(pathname);
+  /** Nguoi dang mo o TRANG `/messages` (trang tu dang ky qua `setPageThread`) — "dang xem" cua trang do. */
+  const pagePeerRef = useRef<string | null>(null);
   const profileIdRef = useRef<string | null>(null);
+
+  /**
+   * Ban luu cua TAB nay (cua so dang mo + nhap) — doc MOT lan luc hydrate. Khong render ra gi nen khong lech
+   * hydration; duoc ap vao state khi chat tu mo lai (`resume`, xem effect phien ben duoi).
+   */
+  const [banLuu] = useState<{ dock: DockWindow[]; nhap: Record<string, string> } | null>(() =>
+    typeof window === "undefined" ? null : { dock: docDock(docPhien(KHOA_DOCK)), nhap: docNhap(docPhien(KHOA_NHAP)) });
+  /** CHUA phuc hoi thi KHONG ghi de ban luu bang trang thai rong luc mount. */
+  const daPhucHoiRef = useRef(false);
 
   useEffect(() => {
     identitiesRef.current = identities;
   }, [identities]);
   useEffect(() => {
-    drawerRef.current = drawer;
-  }, [drawer]);
+    dockRef.current = dock;
+    if (daPhucHoiRef.current) ghiPhien(KHOA_DOCK, dock.length ? ghiDock(dock) : null);
+  }, [dock]);
+  useEffect(() => {
+    maxVisibleRef.current = maxVisible;
+  }, [maxVisible]);
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
+  useEffect(() => {
+    if (!daPhucHoiRef.current) return;
+    const coNoiDung = Object.fromEntries(Object.entries(drafts).filter(([, v]) => v.trim()));
+    ghiPhien(KHOA_NHAP, Object.keys(coNoiDung).length ? JSON.stringify(coNoiDung) : null);
+  }, [drafts]);
 
   const doiTrangThai = useCallback((s: ChatStatus) => {
     setStatus(s);
@@ -438,11 +543,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             doiTrangThai(typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "ready");
             ghiSdk("logged-in");
             const tt = transportRef.current;
-            setKhaNang({ mute: !!tt?.setMuted, block: !!tt?.setBlocked });
+            setKhaNang({ mute: !!tt?.setMuted, block: !!tt?.setBlocked, sticker: !!tt?.sendSticker });
             tt?.blockedPeers?.()
               .then((ds) => setChan(Object.fromEntries(ds.map((id) => [id, true as const]))))
               .catch(() => {})
               .finally(() => setDaTaiChan(true));
+            // Nut Bao cao chi hien khi MAY CHU bat `user_reports` (khong doan tu phia web).
+            social.limits().then((l) => setCoBaoCao(Boolean(l.capabilities?.user_reports))).catch(() => {});
             transportRef.current
               ?.conversations()
               .then((ds) => {
@@ -458,10 +565,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           onMessages: (ds) => {
             ganTin(ds);
             hoiDanhTinh(ds.map((m) => (m.flow === "in" ? m.from : m.to)));
-            const dang = drawerRef.current;
-            if (dang && !dang.minimized && document.visibilityState === "visible"
-              && ds.some((m) => m.conversationId === conversationIdFor(dang.peerId))) {
-              transportRef.current?.markRead(conversationIdFor(dang.peerId)).catch(() => {});
+            // "Da doc" CHI khi cuoc do dang DUOC XEM THAT: mot cua so dang HIEN (khong thu nho, khong o ngan
+            // tran) — hoac dang mo o trang /messages — va tab dang hien. Tin den cua so thu nho/tran: van
+            // chua doc (cham so tren cua so / ngan tran / nut Tin nhan).
+            if (document.visibilityState !== "visible") return;
+            const trangTin = pathnameRef.current?.startsWith("/messages") ?? false;
+            const nguoi = new Set(ds.filter((m) => m.flow === "in").map((m) => m.from));
+            for (const peer of nguoi) {
+              const xem = trangTin ? pagePeerRef.current === peer
+                : dangXem(dockRef.current, maxVisibleRef.current, peer);
+              if (xem) transportRef.current?.markRead(conversationIdFor(peer)).catch(() => {});
             }
           },
           onConversations: (ds) => {
@@ -575,6 +688,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       phienRef.current = null;
       if (hengioRef.current !== null) window.clearTimeout(hengioRef.current);
       datCo(false);
+      // Cua so + nhap cua nguoi TRUOC khong duoc song sot sang tai khoan sau tren may dung chung.
+      ghiPhien(KHOA_DOCK, null);
+      ghiPhien(KHOA_NHAP, null);
       void t?.logout().catch(() => {}).finally(() => t?.destroy().catch(() => {}));
       queueMicrotask(() => {
         doiTrangThai("idle");
@@ -585,19 +701,33 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setMe(null);
         setConversations([]);
         setThreads({});
+        dangTaiRef.current.clear();
         setUnreadTotal(0);
-        setDrawer(null);
+        setDock([]);
         setDrafts({});
         setChan({});
         setTatTieng({});
-        setKhaNang({ mute: false, block: false });
+        setKhaNang({ mute: false, block: false, sticker: false });
+        setGoiNhanDan(null);
+        dangTaiNhanDanRef.current = false;
+        setCoBaoCao(false);
         setDaTaiHopThu(false);
         setDaTaiChan(false);
       });
     }
-    // Da bat tin nhan trong tab nay truoc khi tai lai trang -> mo lai.
-    if (id && !cu && docCo()) queueMicrotask(() => void moChat("resume"));
-  }, [profile?.user_id, doiTrangThai, moChat]);
+    // Da bat tin nhan trong tab nay truoc khi tai lai trang -> mo lai, KEM cac cua so + nhap dang do.
+    if (id && !cu) {
+      const moLai = docCo();
+      queueMicrotask(() => {
+        if (moLai && banLuu) {
+          setDock(banLuu.dock);
+          setDrafts((d) => ({ ...banLuu.nhap, ...d }));
+        }
+        daPhucHoiRef.current = true;
+        if (moLai) void moChat("resume");
+      });
+    }
+  }, [profile?.user_id, doiTrangThai, moChat, banLuu]);
 
   /* ------------------------------------------------------- mang cua trinh duyet */
   useEffect(() => {
@@ -618,13 +748,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   /* ------------------------------------------------------------- hoi thoai */
   const napLichSu = useCallback((peerId: string, cu = false) => {
     const t = transportRef.current;
-    if (!t) return;
     const cid = conversationIdFor(peerId);
+    if (!t) {
+      dangTaiRef.current.delete(cid);
+      return;
+    }
     setThreads((ds) => {
       const th = ds[cid] ?? { items: [], cursor: null, loaded: false, loadingOlder: false };
       return { ...ds, [cid]: { ...th, loadingOlder: cu } };
     });
-    const conTro = cu ? threads[cid]?.cursor ?? null : null;
+    const conTro = cu ? threadsRef.current[cid]?.cursor ?? null : null;
     t.history(cid, conTro)
       .then((trang) => {
         setThreads((ds) => {
@@ -637,24 +770,60 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           const th = ds[cid] ?? { items: [], cursor: null, loaded: false, loadingOlder: false };
           return { ...ds, [cid]: { ...th, loaded: true, loadingOlder: false } };
         });
+      })
+      .finally(() => {
+        dangTaiRef.current.delete(cid);
       });
-  }, [threads]);
+  }, []);
 
   const markRead = useCallback((peerId: string) => {
     transportRef.current?.markRead(conversationIdFor(peerId)).catch(() => {});
   }, []);
 
-  const openThread = useCallback((peerId: string) => {
+  /** Tai danh tinh + lich su (neu chua) — KHONG danh dau da doc (cua so thu nho/tran/vua phuc hoi). */
+  const ensureThread = useCallback((peerId: string) => {
     hoiDanhTinh([peerId]);
-    const th = threads[conversationIdFor(peerId)];
-    if (!th?.loaded) napLichSu(peerId);
-    markRead(peerId);
-  }, [hoiDanhTinh, markRead, napLichSu, threads]);
+    const cid = conversationIdFor(peerId);
+    const th = threadsRef.current[cid];
+    // Mot luot tai dang bay cho moi cuoc (nhieu cua so / effect goi cung luc khong nhan doi request).
+    if (!th?.loaded && !dangTaiRef.current.has(cid)) {
+      dangTaiRef.current.add(cid);
+      napLichSu(peerId);
+    }
+  }, [hoiDanhTinh, napLichSu]);
 
-  const openDrawer = useCallback((peerId: string) => {
-    setDrawer({ peerId, minimized: false });
+  const openThread = useCallback((peerId: string) => {
+    ensureThread(peerId);
+    markRead(peerId);
+  }, [ensureThread, markRead]);
+
+  const openChat = useCallback((peerId: string) => {
+    if (maxVisibleRef.current === 0) {
+      // Di dong: KHONG co cua so noi — cuoc tro chuyen toan man hinh o /messages.
+      router.push(`/messages?c=${encodeURIComponent(peerId)}`);
+      return;
+    }
+    setDock((ds) => moCuaSo(ds, peerId));
+    setFocusRequest((f) => ({ peerId, n: (f?.n ?? 0) + 1 }));
     openThread(peerId);
-  }, [openThread]);
+  }, [openThread, router]);
+
+  const minimizeChat = useCallback((peerId: string, min: boolean) => {
+    setDock((ds) => thuNhoCuaSo(ds, peerId, min));
+    if (!min) {
+      setFocusRequest((f) => ({ peerId, n: (f?.n ?? 0) + 1 }));
+      markRead(peerId);
+    }
+  }, [markRead]);
+
+  const closeChat = useCallback((peerId: string) => {
+    setDock((ds) => dongCuaSo(ds, peerId));
+  }, []);
+
+  /** Trang /messages dang ky nguoi dang mo (hoac `null` khi roi) — de tin den duoc danh dau da doc dung. */
+  const setPageThread = useCallback((peerId: string | null) => {
+    pagePeerRef.current = peerId;
+  }, []);
 
   const nhanTinVoi = useCallback(async (username: string) => {
     const ok = await moChat("profile-dm");
@@ -671,13 +840,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setIdentities((cu) => ({ ...cu, [it.chat_user_id as string]: it }));
-      const nho = window.matchMedia(MAN_HINH_CHAT_NHO).matches;
-      if (nho) router.push(`/messages?c=${encodeURIComponent(it.chat_user_id)}`);
-      else openDrawer(it.chat_user_id);
+      openChat(it.chat_user_id);
     } catch {
       router.push("/messages");
     }
-  }, [moChat, openDrawer, router]);
+  }, [moChat, openChat, router]);
 
   const send = useCallback((peerId: string, text: string) => {
     const t = transportRef.current;
@@ -687,6 +854,23 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     ganTin([tin]);
     setDrafts((cu) => ({ ...cu, [peerId]: "" }));
   }, [ganTin]);
+
+  const sendSticker = useCallback((peerId: string, sticker: StickerRef) => {
+    const t = transportRef.current;
+    if (!t?.sendSticker) return;
+    ganTin([t.sendSticker(peerId, sticker, (m) => ganTin([m]))]);
+  }, [ganTin]);
+
+  const loadStickers = useCallback(() => {
+    if (dangTaiNhanDanRef.current) return;
+    dangTaiNhanDanRef.current = true;
+    chatApi.stickers()
+      .then((r) => setGoiNhanDan(r.packs))
+      .catch(() => {
+        setGoiNhanDan([]);
+        dangTaiNhanDanRef.current = false; // lan mo bo chon sau thu lai
+      });
+  }, []);
 
   const retry = useCallback((_peerId: string, messageId: string) => {
     const t = transportRef.current;
@@ -703,10 +887,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const loadOlder = useCallback((peerId: string) => napLichSu(peerId, true), [napLichSu]);
 
-  const minimizeDrawer = useCallback((min: boolean) => {
-    setDrawer((d) => (d ? { ...d, minimized: min } : d));
-  }, []);
-  const closeDrawer = useCallback(() => setDrawer(null), []);
   const setDraft = useCallback((peerId: string, text: string) => {
     setDrafts((cu) => ({ ...cu, [peerId]: text }));
   }, []);
@@ -734,19 +914,22 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Vao /messages thi drawer nhuong cho khong gian lam viec day du.
-  const drawerHien = drawer && !pathname?.startsWith("/messages") ? drawer : null;
+  // Vao /messages thi dock nhuong cho khong gian lam viec day du (cac cua so VAN con, hien lai khi roi trang).
+  const dockHien = pathname?.startsWith("/messages") ? KHONG_CO_CUA_SO : dock;
 
   const value = useMemo<ChatValue>(() => ({
     status, errorCode, kickReason, me, conversations, unreadTotal, threads, identities,
-    drawer: drawerHien, drafts, moChat, dungOTabNay, thuLai, openThread, nhanTinVoi, openDrawer,
-    minimizeDrawer, closeDrawer, send, retry, loadOlder, markRead, setDraft, identityOf,
-    blocked: chan, canMute: khaNang.mute, canBlock: khaNang.block, inboxLoaded: daTaiHopThu,
+    dock: dockHien, maxVisible, focusRequest, drafts, moChat, dungOTabNay, thuLai, openThread, ensureThread, setPageThread,
+    nhanTinVoi, openChat, minimizeChat, closeChat, send, canSticker: khaNang.sticker, sendSticker,
+    stickerPacks: goiNhanDan, loadStickers, retry, loadOlder, markRead, setDraft, identityOf,
+    blocked: chan, canMute: khaNang.mute, canBlock: khaNang.block, canReport: coBaoCao, inboxLoaded: daTaiHopThu,
     blocksLoaded: daTaiChan, isMuted, setMuted, setBlocked,
-  }), [status, errorCode, kickReason, me, conversations, unreadTotal, threads, identities, drawerHien,
-    drafts, moChat, dungOTabNay, thuLai, openThread, nhanTinVoi, openDrawer, minimizeDrawer, closeDrawer,
-    send, retry, loadOlder, markRead, setDraft, identityOf, chan, khaNang, daTaiHopThu, daTaiChan, isMuted,
-    setMuted, setBlocked]);
+  }), [coBaoCao,status, errorCode, kickReason, me, conversations, unreadTotal, threads, identities, dockHien, maxVisible,
+    focusRequest,
+    drafts, moChat, dungOTabNay, thuLai, openThread, ensureThread, setPageThread, nhanTinVoi, openChat,
+    minimizeChat, closeChat, send, sendSticker, goiNhanDan, loadStickers, retry, loadOlder, markRead, setDraft,
+    identityOf, chan, khaNang, daTaiHopThu,
+    daTaiChan, isMuted, setMuted, setBlocked]);
 
   return (
     <ChatContext.Provider value={value}>

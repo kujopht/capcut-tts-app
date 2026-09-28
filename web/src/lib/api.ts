@@ -4594,6 +4594,17 @@ export interface ChatMessageDto {
   text: string;
   /** Mili-giay. */
   time: number;
+  kind?: "text" | "sticker";
+  sticker?: { id: string; url: string; alt: string } | null;
+}
+
+/** Bo chon nhan dan (`GET /api/chat/stickers`) — trang thai khoa la CUA NGUOI XEM, do may chu quyet. */
+export interface StickerPackDto {
+  id: string;
+  name: string;
+  locked: boolean;
+  unlock: { kind: "free" | "level" | "achievement" | "event" | "season"; label: string };
+  stickers: { id: string; url: string; alt: string }[];
 }
 
 /** Mot hoi thoai trong hop thu (`member_dto`). */
@@ -4653,7 +4664,8 @@ export const chatApi = {
     const s = p.toString();
     return request<{ messages: ChatMessageDto[]; cursor: string | null }>(`${peerPath(peer)}/messages${s ? `?${s}` : ""}`);
   },
-  send: (peer: string, body: { client_id: string; text: string }) =>
+  stickers: () => request<{ packs: StickerPackDto[] }>("/api/chat/stickers"),
+  send: (peer: string, body: { client_id: string; text?: string; kind?: "text" | "sticker"; sticker_id?: string }) =>
     request<{ message: ChatMessageDto; created: boolean }>(`${peerPath(peer)}/messages`, {
       method: "POST",
       body: JSON.stringify(body),

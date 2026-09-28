@@ -4406,7 +4406,22 @@ class _ChanQuaSocial:
 _chan_chinh_tac = (_ChanQuaSocial() if capabilities_for(data_backend=settings.data_backend,
                                                         social_v1_schema=settings.social_v1_schema).get("blocks")
                    else None)
-messaging_runtime = _build_messaging_runtime(settings, user_exists=_nguoi_chat_ton_tai, blocks=_chan_chinh_tac)
+
+
+def _nguoi_gui_nhan_dan(uid: str) -> Any:
+    """Cap XP CONG KHAI cua nguoi gui — may chu quyet mo khoa goi nhan dan (`messaging/stickers.py`). Doc
+    khong duoc -> Lv. 0: goi co dieu kien VAN KHOA (fail closed), goi mien phi khong bi anh huong."""
+    from server.messaging.stickers import NguoiXem
+
+    try:
+        tien_do = gamification_store.get_progress_by_ids([uid]).get(uid)
+        return NguoiXem(level=int(cong_khai_cap_do(tien_do)["level"] or 0))
+    except Exception:  # noqa: BLE001
+        return NguoiXem()
+
+
+messaging_runtime = _build_messaging_runtime(settings, user_exists=_nguoi_chat_ton_tai, blocks=_chan_chinh_tac,
+                                             viewer_of=_nguoi_gui_nhan_dan)
 app.include_router(build_messaging_router(messaging_runtime, resolve_profile=_nguoi_xem_chat))
 
 

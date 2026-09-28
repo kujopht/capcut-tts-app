@@ -63,6 +63,15 @@ from server.messaging.ids import (
     message_row_id,
 )
 from server.messaging.repository import ChatRepository
+from server.messaging.stickers import (
+    DEFAULT_CATALOG,
+    NguoiXem,
+    StickerCatalog,
+    StickerPack,
+    catalog_dto,
+    mo_khoa,
+    sticker_dto,
+)
 
 log = logging.getLogger("fanfic.messaging")
 _DIEU_KHIEN = re.compile(r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f​-‏‪-‮⁦-⁩]")
@@ -121,12 +130,28 @@ class RepoBlocks:
 
 class ChatService:
     def __init__(self, repo: ChatRepository, *, user_exists: Callable[[str], bool],
-                 clock: Callable[[], str] = now_iso, blocks: Optional[BlockSource] = None) -> None:
+                 clock: Callable[[], str] = now_iso, blocks: Optional[BlockSource] = None,
+                 stickers: StickerCatalog = DEFAULT_CATALOG,
+                 viewer_of: Optional[Callable[[str], NguoiXem]] = None) -> None:
         self.repo = repo
         self._co_nguoi = user_exists
         self._gio = clock
         self._nho_nguoi: Dict[str, float] = {}
         self.blocks: BlockSource = blocks or RepoBlocks(repo, clock)
+        self.stickers = stickers
+        #: Cap/thanh tich cua NGUOI GUI de quyet mo khoa goi nhan dan (may chu quyet). Khong co nguon -> Lv. 0.
+        self._nguoi_xem = viewer_of or (lambda _uid: NguoiXem())
+
+    def sticker_catalog(self, me: str) -> Dict[str, Any]:
+        return catalog_dto(self._nguoi_xem(me), self.stickers)
+
+    def _kiem_nhan_dan(self, me: str, sticker_id: Optional[str]) -> Tuple[str, Optional[StickerPack]]:
+        """Ma hop le -> (nhan thay the, goi can kiem mo khoa — `None` = goi mien phi, khong can I/O)."""
+        st = self.stickers.get(sticker_id or "")
+        goi = self.stickers.pack(st.pack_id) if st else None
+        if st is None or goi is None:
+            raise ChatInvalid("Nhãn dán không tồn tại.", code="chat_sticker_unknown")
+        return f"Nhãn dán: {st.alt}", (None if goi.unlock.kind == "free" else goi)
 
     # ------------------------------------------------------------------ nguoi kia
     def _ton_tai(self, uid: str) -> bool:
@@ -194,12 +219,15 @@ class ChatService:
 
     # ------------------------------------------------------------------ gui
     def send(self, me: str, peer_chat_id: str, client_id: str, text: Any, *,
+             kind: str = "text", sticker_id: Optional[str] = None,
              defer: Optional[Callable[..., Any]] = None,
              timing: Optional[Dict[str, float]] = None) -> Tuple[Message, bool]:
         """`defer(fn)`: chay `fn` SAU khi tra loi (vd `BackgroundTasks.add_task`). Chi ban xem truoc hop
         thu duoc hoan — no idempotent va tu sua o lan gui sau. Tin + "+1 chua doc" LUON xong truoc khi
         tra loi: mot lan gui lai phai tu hoan tat duoc, nen khong buoc nao "con no" duoc hoan.
-        `timing`: neu co, ghi mili-giay tung buoc (route dua vao header `Server-Timing`)."""
+        `timing`: neu co, ghi mili-giay tung buoc (route dua vao header `Server-Timing`).
+        `kind="sticker"`: `sticker_id` phai co trong catalog va goi cua no MO KHOA cho nguoi gui (may chu
+        quyet); `text` bi bo qua — tin luu nhan thay the "Nhãn dán: …"."""
         do = timing if timing is not None else {}
         t0 = time.perf_counter()
 
@@ -210,7 +238,13 @@ class ChatService:
             t0 = t
 
         peer = self._peer_id(me, peer_chat_id)
-        van_ban = lam_sach_van_ban(text)
+        goi_khoa: Optional[StickerPack] = None
+        if kind == "sticker":
+            van_ban, goi_khoa = self._kiem_nhan_dan(me, sticker_id)
+        elif kind == "text":
+            van_ban = lam_sach_van_ban(text)
+        else:
+            raise ChatInvalid("Loại tin nhắn không hỗ trợ.", code="chat_bad_kind")
         try:
             mid = message_row_id(client_id)
         except ValueError as exc:
@@ -221,16 +255,21 @@ class ChatService:
         f_chan = _POOL.submit(self.blocks.blocked_between, me, peer)
         f_tv = _POOL.submit(self.repo.get_members, cid)
         f_gd = _POOL.submit(self.repo.stage_fanout, mid, member_row_id(cid, peer))
+        # Goi nhan dan CO DIEU KIEN (cap/su kien...): doc nguoi gui SONG SONG voi cac phep kiem khac.
+        f_mo = _POOL.submit(self._nguoi_xem, me) if goi_khoa is not None else None
         gd: Any = None
         try:
             if not f_nguoi.result():
                 raise ChatNotFound("Không tìm thấy người này.", code="chat_peer_not_found")
             if f_chan.result():
                 raise ChatForbidden("Không gửi được tin nhắn cho người này.", code="chat_blocked")
+            if f_mo is not None and goi_khoa is not None and not mo_khoa(goi_khoa, f_mo.result()):
+                raise ChatForbidden(goi_khoa.unlock.label or "Nhãn dán này chưa mở khoá.", code="chat_sticker_locked")
             tv = self._dam_bao_thanh_vien(cid, me, peer, co_san=f_tv.result())
             moc("kiem")
             moi = Message(id=mid, conversation_id=cid, sender_id=me, recipient_id=peer, client_id=client_id,
-                          text=van_ban, created_at=self._gio())
+                          text=van_ban, created_at=self._gio(), kind=kind,
+                          sticker_id=(sticker_id or "") if kind == "sticker" else "")
             try:
                 tin, tao_moi = self.repo.create_message(moi), True
             except RepoConflict:
@@ -360,8 +399,13 @@ class ChatService:
     @staticmethod
     def message_dto(viewer: str, m: Message) -> Dict[str, Any]:
         kia = m.recipient_id if m.sender_id == viewer else m.sender_id
-        return {"id": m.id, "client_id": m.client_id, "peer_id": chat_user_id(kia),
-                "from_me": m.sender_id == viewer, "text": m.text, "time": epoch_ms(m.created_at)}
+        d: Dict[str, Any] = {"id": m.id, "client_id": m.client_id, "peer_id": chat_user_id(kia),
+                             "from_me": m.sender_id == viewer, "text": m.text, "time": epoch_ms(m.created_at),
+                             "kind": m.kind or "text"}
+        if m.kind == "sticker":
+            # Ma khong con trong catalog -> `sticker: null`: giao dien hien nhan thay the (`text`).
+            d["sticker"] = sticker_dto(m.sticker_id)
+        return d
 
     @staticmethod
     def member_dto(m: Member) -> Dict[str, Any]:

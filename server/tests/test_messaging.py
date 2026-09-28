@@ -223,6 +223,65 @@ class GuiIdempotentTest(MessagingCase):
         self.assertEqual(self.hop_thu(hb)["items"][0]["unread"], 1)
 
 
+class NhanDanTest(MessagingCase):
+    """Nhan dan: tin CHI mang `sticker_id` (khong nhung anh); may chu quyet mo khoa theo cap nguoi gui."""
+
+    def gui_nd(self, hd, peer, n, sticker_id):
+        return self.client.post(f"/api/chat/dm/{peer}/messages", headers=hd,
+                                json={"client_id": cid(n), "kind": "sticker", "sticker_id": sticker_id})
+
+    def test_catalog_theo_nguoi_xem_goi_mien_phi_mo_goi_cap_khoa(self):
+        _, a, ha = self.nguoi("sk")
+        r = self.client.get("/api/chat/stickers", headers=ha)
+        self.assertEqual(r.status_code, 200, r.text)
+        goi = {p["id"]: p for p in r.json()["packs"]}
+        self.assertFalse(goi["coban"]["locked"])
+        self.assertTrue(goi["tacgia"]["locked"])
+        self.assertEqual(goi["tacgia"]["unlock"], {"kind": "level", "label": "Mở khoá ở Lv. 5"})
+        self.assertTrue(goi["sukien"]["locked"])
+        s = goi["coban"]["stickers"][0]
+        self.assertEqual((s["id"], s["url"], s["alt"]), ("coban.vay-tay", "/stickers/dev/coban-vay-tay.svg", "Vẫy tay"))
+        self.assertEqual(self.client.get("/api/chat/stickers").status_code, 401)
+
+    def test_gui_nhan_dan_mien_phi_luu_ma_khong_luu_anh_idempotent(self):
+        ua, a, ha = self.nguoi("sa")
+        ub, b, hb = self.nguoi("sb")
+        r = self.gui_nd(ha, b, 70, "coban.tim")
+        self.assertEqual(r.status_code, 200, r.text)
+        m = r.json()["message"]
+        self.assertEqual((m["kind"], m["sticker"]["id"], m["text"]), ("sticker", "coban.tim", "Nhãn dán: Thả tim"))
+        luu = self.repo.get_message(m["id"])
+        self.assertEqual((luu.kind, luu.sticker_id), ("sticker", "coban.tim"))
+        self.assertFalse(self.gui_nd(ha, b, 70, "coban.tim").json()["created"], "gửi lại cùng client_id")
+        ls = self.client.get(f"/api/chat/dm/{a}/messages", headers=hb).json()["messages"]
+        self.assertEqual([(x["kind"], x["sticker"]["url"]) for x in ls], [("sticker", "/stickers/dev/coban-tim.svg")])
+        self.assertEqual(self.hop_thu(hb)["items"][0]["unread"], 1)
+
+    def test_goi_khoa_403_mo_khi_du_cap_ma_la_400(self):
+        from server.messaging.stickers import NguoiXem
+
+        _, a, ha = self.nguoi("la")
+        _, b, _ = self.nguoi("lb")
+        r = self.gui_nd(ha, b, 71, "tacgia.tuyet-pham")
+        self.assertEqual((r.status_code, r.json()["detail"]["code"]), (403, "chat_sticker_locked"))
+        self.assertEqual(self.gui_nd(ha, b, 72, "sukien.phao-hoa").json()["detail"]["code"], "chat_sticker_locked")
+        self.rt.service = self.sv = ChatService(self.repo, user_exists=server_main._nguoi_chat_ton_tai,
+                                                viewer_of=lambda _uid: NguoiXem(level=5))
+        self.assertEqual(self.gui_nd(ha, b, 73, "tacgia.tuyet-pham").status_code, 200)
+        r = self.gui_nd(ha, b, 74, "coban.khong-co")
+        self.assertEqual((r.status_code, r.json()["detail"]["code"]), (400, "chat_sticker_unknown"))
+        self.assertEqual(self.gui_nd(ha, b, 75, "../../etc/passwd").status_code, 422)
+        # Tin chu rong VAN bi tu choi nhu truoc (text gio co mac dinh "" o hinh dang request).
+        r = self.client.post(f"/api/chat/dm/{b}/messages", headers=ha, json={"client_id": cid(76)})
+        self.assertEqual(r.json()["detail"]["code"], "chat_empty")
+
+    def test_ban_xem_truoc_hop_thu_la_nhan_thay_the(self):
+        _, a, ha = self.nguoi("pv")
+        _, b, hb = self.nguoi("pw")
+        self.gui_nd(ha, b, 77, "coban.cam-on")
+        self.assertEqual(self.hop_thu(hb)["items"][0]["last_text"], "Nhãn dán: Cảm ơn")
+
+
 class ChanChinhTacSocialTest(MessagingCase):
     """Chan MUC TAI KHOAN cua chat = Social Play V1 (#229): MOT hang `user_blocks`, MOT tac dung phu. Chan o
     chat hien o `/api/me/blocks` (va bo theo doi hai chieu nhu nut Chan cua ho so); chan o ho so lam chat 403;
@@ -651,6 +710,20 @@ class _RepoAppwriteChung:
             self.repo.create_message(m)
         self.assertEqual(self.repo.get_message(m.id).text, "t")
         self.assertEqual([x.id for x in self.repo.list_messages("dm_1")], [m.id])
+
+    def test_sticker_id_chi_ghi_cho_tin_nhan_dan(self):
+        """Tin chu KHONG mang cot `sticker_id` -> van ghi duoc vao bang tao TRUOC khi co cot nay."""
+        chu = Message(id="m_" + cid(11), conversation_id="dm_1", sender_id="A", recipient_id="B", client_id=cid(11),
+                      text="t", created_at="2026-09-28T00:00:00.000+00:00")
+        self.repo.create_message(chu)
+        self.assertNotIn("sticker_id", self.aw.goi[-1][2]["data"])
+        nd = Message(id="m_" + cid(12), conversation_id="dm_1", sender_id="A", recipient_id="B", client_id=cid(12),
+                     text="Nhãn dán: OK", created_at="2026-09-28T00:00:01.000+00:00", kind="sticker",
+                     sticker_id="coban.ok")
+        self.repo.create_message(nd)
+        self.assertEqual(self.aw.goi[-1][2]["data"]["sticker_id"], "coban.ok")
+        self.assertEqual((self.repo.get_message(nd.id).kind, self.repo.get_message(nd.id).sticker_id),
+                         ("sticker", "coban.ok"))
 
     def test_phat_tan_dung_mot_lan_bang_hang_danh_dau(self):
         self.aw.rows["chat_members"] = {"cm_b": {"$id": "cm_b", "unread_count": 0}}

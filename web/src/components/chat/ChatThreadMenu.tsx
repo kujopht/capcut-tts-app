@@ -1,26 +1,42 @@
 "use client";
 
 /**
- * Menu "⋯" o dau cuoc tro chuyen (drawer + /messages):
+ * Menu "⋯" o dau cuoc tro chuyen (cua so dock + /messages):
  *
+ *   Xem hồ sơ — trang ca nhan Fanfic cua nguoi kia.
+ *   Mở trong trang Tin nhắn — CHI o cua so dock (`coTrangTin`).
  *   Tat / Bat thong bao — RIENG hoi thoai nay (`chat_members.muted`): tin van den, chi khong tinh vao
  *     tong tren nut Tin nhan. Lam ngay, bam lai la dao nguoc.
- *   Chan / Bo chan — MUC TAI KHOAN (hang `user_blocks`, cung dinh dang voi chan o trang ca nhan): hai
- *     ben khong gui tin moi cho nhau duoc nua; lich su cu van con, khong ai bi bao "ban da bi chan".
- *     Chan la thao tac manh -> ConfirmDialog (danger). Bo chan thi lam ngay.
+ *   Chan / Bo chan — MUC TAI KHOAN (`user_blocks` cua Social, #229 — CUNG thao tac voi nut Chan o trang ca
+ *     nhan): hai ben khong gui tin moi cho nhau duoc nua; lich su cu van con, khong ai bi bao "ban da bi
+ *     chan". Chan la thao tac manh -> ConfirmDialog (danger). Bo chan thi lam ngay.
+ *   Báo cáo — `ReportDialog` cua Social (nguoi dung), CHI khi may chu bat `user_reports`.
  *
- * Hop thoai render qua PORTAL vao `body`: `.chat-drawer` co `backdrop-filter` nen moi `position: fixed`
+ * Hop thoai render qua PORTAL vao `body`: cua so chat co `backdrop-filter` nen moi `position: fixed`
  * ben trong bi giam trong khung (va bi `overflow: hidden` cat).
  *
  * Noi goi dat `key={peerId}`: doi nguoi = mount moi — menu/hop thoai/loi cua cuoc truoc khong mang sang.
  */
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ReportDialog } from "@/components/ReportDialog";
 import { ConfirmDialog } from "@/components/ui";
 import { useChat } from "./ChatProvider";
 
-export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName: string }) {
-  const { canMute, canBlock, inboxLoaded, blocksLoaded, isMuted, blocked, setMuted, setBlocked } = useChat();
+export function ChatThreadMenu({ peerId, peerName, coTrangTin = false }: {
+  peerId: string;
+  peerName: string;
+  /** Cua so dock: them "Mở trong trang Tin nhắn". */
+  coTrangTin?: boolean;
+}) {
+  const { canMute, canBlock, canReport, inboxLoaded, blocksLoaded, isMuted, blocked, setMuted, setBlocked,
+    identityOf } = useChat();
+  const router = useRouter();
+  const it = identityOf(peerId);
+  const hoSo = it?.found && it.username ? `/u/${it.username}` : null;
+  const [baoCao, setBaoCao] = useState(false);
   const [mo, setMo] = useState(false);
   const [hoiChan, setHoiChan] = useState(false);
   const [dangLam, setDangLam] = useState(false);
@@ -52,7 +68,8 @@ export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName:
     return () => cancelAnimationFrame(khung);
   }, [mo, inboxLoaded, blocksLoaded]);
 
-  if (!canMute && !canBlock) return null;
+  const coBaoCaoNguoi = canReport && Boolean(it?.found && it.user_id);
+  if (!canMute && !canBlock && !hoSo && !coTrangTin && !coBaoCaoNguoi) return null;
 
   const dongMenu = () => {
     setMo(false);
@@ -134,6 +151,22 @@ export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName:
       </button>
       {mo ? (
         <div id={menuId} className="chat-menu-bang" role="menu" aria-label="Tuỳ chọn cuộc trò chuyện">
+          {hoSo ? (
+            <Link href={hoSo} role="menuitem" className="chat-menu-muc" prefetch={false} onClick={() => setMo(false)}>
+              <span aria-hidden="true">👤</span>
+              Xem hồ sơ
+            </Link>
+          ) : null}
+          {coTrangTin ? (
+            <button type="button" role="menuitem" className="chat-menu-muc"
+              onClick={() => {
+                setMo(false);
+                router.push(`/messages?c=${encodeURIComponent(peerId)}`);
+              }}>
+              <span aria-hidden="true">⤢</span>
+              Mở trong trang Tin nhắn
+            </button>
+          ) : null}
           {/* Chua tai hop thu / danh sach chan: CHUA BIET trang thai that -> khoa muc, khong doan. */}
           {canMute ? (
             <button type="button" role="menuitem" className="chat-menu-muc" disabled={!inboxLoaded}
@@ -169,7 +202,20 @@ export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName:
               </button>
             )
           ) : null}
+          {coBaoCaoNguoi ? (
+            <button type="button" role="menuitem" className="chat-menu-muc"
+              onClick={() => {
+                setMo(false);
+                setBaoCao(true);
+              }}>
+              <span aria-hidden="true">🚩</span>
+              Báo cáo
+            </button>
+          ) : null}
         </div>
+      ) : null}
+      {baoCao && it?.user_id ? (
+        <ReportDialog targetKind="user" targetId={it.user_id} targetName={peerName} onClose={() => setBaoCao(false)} />
       ) : null}
       {loi && !hoiChan ? <span className="chat-menu-loi" role="alert">{loi}</span> : null}
       {hoiChan && typeof document !== "undefined"
@@ -187,7 +233,8 @@ export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName:
                     Hai bạn sẽ không gửi được tin nhắn mới cho nhau. Tin nhắn cũ vẫn còn trong lịch sử. {peerName} không
                     nhận được thông báo nào về việc này.
                   </p>
-                  <p>Chặn áp dụng cho cả tài khoản — giống chặn ở trang cá nhân. Bạn có thể bỏ chặn bất cứ lúc nào.</p>
+                  <p>Chặn áp dụng cho cả tài khoản — là CÙNG một lần chặn với nút Chặn ở trang cá nhân. Bạn có thể bỏ
+                    chặn bất cứ lúc nào.</p>
                   {loi ? <p className="chat-menu-loi-hop" role="alert">{loi}</p> : null}
                 </>
               }

@@ -816,6 +816,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("text", "string", True, 2000),
             ("created_at", "datetime", True, None),
             ("kind", "string", False, 16),
+            # kind "sticker": CHI ma nhan dan (`server/messaging/stickers.py`) — KHONG nhung anh; anh o R2.
+            # `text` cua tin nhan dan = nhan thay the ("Nhãn dán: …") cho ban xem truoc/doc man hinh.
+            ("sticker_id", "string", False, 64),
         ],
         "indexes": [
             # lich su (moi nhat truoc, con tro) + tin moi nhat cho ban xem truoc

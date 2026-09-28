@@ -49,9 +49,11 @@ def _co(e: Mapping[str, str], ten: str) -> Optional[bool]:
 
 
 def build_runtime(settings: Any, *, user_exists: Callable[[str], bool],
-                  env: Optional[Mapping[str, str]] = None, blocks: Optional[Any] = None) -> MessagingRuntime:
+                  env: Optional[Mapping[str, str]] = None, blocks: Optional[Any] = None,
+                  viewer_of: Optional[Callable[[str], Any]] = None) -> MessagingRuntime:
     """`blocks`: nguon chan CHINH TAC (Social Play V1, #229 — `server/main.py::_ChanQuaSocial`). `None` = doc/
-    ghi thang cung hang `user_blocks` qua kho chat (`service.RepoBlocks`)."""
+    ghi thang cung hang `user_blocks` qua kho chat (`service.RepoBlocks`). `viewer_of`: cap/thanh tich cua
+    nguoi gui cho luat mo khoa nhan dan (`stickers.py`)."""
     e = os.environ if env is None else env
     appwrite = str(getattr(settings, "data_backend", "mock")).lower() == "appwrite"
     bat = _co(e, "FAS_CHAT_V1")
@@ -62,7 +64,7 @@ def build_runtime(settings: Any, *, user_exists: Callable[[str], bool],
                                 reason="FAS_CHAT_V1 chưa bật" + (" (DATA_BACKEND=appwrite)" if appwrite else ""))
     if not appwrite:
         repo = InMemoryChatRepository()
-        return MessagingRuntime(True, ChatService(repo, user_exists=user_exists, blocks=blocks),
+        return MessagingRuntime(True, ChatService(repo, user_exists=user_exists, blocks=blocks, viewer_of=viewer_of),
                                 InMemoryEventSource(repo), "memory")
     api = (e.get("FAS_CHAT_APPWRITE_API") or "legacy").strip().lower()
     if api not in KHO_APPWRITE:
@@ -73,5 +75,5 @@ def build_runtime(settings: Any, *, user_exists: Callable[[str], bool],
 
     repo = (LegacyAppwriteChatRepository if api == "legacy" else TablesDBChatRepository)(settings)
     # Realtime dang ky ten kenh KIEU CU — do that: Cloud 2.3 phat ca hai kieu ten, 1.9.6 phat kieu cu.
-    return MessagingRuntime(True, ChatService(repo, user_exists=user_exists, blocks=blocks),
+    return MessagingRuntime(True, ChatService(repo, user_exists=user_exists, blocks=blocks, viewer_of=viewer_of),
                             AppwriteRealtimeSource(settings), f"appwrite-{api}")

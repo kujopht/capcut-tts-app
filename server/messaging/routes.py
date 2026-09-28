@@ -3,7 +3,9 @@ Route nhan tin — `/api/chat/*`. Moi route CHI cho nguoi da dang nhap, moi rout
 
     GET  /api/chat/conversations                   hop thu (moi nhat truoc) + tong chua doc (tru tat tieng)
     GET  /api/chat/dm/{peer}/messages?before=&after=&limit=
-    POST /api/chat/dm/{peer}/messages              {client_id, text} — idempotent theo client_id
+    POST /api/chat/dm/{peer}/messages              {client_id, text} | {client_id, kind:"sticker", sticker_id}
+                                                   — idempotent theo client_id
+    GET  /api/chat/stickers                        bo chon nhan dan: goi + trang thai khoa CUA NGUOI XEM
     POST /api/chat/dm/{peer}/read                  {up_to?}
     POST /api/chat/dm/{peer}/mute                  {muted}
     POST /api/chat/dm/{peer}/block                 {blocked}
@@ -17,7 +19,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -45,7 +47,11 @@ MsgId = Annotated[str, StringConstraints(min_length=4, max_length=36, pattern=r"
 class SendIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     client_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9]{16,32}$")]
-    text: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
+    #: Tin chu: bat buoc (service kiem rong/qua dai). Tin nhan dan: bo qua.
+    text: Annotated[str, StringConstraints(max_length=4000)] = ""
+    kind: Literal["text", "sticker"] = "text"
+    sticker_id: Optional[Annotated[str, StringConstraints(min_length=3, max_length=64,
+                                                          pattern=r"^[a-z0-9]+\.[a-z0-9-]+$")]] = None
 
 
 class ReadIn(BaseModel):
@@ -117,6 +123,7 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
         _han_muc("send", p.user_id)
         # Ban xem truoc hop thu cap nhat SAU khi tra loi (idempotent, tu sua) — nguoi gui khong phai cho.
         tin, moi = _chay(lambda: sv.send(p.user_id, peer, payload.client_id, payload.text,
+                                         kind=payload.kind, sticker_id=payload.sticker_id,
                                          defer=background.add_task, timing=do))
         do["tong"] = round((time.perf_counter() - t0) * 1000, 1)
         # `Server-Timing` (chuan W3C): CHI ten buoc + mili-giay — khong du lieu nguoi dung nao.
@@ -152,6 +159,16 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
         p = resolve_profile(authorization)
         _han_muc("read", p.user_id)
         return {"items": _chay(lambda: sv.blocked_chat_ids(p.user_id))}
+
+    @r.get("/api/chat/stickers")
+    def stickers(response: Response, authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+        """Bo chon nhan dan: moi goi + trang thai khoa CUA NGUOI XEM (may chu quyet, trinh duyet chi hien)."""
+        sv = _bat()
+        p = resolve_profile(authorization)
+        _han_muc("read", p.user_id)
+        # Rieng tung nguoi (khoa theo cap) — khong cache chung; cho phep trinh duyet giu ngan.
+        response.headers["Cache-Control"] = "private, max-age=300"
+        return _chay(lambda: sv.sticker_catalog(p.user_id))
 
     @r.get("/api/chat/stream")
     async def stream(request: Request, authorization: Optional[str] = Header(default=None)):

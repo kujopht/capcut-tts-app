@@ -16,7 +16,7 @@ import { Logo } from "@/components/Logo";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
 import { ChatProvider } from "@/components/chat/ChatProvider";
-import { ChatDrawer } from "@/components/chat/ChatDrawer";
+import { ChatDock } from "@/components/chat/ChatDock";
 
 // Mo ta cu noi ve viec tao audio truoc tien. San pham nay la nen tang doc va
 // nghe fanfic; Audio Studio la cong cu phu. Mo ta cung phai noi theo thu tu do.
@@ -208,8 +208,9 @@ export default function RootLayout({
                 dang phat, hoac khi dang o chinh trang doc chuong do (trang
                 do da co trinh phat lon + thanh nho theo cuon rieng). */}
             <GlobalMiniPlayer />
-            {/* Khung chat ben phai (desktop) — tu an khi chua mo hoi thoai nao va o /messages. */}
-            <ChatDrawer />
+            {/* Chat Dock: cua so chat noi goc duoi-phai (desktop/may tinh bang) — tu an khi chua mo cuoc
+                nao, o /messages va tren di dong. */}
+            <ChatDock />
           </AudioEngineProvider>
           </ChatProvider>
           </ToastProvider>

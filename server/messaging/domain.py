@@ -58,6 +58,8 @@ class Message:
     text: str
     created_at: str
     kind: str = "text"
+    #: kind "sticker": ma trong catalog (`stickers.py`); anh KHONG nam trong tin (anh o R2 / tai san tinh).
+    sticker_id: str = ""
 
     @property
     def readers(self) -> List[str]:

@@ -3,7 +3,7 @@
  * test chay thang bang `node --test` (Node bo kieu; import GIA TRI tuong doi can duoi tep). Xem
  * `fanficTransport.ts`.
  */
-import type { ChatConversation, ChatMessage } from "./types";
+import type { ChatConversation, ChatMessage, StickerRef } from "./types";
 
 /** = `conversationIdFor` o `types.ts` (test ep hai ben khop). */
 export const khoaHoiThoai = (peerId: string): string => `C2C${peerId}`;
@@ -17,6 +17,10 @@ export interface MessageDto {
   from_me: boolean;
   text: string;
   time: number;
+  /** Vang = "text" (may chu cu). */
+  kind?: "text" | "sticker";
+  /** Tin nhan dan: `null` = ma khong con trong catalog -> hien nhan thay the (`text`). */
+  sticker?: StickerRef | null;
 }
 
 export interface ConversationDto {
@@ -69,6 +73,7 @@ export function doiTin(me: string, d: MessageDto, status: ChatMessage["status"] 
     text: d.text,
     time: d.time,
     status,
+    ...(d.kind === "sticker" ? { kind: "sticker" as const, sticker: d.sticker ?? null } : {}),
   };
 }
 

@@ -26,6 +26,7 @@ import {
   peerIdFromConversation,
   type ChatMessage,
   type ChatTransport,
+  type StickerRef,
   type TransportHandlers,
 } from "./types";
 import type { ChatSessionResponse } from "@/lib/api";
@@ -35,6 +36,8 @@ interface DangGui {
   clientId: string;
   text: string;
   time: number;
+  /** Tin nhan dan: gui LAI cung ma (cung `client_id`) — khong bao gio gui anh. */
+  sticker?: StickerRef;
 }
 
 /**
@@ -218,27 +221,41 @@ export async function taiFanficTransport(_phien: ChatSessionResponse, h: Transpo
     choTim = null;
   };
 
+  /** Tin "dang gui"/"hong" hien NGAY (lac quan) — cung ID ma may chu se luu (`m_<client_id>`). */
+  const tinTam = (id: string, g: DangGui, status: ChatMessage["status"], failCode?: number): ChatMessage => ({
+    id,
+    conversationId: conversationIdFor(g.peerId),
+    from: toi,
+    to: g.peerId,
+    flow: "out",
+    text: g.text,
+    time: g.time,
+    status,
+    ...(failCode !== undefined ? { failCode } : {}),
+    ...(g.sticker ? { kind: "sticker" as const, sticker: g.sticker } : {}),
+  });
+
   const guiThat = (id: string, g: DangGui, onStatus: (m: ChatMessage) => void) => {
     chatApi
-      .send(g.peerId, { client_id: g.clientId, text: g.text })
+      .send(g.peerId, g.sticker
+        ? { client_id: g.clientId, kind: "sticker", sticker_id: g.sticker.id }
+        : { client_id: g.clientId, text: g.text })
       .then((r) => {
         dangGui.delete(id);
         ghiMoiNhat(r.message.peer_id, r.message.id, r.message.time);
         onStatus(doiTin(toi, r.message));
       })
       .catch((e: unknown) => {
-        onStatus({
-          id,
-          conversationId: conversationIdFor(g.peerId),
-          from: toi,
-          to: g.peerId,
-          flow: "out",
-          text: g.text,
-          time: g.time,
-          status: "failed",
-          failCode: e instanceof ApiError ? e.status : undefined,
-        });
+        onStatus(tinTam(id, g, "failed", e instanceof ApiError ? e.status : undefined));
       });
+  };
+
+  const guiMoi = (g: DangGui, onStatus: (m: ChatMessage) => void): ChatMessage => {
+    const id = `m_${g.clientId}`;
+    dangGui.set(id, g);
+    daMo.add(g.peerId);
+    guiThat(id, g, onStatus);
+    return tinTam(id, g, "sending");
   };
 
   return {
@@ -267,13 +284,12 @@ export async function taiFanficTransport(_phien: ChatSessionResponse, h: Transpo
       return { messages: r.messages.map((d) => doiTin(toi, d)), cursor: r.cursor };
     },
     sendText(peerId, text, onStatus) {
-      const clientId = taoClientId();
-      const id = `m_${clientId}`;
-      const g: DangGui = { peerId, clientId, text, time: Date.now() };
-      dangGui.set(id, g);
-      daMo.add(peerId);
-      guiThat(id, g, onStatus);
-      return { id, conversationId: conversationIdFor(peerId), from: toi, to: peerId, flow: "out", text, time: g.time, status: "sending" };
+      return guiMoi({ peerId, clientId: taoClientId(), text, time: Date.now() }, onStatus);
+    },
+    sendSticker(peerId, sticker, onStatus) {
+      // `text` tam = nhan thay the (giong may chu luu) — ban xem truoc/doc man hinh dung ngay luc gui.
+      return guiMoi({ peerId, clientId: taoClientId(), text: `Nhãn dán: ${sticker.alt}`, time: Date.now(), sticker },
+        onStatus);
     },
     resend(messageId, onStatus) {
       const g = dangGui.get(messageId);

@@ -29,6 +29,28 @@ import {
   tongChuaDoc,
 } from "../src/lib/chat/fanficProtocol.ts";
 import { conversationIdFor } from "../src/lib/chat/types.ts";
+import {
+  CUA_SO_RONG,
+  CUA_SO_RONG_HEP,
+  DOCK_TOI_DA,
+  chiaCuaSo,
+  dangXem,
+  docDock,
+  docNhap,
+  dongCuaSo,
+  ghiDock,
+  moCuaSo,
+  soCuaSoHien,
+  thuNhoCuaSo,
+} from "../src/lib/chat/dock.ts";
+import {
+  GAN_DAY_TOI_DA,
+  PREFS_RONG,
+  docPrefs,
+  doiYeuThich,
+  khoaPrefs,
+  themGanDay,
+} from "../src/lib/chat/stickerPrefs.ts";
 
 const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const read = (p) => readFileSync(new URL(`../src/${p}`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
@@ -98,7 +120,9 @@ test("1c. dang nhap Fanfic KHONG mo chat: phien Fanfic va cai dat nut khong goi 
   // "profile-dm" CHI nam trong `nhanTinVoi` (nguoi dung bam nut o ho so).
   const nhanTin = p.slice(p.indexOf("const nhanTinVoi = useCallback"), p.indexOf("const send = useCallback"));
   assert.match(nhanTin, /await moChat\("profile-dm"\)/);
-  assert.match(p, /if \(id && !cu && docCo\(\)\) queueMicrotask\(\(\) => void moChat\("resume"\)\)/);
+  // Tu mo lai CHI khi tab nay DA bat chat (co sessionStorage) — kem phuc hoi cua so + nhap.
+  assert.match(p, /if \(id && !cu\) \{\s*const moLai = docCo\(\);/);
+  assert.match(p, /if \(moLai\) void moChat\("resume"\);/);
   // chatApi.session CHI trong xinPhien.
   assert.equal((p.match(/chatApi\s*\.session\(/g) ?? []).length, 1);
   const launcher = codeOnly(read("components/chat/ChatLauncher.tsx"));
@@ -129,14 +153,14 @@ test("7b. di dong: cuoc tro chuyen phu man hinh THAT — bo transform/backdrop-f
   assert.match(css, /\.chat-co-hoi-thoai \{ -webkit-backdrop-filter: none; backdrop-filter: none; \}/);
 });
 
-test("3+6. provider + drawer gan o LAYOUT (song xuyen route), khong o trang nao", () => {
+test("3+6. provider + ChatDock gan o LAYOUT (song xuyen route), khong o trang nao", () => {
   const layout = codeOnly(read("app/layout.tsx"));
   assert.match(layout, /<ChatProvider>/);
-  assert.match(layout, /<ChatDrawer \/>/);
+  assert.match(layout, /<ChatDock \/>/);
   assert.ok(layout.indexOf("<ChatProvider>") < layout.indexOf("<main id=\"main\">"), "ChatProvider phải bao ngoài {children}");
   for (const p of moiTep(join(SRC, "app"))) {
     if (tuongDoi(p) === "app/layout.tsx") continue;
-    assert.ok(!/<ChatProvider|<ChatDrawer/.test(readFileSync(p, "utf8")), `${tuongDoi(p)} tự gắn ChatProvider/ChatDrawer — sẽ mất kết nối khi đổi trang`);
+    assert.ok(!/<ChatProvider|<ChatDock|<ChatWindow/.test(readFileSync(p, "utf8")), `${tuongDoi(p)} tự gắn ChatProvider/ChatDock — sẽ mất kết nối khi đổi trang`);
   }
 });
 
@@ -165,15 +189,84 @@ test("5. so chua doc cap nhat sau khi khoi tao: su kien luong -> state -> nut (t
   assert.match(launcher, /aria-label=\{unreadTotal > 0 \? `Tin nhắn, \$\{unreadTotal\} chưa đọc` : "Tin nhắn"\}/);
 });
 
-test("7. di dong khong tran: drawer an, bang/khung co tran chieu rong, mot cot", () => {
+test("7. di dong khong tran: dock an, bang/khung co tran chieu rong, mot cot", () => {
   const css = readFileSync(new URL("../src/app/chat.css", import.meta.url), "utf8");
   const mobile = css.slice(css.indexOf("@media (max-width: 640px)"));
-  assert.match(mobile, /\.chat-drawer, \.chat-drawer-thu \{ display: none; \}/);
+  assert.match(mobile, /\.chat-dock \{ display: none; \}/, "điện thoại: KHÔNG có cửa sổ nổi — /messages toàn màn hình");
   assert.match(mobile, /\.chat-khong-gian \{ grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(mobile, /\.chat-nut \{ width: 44px; height: 44px; \}/, "nút chạm tối thiểu 44px");
   assert.match(mobile, /env\(safe-area-inset-bottom/, "ô soạn tin phải tránh vùng an toàn đáy");
   assert.match(css, /\.chat-inbox \{\s*width: min\(360px, calc\(100vw - 32px\)\);/);
-  assert.match(css, /\.chat-drawer \{[\s\S]*?width: min\(440px, calc\(100vw - 32px\)\);/);
+  assert.match(css, /\.chat-dock \{[\s\S]*?max-width: calc\(100vw - 32px\);/);
+  // Be rong cua so CSS phai khop noi tinh "bao nhieu cua so vua man hinh" (lib/chat/dock.ts).
+  assert.match(css, /--chat-win-w: 336px;/);
+  assert.match(css, /@media \(max-width: 1279px\) \{ \.chat-win \{ --chat-win-w: 304px; \} \}/);
+});
+
+test("dock: 3 cua so hien toi da (desktop), 1 (may tinh bang), 0 (di dong); moi nhat o dau; tran; phuc hoi", () => {
+  assert.equal(soCuaSoHien(1600), 3);
+  assert.equal(soCuaSoHien(1440), 3);
+  assert.equal(soCuaSoHien(1024), 3, "1024: 3 cửa sổ 304px vẫn vừa");
+  assert.equal(soCuaSoHien(1023), 1);
+  assert.equal(soCuaSoHien(768), 1);
+  assert.equal(soCuaSoHien(640), 0);
+  assert.equal(soCuaSoHien(390), 0);
+  assert.equal(CUA_SO_RONG, 336);
+  assert.equal(CUA_SO_RONG_HEP, 304);
+  let ds = [];
+  for (const p of ["fw_a", "fw_b", "fw_c", "fw_d"]) ds = moCuaSo(ds, p);
+  assert.deepEqual(ds.map((c) => c.peerId), ["fw_d", "fw_c", "fw_b", "fw_a"], "mới nhất ở đầu (sát mép phải)");
+  const { hien, tran } = chiaCuaSo(ds, 3);
+  assert.deepEqual([hien.map((c) => c.peerId), tran.map((c) => c.peerId)], [["fw_d", "fw_c", "fw_b"], ["fw_a"]]);
+  ds = thuNhoCuaSo(ds, "fw_c", true);
+  assert.equal(dangXem(ds, 3, "fw_c"), false, "thu nhỏ = không đang xem (không đánh dấu đã đọc)");
+  assert.equal(dangXem(ds, 3, "fw_a"), false, "ở ngăn tràn = không đang xem");
+  assert.equal(dangXem(ds, 3, "fw_d"), true);
+  ds = moCuaSo(ds, "fw_a");
+  assert.deepEqual(ds.map((c) => c.peerId), ["fw_a", "fw_d", "fw_c", "fw_b"], "mở từ ngăn tràn = đưa lên đầu");
+  ds = moCuaSo(ds, "fw_c");
+  assert.equal(ds[0].minimized, false, "mở lại = bỏ thu nhỏ");
+  assert.deepEqual(dongCuaSo(ds, "fw_d").map((c) => c.peerId), ["fw_c", "fw_a", "fw_b"]);
+  let nhieu = [];
+  for (let i = 0; i < 12; i += 1) nhieu = moCuaSo(nhieu, `fw_${i}`);
+  assert.equal(nhieu.length, DOCK_TOI_DA, "tổng số cửa sổ có trần");
+  assert.deepEqual(docDock(ghiDock(ds)), ds);
+  for (const rac of [null, "", "{", "[1,2]", '[{"peerId":"../x"}]', '{"peerId":"fw_a"}']) {
+    assert.deepEqual(docDock(rac), [], String(rac));
+  }
+  assert.deepEqual(docDock('[{"peerId":"fw_a"},{"peerId":"fw_a","minimized":true}]'), [{ peerId: "fw_a", minimized: false }]);
+  assert.deepEqual(docNhap('{"fw_a":"xin chào","fw_b":"   ","../x":"y","fw_c":3}'), { fw_a: "xin chào" });
+});
+
+test("dock: cua so da doc dung + phuc hoi khong cuop tieu diem + khong nhan doi request lich su", () => {
+  const p = provider();
+  // Tin den: da doc CHI khi cuoc do dang HIEN (khong thu nho, khong tran) hoac dang mo o /messages.
+  assert.match(p, /const xem = trangTin \? pagePeerRef\.current === peer\s*: dangXem\(dockRef\.current, maxVisibleRef\.current, peer\);/);
+  // Ban luu doc MOT lan luc hydrate; KHONG ghi de truoc khi phuc hoi.
+  assert.match(p, /if \(daPhucHoiRef\.current\) ghiPhien\(KHOA_DOCK/);
+  // Dang xuat: xoa cua so + nhap cua nguoi truoc.
+  assert.match(p, /ghiPhien\(KHOA_DOCK, null\);\s*ghiPhien\(KHOA_NHAP, null\);/);
+  // Mot luot tai lich su dang bay cho moi cuoc.
+  assert.match(p, /if \(!th\?\.loaded && !dangTaiRef\.current\.has\(cid\)\)/);
+  const cs = codeOnly(read("components/chat/ChatWindow.tsx"));
+  // Tieu diem CHI khi nguoi dung chu dong mo/khoi phuc (focusRequest), khong phai moi lan mount.
+  assert.match(cs, /if \(minimized \|\| focusRequest\?\.peerId !== peerId\) return;/);
+  // Thu nho: tai lich su nhung KHONG danh dau da doc.
+  assert.match(cs, /if \(minimized\) ensureThread\(peerId\);\s*else openThread\(peerId\);/);
+  // Escape trong hop thoai (portal) khong dong cua so.
+  assert.match(cs, /closest\?\.\('\.modal, \[aria-modal="true"\]'\)/);
+  // Di dong: mo chat = /messages toan man hinh.
+  assert.match(p, /if \(maxVisibleRef\.current === 0\) \{[\s\S]*?router\.push\(`\/messages\?c=/);
+});
+
+test("dau cuoc tro chuyen: nut goi thoai/video VO HIEU HOA (TRTC sau), khong trang thai truc tuyen gia", () => {
+  const goi = codeOnly(read("components/chat/ChatCallButtons.tsx"));
+  assert.match(goi, /disabled=\{!kha\.voice\}/);
+  assert.match(goi, /disabled=\{!kha\.video\}/);
+  assert.ok(!/getUserMedia|RTCPeerConnection|trtc/i.test(goi), "chưa được xin micro/camera hay tải TRTC");
+  assert.match(codeOnly(read("lib/chat/calls.ts")), /export const CALLS_UNAVAILABLE: CallCapabilities = \{ voice: false, video: false \};/);
+  const hdr = read("components/chat/ChatUserHeader.tsx");
+  assert.ok(!/online|truc tuyen|đang hoạt động/i.test(codeOnly(hdr)), "không có chấm 'đang hoạt động' khi máy chủ chưa có trạng thái thật");
 });
 
 test("8. loi phien co giao dien TRUNG THUC cho moi ma loi", () => {
@@ -256,7 +349,7 @@ test("lam muot tin nhan: vach ngay Hôm nay/Hôm qua, gio o tin CUOI cum, emoji 
 });
 
 test("khong bay o soan vo dung khi loi/bi day; danh xung cung thu tu voi trang ca nhan", () => {
-  for (const f of ["components/chat/ChatDrawer.tsx", "app/messages/page.tsx"]) {
+  for (const f of ["components/chat/ChatWindow.tsx", "app/messages/page.tsx"]) {
     assert.match(codeOnly(read(f)), /\{status === "error" \|\| status === "kicked" \? null : \(\s*<ChatComposer/, f);
   }
   // MOT cach hien thi mot nguoi o moi noi (#229): avatar + khung = `UserAvatar`, cap/danh xung =
@@ -297,7 +390,7 @@ test("noi lai co tran va client_id hop le voi may chu (idempotent theo m_<client
   assert.notEqual(taoClientId(), id);
   const t = transport();
   // Tin "dang gui" dung CUNG ID may chu se luu -> giao dien gop, khong nhan doi; gui lai = cung client_id.
-  assert.match(t, /const id = `m_\$\{clientId\}`;/);
+  assert.match(t, /const id = `m_\$\{g\.clientId\}`;/);
   assert.match(t, /resend\(messageId, onStatus\) \{\s*const g = dangGui\.get\(messageId\);\s*if \(g\) guiThat\(messageId, g, onStatus\);/);
   // Sau noi lai: tai lai hop thu + bu khoang trong TRUOC khi bao da ket noi.
   assert.match(t, /await taiHopThu\(\)\.catch\(\(\) => \{\}\);\s*await buKhoangTrong\(\)\.catch\(\(\) => \{\}\);\s*h\.onNetState\("connected"\);/);
@@ -316,32 +409,35 @@ test("noi lai co tran va client_id hop le voi may chu (idempotent theo m_<client
   assert.match(t, /async destroy\(\) \{\s*dong = true;\s*tatNghe\(\);/, "gỡ listener/interval khi huỷ");
 });
 
-test("chan / tat tieng: nut THAT o drawer + /messages, chan qua ConfirmDialog (portal), bo chan thay o soan", () => {
+test("chan / tat tieng: nut THAT o cua so dock + /messages, chan qua ConfirmDialog (portal), bo chan thay o soan", () => {
   const menu = codeOnly(read("components/chat/ChatThreadMenu.tsx"));
   // Chan la thao tac manh -> hop thoai xac nhan danger; tat tieng/bo chan lam ngay.
   assert.match(menu, /<ConfirmDialog\s+open\s+danger/);
   assert.match(menu, /await setBlocked\(peerId, true\);/);
   assert.match(menu, /await setBlocked\(peerId, false\);/);
   assert.match(menu, /await setMuted\(peerId, !tatTieng\);/);
-  // `.chat-drawer` co backdrop-filter: position:fixed ben trong bi giam -> hop thoai PHAI portal ra body.
+  // Cua so dock co backdrop-filter/transform: position:fixed ben trong bi giam -> hop thoai PHAI portal ra body.
   assert.match(menu, /createPortal\(\s*<ConfirmDialog[\s\S]*?document\.body,?\s*\)/);
-  // Escape trong menu chi dong menu; Escape trong hop thoai khong dong ca drawer.
+  // Escape trong menu chi dong menu; Escape trong hop thoai (chan / bao cao) khong dong ca cua so.
   assert.match(menu, /e\.key === "Escape"\) \{\s*e\.stopPropagation\(\);/);
-  assert.match(codeOnly(read("components/chat/ChatDrawer.tsx")), /e\.key === "Escape" && !\(e\.target as Element \| null\)\?\.closest\?\.\("\.modal"\)/);
+  assert.match(codeOnly(read("components/chat/ChatWindow.tsx")), /e\.key === "Escape" && !\(e\.target as Element \| null\)\?\.closest\?\.\('\.modal, \[aria-modal="true"\]'\)/);
   assert.match(menu, /role="menu"/);
   assert.match(menu, /aria-haspopup="menu"/);
-  for (const p of ["components/chat/ChatDrawer.tsx", "app/messages/page.tsx"]) {
+  for (const p of ["components/chat/ChatWindow.tsx", "app/messages/page.tsx"]) {
     // `key` = nguoi kia: doi cuoc tro chuyen thi menu/hop thoai/loi cu KHONG mang sang.
-    assert.match(codeOnly(read(p)), /<ChatThreadMenu key=\{(drawer\.peerId|peer)\} peerId=\{\1\}/, `${p} thiếu menu chặn/tắt tiếng`);
+    assert.match(codeOnly(read(p)), /<ChatThreadMenu key=\{(peerId|peer)\} peerId=\{\1\}/, `${p} thiếu menu chặn/tắt tiếng`);
   }
   // Minh da chan: khong co o soan — thay bang dong thong bao + Bo chan.
   const soan = codeOnly(read("components/chat/ChatComposer.tsx"));
   assert.match(soan, /if \(blocked\[props\.peerId\]\) return <DaChan/);
   // Provider: danh sach chan tai MOT lan khi san sang; transport khong ho tro -> an nut.
   const p = provider();
-  assert.match(p, /setKhaNang\(\{ mute: !!tt\?\.setMuted, block: !!tt\?\.setBlocked \}\);/);
+  assert.match(p, /setKhaNang\(\{ mute: !!tt\?\.setMuted, block: !!tt\?\.setBlocked, sticker: !!tt\?\.sendSticker \}\);/);
   assert.match(p, /tt\?\.blockedPeers\?\.\(\)/);
-  assert.match(menu, /if \(!canMute && !canBlock\) return null;/);
+  // Menu con muc Xem ho so / Mo trong trang Tin nhan / Bao cao -> chi an khi KHONG con muc nao.
+  assert.match(menu, /if \(!canMute && !canBlock && !hoSo && !coTrangTin && !coBaoCaoNguoi\) return null;/);
+  assert.match(menu, /\{canMute \? \(/);
+  assert.match(menu, /\{canBlock \? \(/);
   // Ngay sau khi tai lai trang, hop thu/danh sach chan CHUA ve: khong duoc hien trang thai doan (do that
   // tren Chrome QA — menu tung hien "Tắt thông báo" cho mot hoi thoai DA tat tieng).
   assert.match(menu, /disabled=\{!inboxLoaded\}/);
@@ -377,4 +473,50 @@ test("nut Nhan tin o ho so: khong cho khach, khong cho chinh minh, khong khi dan
   assert.match(nhanhKhac, /\{!p\.viewer_relation\?\.blocked \? \(\s*<StartChatButton/);
   const nut = codeOnly(read("components/chat/StartChatButton.tsx"));
   assert.match(nut, /if \(!profile\) return null;/);
+});
+
+test("o soan: Enter gui, Shift+Enter xuong dong, IME an toan, chong gui trung, dinh kem vo hieu (khong gia vo)", () => {
+  const s = codeOnly(read("components/chat/ChatComposer.tsx"));
+  assert.match(s, /if \(e\.key !== "Enter" \|\| e\.shiftKey\) return;/);
+  assert.match(s, /if \(e\.nativeEvent\.isComposing \|\| e\.keyCode === 229\) return;/, "bộ gõ tiếng Việt/Hàn/Nhật đang soạn: Enter là chốt chữ");
+  assert.match(s, /const CHONG_GUI_TRUNG_MS = 800;/);
+  assert.match(s, /if \(truoc && truoc\.text === gt && bay - truoc\.luc < CHONG_GUI_TRUNG_MS\) return;/);
+  // Dinh kem CHUA co: nut hien nhung disabled — khong co onClick, khong input file.
+  assert.match(s, /<button type="button" className="chat-nut" disabled aria-disabled="true"\s+aria-label="Đính kèm tệp — sắp có"/);
+  assert.ok(!/type="file"/.test(s), "chưa có đính kèm thật — không được mở hộp chọn tệp");
+  // Nhan dan chi hien khi transport ho tro; gui nhan dan = MA, khong nhung anh.
+  assert.match(s, /\{canSticker \? \(/);
+  const t = transport();
+  assert.match(t, /\{ client_id: g\.clientId, kind: "sticker", sticker_id: g\.sticker\.id \}/);
+  assert.ok(!/base64|FileReader|data:image/.test(t), "tin nhãn dán không được mang ảnh");
+});
+
+test("nhan dan: tin mang sticker_id, hien anh tu kho tai san, nhan thay the cho trinh doc man hinh", () => {
+  const m = doiTin("fw_toi", {
+    id: "m_9", client_id: "z", peer_id: "fw_ban", from_me: false, text: "Nhãn dán: Vẫy tay", time: 7,
+    kind: "sticker", sticker: { id: "coban.chao", pack_id: "coban", alt: "Vẫy tay", url: "/stickers/dev/coban-chao.svg" },
+  });
+  assert.equal(m.kind, "sticker");
+  assert.equal(m.sticker?.id, "coban.chao");
+  const thuong = doiTin("fw_toi", { id: "m_8", client_id: "w", peer_id: "fw_ban", from_me: false, text: "chào", time: 6 });
+  assert.ok(!("sticker" in thuong), "tin chữ không mang trường nhãn dán");
+  const th = codeOnly(read("components/chat/ChatThread.tsx"));
+  assert.match(th, /m\.kind === "sticker" && m\.sticker \? \(/);
+  assert.match(th, /<img src=\{m\.sticker\.url\} alt=\{m\.sticker\.alt\}/);
+  const bo = codeOnly(read("components/chat/StickerPicker.tsx"));
+  assert.match(bo, /disabled=\{locked\}/, "gói KHOÁ: không gửi được");
+  assert.match(bo, /role="tablist"/);
+  // Gan day / Yeu thich: thuan, theo nguoi, bo rac.
+  assert.equal(khoaPrefs("fw_a"), "fanfic.chat.stickers.fw_a");
+  assert.deepEqual(docPrefs(null), PREFS_RONG);
+  assert.deepEqual(docPrefs("{"), PREFS_RONG);
+  assert.deepEqual(docPrefs('{"recent":["coban.chao","../x","coban.chao",3],"favorites":"x"}'), { recent: ["coban.chao"], favorites: [] });
+  let p = PREFS_RONG;
+  for (let i = 0; i < 20; i += 1) p = themGanDay(p, `coban.s${i}`);
+  assert.equal(p.recent.length, GAN_DAY_TOI_DA);
+  assert.equal(themGanDay(p, "coban.s5").recent[0], "coban.s5", "dùng lại = lên đầu, không trùng");
+  assert.equal(themGanDay(p, "coban.s5").recent.filter((x) => x === "coban.s5").length, 1);
+  const y = doiYeuThich(PREFS_RONG, "coban.chao");
+  assert.deepEqual(y.favorites, ["coban.chao"]);
+  assert.deepEqual(doiYeuThich(y, "coban.chao").favorites, []);
 });

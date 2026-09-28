@@ -18,7 +18,7 @@ import { EmptyState, Loading, PageHeader } from "@/components/ui";
 import { CHAT_V1_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import { useChat } from "@/components/chat/ChatProvider";
-import { ChatAvatar, danhXung, tenHien } from "@/components/chat/ChatAvatar";
+import { ChatAvatar, ChatCapDo, tenHien } from "@/components/chat/ChatAvatar";
 import { ChatComposer } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { ChatErrorState, ChatNetBanner } from "@/components/chat/ChatErrorState";
@@ -138,7 +138,7 @@ function KhongGianTinNhan() {
               <ChatAvatar identity={it} size="lg" />
               <strong className="chat-ttin-ten">{ten}</strong>
               {it.found && it.username ? <span className="hint">@{it.username}</span> : null}
-              {danhXung(it) ? <span className="hint">{danhXung(it)}</span> : null}
+              <ChatCapDo identity={it} />
               {it.found && it.username ? (
                 <Link href={`/u/${it.username}`} className="btn btn-outline btn-sm" prefetch={false}>
                   Xem hồ sơ

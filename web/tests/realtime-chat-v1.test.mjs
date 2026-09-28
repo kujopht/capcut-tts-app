@@ -259,11 +259,15 @@ test("khong bay o soan vo dung khi loi/bi day; danh xung cung thu tu voi trang c
   for (const f of ["components/chat/ChatDrawer.tsx", "app/messages/page.tsx"]) {
     assert.match(codeOnly(read(f)), /\{status === "error" \|\| status === "kicked" \? null : \(\s*<ChatComposer/, f);
   }
+  // MOT cach hien thi mot nguoi o moi noi (#229): avatar + khung = `UserAvatar`, cap/danh xung =
+  // `CapDoTaiKhoan` — chat dung dung hai component ma trang ca nhan dung.
   const avt = codeOnly(read("components/chat/ChatAvatar.tsx"));
-  assert.match(avt, /`✦ \$\{it\.equipped_title\} · Lv\. \$\{it\.level\}`/);
-  assert.match(codeOnly(read("app/u/[username]/page.tsx")), /\{gam\.equipped_title\} · Lv\. \{gam\.level\}/);
+  assert.match(avt, /<UserAvatar/);
+  assert.match(avt, /<CapDoTaiKhoan level=\{identity\.level\} title=\{identity\.equipped_title\} \/>/);
+  assert.match(codeOnly(read("app/u/[username]/page.tsx")), /<CapDoTaiKhoan/);
+  assert.ok(!/<CosmeticFrame|<Avatar /.test(avt), "chat không tự ghép avatar/khung nữa");
   // Nguoi khong xac dinh: "?" trung tinh, khong phai chu cai dau "NG".
-  assert.match(avt, /name=\{identity && !identity\.found \? "\?" : tenHien\(identity\)\}/);
+  assert.match(avt, /user=\{la \? \{ display_name: "\?" \}/);
 });
 
 test("SSE: tach khung dung, bo nhip tim, giu khung do dang cho lan doc sau", () => {
@@ -365,9 +369,12 @@ test("co web CHAT_V1_ENABLED TAT mac dinh: khong nut, khong khung, khong request
   assert.match(provider(), /if \(!CHAT_V1_ENABLED \|\| !coPhienFanfic\) return false;/);
 });
 
-test("nut Nhan tin o ho so: khong cho khach, khong cho chinh minh", () => {
+test("nut Nhan tin o ho so: khong cho khach, khong cho chinh minh, khong khi dang chan", () => {
   const trang = codeOnly(read("app/u/[username]/page.tsx"));
-  assert.match(trang, /\{xh\.is_self \? null : \(\s*<StartChatButton/);
+  // Ho so cua #229: nhanh `laToi` (chinh minh) o tren; nut Nhan tin nam o nhanh nguoi KHAC, canh Theo doi,
+  // an khi dang chan (chan = muc tai khoan, dung chung `user_blocks`).
+  const nhanhKhac = trang.slice(trang.indexOf("{laToi ? ("), trang.indexOf("{toi ? <MenuHoSo"));
+  assert.match(nhanhKhac, /\{!p\.viewer_relation\?\.blocked \? \(\s*<StartChatButton/);
   const nut = codeOnly(read("components/chat/StartChatButton.tsx"));
   assert.match(nut, /if \(!profile\) return null;/);
 });

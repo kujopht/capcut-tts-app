@@ -321,6 +321,18 @@ class Profile:
     last_watch_duration_seconds: float = 0.0
     last_watch_at: str = ""
 
+    # -- Social Play V1 (capability `social_v1_schema`) ----------------------
+    #: Khoa doi tuong anh bia (banner) trong R2, cung mau voi `avatar_key`.
+    #: Chuoi rong = chua tai.
+    banner_key: str = ""
+    #: Mau nhan dien trang ca nhan — mot trong preset o `server/social.py`
+    #: (`ACCENT_PRESETS`). Rong = mac dinh he thong.
+    accent: str = ""
+    #: Slug fandom nguoi dung tu gan cho trang ca nhan cua minh — cung danh
+    #: sach voi `social.COMMUNITY_FANDOMS`, toi da 5 muc (xem
+    #: `SocialService.update_profile`).
+    fandom_ids: List[str] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Hinh dang RIENG TU — chi tra ve cho chinh chu qua `/api/auth/me`.
@@ -352,6 +364,9 @@ class Profile:
             "last_watch_position_seconds": self.last_watch_position_seconds,
             "last_watch_duration_seconds": self.last_watch_duration_seconds or None,
             "last_watch_at": self.last_watch_at or None,
+            "banner_key": self.banner_key,
+            "accent": self.accent or None,
+            "fandom_ids": list(self.fandom_ids),
         }
 
 
@@ -1066,6 +1081,19 @@ class Post:
     created_at: str = field(default_factory=now_iso_us)
     updated_at: str = field(default_factory=now_iso_us)
 
+    # -- Social Play V1 (capability `social_v1_schema`) ----------------------
+    #: Nguoi viet TU danh dau co spoiler (vd tiet lo noi dung truyen). Khong
+    #: co may do spoiler nao — cung triet ly voi `Comment.spoiler`.
+    spoiler: bool = False
+    #: Slug fandom cua bai — mot trong `social.COMMUNITY_FANDOMS`, rong neu
+    #: khong gan. Dung de loc bang tin theo fandom (xem `SocialService.feed_v2`).
+    fandom_id: str = ""
+    #: Moc thoi gian SUA GAN NHAT — RONG nghia la CHUA BAO GIO sua. Chi duoc
+    #: dat trong duong SUA cua chinh chu (`SocialService.edit_post`), KHONG
+    #: BAO GIO boi cac phep cong don bo dem (like/comment count) — nen mot
+    #: bai chi tang luot thich khong bao gio hien nham nhan "đã chỉnh sửa".
+    edited_at: str = ""
+
     @property
     def has_image(self) -> bool:
         return bool(self.image_key) or bool(self.images)
@@ -1101,6 +1129,9 @@ class Post:
             "removed_reason": self.removed_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "spoiler": self.spoiler,
+            "fandom_id": self.fandom_id,
+            "edited_at": self.edited_at,
         }
 
     def to_public_dict(self) -> Dict[str, Any]:
@@ -1134,6 +1165,10 @@ class Post:
             "comment_count": self.comment_count,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "spoiler": self.spoiler,
+            "fandom_id": self.fandom_id,
+            "edited": bool(self.edited_at),
+            "edited_at": self.edited_at or None,
         }
 
 
@@ -1196,6 +1231,10 @@ class Comment:
     comment_id: str = field(default_factory=lambda: new_id("cmt"))
     created_at: str = field(default_factory=now_iso_us)
     updated_at: str = field(default_factory=now_iso_us)
+    #: Moc thoi gian SUA GAN NHAT — RONG nghia la CHUA BAO GIO sua. Cung
+    #: nguyen tac voi `Post.edited_at`: chi dat trong duong SUA cua chinh
+    #: chu, khong bao gio boi cong don `reply_count`.
+    edited_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -1213,6 +1252,7 @@ class Comment:
             "removed_reason": self.removed_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "edited_at": self.edited_at,
         }
 
     def to_public_dict(self) -> Dict[str, Any]:
@@ -1237,6 +1277,8 @@ class Comment:
             "reply_count": self.reply_count,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "edited": bool(self.edited_at),
+            "edited_at": self.edited_at or None,
         }
 
 
@@ -1301,7 +1343,8 @@ class ContentReport:
     """
 
     reporter_id: str
-    #: `post` | `comment`.
+    #: `post` | `comment` | `user` (Social Play V1, capability `user_reports`
+    #: — bao cao mot NGUOI DUNG, khong phai mot noi dung cu the).
     target_kind: str = "post"
     target_id: str = ""
     #: Chu so huu noi dung bi bao cao, chep lai luc bao cao de khu quan tri khong
@@ -1330,6 +1373,40 @@ class ContentReport:
             "resolved_by": self.resolved_by,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class UserBlock:
+    """
+    Mot canh chan/tat tieng giua hai nguoi dung (Social Play V1, capability
+    `blocks`).
+
+    `block_id` la khoa TAT DINH tu (nguoi chan, nguoi bi chan, loai) — xem
+    `social.block_key`. Tinh duy nhat cua no la ca co che chong bam-hai-lan:
+    bam "Chặn" hai lan khong tao hai hang.
+
+    HAI CHIEU HOAN TOAN KHAC NHAU: `blocker_id` chan `blocked_id`, KHONG
+    nguoc lai. Kiem "co canh chan giua hai nguoi nay khong" (cho tuong tac)
+    phai xet CA HAI chieu; kiem "nguoi nay dang an ai" (cho bang tin cua
+    CHINH ho) chi xet MOT chieu (`blocker_id == minh`).
+    """
+
+    blocker_id: str
+    blocked_id: str
+    #: `"block"` (hai chieu: chan tuong tac + an noi dung) hoac `"mute"`
+    #: (mot chieu: chi an noi dung khoi nguoi tat tieng).
+    kind: str = "block"
+    block_id: str = ""
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "block_id": self.block_id,
+            "blocker_id": self.blocker_id,
+            "blocked_id": self.blocked_id,
+            "kind": self.kind,
+            "created_at": self.created_at,
         }
 
 

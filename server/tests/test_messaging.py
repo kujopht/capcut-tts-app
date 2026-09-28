@@ -223,6 +223,69 @@ class GuiIdempotentTest(MessagingCase):
         self.assertEqual(self.hop_thu(hb)["items"][0]["unread"], 1)
 
 
+class ChanChinhTacSocialTest(MessagingCase):
+    """Chan MUC TAI KHOAN cua chat = Social Play V1 (#229): MOT hang `user_blocks`, MOT tac dung phu. Chan o
+    chat hien o `/api/me/blocks` (va bo theo doi hai chieu nhu nut Chan cua ho so); chan o ho so lam chat 403;
+    "tat tieng" NOI DUNG cua Social (kind "mute") KHONG chan tin nhan."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from server.social import CAPABILITY_KEYS
+        from server.social_service import SocialService
+
+        self._social_cu = server_main.social
+        server_main.social = SocialService(server_main.identity, server_main.store, server_main.storage,
+                                           capabilities={k: True for k in CAPABILITY_KEYS})
+        self.rt.service = self.sv = ChatService(self.repo, user_exists=server_main._nguoi_chat_ton_tai,
+                                                blocks=server_main._ChanQuaSocial())
+
+    def tearDown(self) -> None:
+        server_main.social = self._social_cu
+        super().tearDown()
+
+    def test_chan_o_chat_la_chan_cua_social_va_bo_theo_doi_hai_chieu(self):
+        from server.social import user_follow_key
+
+        ua, a, ha = self.nguoi("sa")
+        ub, b, hb = self.nguoi("sb")
+        self.assertEqual(self.client.post(f"/api/users/{ub}/follow", headers=ha, json={}).status_code, 200)
+        self.assertEqual(self.client.post(f"/api/users/{ua}/follow", headers=hb, json={}).status_code, 200)
+        self.assertEqual(self.gui(ha, b, 1).status_code, 200)
+        r = self.client.post(f"/api/chat/dm/{b}/block", headers=ha, json={"blocked": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        chan = self.client.get("/api/me/blocks", headers=ha).json()
+        self.assertEqual([x["user_id"] for x in chan["blocked"]], [ub], "chặn ở chat phải hiện ở trang cá nhân")
+        for tu, toi in ((ua, ub), (ub, ua)):
+            self.assertFalse(server_main.store.is_following_user(user_follow_key(tu, toi)), "phải bỏ theo dõi hai chiều")
+        for hd, peer in ((ha, b), (hb, a)):
+            r = self.gui(hd, peer, 2 if hd is ha else 3)
+            self.assertEqual((r.status_code, r.json()["detail"]["code"]), (403, "chat_blocked"))
+        self.assertEqual(self.client.get("/api/chat/blocks", headers=ha).json()["items"], [b])
+        self.assertEqual(self.client.get("/api/chat/blocks", headers=hb).json()["items"], [], "B không biết ai chặn mình")
+        self.client.post(f"/api/chat/dm/{b}/block", headers=ha, json={"blocked": False})
+        self.assertEqual(self.client.get("/api/me/blocks", headers=ha).json()["blocked"], [])
+        self.assertEqual(self.gui(hb, a, 4).status_code, 200)
+
+    def test_chan_o_trang_ca_nhan_lam_chat_403_tat_tieng_noi_dung_thi_khong(self):
+        ua, a, ha = self.nguoi("pa")
+        ub, b, hb = self.nguoi("pb")
+        self.assertEqual(self.client.post(f"/api/users/{ub}/mute", headers=ha, json={}).status_code, 200)
+        self.assertEqual(self.gui(ha, b, 5).status_code, 200, "tắt tiếng NỘI DUNG của Social không chặn tin nhắn")
+        self.assertEqual(self.client.post(f"/api/users/{ub}/block", headers=ha, json={}).status_code, 200)
+        self.assertEqual(self.gui(hb, a, 6).json()["detail"]["code"], "chat_blocked")
+        self.assertEqual(self.client.get("/api/chat/blocks", headers=ha).json()["items"], [b])
+        self.assertEqual(self.client.delete(f"/api/users/{ub}/block", headers=ha).status_code, 200)
+        self.assertEqual(self.gui(hb, a, 7).status_code, 200)
+
+    def test_nguon_chan_mac_dinh_theo_nang_luc_social(self):
+        """Mock (Social BAT) -> nguon chinh tac la Social; `appwrite` chua migration Social -> kho chat."""
+        from server.social import capabilities_for
+
+        self.assertTrue(capabilities_for(data_backend="mock", social_v1_schema=False)["blocks"])
+        self.assertIsInstance(server_main._chan_chinh_tac, server_main._ChanQuaSocial)
+        self.assertFalse(capabilities_for(data_backend="appwrite", social_v1_schema=False)["blocks"])
+
+
 class ThuTuPhatTanTest(MessagingCase):
     """Giao dich phat tan duoc CHUAN BI song song, nhung: tao tin KHONG cho no (do tre), commit LUON sau tao
     tin (dung mot lan), va bi chan thi tra loi NGAY roi huy giao dich khi no chuan bi xong — khong commit."""

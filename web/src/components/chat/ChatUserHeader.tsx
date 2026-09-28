@@ -1,11 +1,11 @@
 /**
- * Dau cuoc tro chuyen: avatar + ten + "✦ danh hieu · Lv. N" (cung dong voi
- * trang ca nhan). Bam vao la mo HO SO FANFIC (`/u/username`) — khong bao gio
- * mot trang ho so cua Tencent.
+ * Dau cuoc tro chuyen: avatar + khung + ten + cap/danh xung (`CapDoTaiKhoan`, cung dong voi trang ca nhan).
+ * Bam vao la mo HO SO FANFIC (`/u/username`). KHONG co cham "dang hoat dong": may chu chua co trang thai
+ * truc tuyen that — hien mot cham doan la noi doi nguoi dung.
  */
 import Link from "next/link";
 import type { ChatIdentity } from "@/lib/api";
-import { ChatAvatar, danhXung, tenHien } from "./ChatAvatar";
+import { ChatAvatar, ChatCapDo, tenHien } from "./ChatAvatar";
 
 export function ChatUserHeader({
   identity,
@@ -18,13 +18,12 @@ export function ChatUserHeader({
 }) {
   const ten = tenHien(identity);
   const hoSo = identity?.found && identity.username ? `/u/${identity.username}` : null;
-  const phu = danhXung(identity);
   const than = (
     <>
       <ChatAvatar identity={identity} size="md" />
       <span className="chat-uh-chu">
         <strong id={titleId} className="chat-uh-ten truncate">{ten}</strong>
-        {phu ? <span className="hint chat-uh-phu truncate">{phu}</span> : null}
+        <span className="chat-uh-phu truncate"><ChatCapDo identity={identity} /></span>
       </span>
     </>
   );

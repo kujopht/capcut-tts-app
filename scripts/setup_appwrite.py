@@ -81,6 +81,16 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("last_watch_position_seconds", "double", False, None),
             ("last_watch_duration_seconds", "double", False, None),
             ("last_watch_at", "datetime", False, None),
+            # --- Social Play V1 (capability `social_v1_schema`) ---------------
+            # CHUA ap len production — cung co che "dong-thieu-thi-bo-qua" voi
+            # cac nhom truong V2/V6 o tren: `AppwriteIdentityAdapter` chi gui
+            # thuoc tinh THAT SU co trong schema (`_writable`), va tang dich vu
+            # tu choi ro rang o `Settings.social_v1_schema=False` truoc khi toi
+            # duoc day (xem `social.CapabilityDisabled`). Xem
+            # `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`.
+            ("banner_key", "string", False, 512),
+            ("accent", "string", False, 24),
+            ("fandom_ids", "string", False, 32),    # mang, xem ARRAY_ATTRIBUTES
         ],
         "indexes": [
             ("email_unique", "unique", ["email"]),
@@ -325,6 +335,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("removed_reason", "string", False, 1000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
+            # --- Social Play V1 (capability `social_v1_schema`) ---------------
+            # CHUA ap len production — xem ghi chu o `profiles` phia tren va
+            # `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`.
+            ("spoiler", "boolean", False, None),
+            ("fandom_id", "string", False, 32),
+            ("edited_at", "datetime", False, None),
         ],
         "indexes": [
             # Bang tin "theo doi": `author_user_id IN (...)` + moi nhat truoc.
@@ -338,6 +354,8 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # nhu `get_series_by_ids`; cho toi khi doi, chi muc nay tranh quet
             # toan bang.
             ("post_id_idx", "key", ["post_id"]),
+            # Social Play V1: loc bang tin theo fandom, moi nhat truoc.
+            ("fandom_created_idx", "key", ["fandom_id", "created_at"]),
         ],
     },
     "post_likes": {
@@ -382,6 +400,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("removed_reason", "string", False, 1000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
+            # Social Play V1 (capability `edited_label`) — xem ghi chu o
+            # `profiles` phia tren.
+            ("edited_at", "datetime", False, None),
         ],
         "indexes": [
             # Binh luan cua mot bai, cu nhat truoc.
@@ -438,7 +459,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "attributes": [
             ("report_id", "string", True, 64),
             ("reporter_id", "string", True, 64),
-            ("target_kind", "enum", True, ["post", "comment"]),
+            # Social Play V1 (capability `user_reports`): them "user" — bao
+            # cao MOT NGUOI DUNG, khong phai mot noi dung cu the.
+            ("target_kind", "enum", True, ["post", "comment", "user"]),
             ("target_id", "string", True, 64),
             # Chep lai luc bao cao de khu quan tri khong phai doc them mot bang
             # nua cho moi hang.
@@ -462,6 +485,32 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # co the loc CHI theo target_kind (khong kem status) — khong chi
             # muc nao o tren co target_kind lam cot dau.
             ("target_kind_idx", "key", ["target_kind"]),
+        ],
+    },
+    # --- Social Play V1 (capability `blocks`) --------------------------------
+    # CHUA ap len production. Xem `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`.
+    "user_blocks": {
+        "name": "User blocks",
+        # `rowId` = khoa tat dinh tu (nguoi chan, nguoi bi chan, loai) — xem
+        # `social.block_key`/`domain.UserBlock`. Cung ky thuat voi
+        # `user_follows`: chinh no la co che chong bam-hai-lan.
+        "attributes": [
+            ("block_id", "string", True, 64),
+            ("blocker_id", "string", True, 64),
+            ("blocked_id", "string", True, 64),
+            # "block" (hai chieu: tu choi tuong tac + an noi dung ca hai
+            # phia) hoac "mute" (mot chieu: chi an noi dung khoi nguoi tat
+            # tieng) — xem docstring `domain.UserBlock`.
+            ("kind", "enum", True, ["block", "mute"]),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # `list_user_blocks`/`my_blocks` — danh sach cua CHINH nguoi chan.
+            ("blocker_created_idx", "key", ["blocker_id", "created_at"]),
+            # `hidden_authors_for_viewer` (chieu nguoc: ai da chan minh) va
+            # `is_blocked_either_direction`.
+            ("blocked_kind_idx", "key", ["blocked_id", "kind"]),
+            ("blocker_kind_idx", "key", ["blocker_id", "kind"]),
         ],
     },
     "novels": {
@@ -796,29 +845,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("conv_idx", "key", ["conversation_id"]),
         ],
     },
-    # CHAN MUC TAI KHOAN — DINH NGHIA GIONG HET #229 (Social/Profile, chua merge).
-    # Chat ghi DUNG dinh dang cua #229 (`block_id` = `social.block_key`, kind
-    # "block", quyen doc: nguoi chan) nen chan qua chat va qua trang ca nhan la
-    # MOT hang, MOT he thong. Khi #229 merge: giu MOT ban cua muc nay (hai ban
-    # giong het nhau), khong migrate du lieu.
-    "user_blocks": {
-        "name": "User blocks",
-        "attributes": [
-            ("block_id", "string", True, 64),
-            ("blocker_id", "string", True, 64),
-            ("blocked_id", "string", True, 64),
-            # "block" (hai chieu) hoac "mute" (mot chieu, chi an NOI DUNG — cua
-            # Social; chat khong dung "mute" nay, tat tieng hoi thoai o
-            # `chat_members.muted`).
-            ("kind", "enum", True, ["block", "mute"]),
-            ("created_at", "datetime", True, None),
-        ],
-        "indexes": [
-            ("blocker_created_idx", "key", ["blocker_id", "created_at"]),
-            ("blocked_kind_idx", "key", ["blocked_id", "kind"]),
-            ("blocker_kind_idx", "key", ["blocker_id", "kind"]),
-        ],
-    },
+    # CHAN MUC TAI KHOAN: bang `user_blocks` cua Social Play V1 (#229, o tren) — MOT bang, MOT he thong.
+    # Chat doc/ghi DUNG hang do (`social.block_key`, kind "block"); tat tieng hoi thoai la
+    # `chat_members.muted`, KHONG phai kind "mute" (cua Social: an noi dung).
     # Hang DANH DAU "tin X da phat tan" — tao CUNG giao dich voi phep tang "chua
     # doc": trung rowId -> ca giao dich hong -> tac dung phu DUNG MOT LAN.
     "chat_fanouts": {

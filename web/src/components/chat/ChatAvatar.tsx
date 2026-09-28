@@ -1,10 +1,10 @@
 /**
- * Avatar trong tin nhan = avatar FANFIC (anh tu tai len hoac chu cai dau)
- * boc khung suu tam dang trang bi — cung hai thanh phan voi `/u/[username]`
- * va bang xep hang, de mot nguoi trong giong NHAU o moi noi.
+ * Avatar trong tin nhan = `UserAvatar` (avatar FANFIC + khung suu tam DANG trang bi) — CUNG component voi
+ * thanh dieu huong, bai dang, binh luan, ho so (#229 "one identity everywhere"): mot nguoi trong giong
+ * NHAU o moi noi. Cap/danh xung = `CapDoTaiKhoan` (kieu gon), cung cho voi trang ca nhan.
  */
-import { Avatar } from "@/components/Avatar";
-import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
+import { CapDoTaiKhoan } from "@/components/CapDoTaiKhoan";
+import { UserAvatar } from "@/components/UserAvatar";
 import type { ChatIdentity } from "@/lib/api";
 
 export function tenHien(it: ChatIdentity | undefined): string {
@@ -13,23 +13,32 @@ export function tenHien(it: ChatIdentity | undefined): string {
   return it.display_name || it.username || "Người dùng Fanfic";
 }
 
-/**
- * Dong danh xung — CUNG THU TU voi trang ca nhan (`/u/[username]`):
- * "✦ {danh hieu} · Lv. {bac}". Mot nguoi phai doc giong nhau o moi noi.
- */
+/** Chuoi danh xung cho aria/tieu de: "Lv. N · danh hieu" — cung thu tu voi `CapDoTaiKhoan`. */
 export function danhXung(it: ChatIdentity | undefined): string | null {
   if (!it?.found || !it.level) return null;
-  return it.equipped_title ? `✦ ${it.equipped_title} · Lv. ${it.level}` : `Lv. ${it.level}`;
+  return it.equipped_title ? `Lv. ${it.level} · ${it.equipped_title}` : `Lv. ${it.level}`;
+}
+
+/** Dong cap/danh xung hien thi — `CapDoTaiKhoan` gon (nhu ho so cong khai: khong XP). */
+export function ChatCapDo({ identity }: { identity: ChatIdentity | undefined }) {
+  if (!identity?.found || !identity.level) return null;
+  return <CapDoTaiKhoan level={identity.level} title={identity.equipped_title} />;
 }
 
 export function ChatAvatar({ identity, size = "md" }: { identity: ChatIdentity | undefined; size?: "sm" | "md" | "lg" }) {
+  const la = !identity?.found;
   return (
     <span className={`chat-avt chat-avt-${size}`}>
-      <CosmeticFrame cosmetic={identity?.found ? identity.avatar_frame ?? null : null}>
-        {/* Nguoi khong xac dinh: "?" trung tinh — khong phai chu cai dau cua dong "Nguoi dung khong xac dinh". */}
-        <Avatar name={identity && !identity.found ? "?" : tenHien(identity)}
-          avatarUrl={identity?.found ? identity.avatar_url : null} className="avatar" />
-      </CosmeticFrame>
+      {/* Nguoi khong xac dinh: "?" trung tinh — khong phai chu cai dau cua dong "Nguoi dung khong xac dinh". */}
+      <UserAvatar
+        user={la ? { display_name: "?" } : {
+          user_id: identity?.user_id ?? undefined,
+          username: identity?.username,
+          display_name: tenHien(identity),
+          avatar_url: identity?.avatar_url,
+        }}
+        frame={la ? null : identity?.avatar_frame ?? null}
+      />
     </span>
   );
 }

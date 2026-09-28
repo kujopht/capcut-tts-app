@@ -46,6 +46,7 @@ from server.domain import (
     ReportReason,
     ReportStatus,
     StoryFollow,
+    UserBlock,
     UserFollow,
     now_iso_us,
 )
@@ -57,8 +58,20 @@ COL_POST_LIKES = "post_likes"
 COL_COMMENTS = "comments"
 COL_NOTIFICATIONS = "notifications"
 COL_REPORTS = "content_reports"
+#: Social Play V1 (capability `blocks`) — xem `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`.
+COL_USER_BLOCKS = "user_blocks"
 
 #: Thuoc tinh THUC SU co trong schema — xem `scripts/setup_appwrite.py`.
+#:
+#: Cac truong Social Play V1 (`fandom_id`/`edited_at` tren `posts`, `edited_at`
+#: tren `comments`, ca collection `user_blocks`) duoc liet o day NGAY CA KHI
+#: chua migrate: `_writable()` (`appwrite_store.py`) loc thanh HAI TANG — danh
+#: sach nay (thu ta MUON luu) roi `_supported_fields()` (thu Appwrite THUC SU
+#: co, hoi truc tiep schema) — nen mot deployment CHUA chay migration se tu
+#: dong KHONG gui cac truong nay, du danh sach o day da co chung. Day la lop
+#: phong thu THU HAI; lop THU NHAT la `Settings.social_v1_schema` tu choi ro
+#: rang o tang dich vu (xem `social.CapabilityDisabled`) truoc khi request
+#: toi duoc day.
 SOCIAL_PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_USER_FOLLOWS: ("follow_id", "follower_id", "target_id", "created_at"),
     COL_STORY_FOLLOWS: ("follow_id", "follower_id", "novel_id", "created_at"),
@@ -69,6 +82,8 @@ SOCIAL_PERSISTED_FIELDS: Dict[str, tuple] = {
         "images_json",
         "state", "like_count", "comment_count", "removed_by", "removed_reason",
         "created_at", "updated_at",
+        # Social Play V1 (capability post_fandom/edited_label).
+        "spoiler", "fandom_id", "edited_at",
     ),
     COL_POST_LIKES: ("like_id", "post_id", "user_id", "created_at"),
     COL_COMMENTS: (
@@ -77,6 +92,8 @@ SOCIAL_PERSISTED_FIELDS: Dict[str, tuple] = {
         "target_kind", "timestamp_ms", "spoiler",
         "state", "reply_count", "removed_by", "removed_reason",
         "created_at", "updated_at",
+        # Social Play V1 (capability edited_label).
+        "edited_at",
     ),
     COL_NOTIFICATIONS: (
         "notification_id", "user_id", "kind", "actor_id", "subject_id",
@@ -87,6 +104,9 @@ SOCIAL_PERSISTED_FIELDS: Dict[str, tuple] = {
         "target_owner_id", "reason", "detail", "status", "resolution_note",
         "resolved_by", "created_at", "updated_at",
     ),
+    # Social Play V1 (capability blocks) — collection MOI, xem
+    # `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`.
+    COL_USER_BLOCKS: ("block_id", "blocker_id", "blocked_id", "kind", "created_at"),
 }
 
 
@@ -154,6 +174,9 @@ def _post_from(row: Dict[str, Any]) -> Post:
         removed_reason=str(row.get("removed_reason") or ""),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
+        spoiler=bool(row.get("spoiler")),
+        fandom_id=str(row.get("fandom_id") or ""),
+        edited_at=str(row.get("edited_at") or ""),
     )
 
 
@@ -176,6 +199,7 @@ def _comment_from(row: Dict[str, Any]) -> Comment:
         removed_reason=str(row.get("removed_reason") or ""),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
+        edited_at=str(row.get("edited_at") or ""),
     )
 
 
@@ -189,6 +213,16 @@ def _notification_from(row: Dict[str, Any]) -> Notification:
         subject_kind=str(row.get("subject_kind") or ""),
         preview=str(row.get("preview") or ""),
         read=bool(row.get("read")),
+        created_at=str(row.get("created_at") or ""),
+    )
+
+
+def _block_from(row: Dict[str, Any]) -> UserBlock:
+    return UserBlock(
+        block_id=str(row.get("block_id") or row.get("$id") or ""),
+        blocker_id=str(row.get("blocker_id") or ""),
+        blocked_id=str(row.get("blocked_id") or ""),
+        kind=str(row.get("kind") or "block"),
         created_at=str(row.get("created_at") or ""),
     )
 
@@ -347,6 +381,15 @@ class AppwriteSocialStore:
         except NotFoundError:
             return None
 
+    def create_post_once(self, post: Post) -> Tuple[Post, bool]:
+        """Tao neu `post.post_id` (khoa TAT DINH tu `client_key` khi co)
+        chua ton tai — xem contract o `MockSocialStore.create_post_once`."""
+        if self._tao_mot_lan(COL_POSTS, post.post_id, self._hinh_luu_bai(post),
+                             post.author_user_id, public_read=True):
+            return post, True
+        da_co = self.get_post(post.post_id)
+        return (da_co, False) if da_co is not None else (post, False)
+
     def save_post(self, post: Post) -> Post:
         post.updated_at = now_iso_us()
         self._update(COL_POSTS, post.post_id, self._hinh_luu_bai(post))
@@ -471,6 +514,14 @@ class AppwriteSocialStore:
             return _comment_from(self._get(COL_COMMENTS, comment_id))
         except NotFoundError:
             return None
+
+    def create_comment_once(self, comment: Comment) -> Tuple[Comment, bool]:
+        """Xem contract o `MockSocialStore.create_comment_once`."""
+        if self._tao_mot_lan(COL_COMMENTS, comment.comment_id, comment.to_dict(),
+                             comment.author_user_id, public_read=True):
+            return comment, True
+        da_co = self.get_comment(comment.comment_id)
+        return (da_co, False) if da_co is not None else (comment, False)
 
     def save_comment(self, comment: Comment) -> Comment:
         comment.updated_at = now_iso_us()
@@ -777,10 +828,137 @@ class AppwriteSocialStore:
             COL_REPORTS, "target_id", target_ids,
             them=[q_equal("status", ReportStatus.OPEN.value)])
 
+    # ============================================================ CHAN / TAT TIENG
+
+    def add_user_block(self, block: UserBlock) -> bool:
+        """Tao neu chua co. `False` = da chan/tat tieng nguoi nay tu truoc,
+        HOAC mot loi mang — xem `follow_user` ve ly do huong nham la an toan."""
+        return self._tao_mot_lan(COL_USER_BLOCKS, block.block_id, block.to_dict(),
+                                 block.blocker_id)
+
+    def remove_user_block(self, block_id: str) -> bool:
+        return self._xoa_neu_co(COL_USER_BLOCKS, block_id)
+
+    def list_user_blocks(self, blocker_id: str, kind: str = "",
+                         limit: int = 1000) -> List[UserBlock]:
+        from server.appwrite_store import q_equal, q_limit, q_order_desc
+
+        queries = [q_equal("blocker_id", blocker_id)]
+        if kind:
+            queries.append(q_equal("kind", kind))
+        queries += [q_order_desc("created_at"), q_limit(limit)]
+        return [_block_from(r) for r in self._list(COL_USER_BLOCKS, queries)]
+
+    def is_blocked_either_direction(self, a: str, b: str) -> bool:
+        """Co mot canh CHAN (khong tinh tat tieng) giua hai nguoi nay, o BAT
+        KY chieu nao — dung de tu choi tuong tac (thich/binh luan/theo doi)."""
+        from server.appwrite_store import q_equal, q_limit
+
+        rows = self._list(COL_USER_BLOCKS, [
+            q_equal("blocker_id", a, b),
+            q_equal("blocked_id", a, b),
+            q_equal("kind", "block"),
+            q_limit(4),
+        ])
+        # `equal(blocker_id, [a,b])` VA `equal(blocked_id, [a,b])` cung luc chi
+        # loai bo duoc hang KHONG khop CA HAI dieu kien AND — nhung ta can
+        # CHINH XAC (a chan b) HOAC (b chan a), khong phai "a chan a". Loc lai
+        # o Python cho bon hang toi da nay (khong phai N+1 — ca trang chi bon
+        # hang tho).
+        for r in rows:
+            bl, bd = str(r.get("blocker_id") or ""), str(r.get("blocked_id") or "")
+            if (bl, bd) in ((a, b), (b, a)):
+                return True
+        return False
+
+    def hidden_authors_for_viewer(self, viewer_id: str,
+                                  limit: int = 1000) -> Set[str]:
+        """
+        Nguoi ma NOI DUNG cua ho phai bi AN khoi bang tin/binh luan CUA
+        `viewer_id` — hop cua (nguoi `viewer_id` da CHAN hoac TAT TIENG) VA
+        (nguoi da CHAN `viewer_id`, chi tinh chieu `kind == "block"`: tat
+        tieng la MOT CHIEU, khong anh huong nguoc lai — xem `domain.UserBlock`).
+
+        HAI truy van BI CHAN (khong phai mot truy van cho moi tac gia), goi
+        MOT LAN moi request — xem "mot lan tra cuu tap chan" trong dac ta.
+        """
+        from server.appwrite_store import q_equal, q_limit
+
+        an: Set[str] = set()
+        for r in self._list(COL_USER_BLOCKS, [
+            q_equal("blocker_id", viewer_id), q_limit(limit),
+        ]):
+            bid = str(r.get("blocked_id") or "")
+            if bid:
+                an.add(bid)
+        for r in self._list(COL_USER_BLOCKS, [
+            q_equal("blocked_id", viewer_id), q_equal("kind", "block"),
+            q_limit(limit),
+        ]):
+            bl = str(r.get("blocker_id") or "")
+            if bl:
+                an.add(bl)
+        return an
+
+    # ================================================================== BANG TIN
+
+    def list_feed_posts(self, *, author_ids: Optional[Sequence[str]] = None,
+                        fandom_id: str = "",
+                        fandom_novel_ids: Sequence[str] = (),
+                        loc_fandom: bool = False,
+                        cursor: Optional[Tuple[str, str]] = None,
+                        limit: int = 20) -> List[Post]:
+        """
+        Trang bang tin THEO PHAM VI (scope), sap `(created_at DESC, post_id
+        DESC)`, cursor la "muc CUOI CUNG da xet" — xem `social.FEED_MAX_DEPTH`/
+        `social.decode_feed_cursor` va contract o `MockSocialStore`.
+        """
+        from server.appwrite_store import (q_and, q_equal, q_less_than,
+                                           q_limit, q_or, q_order_desc)
+
+        if author_ids is not None and not list(author_ids):
+            return []
+        queries: List[str] = [q_equal("state", ContentState.VISIBLE.value)]
+        if author_ids is not None:
+            queries.append(q_equal("author_user_id", *list(author_ids)))
+        if loc_fandom or fandom_id:
+            # `fandom_id` rong khi nang luc `post_fandom` TAT: cot chua ton tai
+            # tren Appwrite chua migrate — KHONG duoc nhac toi no trong truy van.
+            dieu_kien = []
+            if fandom_id:
+                dieu_kien.append({"method": "equal", "attribute": "fandom_id",
+                                  "values": [fandom_id]})
+            if fandom_novel_ids:
+                dieu_kien.append({"method": "equal", "attribute": "novel_id",
+                                  "values": list(fandom_novel_ids)})
+            if not dieu_kien:
+                return []
+            queries.append(q_or(*dieu_kien) if len(dieu_kien) > 1
+                           else q_equal(dieu_kien[0]["attribute"], *dieu_kien[0]["values"]))
+        if cursor is not None:
+            c_created, c_pid = cursor
+            queries.append(q_or(
+                q_less_than("created_at", c_created),
+                q_and(
+                    {"method": "equal", "attribute": "created_at",
+                     "values": [c_created]},
+                    q_less_than("post_id", c_pid),
+                ),
+            ))
+        queries += [q_order_desc("created_at"), q_limit(limit)]
+        rows = self._list(COL_POSTS, queries)
+        # Appwrite `orderDesc` MOT thuoc tinh khong dam bao thu tu phu theo
+        # thuoc tinh thu hai (`post_id`) khi trung `created_at` — sap lai o
+        # Python cho DUNG thu tu tat dinh ma cursor doi hoi. Trang chi co
+        # `limit` hang (toi da vai chuc), nen phep sap nay re.
+        ds = [_post_from(r) for r in rows]
+        ds.sort(key=lambda p: (p.created_at, p.post_id), reverse=True)
+        return ds
+
     # ================================================================== HA TANG
 
     def _tao_mot_lan(self, collection: str, doc_id: str, data: Dict[str, Any],
-                     owner_id: str) -> bool:
+                     owner_id: str, public_read: bool = False) -> bool:
         """
         Tao hang voi `rowId` tat dinh. `False` neu da ton tai.
 
@@ -788,7 +966,7 @@ class AppwriteSocialStore:
         duoc 409 voi loi mang. Huong nham la an toan — xem `follow_user`.
         """
         try:
-            self._create(collection, doc_id, data, owner_id)
+            self._create(collection, doc_id, data, owner_id, public_read=public_read)
             return True
         except NotFoundError:
             return False

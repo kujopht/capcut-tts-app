@@ -51,7 +51,7 @@ function HangCo({ nhan, trangThai, ghiChu }: { nhan: string; trangThai: TrangTha
 /** `capabilities` là object thật -> liệt kê nguyên văn khoá/giá trị nhận
  * được, KHÔNG lọc theo danh sách cờ định sẵn (tên khoá thật do PR #229/#231
  * quyết định, chưa tồn tại trong mã ở đây). */
-function DanhSachCapabilities({ capabilities }: { capabilities: Record<string, boolean> }) {
+function DanhSachCapabilities({ capabilities }: { capabilities: Readonly<Record<string, boolean | undefined>> }) {
   const muc = Object.entries(capabilities);
   if (muc.length === 0) {
     return <p className="hint">`capabilities` là một đối tượng rỗng.</p>;

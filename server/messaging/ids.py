@@ -67,10 +67,11 @@ def message_row_id(client_id: str) -> str:
 
 
 def block_row_id(blocker_id: str, blocked_id: str, kind: str = "block") -> str:
-    """ID hang `user_blocks` — CHINH XAC `server.social.block_key` cua #229 (Social/Profile), de chan qua
-    chat va chan qua trang ca nhan la MOT hang, MOT he thong (khong co bang chan rieng cua chat). Khi #229
-    vao `main`, thay ham nay bang `from server.social import block_key` — bai test khoa vector dau ra."""
-    return "blk_" + hashlib.sha256(f"{blocker_id}\x1f{blocked_id}\x1f{kind}".encode()).hexdigest()[:24]
+    """ID hang `user_blocks` = `server.social.block_key` cua Social Play V1 (#229) — MOT ham, MOT dinh dang:
+    chan qua chat va chan qua trang ca nhan la MOT hang (khong co bang chan rieng cua chat)."""
+    from server.social import block_key
+
+    return block_key(blocker_id, blocked_id, kind)
 
 
 def conversation_row_id(user_a: str, user_b: str) -> str:

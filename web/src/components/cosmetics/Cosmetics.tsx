@@ -61,6 +61,7 @@ function KhungAvatar({ assetRef }: { assetRef: string }) {
         alt=""
         aria-hidden="true"
         draggable={false}
+        data-khung={assetRef}
         className="cosmetic-frame-svg cosmetic-frame-img"
         onError={() => setLoiAnh(true)}
       />

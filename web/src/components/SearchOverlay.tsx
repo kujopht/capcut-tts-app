@@ -48,7 +48,7 @@ import {
   type PublicProfile,
 } from "@/lib/api";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
-import { Avatar } from "@/components/Avatar";
+import { UserAvatar } from "@/components/UserAvatar";
 import { fandomCauTruc, getReaderTags, theChoThe } from "@/lib/taxonomy";
 import { NovelCover } from "@/components/NovelCover";
 import {
@@ -667,9 +667,8 @@ export function SearchOverlay({
                         onClick={onDong}
                         onMouseEnter={() => setChon(vt)}
                       >
-                        <Avatar
-                          name={p.display_name || p.username}
-                          avatarUrl={p.avatar_url}
+                        <UserAvatar
+                          user={{ ...p, equipped_cosmetics: p.gamification?.equipped_cosmetics }}
                           className="tim-avatar"
                         />
                         <span className="tim-chu">
@@ -713,11 +712,7 @@ export function SearchOverlay({
                         onClick={onDong}
                         onMouseEnter={() => setChon(vt)}
                       >
-                        <Avatar
-                          name={b.author?.display_name || "?"}
-                          avatarUrl={b.author?.avatar_url}
-                          className="tim-avatar"
-                        />
+                        <UserAvatar user={b.author} className="tim-avatar" />
                         <span className="tim-chu">
                           <strong>
                             {b.text.length > 70 ? `${b.text.slice(0, 70)}…` : b.text}

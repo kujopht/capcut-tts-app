@@ -33,7 +33,7 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from server.messaging.domain import (
     PREVIEW_MAX,
@@ -86,13 +86,47 @@ _POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="messaging")
 NHO_NGUOI_GIAY = 600.0
 
 
+class BlockSource(Protocol):
+    """Chan MUC TAI KHOAN (`user_blocks`, kind "block"). Nguon CHINH TAC la Social Play V1 (#229) — xem
+    `server/main.py::_ChanQuaSocial`; `RepoBlocks` la ban doc/ghi THANG cung hang do (dung khi Social tat)."""
+
+    def blocked_between(self, a: str, b: str) -> bool: ...
+    def set_blocked(self, blocker: str, blocked: str, on: bool) -> None: ...
+    def blocked_by(self, blocker: str) -> List[str]: ...
+
+
+class RepoBlocks:
+    """Doc/ghi THANG hang `user_blocks` qua kho chat — DUNG dinh dang cua #229 (`social.block_key`). Khong co
+    tac dung phu cua Social (bo theo doi hai chieu): chi dung khi nang luc `blocks` cua Social dang TAT."""
+
+    def __init__(self, repo: ChatRepository, clock: Callable[[], str] = now_iso) -> None:
+        self._repo, self._gio = repo, clock
+
+    def blocked_between(self, a: str, b: str) -> bool:
+        return bool(self._repo.blocks_between(a, b))
+
+    def set_blocked(self, blocker: str, blocked: str, on: bool) -> None:
+        bid = block_row_id(blocker, blocked)
+        if on:
+            try:
+                self._repo.create_block(Block(id=bid, blocker_id=blocker, blocked_id=blocked, created_at=self._gio()))
+            except RepoConflict:
+                pass
+        else:
+            self._repo.delete_block(bid)
+
+    def blocked_by(self, blocker: str) -> List[str]:
+        return [b.blocked_id for b in self._repo.list_blocks(blocker)]
+
+
 class ChatService:
     def __init__(self, repo: ChatRepository, *, user_exists: Callable[[str], bool],
-                 clock: Callable[[], str] = now_iso) -> None:
+                 clock: Callable[[], str] = now_iso, blocks: Optional[BlockSource] = None) -> None:
         self.repo = repo
         self._co_nguoi = user_exists
         self._gio = clock
         self._nho_nguoi: Dict[str, float] = {}
+        self.blocks: BlockSource = blocks or RepoBlocks(repo, clock)
 
     # ------------------------------------------------------------------ nguoi kia
     def _ton_tai(self, uid: str) -> bool:
@@ -184,7 +218,7 @@ class ChatService:
         cid = dm_id(me, peer)
         # SONG SONG: ba phep kiem + CHUAN BI giao dich phat tan (ID thanh vien tat dinh -> khong phai cho).
         f_nguoi = _POOL.submit(self._ton_tai, peer)
-        f_chan = _POOL.submit(self.repo.blocks_between, me, peer)
+        f_chan = _POOL.submit(self.blocks.blocked_between, me, peer)
         f_tv = _POOL.submit(self.repo.get_members, cid)
         f_gd = _POOL.submit(self.repo.stage_fanout, mid, member_row_id(cid, peer))
         gd: Any = None
@@ -314,19 +348,13 @@ class ChatService:
         return self.repo.update_member(cua_toi.id, {"muted": bool(muted), "updated_at": self._gio()})
 
     def set_blocked(self, me: str, peer_chat_id: str, blocked: bool) -> bool:
+        """Chan MUC TAI KHOAN qua nguon chinh tac (`self.blocks`) — chan o chat = chan o trang ca nhan."""
         peer = self.resolve_peer(me, peer_chat_id)
-        bid = block_row_id(me, peer)
-        if blocked:
-            try:
-                self.repo.create_block(Block(id=bid, blocker_id=me, blocked_id=peer, created_at=self._gio()))
-            except RepoConflict:
-                pass
-        else:
-            self.repo.delete_block(bid)
+        self.blocks.set_blocked(me, peer, bool(blocked))
         return blocked
 
     def blocked_chat_ids(self, me: str) -> List[str]:
-        return [chat_user_id(b.blocked_id) for b in self.repo.list_blocks(me)]
+        return [chat_user_id(uid) for uid in self.blocks.blocked_by(me)]
 
     # ------------------------------------------------------------------ hinh dang tra ve
     @staticmethod

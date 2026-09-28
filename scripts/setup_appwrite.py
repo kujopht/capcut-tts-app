@@ -1854,6 +1854,11 @@ class Setup:
                 "APPWRITE_PROJECT_ID, APPWRITE_API_KEY, APPWRITE_DATABASE_ID."
             )
         self.cfg = settings.appwrite
+        # Appwrite STAGING (Cloud 2.3) chi co scope TablesDB: dich API cu -> TablesDB CHI cho project
+        # staging da duyet; production khong cham gi, sai dich thi chet ngay. Xem
+        # `server/appwrite_tablesdb_compat.py`.
+        from server.appwrite_tablesdb_compat import kich_hoat_neu_staging
+        kich_hoat_neu_staging(settings)
         # `api_base` da bo `/v1` o cuoi neu co - moi path duoi day tu them `/v1`
         self.endpoint = self.cfg.api_base or "https://<endpoint>"
         self.dry_run = dry_run

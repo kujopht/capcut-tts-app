@@ -1,8 +1,9 @@
 /**
  * Bo dem CHUNG MINH "lazy login" cua Fanfic Chat V1.
  *
- * Tencent Chat tinh MAU theo lan dang nhap SDK. Mot nguoi chi doc/nghe truyen
- * phai co CA BA con so bang 0. Doc duoc tu hai noi, khong can cong cu gi:
+ * Mot nguoi chi doc/nghe truyen phai co CA BA con so bang 0 — khong phien chat,
+ * khong tai dong co, khong luong tin nhan nao (moi luong mo la mot ket noi toi
+ * may chu + Appwrite Realtime). Doc duoc tu hai noi, khong can cong cu gi:
  *
  *   window.__fanficChat                  { sessionRequests, sdkLoads, logins, ... }
  *   <html data-chat-sdk="...">           "idle" | "loading" | "loaded" | "logged-in"
@@ -14,9 +15,9 @@ import type { ChatStatus } from "./types";
 export interface ChatMetrics {
   /** So lan goi `POST /api/chat/session`. */
   sessionRequests: number;
-  /** So lan `import("@tencentcloud/chat")` thuc su chay. */
+  /** So lan tai dong co chat (chunk transport) — ten giu tu V1 cho harness QA. */
   sdkLoads: number;
-  /** So lan `chat.login()` thanh cong. */
+  /** So lan mo luong tin nhan thanh cong (`transport.login()`). */
   logins: number;
   loginFailures: number;
   /** Ly do moi lan khoi tao (vd "inbox", "messages-page", "profile-dm", "resume"). */

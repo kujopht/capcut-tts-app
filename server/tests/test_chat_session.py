@@ -162,14 +162,21 @@ class TestSessionRoute(ChatRouteCase):
     def test_chua_dang_nhap_401(self):
         self.assertEqual(self.client.post("/api/chat/session").status_code, 401)
 
-    def test_thieu_cau_hinh_503_ro_rang(self):
+    def test_tat_tin_nhan_503_ro_rang(self):
         tok = self.user("a@example.com")
-        with patch.dict(os.environ, ENV_SACH):
+        rt = server_main.messaging_runtime
+        cu = rt.enabled
+        rt.enabled = False
+        try:
             r = self.client.post("/api/chat/session", headers=self.auth(tok))
+        finally:
+            rt.enabled = cu
         self.assertEqual(r.status_code, 503)
         self.assertEqual(r.json()["detail"]["code"], "chat_not_configured")
 
-    def test_cap_phien_dev(self):
+    def test_phien_nhan_tin_khong_can_tencent_va_khong_co_credential(self):
+        """Tin nhan chu KHONG con dung Tencent: phien khong ky UserSig, khong co khoa/credential nao —
+        moi request chat dung chinh token Fanfic, va ca bien Tencent co dat cung khong duoc dung."""
         tok = self.user("b@example.com")
         me = self.client.get("/api/auth/me", headers=self.auth(tok)).json()["profile"]
         truoc = int(time.time() * 1000)
@@ -178,13 +185,13 @@ class TestSessionRoute(ChatRouteCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.headers.get("cache-control"), "no-store")
         d = r.json()
-        self.assertEqual(set(d), {"sdkAppId", "userId", "userSig", "expiresAt", "environment"})
-        self.assertEqual(d["sdkAppId"], 20047363)
-        self.assertEqual(d["environment"], "dev")
+        self.assertEqual(set(d), {"provider", "userId", "expiresAt", "environment"})
+        self.assertEqual(d["provider"], "fanfic")
+        self.assertEqual(d["environment"], "memory")
         self.assertEqual(d["userId"], chat_user_id(me["user_id"]))
-        self.assertGreaterEqual(d["expiresAt"], truoc + 7200 * 1000 - 5000)
-        self.assertEqual(giai_ma_sig(d["userSig"])["TLS.identifier"], d["userId"])
-        self.assertNotIn(KHOA_GIA, r.text, "khoa bi mat KHONG BAO GIO duoc roi khoi may chu")
+        self.assertGreaterEqual(d["expiresAt"], truoc + 3600 * 1000 - 5000)
+        self.assertNotIn(KHOA_GIA, r.text)
+        self.assertNotIn(tok, r.text, "token Fanfic khong duoc phan hoi lai")
 
     def test_han_muc_rieng_429_kem_retry_after(self):
         tok = self.user("c@example.com")

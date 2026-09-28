@@ -246,13 +246,9 @@ from server.image_service import (
     UnknownOrDisabledModel,
 )
 from server.rate_limit import RateLimitMiddleware, SlidingWindowRateLimiter
-from server.chat_tencent import (
-    ChatNotConfigured,
-    TencentChatSettings,
-    cap_phien as cap_phien_chat,
-    chat_user_id,
-    fanfic_user_id_tu_chat,
-)
+# Nhan tin (Chat V1, phan chu): Appwrite so huu du lieu + Realtime — xem `server/messaging/`.
+# Tencent Chat KHONG con can cho tin nhan chu (Tencent/TRTC de danh cho goi thoai/video).
+from server.messaging.ids import chat_user_id, fanfic_user_id_from_chat as fanfic_user_id_tu_chat
 
 app = FastAPI(
     title="Fanfic Audio Studio API",
@@ -4175,36 +4171,52 @@ def public_profile_route(
 
 
 # =============================================================================
-# FANFIC CHAT V1 — Tencent Chat (IM). Xem `server/chat_tencent.py`.
+# FANFIC CHAT V1 — nhan tin 1:1. Appwrite SO HUU du lieu + Realtime; backend la
+# lop chuyen tiep mong (trinh duyet chi biet NEXT_PUBLIC_API_BASE). Xem
+# `server/messaging/` va `docs/messaging/CHAT_APPWRITE.md`.
 #
-# Hai route, ca hai CHI cho nguoi da dang nhap:
-#   POST /api/chat/session     -> {sdkAppId, userId, userSig, expiresAt}
+#   POST /api/chat/session     -> {provider, userId, expiresAt, environment}
 #   POST /api/chat/identities  -> danh tinh FANFIC cua nguoi trong hoi thoai
+#   /api/chat/conversations, /api/chat/dm/{peer}/..., /api/chat/stream
+#                              -> `server/messaging/routes.py`
 #
 # Trinh duyet chi goi `session` khi nguoi dung THAT SU mo tin nhan (xem
-# `web/src/components/chat/ChatProvider.tsx`) — doc/nghe truyen khong bao gio
-# tao phien chat, nen khong tinh vao MAU cua Tencent.
+# `web/src/components/chat/ChatProvider.tsx`) — doc/nghe truyen khong mo
+# luong chat nao. Tencent Chat KHONG con can cho tin nhan chu.
 # =============================================================================
 
-#: Han muc RIENG cho viec cap UserSig, chat hon Tier A cua middleware. Mot
-#: trinh duyet xin 1 phien khi mo tin nhan + 1 moi lan TAI LAI trang (tu mo
-#: lai) + 1 moi ~2 gio. QA that cho thay 10 / 5 phut bi cham boi mot nguoi mo
-#: vai tab va tai lai vai lan — 20 van du chan mot vong lap loi (vong lap goi
-#: hang tram lan) ma khong lam phien nguoi dung that.
+#: Han muc RIENG cho viec mo phien chat. Mot trinh duyet xin 1 phien khi mo tin
+#: nhan + 1 moi lan TAI LAI trang (tu mo lai) + 1 moi ~gio. 20 / 5 phut van du
+#: chan mot vong lap loi ma khong lam phien nguoi dung that (do tren QA #239).
 _han_muc_phien_chat = SlidingWindowRateLimiter()
 CHAT_PHIEN_TOI_DA = 20
 CHAT_PHIEN_CUA_SO_GIAY = 300.0
+CHAT_PHIEN_TTL_GIAY = 3600
+
+
+def _nguoi_chat_ton_tai(uid: str) -> bool:
+    # Doc `identity` o THOI DIEM GOI (test thay the no) — khong chup lai luc khoi dong.
+    return uid in (identity.profiles_by_ids([uid]) or {})
+
+
+from server.messaging.routes import build_messaging_router  # noqa: E402
+from server.messaging.runtime import build_runtime as _build_messaging_runtime  # noqa: E402
+
+messaging_runtime = _build_messaging_runtime(settings, user_exists=_nguoi_chat_ton_tai)
+app.include_router(build_messaging_router(messaging_runtime, resolve_profile=current_profile))
 
 
 @app.post("/api/chat/session")
 def chat_session(response: Response,
                  profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     """
-    Cap phien Tencent Chat ngan han. UserSig duoc ky PHIA MAY CHU; khoa bi mat
-    khong bao gio roi khoi tien trinh nay.
+    Mo phien nhan tin. KHONG co credential rieng nao: moi request chat (REST +
+    luong SSE) dung chinh token Fanfic cua nguoi dung, va Realtime cua Appwrite
+    xac thuc bang CHINH session do — nen quyen doc theo hang cua Appwrite loc su
+    kien, khong phai may chu "tu hua" loc.
 
-    503 `chat_not_configured` khi moi truong da chon thieu cau hinh — KHONG
-    tra mot phien rong/gia. 429 `chat_rate_limited` kem `Retry-After`.
+    503 `chat_not_configured` khi `FAS_CHAT_V1` tat — KHONG tra mot phien
+    rong/gia. 429 `chat_rate_limited` kem `Retry-After`.
     """
     duoc, _con, cho = _han_muc_phien_chat.check(
         f"chat_session:{profile.user_id}", CHAT_PHIEN_TOI_DA, CHAT_PHIEN_CUA_SO_GIAY)
@@ -4214,14 +4226,14 @@ def chat_session(response: Response,
             {"code": "chat_rate_limited",
              "message": "Bạn mở tin nhắn quá nhiều lần. Thử lại sau ít phút."},
             headers={"Retry-After": str(max(1, int(cho)))})
-    try:
-        phien = cap_phien_chat(TencentChatSettings.from_env(), profile.user_id)
-    except ChatNotConfigured as exc:
+    if not messaging_runtime.enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
-                            {"code": "chat_not_configured", "message": str(exc)}) from exc
-    # Chu ky dang nhap — khong de trinh duyet/proxy nao giu lai.
+                            {"code": "chat_not_configured",
+                             "message": "Tin nhắn chưa được bật trên máy chủ."})
     response.headers["Cache-Control"] = "no-store"
-    return phien
+    return {"provider": "fanfic", "userId": chat_user_id(profile.user_id),
+            "expiresAt": int((time.time() + CHAT_PHIEN_TTL_GIAY) * 1000),
+            "environment": messaging_runtime.backend}
 
 
 class ChatIdentitiesIn(BaseModel):

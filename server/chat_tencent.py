@@ -1,5 +1,10 @@
 """
-Tencent Chat (IM) — Fanfic Chat V1: cap UserSig PHIA MAY CHU.
+Tencent — ky UserSig PHIA MAY CHU. DE DANH cho goi thoai/video (TRTC) sau nay.
+
+TU 2026-09-28 TIN NHAN CHU KHONG CON DUNG TENCENT: Appwrite so huu du lieu + Realtime
+(`server/messaging/`), va `/api/chat/session` khong con ky UserSig. Module nay giu nguyen
+(kem bai test) vi TRTC dung CUNG thuat toan TLSSigAPIv2 va CUNG ma nguoi dung `fw_<id>`
+(`server/messaging/ids.py` la nguon DUY NHAT cua ma do).
 
 Trinh duyet KHONG BAO GIO thay SDKSecretKey. No chi nhan `{sdkAppId, userId,
 userSig, expiresAt}` tu `POST /api/chat/session`, va `userSig` la mot chu ky
@@ -115,29 +120,17 @@ class TencentChatSettings:
 
 
 def chat_user_id(fanfic_user_id: str) -> str:
-    """
-    Ma nguoi dung Fanfic -> userID Tencent, TAT DINH va KHONG DOI.
+    """Ma nguoi dung Fanfic -> userID Tencent/TRTC. CHUNG ma voi tin nhan — xem `server.messaging.ids`."""
+    from server.messaging.ids import chat_user_id as _ma
 
-    Truong hop thuong (ID Appwrite 20 ky tu, ID mock `usr_...`): `fw_<id>` —
-    dao nguoc duoc, nen tra danh tinh Fanfic tu mot hoi thoai khong can bang
-    tra cuu. ID co ky tu ngoai `[A-Za-z0-9_-]` hoac qua dai: `fwh_` + 28 ky
-    tu hex cua SHA-256 (dung 32 byte) — mot chieu, co y.
-    """
-    uid = (fanfic_user_id or "").strip()
-    if not uid:
-        raise ValueError("user_id rỗng")
-    if _HOP_LE.match(uid) and len(TIEN_TO) + len(uid) <= USER_ID_MAX:
-        return TIEN_TO + uid
-    return TIEN_TO_BAM + hashlib.sha256(uid.encode("utf-8")).hexdigest()[:USER_ID_MAX - len(TIEN_TO_BAM)]
+    return _ma(fanfic_user_id)
 
 
 def fanfic_user_id_tu_chat(chat_id: str) -> Optional[str]:
     """Nguoc cua `chat_user_id` cho dang `fw_<id>`; dang bam -> None."""
-    if chat_id.startswith(TIEN_TO_BAM):
-        return None
-    if chat_id.startswith(TIEN_TO) and _HOP_LE.match(chat_id) and len(chat_id) <= USER_ID_MAX:
-        return chat_id[len(TIEN_TO):] or None
-    return None
+    from server.messaging.ids import fanfic_user_id_from_chat
+
+    return fanfic_user_id_from_chat(chat_id)
 
 
 def _base64_url(du_lieu: bytes) -> str:

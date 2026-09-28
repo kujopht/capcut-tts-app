@@ -1,9 +1,9 @@
 /**
  * Fanfic Chat V1 — kieu dung chung cho giao dien chat.
  *
- * Giao dien KHONG BAO GIO cham kieu cua SDK Tencent: moi thu di qua
- * `ChatTransport` (xem `tencentTransport.ts`). Nho vay component khong biet
- * Tencent la ai, va doi nha cung cap sau nay chi thay mot tep.
+ * Giao dien KHONG BAO GIO cham nha cung cap: moi thu di qua `ChatTransport`
+ * (hien tai `fanficTransport.ts` — API Fanfic, du lieu + Realtime o Appwrite).
+ * Ban Tencent Chat cu da duoc thay CHI bang mot tep do; khong component nao doi.
  */
 
 /**
@@ -23,9 +23,9 @@ export type ChatErrorCode =
   | "unauthorized" //   phien Fanfic het han / chua dang nhap (401)
   | "rate_limited" //   xin phien qua nhieu lan (429)
   | "network" //        khong toi duoc may chu Fanfic
-  | "sdk_load" //       khong tai duoc thu vien chat
-  | "login" //          Tencent tu choi dang nhap
-  | "expired"; //       UserSig het han va lam moi that bai
+  | "sdk_load" //       khong tai duoc dong co chat (chunk)
+  | "login" //          khong mo duoc luong tin nhan
+  | "expired"; //       phien het han va lam moi that bai
 
 export type MessageStatus = "sending" | "sent" | "failed";
 
@@ -50,7 +50,7 @@ export interface ChatMessage {
 }
 
 export interface ChatConversation {
-  /** Dang Tencent "C2C<userID>". */
+  /** Khoa hoi thoai 1:1 PHIA GIAO DIEN (`conversationIdFor(peerId)`) — khong phai ID luu tru. */
   id: string;
   /** userID chat cua nguoi kia. */
   peerId: string;
@@ -82,7 +82,8 @@ export interface TransportHandlers {
 
 /** Hop dong duy nhat giua giao dien va nha cung cap chat. */
 export interface ChatTransport {
-  login(userId: string, userSig: string): Promise<void>;
+  /** `userId` = ma chat cua minh (tu `/api/chat/session`). Khong co credential rieng nao. */
+  login(userId: string): Promise<void>;
   logout(): Promise<void>;
   conversations(): Promise<ChatConversation[]>;
   history(conversationId: string, cursor?: string | null): Promise<HistoryPage>;
@@ -93,6 +94,7 @@ export interface ChatTransport {
   destroy(): Promise<void>;
 }
 
+/** Tien to "C2C" giu tu Chat V1 de moi khoa trang thai giao dien (thread, nhap) khong doi. */
 export function conversationIdFor(peerId: string): string {
   return `C2C${peerId}`;
 }

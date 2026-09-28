@@ -4422,15 +4422,56 @@ export const CEREBRAS_CONSOLE_KEYS_URL = "https://cloud.cerebras.ai";
 // theo lan dang nhap SDK).
 // =============================================================================
 
-/** Phien Tencent Chat ngan han — UserSig do MAY CHU ky; khong co khoa nao o day. */
+/**
+ * Phien nhan tin. KHONG co credential rieng: moi request chat (REST + luong SSE) dung chinh token
+ * Fanfic, va may chu xac thuc Realtime cua Appwrite bang CHINH session do. Tencent Chat khong con
+ * duoc dung cho tin nhan chu (de danh cho goi thoai/video).
+ */
 export interface ChatSessionResponse {
-  sdkAppId: number;
+  provider: "fanfic";
   userId: string;
-  userSig: string;
   /** Mili-giay (so thang voi `Date.now()`). */
   expiresAt: number;
   environment: string;
 }
+
+/** Tin nhan nhu may chu tra (`server/messaging/service.py::message_dto`). */
+export interface ChatMessageDto {
+  id: string;
+  client_id: string;
+  peer_id: string;
+  from_me: boolean;
+  text: string;
+  /** Mili-giay. */
+  time: number;
+}
+
+/** Mot hoi thoai trong hop thu (`member_dto`). */
+export interface ChatConversationDto {
+  peer_id: string;
+  unread: number;
+  muted: boolean;
+  last_text: string;
+  last_time: number;
+  last_from_me: boolean;
+  last_message_id: string;
+}
+
+/**
+ * Luong su kien chat (SSE qua `fetch`, KHONG `EventSource`: EventSource khong gui duoc header
+ * `Authorization`, va token KHONG BAO GIO duoc dat len URL). Tra Response tho — `fanficTransport`
+ * tu doc tung khung.
+ */
+export function openChatStream(signal: AbortSignal): Promise<Response> {
+  const token = getToken();
+  return fetch(`${API_BASE}/api/chat/stream`, {
+    headers: { Accept: "text/event-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    cache: "no-store",
+    signal,
+  });
+}
+
+const peerPath = (peer: string) => `/api/chat/dm/${encodeURIComponent(peer)}`;
 
 /** Danh tinh FANFIC cua mot nguoi trong hoi thoai (khong bao gio lay tu Tencent). */
 export interface ChatIdentity {
@@ -4452,4 +4493,29 @@ export const chatApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  conversations: () =>
+    request<{ items: ChatConversationDto[]; unread_total: number }>("/api/chat/conversations"),
+  history: (peer: string, q: { before?: string | null; after?: string | null; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.before) p.set("before", q.before);
+    if (q.after) p.set("after", q.after);
+    if (q.limit) p.set("limit", String(q.limit));
+    const s = p.toString();
+    return request<{ messages: ChatMessageDto[]; cursor: string | null }>(`${peerPath(peer)}/messages${s ? `?${s}` : ""}`);
+  },
+  send: (peer: string, body: { client_id: string; text: string }) =>
+    request<{ message: ChatMessageDto; created: boolean }>(`${peerPath(peer)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  read: (peer: string, upTo?: string | null) =>
+    request<{ conversation: ChatConversationDto | null }>(`${peerPath(peer)}/read`, {
+      method: "POST",
+      body: JSON.stringify(upTo ? { up_to: upTo } : {}),
+    }),
+  mute: (peer: string, muted: boolean) =>
+    request<{ muted: boolean }>(`${peerPath(peer)}/mute`, { method: "POST", body: JSON.stringify({ muted }) }),
+  block: (peer: string, blocked: boolean) =>
+    request<{ blocked: boolean }>(`${peerPath(peer)}/block`, { method: "POST", body: JSON.stringify({ blocked }) }),
+  blocks: () => request<{ items: string[] }>("/api/chat/blocks"),
 };

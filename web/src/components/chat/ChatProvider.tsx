@@ -11,22 +11,19 @@
  *
  * 1. LUOI (lazy). Dang nhap Fanfic KHONG mo chat. Chi `moChat(lyDo)` — goi
  *    tu nut Tin nhan, trang /messages, nut "Nhan tin" o ho so — moi xin phien,
- *    tai SDK va dang nhap Tencent. Tencent tinh MAU theo lan dang nhap SDK:
- *    nguoi chi doc truyen = 0. Da mo mot lan trong TAB nay thi tai lai trang
- *    se tu mo lai (`sessionStorage`), vi nguoi do da chu dong bat tin nhan.
+ *    tai dong co va mo luong tin nhan. Nguoi chi doc truyen = 0 luong. Da mo
+ *    mot lan trong TAB nay thi tai lai trang se tu mo lai (`sessionStorage`).
  *
  * 2. KHONG VONG LAP VO HAN. Xin phien thu lai toi da 2 lan (1 s, 3 s) cho loi
- *    mang/5xx; 401/429/503 khong thu lai. UserSig het han -> dang nhap lai
- *    toi da 2 lan moi 10 phut. Mat mang thi SDK tu noi lai; ta chi hien trang
- *    thai.
+ *    mang/5xx; 401/429/503 khong thu lai. Mat ket noi thi transport tu noi
+ *    lai (lui co tran) va bu khoang trong; ta chi hien trang thai.
  *
- * 3. DA TAB LA MOT QUYET DINH TUONG MINH. SDK Web mac dinh chi cho mot phien
- *    tren moi tai khoan: tab moi dang nhap se day tab cu ra (`KICKED_OUT`).
- *    Tab bi day KHONG tu dang nhap lai (neu khong hai tab se day nhau mai):
- *    no hien "Tin nhan dang mo o noi khac" kem nut "Dung o tab nay".
+ * 3. DA TAB. Du lieu + Realtime o Appwrite (qua API Fanfic): MOI tab mot luong,
+ *    khong tab nao day tab nao. Nhanh "bi day" (`kicked`) giu lai cho mot nha
+ *    cung cap mot-phien sau nay; transport hien tai khong bao gio phat no.
  *
  * 4. DANH TINH LA CUA FANFIC. Ten/avatar/khung/cap/danh xung lay tu
- *    `POST /api/chat/identities`, khong bao gio tu nickname/avatar Tencent.
+ *    `POST /api/chat/identities`.
  */
 
 import dynamic from "next/dynamic";
@@ -57,7 +54,7 @@ import {
 } from "@/lib/chat/types";
 
 /*
-  Dong co chat (SDK Tencent) — `ssr: false` giu no NGOAI bundle server cua
+  Dong co chat (transport) — `ssr: false` giu no NGOAI bundle server cua
   Worker, va chi render sau khi nguoi dung mo chat. Xem `ChatEngine.tsx`.
 */
 const ChatEngine = dynamic(() => import("./ChatEngine"), { ssr: false });
@@ -366,7 +363,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       let p = phienRef.current;
       if (!p || p.expiresAt - Date.now() < 60_000) p = await xinPhien();
       if (theHeRef.current !== theHe) return;
-      await t.login(p.userId, p.userSig);
+      await t.login(p.userId);
       if (theHeRef.current !== theHe) return;
       dem("logins");
       henLamMoi(p);
@@ -460,7 +457,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             else doiTrangThai("reconnecting");
           },
         };
-        const moi = await tai(p.sdkAppId, handlers);
+        const moi = await tai(p, handlers);
         if (!conHieuLuc()) {
           void moi.destroy().catch(() => {});
           return false;
@@ -477,9 +474,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       }
     }
     try {
-      await t.login(p.userId, p.userSig);
+      await t.login(p.userId);
       if (!conHieuLuc()) {
-        // Dang xuat trong luc dang nhap Tencent: dong ngay phien vua mo.
+        // Dang xuat trong luc dang mo luong: dong ngay phien vua mo.
         void t.logout().catch(() => {}).finally(() => t?.destroy().catch(() => {}));
         return false;
       }

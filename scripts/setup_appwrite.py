@@ -732,6 +732,77 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "indexes": [],
     },
     # ==========================================================================
+    # NHAN TIN 1:1 (Chat V1, phan chu) — bon bang, xem `server/messaging/`.
+    #
+    # Appwrite SO HUU du lieu + Realtime. Quyen cap BANG rong (khong ai tao/sua
+    # truc tiep); quyen theo HANG chi cap DOC: tin -> hai thanh vien; thanh vien
+    # -> chinh chu; chan -> nguoi chan; danh dau phat tan -> khong ai.
+    # Realtime chi day su kien cho nguoi CO QUYEN DOC hang (do that Cloud 2.3).
+    #
+    # ROLLBACK: xoa ca bon bang. Chi mat tin nhan (chua bat tren production).
+    # Production (1.9.6): CHUA tao — `FAS_CHAT_V1` tat.
+    "chat_messages": {
+        "name": "Chat Messages",
+        "attributes": [
+            ("conversation_id", "string", True, 40),
+            ("sender_id", "string", True, 36),
+            ("recipient_id", "string", True, 36),
+            ("client_id", "string", True, 32),
+            ("text", "string", True, 2000),
+            ("created_at", "datetime", True, None),
+            ("kind", "string", False, 16),
+        ],
+        "indexes": [
+            # lich su (moi nhat truoc, con tro) + tin moi nhat cho ban xem truoc
+            ("conv_created_idx", "key", ["conversation_id", "created_at"]),
+            # dem "chua doc": tin GUI CHO TOI sau moc da doc
+            ("conv_recipient_created_idx", "key", ["conversation_id", "recipient_id", "created_at"]),
+        ],
+    },
+    "chat_members": {
+        "name": "Chat Members",
+        "attributes": [
+            ("conversation_id", "string", True, 40),
+            ("user_id", "string", True, 36),
+            ("peer_id", "string", True, 36),
+            ("unread_count", "integer", False, None),
+            ("last_read_at", "datetime", False, None),
+            ("last_read_message_id", "string", False, 40),
+            ("muted", "boolean", False, None),
+            ("last_message_id", "string", False, 40),
+            ("last_text", "string", False, 200),
+            ("last_at", "datetime", False, None),
+            ("last_sender_id", "string", False, 36),
+            ("updated_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("user_last_idx", "key", ["user_id", "last_at"]),  # hop thu, moi nhat truoc
+            ("conv_idx", "key", ["conversation_id"]),
+        ],
+    },
+    "chat_blocks": {
+        "name": "Chat Blocks",
+        "attributes": [
+            ("blocker_id", "string", True, 36),
+            ("blocked_id", "string", True, 36),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("blocker_idx", "key", ["blocker_id"]),
+            ("blocked_idx", "key", ["blocked_id"]),
+        ],
+    },
+    # Hang DANH DAU "tin X da phat tan" — tao CUNG giao dich voi phep tang "chua
+    # doc": trung rowId -> ca giao dich hong -> tac dung phu DUNG MOT LAN.
+    "chat_fanouts": {
+        "name": "Chat Fanouts",
+        "attributes": [
+            ("message_id", "string", True, 40),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
+    # ==========================================================================
     # NHAP CHUONG HANG LOAT — hai bang, xem `server/bulk_import_domain.py`.
     #
     # Day la trang thai DIEU PHOI, khong phai noi dung cong bo. Chuong that nam

@@ -76,14 +76,20 @@ Cả hai lệnh đều qua guard và xác minh chỉ đọc. Chỉ xoá tài kho
 
 ## Ma trận test tích hợp thật (`python -m scripts.staging.run_live`)
 
-**22/22 ĐẠT** (lần 4, 251 giây, backend thật và Appwrite Cloud thật qua lớp dịch).
+**23/23 ĐẠT** (2026-09-28, 228 giây, backend thật và Appwrite Cloud thật qua lớp dịch). Cây chạy: `main` + #229 + #231 (đã làm mới lên `main`) + nhánh này + bản sửa XP #246. Lần 4 trước đó: 22/22, 251 giây.
+
+Bài thứ 23 là hồi quy **ghi không đổi dữ liệu**:
+- chạy riêng trên cây **không có** #246: **ĐỎ** (`AppwriteUnavailableError`, XP bị khoá vĩnh viễn);
+- chạy có #246: **XANH**.
+
+XP hỗn hợp 10 writer đồng thời: 0/10 lỗi tạm thời.
 
 | Nhóm | Kiểm |
 |---|---|
 | Kết nối / cấu hình | backend `appwrite` + `staging`, cờ Social V1 / XP nguyên tử / Games bật, `/api/health` không lộ khoá |
 | Community | đăng bài idempotent theo `client_key` (lần lặp trả 200 và giữ nội dung lần đầu; người khác cùng khoá không va chạm); sửa/xoá chỉ chủ bài (403 với người khác); khách trả 401; bình luận idempotent và `comment_count` đếm một lần; chỉ tác giả sửa được bình luận; like hai lần tính một; feed `scope=latest` có cursor không lặp, lọc fandom đúng, cursor hỏng trả 400; chặn thì ẩn bài; báo cáo; feed không lộ email/token |
 | Hồ sơ | bio/fandom/accent lưu thật; fandom sai thì **không ghi gì**; avatar lưu thật (`avatars/<uid>/`), dữ liệu rác trả 400; khung chỉ trang bị được khi sở hữu, gỡ được |
-| XP nguyên tử | 16 lượt ghi đồng thời (8 entry, mỗi entry gửi 2 lần) cho XP 16, sổ cái 8 dòng, không trùng; 6 lượt cộng + 4 lượt đổi danh xưng đồng thời: tiến độ == sổ cái, thử lại tuần tự idempotent |
+| XP nguyên tử | 16 lượt ghi đồng thời (8 entry, mỗi entry gửi 2 lần) cho XP 16, sổ cái 8 dòng, không trùng; 6 lượt cộng + 4 lượt đổi danh xưng đồng thời: tiến độ == sổ cái, thử lại tuần tự idempotent; ghi không đổi dữ liệu hai lần rồi cộng XP tiếp vẫn thành công, `updated_at` tiến |
 | Games | ván Caro quyết toán đúng một lần (+5 / +2 XP) kể cả khi **5 worker cùng thấy "pending"**; sau khi kết thúc, body không đổi được kết quả (409); bảng xếp hạng có người thắng (3 điểm) và người thua (0); Memory không lộ bố cục, chỉ chủ lượt thao tác được (403) |
 | Hạn mức và đồng thời | trần đăng bài **đếm trên dữ liệu Appwrite** (bài 13 trả 429; gửi lại `client_key` không bị tính); 6 lượt đăng cùng `client_key` đồng thời cho đúng 1 bài; 6 lượt like đồng thời cho `like_count` = 1 |
 
@@ -96,4 +102,9 @@ API Databases kiểu cũ đã bị deprecate từ Appwrite 1.8; khoá tạo trê
 3. Chạy bộ `scripts/staging/live` trên staging **không có** lớp dịch để chứng minh tương đương; sau đó chạy trên một bản sao production-parity (1.9.6 + MongoDB).
 4. Gỡ lớp dịch khi không còn đường gọi kiểu cũ.
 
-Cờ và thứ tự triển khai cần quyết định riêng. **Không có gì ở đây được thực thi trong đợt này.**
+Cờ và thứ tự triển khai cần quyết định riêng. **Không có gì ở đây được thực thi trong đợt này.** Thiết kế chi tiết nằm ở `docs/migrations/APPWRITE_TABLESDB_MIGRATION_DESIGN.md`, gồm:
+- ánh xạ schema;
+- ngữ nghĩa thời gian;
+- quyền, ID, index, lưu trữ;
+- dual-run và cutover;
+- rollback.

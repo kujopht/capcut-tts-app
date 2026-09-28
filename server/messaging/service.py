@@ -22,7 +22,10 @@ DA DOC (`mark_read`): "chua doc" = so tin GUI CHO TOI co `created_at` > `last_re
 """
 from __future__ import annotations
 
+import logging
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from server.messaging.domain import (
@@ -53,6 +56,7 @@ from server.messaging.ids import (
 )
 from server.messaging.repository import ChatRepository
 
+log = logging.getLogger("fanfic.messaging")
 _DIEU_KHIEN = re.compile(r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f​-‏‪-‮⁦-⁩]")
 TRANG_TOI_DA = 50
 
@@ -67,26 +71,50 @@ def lam_sach_van_ban(text: Any) -> str:
     return t
 
 
+#: Cac phep doc DOC LAP cua mot lan gui chay SONG SONG. Do that tren staging (VN -> SGP, 2026-09-28):
+#: ~11 lan goi Appwrite tuan tu = trung vi 3,1 s cho nguoi gui.
+_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="messaging")
+#: "Nguoi nay ton tai" — CHI nho ket qua DUONG (tai khoan bi xoa van bi chan boi 404 o lan het han).
+NHO_NGUOI_GIAY = 600.0
+
+
 class ChatService:
     def __init__(self, repo: ChatRepository, *, user_exists: Callable[[str], bool],
                  clock: Callable[[], str] = now_iso) -> None:
         self.repo = repo
         self._co_nguoi = user_exists
         self._gio = clock
+        self._nho_nguoi: Dict[str, float] = {}
 
     # ------------------------------------------------------------------ nguoi kia
-    def resolve_peer(self, me: str, peer_chat_id: str) -> str:
+    def _ton_tai(self, uid: str) -> bool:
+        luc = self._nho_nguoi.get(uid)
+        if luc is not None and time.monotonic() - luc < NHO_NGUOI_GIAY:
+            return True
+        if self._co_nguoi(uid):
+            self._nho_nguoi[uid] = time.monotonic()
+            return True
+        return False
+
+    @staticmethod
+    def _peer_id(me: str, peer_chat_id: str) -> str:
+        """Kiem hinh thuc, KHONG goi kho."""
         peer = fanfic_user_id_from_chat((peer_chat_id or "").strip())
         if not peer:
             raise ChatNotFound("Không tìm thấy người này.", code="chat_peer_not_found")
         if peer == me:
             raise ChatInvalid("Không thể nhắn tin cho chính mình.", code="chat_self")
-        if not self._co_nguoi(peer):
+        return peer
+
+    def resolve_peer(self, me: str, peer_chat_id: str) -> str:
+        peer = self._peer_id(me, peer_chat_id)
+        if not self._ton_tai(peer):
             raise ChatNotFound("Không tìm thấy người này.", code="chat_peer_not_found")
         return peer
 
-    def _dam_bao_thanh_vien(self, cid: str, me: str, peer: str) -> Dict[str, Member]:
-        tv = self.repo.get_members(cid)
+    def _dam_bao_thanh_vien(self, cid: str, me: str, peer: str,
+                            co_san: Optional[Dict[str, Member]] = None) -> Dict[str, Member]:
+        tv = dict(co_san) if co_san is not None else self.repo.get_members(cid)
         for uid, kia in ((me, peer), (peer, me)):
             if uid in tv:
                 continue
@@ -100,17 +128,26 @@ class ChatService:
         return tv
 
     # ------------------------------------------------------------------ gui
-    def send(self, me: str, peer_chat_id: str, client_id: str, text: Any) -> Tuple[Message, bool]:
-        peer = self.resolve_peer(me, peer_chat_id)
+    def send(self, me: str, peer_chat_id: str, client_id: str, text: Any, *,
+             defer: Optional[Callable[..., Any]] = None) -> Tuple[Message, bool]:
+        """`defer(fn)`: chay `fn` SAU khi tra loi (vd `BackgroundTasks.add_task`). Chi ban xem truoc hop
+        thu duoc hoan — no idempotent va tu sua o lan gui sau. Tin + "+1 chua doc" LUON xong truoc khi
+        tra loi: mot lan gui lai phai tu hoan tat duoc, nen khong buoc nao "con no" duoc hoan."""
+        peer = self._peer_id(me, peer_chat_id)
         van_ban = lam_sach_van_ban(text)
         try:
             mid = message_row_id(client_id)
         except ValueError as exc:
             raise ChatInvalid("Mã tin nhắn không hợp lệ.", code="chat_bad_client_id") from exc
-        if self.repo.blocks_between(me, peer):
-            raise ChatForbidden("Không gửi được tin nhắn cho người này.", code="chat_blocked")
         cid = dm_id(me, peer)
-        tv = self._dam_bao_thanh_vien(cid, me, peer)
+        f_nguoi = _POOL.submit(self._ton_tai, peer)
+        f_chan = _POOL.submit(self.repo.blocks_between, me, peer)
+        f_tv = _POOL.submit(self.repo.get_members, cid)
+        if not f_nguoi.result():
+            raise ChatNotFound("Không tìm thấy người này.", code="chat_peer_not_found")
+        if f_chan.result():
+            raise ChatForbidden("Không gửi được tin nhắn cho người này.", code="chat_blocked")
+        tv = self._dam_bao_thanh_vien(cid, me, peer, co_san=f_tv.result())
         moi = Message(id=mid, conversation_id=cid, sender_id=me, recipient_id=peer, client_id=client_id,
                       text=van_ban, created_at=self._gio())
         try:
@@ -125,14 +162,25 @@ class ChatService:
             self.repo.fanout(tin.id, tv[peer].id)
         except RepoConflict:
             pass  # da phat tan (lan gui truoc / request song song) — DUNG MOT LAN
-        self._cap_nhat_xem_truoc(cid, tv)
+        if defer is not None:
+            defer(self._cap_nhat_xem_truoc_an_toan, cid)
+        else:
+            self._cap_nhat_xem_truoc(cid)
         return tin, tao_moi
 
-    def _cap_nhat_xem_truoc(self, cid: str, tv: Dict[str, Member]) -> None:
-        cuoi = self.repo.latest_message(cid)
+    def _cap_nhat_xem_truoc_an_toan(self, cid: str) -> None:
+        try:
+            self._cap_nhat_xem_truoc(cid)
+        except Exception:  # noqa: BLE001 — chay SAU khi tra loi: khong ai nhan loi; lan gui sau tu sua
+            log.warning("messaging: cập nhật xem trước bị lỗi (tự sửa ở lần gửi sau)", exc_info=True)
+
+    def _cap_nhat_xem_truoc(self, cid: str) -> None:
+        f_cuoi = _POOL.submit(self.repo.latest_message, cid)
+        tv = self.repo.get_members(cid)
+        cuoi = f_cuoi.result()
         if cuoi is None:
             return
-        for m in self.repo.get_members(cid).values() or tv.values():
+        for m in tv.values():
             if m.last_message_id == cuoi.id:
                 continue
             if m.last_at and iso_ms(m.last_at) > iso_ms(cuoi.created_at):

@@ -18,7 +18,7 @@ import json
 import time
 from typing import Any, Callable, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -102,11 +102,13 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
         return {"messages": [sv.message_dto(p.user_id, m) for m in trang.messages], "cursor": trang.cursor}
 
     @r.post("/api/chat/dm/{peer}/messages")
-    def send(peer: PeerId, payload: SendIn, authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    def send(peer: PeerId, payload: SendIn, background: BackgroundTasks,
+             authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         sv = _bat()
         p = resolve_profile(authorization)
         _han_muc("send", p.user_id)
-        tin, moi = _chay(lambda: sv.send(p.user_id, peer, payload.client_id, payload.text))
+        # Ban xem truoc hop thu cap nhat SAU khi tra loi (idempotent, tu sua) — nguoi gui khong phai cho.
+        tin, moi = _chay(lambda: sv.send(p.user_id, peer, payload.client_id, payload.text, defer=background.add_task))
         return {"message": sv.message_dto(p.user_id, tin), "created": moi}
 
     @r.post("/api/chat/dm/{peer}/read")

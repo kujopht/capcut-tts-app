@@ -223,6 +223,38 @@ class GuiIdempotentTest(MessagingCase):
         self.assertEqual(self.hop_thu(hb)["items"][0]["unread"], 1)
 
 
+class DoTreGuiTest(MessagingCase):
+    def test_xem_truoc_duoc_hoan_nhung_chua_doc_thi_khong(self):
+        ua, a, _ = self.nguoi("da")
+        ub, b, hb = self.nguoi("db")
+        hoan: List[Any] = []
+        self.sv.send(ua, b, cid(1), "tin", defer=lambda f, *a: hoan.append((f, a)))
+        tv = self.repo.get_members(dm_id(ua, ub))
+        self.assertEqual(tv[ub].unread_count, 1, "+1 chưa đọc PHẢI xong trước khi trả lời")
+        self.assertEqual(tv[ub].last_message_id, "", "xem trước được hoãn")
+        f, args = hoan[0]
+        f(*args)
+        self.assertEqual(self.hop_thu(hb)["items"][0]["last_text"], "tin")
+
+    def test_nho_nguoi_ton_tai_chi_ket_qua_duong_va_loi_nen_khong_lam_hong(self):
+        ua, a, _ = self.nguoi("ea")
+        ub, b, _ = self.nguoi("eb")
+        goi: List[str] = []
+        goc = self.sv._co_nguoi
+        self.sv._co_nguoi = lambda u: (goi.append(u), goc(u))[1]
+        for i in range(3):
+            self.sv.send(ua, b, cid(10 + i), f"t{i}")
+        self.assertEqual(goi, [ub], "người tồn tại chỉ hỏi MỘT lần")
+        with self.assertRaises(Exception):
+            self.sv.send(ua, "fw_khongtontai00000", cid(20), "x")
+        with self.assertRaises(Exception):
+            self.sv.send(ua, "fw_khongtontai00000", cid(21), "x")
+        self.assertEqual(goi.count("khongtontai00000"), 2, "kết quả ÂM không được nhớ")
+        # loi o buoc chay nen chi ghi log, khong nem
+        self.repo.latest_message = lambda *_a: (_ for _ in ()).throw(RuntimeError("sập"))
+        self.sv._cap_nhat_xem_truoc_an_toan(dm_id(ua, ub))
+
+
 class ChuaDocVaPhanTrangTest(MessagingCase):
     def test_chua_doc_da_doc_toi_moc_va_tong_tru_tat_tieng(self):
         ua, a, ha = self.nguoi("ua")

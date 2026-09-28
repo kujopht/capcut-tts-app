@@ -1,5 +1,5 @@
 """
-Chay bo test TICH HOP THAT (`server/tests/staging/test_staging_live.py`) tren Appwrite STAGING.
+Chay bo test TICH HOP THAT (`scripts/staging/live/test_live.py`) tren Appwrite STAGING.
 
     python -m scripts.staging.run_live [--log <tep>] [--chi <TenLop>]
 
@@ -47,7 +47,7 @@ def main(argv: List[str]) -> int:
         "FAS_SOCIAL_LIMITS": "post:5/60,comment:40/60",
         "FAS_VAR_DIR": tempfile.mkdtemp(prefix="fas-staging-var-"),
     })
-    muc = "server.tests.staging.test_staging_live" + (f".{a.chi}" if a.chi else "")
+    muc = "scripts.staging.live.test_live" + (f".{a.chi}" if a.chi else "")
     print(f"Đích {cfg.endpoint} · {cfg.project_id} · db {cfg.database_id} · Appwrite {dt['appwrite_version']} · run {run_id}")
     t0 = time.time()
     p = subprocess.run([sys.executable, "-m", "unittest", "-v", muc], cwd=GOC, env=env, capture_output=True,

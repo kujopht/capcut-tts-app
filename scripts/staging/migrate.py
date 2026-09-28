@@ -35,7 +35,9 @@ GOC = Path(__file__).resolve().parents[2]
 
 #: Pham vi DUY NHAT migration nay duoc cham. Thu tu = thu tu tao.
 PHAM_VI: Dict[str, List[str]] = {
-    "nen": ["profiles"],
+    # `author_stats`: dang bai cap nhat thong ke tac gia NGAY sau khi ghi bai — thieu bang nay thi
+    # bai VAN duoc tao nhung request tra 503 (do that tren staging 2026-09-28).
+    "nen": ["profiles", "author_stats"],
     "community_229": ["posts", "post_likes", "comments", "notifications", "content_reports",
                       "user_blocks", "user_follows", "story_follows", "moderation_events"],
     "xp": ["user_progress", "cosmetic_inventory", "xp_ledger", "achievement_unlocks", "reading_streaks",

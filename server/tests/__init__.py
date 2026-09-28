@@ -34,3 +34,14 @@ for _name in (
 ):
     os.environ.pop(_name, None)
 del _name
+
+#: Middleware gioi han theo TANG (`server/rate_limit.py`, tu 7f8e80a ngay 2026-09-23) dem theo IP cho
+#: TOAN TIEN TRINH, va moi `TestClient` deu la IP "testclient". Ca bo test chay ~70 s nen chi rieng
+#: cac `setUp` dang ky + dang nhap qua HTTP da vuot 60 request Tier A/phut (vd `test_admin`: 74 test x
+#: 4 request trong 1,4 s) -> 429 -> `KeyError: 'token'` o 54 module. Do la ly do CI backend cua `main` do
+#: tu 2026-09-23. Tran rat cao o day chi cho TIEN TRINH TEST; mac dinh production (60/120/600) khong doi
+#: va `test_rate_limiting` tu dat tran nho cua no roi TRA LAI gia tri nay (khoa bang
+#: `test_mac_dinh_production_khong_doi`).
+for _name in ("FAS_RATE_LIMIT_TIER_A", "FAS_RATE_LIMIT_TIER_B", "FAS_RATE_LIMIT_TIER_C"):
+    os.environ.setdefault(_name, "1000000")
+del _name

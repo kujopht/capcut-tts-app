@@ -259,6 +259,10 @@ app = FastAPI(
 
 settings = get_settings()
 settings.validate()   # FAIL FAST neu chon che do cloud ma cau hinh sai
+# Lop dich Databases->TablesDB CHI cho Appwrite staging (Cloud 2.3) — production KHONG cham gi;
+# bat voi sai dich (vd project production) thi CHET o day. Xem `server/appwrite_tablesdb_compat.py`.
+from server.appwrite_tablesdb_compat import kich_hoat_neu_staging as _kich_hoat_lop_dich_staging  # noqa: E402
+_kich_hoat_lop_dich_staging(settings)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins or ["http://localhost:3000"],

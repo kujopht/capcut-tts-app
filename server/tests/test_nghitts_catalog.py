@@ -40,6 +40,10 @@ CU = {
     "deepman3909": "Male",
 }
 
+#: Bí danh -> giọng gốc: CÙNG một model vật lý (fallback trong
+#: `desktop_app/providers/piper_models.py`, e293a01 / 45085a4).
+BI_DANH = {"ngochuyennew": "ngochuyen"}
+
 #: 22 giọng thêm mới trong lượt mở rộng.
 MOI = {
     "adam1", "banmai", "chieuthanh", "duyoryx3175", "lacphi", "maiphuong",
@@ -86,12 +90,19 @@ class TuongThichNguoc(unittest.TestCase):
 
     def test_ba_id_cu_van_dung_dau_danh_sach(self) -> None:
         """Thứ tự trong catalog là thứ tự hiển thị, và cũng là thứ tự dự phòng
-        của `default_voice_key()`."""
-        dau = [m["voice_key"] for m in PIPER_BUILTIN[:3]]
-        self.assertEqual(dau, ["ngochuyen", "calmwoman3688", "deepman3909"])
+        của `default_voice_key()`.
+
+        e293a01 (2026-09-24) CÓ Ý đặt `ngochuyennew` — BÍ DANH cùng model vật lý
+        với `ngochuyen` (`piper_models.py`) — lên ĐẦU làm giọng chính tắc. Ba id
+        cũ vẫn đứng ngay sau, đúng thứ tự cũ."""
+        dau = [m["voice_key"] for m in PIPER_BUILTIN[:4]]
+        self.assertEqual(dau, ["ngochuyennew", "ngochuyen", "calmwoman3688", "deepman3909"])
 
     def test_giong_uu_tien_khong_doi(self) -> None:
-        self.assertEqual(PIPER_PREFERRED_KEY, "ngochuyen")
+        """Ưu tiên là `ngochuyennew` (e293a01) — cùng model với `ngochuyen`, nên
+        `piper:ngochuyen` cũ vẫn tổng hợp ra đúng giọng đó (xem
+        `test_ba_id_cu_van_ton_tai`)."""
+        self.assertEqual(PIPER_PREFERRED_KEY, "ngochuyennew")
 
 
 class KhongDoanMetadata(unittest.TestCase):
@@ -120,8 +131,15 @@ class KhongDoanMetadata(unittest.TestCase):
         sau nay loc sai.
         """
         for m in PIPER_BUILTIN:
-            if m["voice_key"] in MOI:
+            if m["voice_key"] in MOI - set(BI_DANH):
                 self.assertEqual(m["gender"], "", m["voice_key"])
+
+    def test_bi_danh_ke_thua_gioi_tinh_da_kiem_chung(self) -> None:
+        """Bí danh CÙNG model vật lý không phải "giọng mới" về metadata: giới
+        tính của nó là giới tính ĐÃ KIỂM CHỨNG của giọng gốc, không phải đoán."""
+        theo_khoa = {m["voice_key"]: m for m in PIPER_BUILTIN}
+        for bi_danh, goc in BI_DANH.items():
+            self.assertEqual(theo_khoa[bi_danh]["gender"], CU[goc], bi_danh)
 
     def test_bang_ten_phu_dung_ca_catalog(self) -> None:
         """Thieu mot khoa la `NGHITTS_DISPLAY_NAMES[khoa]` nem KeyError luc nap."""

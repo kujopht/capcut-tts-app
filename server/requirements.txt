@@ -92,5 +92,10 @@ scrapling>=0.4,<0.5
 # chung minh duoc gi ve moi truong production.
 google-cloud-tasks>=2.16,<3
 
+# --- Theo doi loi: Sentry (server/observability.py) ---
+# TAT khi khong co FAS_SENTRY_DSN (khong import, khong gui gi). Ghim minor: before_send /
+# before_breadcrumb va tham so `max_request_body_size`/`include_local_variables` la API cua 2.x.
+sentry-sdk>=2.70,<2.71
+
 # --- Ngoai Python ---
 # ffmpeg phai co trong PATH de ghep cac doan MP3 (server/tts_bridge.py).

@@ -14,6 +14,8 @@ import { MUSIC_ENABLED } from "@/lib/features";
 import { Logo } from "@/components/Logo";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
+// Sentry web — TAT khi khong co NEXT_PUBLIC_SENTRY_DSN; co loi moi nap SDK (xem components/SentryGate.tsx).
+import { SentryGate } from "@/components/SentryGate";
 
 // Mo ta cu noi ve viec tao audio truoc tien. San pham nay la nen tang doc va
 // nghe fanfic; Audio Studio la cong cu phu. Mo ta cung phai noi theo thu tu do.
@@ -198,6 +200,7 @@ export default function RootLayout({
                 dang phat, hoac khi dang o chinh trang doc chuong do (trang
                 do da co trinh phat lon + thanh nho theo cuon rieng). */}
             <GlobalMiniPlayer />
+            <SentryGate />
           </AudioEngineProvider>
           </ToastProvider>
         </SessionProvider>

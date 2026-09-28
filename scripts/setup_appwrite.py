@@ -1854,7 +1854,7 @@ class Setup:
         return response.status_code == 200
 
     def _call(self, method: str, path: str, payload: Optional[Dict] = None,
-              *, doc_thoi: bool = False) -> Any:
+              *, doc_thoi: bool = False, khi_404: Any = None) -> Any:
         """
         :param doc_thoi: mot phep DOC de so sanh, khong phai mot thay doi —
             khong in dong dry-run va khong cong vao bo dem `created`. Khong co
@@ -1873,6 +1873,8 @@ class Setup:
         if response.status_code == 409:
             self.skipped += 1
             return "exists"
+        if response.status_code == 404 and khi_404 is not None:
+            return khi_404  # chi phep DOC trang thai tung muc (`_muc`) — noi goi tu quyet 404 nghia la gi
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -1992,7 +1994,7 @@ class Setup:
             if not self.dry_run:
                 self._cho_index_san_sang(base, name)
 
-    def _goi_doc_thoi_thu_lai(self, base: str, han_chot: float) -> Optional[Dict]:
+    def _goi_doc_thoi_thu_lai(self, base: str, han_chot: float, *, khi_404: Any = None) -> Optional[Dict]:
         """`GET base` (doc_thoi=True) nhưng KHÔNG để một lỗi mạng thoáng qua
         (vd `httpx.ReadTimeout`, connection reset) làm sập cả vòng chờ.
 
@@ -2007,6 +2009,8 @@ class Setup:
         thời gian đã có (`han_chot`), không phải một lý do để dừng khác."""
         import time
         try:
+            if khi_404 is not None:
+                return self._call("GET", base, doc_thoi=True, khi_404=khi_404)
             return self._call("GET", base, doc_thoi=True)
         except httpx.TransportError as exc:
             if time.monotonic() >= han_chot:
@@ -2022,8 +2026,12 @@ class Setup:
         Do that 2026-09-28 tren Appwrite 1.9.6 + MongoDB tu dung (dung ban production): `GET collection`
         tra BO DEM cu (TTL -1) — `novels.dub_audio_key` van 'processing' o do trong khi
         `GET .../attributes/dub_audio_key` = 'available'. Doc qua collection thi script bao "kẹt" SAU
-        120 s cho mot thuoc tinh da dung duoc tu lau."""
-        return self._goi_doc_thoi_thu_lai(f"{base}/{loai}/{key}", han_chot)
+        120 s cho mot thuoc tinh da dung duoc tu lau.
+
+        404 o endpoint TUNG MUC = "chua hien" (khoang ngan ngay sau POST), KHONG phai "xong" cung KHONG phai
+        loi chot: vong cho coi no nhu mot trang thai chua san sang va tiep tuc toi han (review doc lap)."""
+        return self._goi_doc_thoi_thu_lai(f"{base}/{loai}/{key}", han_chot,
+                                          khi_404={"key": key, "status": "chưa hiện (404)"})
 
     def _cho_thuoc_tinh_san_sang(self, base: str, key: str,
                                  *, timeout_giay: float = 120.0) -> None:

@@ -48,7 +48,7 @@ class BoDemCollectionCuTest(unittest.TestCase):
     cho san sang phai doc TUNG MUC, khong bao gio qua `GET base`."""
 
     def _call_theo_duong(self, duong_goi):
-        def _call(method, path, payload=None, *, doc_thoi=False):
+        def _call(method, path, payload=None, *, doc_thoi=False, khi_404=None):
             duong_goi.append(path)
             if path.endswith("/attributes/a") or path.endswith("/attributes/b"):
                 return {"key": path.rsplit("/", 1)[1], "status": "available"}
@@ -68,6 +68,19 @@ class BoDemCollectionCuTest(unittest.TestCase):
             s._cho_index_san_sang("/v1/db/t", "t_idx", timeout_giay=0.01)
         self.assertEqual(duong, ["/v1/db/t/attributes/a", "/v1/db/t/attributes/a", "/v1/db/t/attributes/b",
                                  "/v1/db/t/indexes/t_idx"])
+
+    def test_404_tung_muc_la_chua_hien_cho_tiep_khong_thoat(self):
+        """Ngay sau POST, endpoint tung muc co the 404 mot luc: CHO tiep (khong 'xong', khong thoat ngay)."""
+        s = _tao_setup()
+        ket_qua = [{"key": "a", "status": "chưa hiện (404)"}, _thuoc_tinh("a", "processing"), _thuoc_tinh("a", "available")]
+        with patch.object(s, "_call", side_effect=ket_qua) as m, patch("time.sleep", return_value=None):
+            s._cho_thuoc_tinh_san_sang("/v1/db/t", "a")
+        self.assertEqual(m.call_count, 3)
+        self.assertEqual(m.call_args.kwargs.get("khi_404"), {"key": "a", "status": "chưa hiện (404)"})
+        with patch.object(s, "_call", return_value={"key": "a", "status": "chưa hiện (404)"}), \
+                patch("time.sleep", return_value=None), self.assertRaises(SystemExit) as ctx:
+            s._cho_thuoc_tinh_san_sang("/v1/db/t", "a", timeout_giay=0.01)
+        self.assertIn("404", str(ctx.exception))
 
 
 class ChoThuocTinhSanSangTest(unittest.TestCase):
@@ -157,7 +170,7 @@ class IndexChoTatCaThuocTinhTest(unittest.TestCase):
         s = _tao_setup()
         trang_thai = {"a": "available", "b": "processing"}
 
-        def _call(method, path, payload=None, *, doc_thoi=False):
+        def _call(method, path, payload=None, *, doc_thoi=False, khi_404=None):
             k = path.rsplit("/", 1)[1]
             return {"key": k, "status": trang_thai[k]}
 
@@ -173,7 +186,7 @@ class IndexChoTatCaThuocTinhTest(unittest.TestCase):
     def test_index_khong_bao_loi_khi_tat_ca_da_available(self):
         s = _tao_setup()
 
-        def _call(method, path, payload=None, *, doc_thoi=False):
+        def _call(method, path, payload=None, *, doc_thoi=False, khi_404=None):
             return {"key": path.rsplit("/", 1)[1], "status": "available"}
 
         with patch.object(s, "_call", side_effect=_call):

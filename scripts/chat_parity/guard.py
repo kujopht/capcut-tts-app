@@ -3,7 +3,8 @@ Rao CUNG cho bai kiem tuong duong production (`scripts.chat_parity`). FAIL CLOSE
 
 Dich DUY NHAT duoc phep la mot Appwrite 1.9.x DUNG MOT LAN, tu dung tren chinh may chay test:
 
-1. `kiem_dich()` — KHONG goi mang. Host phai la LOOPBACK (`127.0.0.1` / `localhost` / `::1`), project ID
+1. `kiem_dich()` — KHONG goi mang. Host phai la IP LOOPBACK (127.0.0.0/8 hoac ::1 — khong ten mien nao, ke ca
+   `localhost`; khong `user@host`), project ID
    phai mang tien to `parity-`, va toa do KHONG trung production nao trong nguon su that duy nhat
    `scripts/ops/cutover_target.py` (lop kiem nguoc `khang_dinh_khong_phai_production`).
 2. `xac_minh_song()` — CHI DOC: phien ban tra ve phai la 1.9.x (dung dong production dang chay), khoa
@@ -16,6 +17,7 @@ Khong co duong nao de tro rao nay vao production: production la mot host tu xa, 
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional
@@ -23,7 +25,6 @@ from urllib.parse import quote, urlparse
 
 from scripts.ops.cutover_target import CutoverRefused, khang_dinh_khong_phai_production
 
-LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 TIEN_TO_DU_AN = "parity-"
 DONG_PHIEN_BAN = "1.9."
 MIEN_TONG_HOP = "@example.test"
@@ -57,12 +58,23 @@ class CauHinhParity:
         return s.replace(self.api_key, "«khoá-api»") if self.api_key else s
 
 
+def _la_loopback(host: str) -> bool:
+    """CHI dia chi IP loopback THAT (127.0.0.0/8, ::1 o moi cach viet). Ten mien — ke ca `localhost` — KHONG
+    duoc tin: tep hosts/DNS co the tro no di noi khac (review doc lap 2026-09-28)."""
+    try:
+        return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
 def kiem_dich(cfg: CauHinhParity) -> None:
     u = urlparse(cfg.endpoint)
     if u.scheme not in ("http", "https") or not u.hostname:
         raise DichBiTuChoi("APPWRITE_ENDPOINT không hợp lệ.")
-    if u.hostname not in LOOPBACK:
-        raise DichBiTuChoi(f"Chỉ cho phép Appwrite trên loopback, không phải {u.hostname!r}.")
+    if u.username is not None or u.password is not None or "@" in u.netloc:
+        raise DichBiTuChoi("APPWRITE_ENDPOINT không được chứa thông tin đăng nhập (user@host).")
+    if not _la_loopback(u.hostname):
+        raise DichBiTuChoi(f"Chỉ cho phép Appwrite trên IP loopback, không phải {u.hostname!r}.")
     if u.path.rstrip("/") != "/v1":
         raise DichBiTuChoi("APPWRITE_ENDPOINT phải kết thúc bằng /v1.")
     if not cfg.project_id.startswith(TIEN_TO_DU_AN):
@@ -133,6 +145,10 @@ def moi_truong_con(cfg: CauHinhParity, *, them: Optional[Mapping[str, str]] = No
         "APPWRITE_API_KEY": cfg.api_key,
     })
     if them:
+        # `them` KHONG duoc doi toa do/tep cau hinh da kiem o tren (review doc lap 2026-09-28).
+        cam = [k for k in them if k.startswith("APPWRITE_") or k in ("FAS_ENV_FILE", "DATA_BACKEND")]
+        if cam:
+            raise DichBiTuChoi(f"Không được ghi đè {sorted(cam)} qua `them`.")
         env.update(them)
     try:
         khang_dinh_khong_phai_production(env)

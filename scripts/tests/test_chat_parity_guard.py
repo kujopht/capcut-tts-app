@@ -17,14 +17,24 @@ def cfg(**kw):
 
 class KiemDichTest(unittest.TestCase):
     def test_loopback_parity_hop_le(self):
-        for ep in ("http://127.0.0.1:8080/v1", "http://localhost/v1", "http://[::1]:8080/v1/"):
+        for ep in ("http://127.0.0.1:8080/v1", "http://127.0.0.2/v1", "http://[::1]:8080/v1/",
+                   "http://[0:0:0:0:0:0:0:1]/v1"):
             guard.kiem_dich(cfg(endpoint=ep))
 
     def test_tu_choi_moi_host_khong_phai_loopback(self):
         for ep in (PROD_APPWRITE_ENDPOINT, "https://sgp.cloud.appwrite.io/v1", "http://10.0.0.5:8080/v1",
-                   "http://127.0.0.1.nip.io/v1", "http://localhost.fanfic.world/v1", "file:///v1", ""):
+                   "http://127.0.0.1.nip.io/v1", "http://localhost.fanfic.world/v1", "file:///v1", "",
+                   # ten mien (ke ca localhost) khong duoc tin — hosts/DNS tro di dau cung duoc
+                   "http://localhost/v1",
+                   # thong tin dang nhap trong URL (review doc lap): tu choi du host sau @ la loopback
+                   "http://evil.example@127.0.0.1:8080/v1", "http://u:p@127.0.0.1/v1"):
             with self.assertRaises(guard.DichBiTuChoi, msg=ep):
                 guard.kiem_dich(cfg(endpoint=ep))
+
+    def test_them_khong_duoc_ghi_de_toa_do(self):
+        for k in ("APPWRITE_ENDPOINT", "APPWRITE_API_KEY", "FAS_ENV_FILE", "DATA_BACKEND"):
+            with self.assertRaises(guard.DichBiTuChoi, msg=k):
+                guard.moi_truong_con(cfg(), them={k: "https://x.example/v1"})
 
     def test_tu_choi_project_khong_parity_va_toa_do_production(self):
         for pid in (PROD_APPWRITE_PROJECT_ID, "fanfic-staging", "chat"):

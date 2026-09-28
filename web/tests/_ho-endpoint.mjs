@@ -33,6 +33,10 @@ export const HO_ENDPOINT = [
   "comments",
   "creator",
   "feed",
+  // FAS_GAMES_V1 (PR #229/#231) — trạng thái đọc qua `GET /api/games/config`.
+  // CHƯA triển khai trên bản API đang chạy (route trả 404) — xem
+  // `gamesConfig()` ở `lib/api.ts` và `/admin/games`.
+  "games",
   "health",
   // Image Studio V1 (overnight build) — Quick Free/Fanfic Credits/My
   // Pollinations, doc lap voi moi ho khac. Xem

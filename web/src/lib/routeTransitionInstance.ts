@@ -9,13 +9,15 @@
  * hai component luon thay CHINH XAC mot trang thai, khong bao gio lech nhau.
  */
 
-import { anhNen, tenNen } from "@/lib/backgrounds";
+import { MAN_HINH_NHO, anhNen, anhNenNho, tenNen } from "@/lib/backgrounds";
 import { taoRouteTransitionStore } from "@/lib/routeTransitionStore";
 
 function napAnhThat(ten: string): Promise<void> {
   return new Promise((giai) => {
     const img = new Image();
-    img.src = anhNen(ten);
+    // Nap truoc DUNG tam se ve: dien thoai ve ban nho (CSS `--anh-nho` + poster
+    // `<picture>`), nap tam lon o do la tai thua ~300 KB ma van phai tai tam nho.
+    img.src = window.matchMedia(MAN_HINH_NHO).matches ? anhNenNho(ten) : anhNen(ten);
     const xong = () => giai();
     // `decode()` cho ca truong hop anh da nam trong cache: no tra ve ngay,
     // nen chuyen canh bat dau lien ma khong phai cho mot vong mang nao.

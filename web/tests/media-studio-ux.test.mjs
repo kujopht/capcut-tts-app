@@ -71,12 +71,21 @@ test("Audio is a real page; compatibility pages use ChuyenHuong", () => {
   const audio = read("../src/app/studio/audio/page.tsx");
   assert.match(audio, /Audio Studio/);
   assert.ok(!audio.includes("ChuyenHuong"));
-  assert.match(audio, /Chỉnh với video/);
-  assert.match(audio, /AudioPlayer/);
-  assert.match(audio, /\/studio\/media\?audio=\$\{encodeURIComponent\(a\.track_id\)\}/,
+  // Social & Play V1: moi ban audio gan day la mot `RecentAudioCard` (ten, giong,
+  // ngay, thoi luong THAT) thay vi mot AudioPlayer "0:00 / --:--".
+  assert.match(audio, /<RecentAudioCard key=\{a\.track_id\} a=\{a\} voices=\{voices\} \/>/);
+  const the = read("../src/components/studio/RecentAudioCard.tsx");
+  assert.match(the, /Chỉnh với video/);
+  assert.match(the, /\/studio\/media\?audio=\$\{encodeURIComponent\(a\.track_id\)\}/,
     "Chỉnh với video phải mang đúng audio hiện có vào Media");
-  assert.match(read("../src/components/AudioPlayer.tsx"), /aria-label=\{`Tải xuống audio MP3:/,
-    "Audio gần đây phải có hành động tải xuống rõ ràng, dùng URL audio chuẩn");
+  assert.match(the, /aria-label=\{`Tải MP3: \$\{tieuDe\}`\}/,
+    "Audio gần đây phải có hành động tải xuống rõ ràng");
+  assert.match(the, /const r = await resolveAudio\(a\.chapter_id\);[\s\S]*link\.href = r\.downloadUrl;/,
+    "tải xuống dùng URL audio chuẩn (resolveAudio)");
+  // Mot chu so huu giong doc: phat qua dong co toan cuc, khong <audio> rieng.
+  assert.match(the, /useAudioEngine\(\)/);
+  assert.ok(!/^\s*<audio\b/m.test(the), "không thêm thẻ <audio> thứ hai");
+  assert.match(the, /a\.duration_seconds > 0 \? dongHo\(a\.duration_seconds\) : ""/, "thời lượng thật, không --:-- giả");
 });
 
 test("Audio co loi vao Media tuy chon ca khi chua chon audio", () => {
@@ -84,7 +93,8 @@ test("Audio co loi vao Media tuy chon ca khi chua chon audio", () => {
   assert.match(audio, /\+ Thêm video để chỉnh/);
   assert.match(audio, /href="\/studio\/media"/,
     "CTA không được đòi audio_id mới vào được Media");
-  assert.match(audio, /\/studio\/media\?audio=\$\{encodeURIComponent\(a\.track_id\)\}/,
+  assert.match(read("../src/components/studio/RecentAudioCard.tsx"),
+    /\/studio\/media\?audio=\$\{encodeURIComponent\(a\.track_id\)\}/,
     "thẻ audio có sẵn vẫn phải mang đúng track_id sang Media");
 });
 

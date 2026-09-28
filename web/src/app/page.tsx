@@ -58,6 +58,7 @@ import {
 } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
+import { MUSIC_ENABLED } from "@/lib/features";
 import { getReaderTags } from "@/lib/taxonomy";
 import {
   novelHasAudio,
@@ -80,6 +81,7 @@ import {
   IconCrown,
   IconFilm,
   IconFlame,
+  IconGamepad,
   IconHeadphones,
   IconLibrary,
   IconMegaphone,
@@ -100,20 +102,29 @@ const BANG_VANG_COUNT = 5;
 /** So bai dang lay ve cho o xem truoc cong dong — "2–4 the" theo dac ta. */
 const FEED_SHELF_COUNT = 3;
 
-interface HomeData {
+/** Nguon CONG KHAI — giong nhau voi moi nguoi, nap MOT lan khi vao trang. */
+interface HomeDataChung {
   novels: Novel[];
   tags: string[];
   animationSeries: AnimationSeries[];
   communityPosts: Post[];
-  reading: ContinueItem | null;
-  listening: ContinueItem | null;
-  watching: ContinueWatchItem | null;
-  gamification: { progress: OwnProgress; thanhTuuMoiNhat: Achievement | null } | null;
   /** Top XP tuần ISO hiện tại — "Bảng vàng tuần". Rỗng khi chưa ai kiếm XP
    * trong tuần (`GET /api/leaderboard?mode=weekly` thật, xem
    * `app/leaderboard/page.tsx` — KHÔNG bịa chỉ số mới nào). */
   bangVangTuan: LeaderboardEntry[];
 }
+
+/** Nguon RIENG cua nguoi dang nhap — chi nap khi da biet la ai. */
+interface HomeDataRieng {
+  reading: ContinueItem | null;
+  listening: ContinueItem | null;
+  watching: ContinueWatchItem | null;
+  gamification: { progress: OwnProgress; thanhTuuMoiNhat: Achievement | null } | null;
+}
+
+type HomeData = HomeDataChung & HomeDataRieng;
+
+const RIENG_RONG: HomeDataRieng = { reading: null, listening: null, watching: null, gamification: null };
 
 function dinhDangGio(giay: number): string {
   const s = Math.max(0, Math.floor(giay));
@@ -608,27 +619,42 @@ function KhungChoDanhSach() {
 export default function HomePage() {
   const { profile } = useSession();
   const daDangNhap = Boolean(profile);
+  const nguoiDung = profile?.user_id ?? null;
 
-  const load = useCallback(async (): Promise<HomeData> => {
-    /*
-      SAU nguon DOC LAP, goi SONG SONG trong MOT `Promise.all` — khong phai
-      sau request tuan tu. Bon nguon PHU (tiep tuc/gamification/animation/
-      cong dong) deu tu `.catch` ve gia tri rong rieng: mot nguon loi KHONG
-      duoc keo sap ca trang chu (cung triet ly voi ban V4 cu, mo rong cho hai
-      nguon moi).
-    */
-    const [page, tags, tiepTuc, gam, animRes, feedRes, lbRes] = await Promise.all([
+  /*
+    HAI bo nap, khong phai mot bo phu thuoc `daDangNhap`: phien dang nhap chi
+    khoi phuc XONG sau lan ve dau, nen mot bo nap duy nhat chay HAI lan voi
+    nguoi da dang nhap — lan dau khi `profile` con null, lan hai khi no ve — va
+    lap lai ca nam request cong khai (do tren ban production: 17 request thay
+    vi 12). Nguon cong khai nap ngay, dung mot lan; nguon rieng chi nap khi da
+    biet nguoi dung, nen khach khong phai cho gi them.
+
+    Moi nhom goi SONG SONG trong MOT `Promise.all`. Cac nguon PHU deu tu
+    `.catch` ve gia tri rong rieng: mot nguon loi KHONG duoc keo sap ca trang
+    chu (cung triet ly voi ban V4 cu).
+  */
+  const loadChung = useCallback(async (): Promise<HomeDataChung> => {
+    const [page, tags, animRes, feedRes, lbRes] = await Promise.all([
       api.browseNovels({ limit: GRID_COUNT, content_mode: "readable" }),
       api.novelTags(),
-      daDangNhap
-        ? api.getContinueProgress().catch(() => ({ reading: null, listening: null, watching: null }))
-        : Promise.resolve({ reading: null, listening: null, watching: null }),
-      daDangNhap
-        ? Promise.all([api.getProgress(), api.getAchievements()]).catch(() => null)
-        : Promise.resolve(null),
       api.listAnimationSeries({ limit: ANIM_SHELF_COUNT }).catch(() => ({ series: [] })),
       social.feed(FEED_SHELF_COUNT).catch(() => ({ items: [] })),
       api.getLeaderboard("weekly", BANG_VANG_COUNT, 0).catch(() => ({ items: [] })),
+    ]);
+    return {
+      novels: page.novels,
+      tags: tags.tags,
+      animationSeries: animRes.series,
+      communityPosts: feedRes.items,
+      bangVangTuan: lbRes.items,
+    };
+  }, []);
+
+  const loadRieng = useCallback(async (): Promise<HomeDataRieng> => {
+    if (!nguoiDung) return RIENG_RONG;
+    const [tiepTuc, gam] = await Promise.all([
+      api.getContinueProgress().catch(() => ({ reading: null, listening: null, watching: null })),
+      Promise.all([api.getProgress(), api.getAchievements()]).catch(() => null),
     ]);
     const thanhTuuMoiNhat = gam
       ? gam[1].achievements
@@ -636,19 +662,17 @@ export default function HomePage() {
           .sort((a, b) => (b.unlocked_at! < a.unlocked_at! ? -1 : 1))[0] ?? null
       : null;
     return {
-      novels: page.novels,
-      tags: tags.tags,
-      animationSeries: animRes.series,
-      communityPosts: feedRes.items,
-      bangVangTuan: lbRes.items,
       reading: tiepTuc.reading,
       listening: tiepTuc.listening,
       watching: tiepTuc.watching,
       gamification: gam ? { progress: gam[0], thanhTuuMoiNhat } : null,
     };
-  }, [daDangNhap]);
+  }, [nguoiDung]);
 
-  const { data, error, loading, reload } = useAsyncData(load);
+  const { data: chung, error, loading, reload } = useAsyncData(loadChung);
+  const { data: rieng } = useAsyncData(loadRieng, { enabled: daDangNhap });
+  // Dang xuat: bo du lieu rieng cu ngay, khong cho lan nap sau.
+  const data: HomeData | null = chung ? { ...chung, ...((daDangNhap && rieng) || RIENG_RONG) } : null;
 
   const novels = data?.novels ?? [];
   const animationSeries = data?.animationSeries ?? [];
@@ -863,13 +887,17 @@ export default function HomePage() {
               <span className="home-util-desc">Tủ sách &amp; tuyển tập</span>
             </div>
           </Link>
+          {/* Nhac tam an (`lib/features.ts`): the nay tro thanh loi vao Giai tri
+              (mini-game, bang xep hang) thay vi hua mot kho nhac chua co. */}
           <Link href="/entertainment" className="home-util-card" prefetch={false}>
             <div className="home-util-icon home-util-icon-audio">
-              <IconHeadphones size={20} />
+              {MUSIC_ENABLED ? <IconHeadphones size={20} /> : <IconGamepad size={20} />}
             </div>
             <div className="home-util-text">
-              <strong className="home-util-name">Âm Nhạc</strong>
-              <span className="home-util-desc">Fantasy ambient &amp; bài hát</span>
+              <strong className="home-util-name">{MUSIC_ENABLED ? "Âm Nhạc" : "Giải trí"}</strong>
+              <span className="home-util-desc">
+                {MUSIC_ENABLED ? "Fantasy ambient & bài hát" : "Mini-game & bảng xếp hạng"}
+              </span>
             </div>
           </Link>
           <Link href="/studio" className="home-util-card" prefetch={false}>

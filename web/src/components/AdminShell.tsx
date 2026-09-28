@@ -33,6 +33,7 @@ import {
   IconCompass,
   IconFeather,
   IconFilm,
+  IconGamepad,
   IconGear,
   IconHistory,
   IconInbox,
@@ -40,6 +41,7 @@ import {
   IconLink,
   IconMegaphone,
   IconShield,
+  IconSliders,
   IconSparkles,
   IconUser,
 } from "@/components/Icons";
@@ -76,6 +78,7 @@ interface NhomDieuHuong {
 const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
   { muc: [{ href: "/admin", nhan: "Dashboard", icon: IconCompass }] },
   { muc: [{ href: "/admin/users", nhan: "Users", icon: IconUser, vaiToiThieu: "admin" }] },
+  { muc: [{ href: "/admin/community", nhan: "Cộng đồng", icon: IconMegaphone }] },
   {
     nhom: "Content",
     muc: [
@@ -118,6 +121,13 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
       { href: "/admin/reports", nhan: "Báo cáo", icon: IconShield },
       { href: "/admin/authors/applications", nhan: "Đơn tác giả", icon: IconFeather },
       { href: "/admin/authors", nhan: "Tác giả", icon: IconKey },
+    ],
+  },
+  {
+    nhom: "Games & Features",
+    muc: [
+      { href: "/admin/games", nhan: "Games", icon: IconGamepad },
+      { href: "/admin/features", nhan: "Features", icon: IconSliders },
     ],
   },
   { muc: [{ href: "/admin/analytics", nhan: "Analytics", icon: IconChart, vaiToiThieu: "admin" }] },

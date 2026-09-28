@@ -2333,6 +2333,19 @@ export interface ContentQueueSummary {
   by_overall: Partial<Record<ContentQueueOverall, number>>;
 }
 
+/**
+ * Trạng thái `FAS_GAMES_V1` (PR #229/#231, CHƯA triển khai trên bản API đang
+ * chạy hiện tại — trả 404). KHÔNG nằm trong `adminApi`: đây không phải một
+ * route `/api/admin/*` (bài test `admin.test.mjs` đối soát "mọi hàm trong
+ * adminApi đều nằm dưới /api/admin/" — đặt nhầm vào đó sẽ tự làm sai điều đó
+ * ngay khi route thật triển khai với tiền tố khác). Hình dạng phản hồi THẬT
+ * chưa tồn tại trong mã ở đây nên kiểu trả về CỐ Ý để lỏng
+ * (`Record<string, unknown>`); `/admin/games` và `/admin/features` tự hiển
+ * thị khoá/giá trị có thật, không đoán tên trường.
+ */
+export const gamesConfig = () =>
+  request<Record<string, unknown>>("/api/games/config");
+
 export const adminApi = {
   overview: () => request<AdminOverview>("/api/admin/overview"),
 
@@ -3158,8 +3171,11 @@ export interface ServerLimits {
     }
   >;
   rate: Record<string, { count: number; minutes: number }>;
-  /** Social & Play V1 — vắng mặt trên máy chủ cũ = coi như mọi cờ đều tắt. */
-  capabilities?: Partial<SocialCapabilities>;
+  /**
+   * Social & Play V1 — vắng mặt (hoặc `null`) trên máy chủ cũ = coi như mọi cờ đều tắt. Trang
+   * `/admin/features` liệt kê NGUYÊN VĂN khoá/giá trị nhận được, không đặt tên cứng từng cờ.
+   */
+  capabilities?: Partial<SocialCapabilities> | null;
   community_fandoms?: CommunityFandom[];
   feed_max_depth?: number;
   profile_accent_presets?: string[];

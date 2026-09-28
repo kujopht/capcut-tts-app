@@ -45,6 +45,9 @@ PHAM_VI: Dict[str, List[str]] = {
     "xp": ["user_progress", "cosmetic_inventory", "xp_ledger", "achievement_unlocks", "reading_streaks",
            "quest_progress", "xp_progress_cas"],
     "games_231": ["game_rooms", "game_room_versions", "game_runs", "game_run_versions", "game_results"],
+    # Nhan tin 1:1 tren Appwrite (thay Tencent cho tin nhan chu) — `server/messaging/`. Cay khong co cac
+    # bang nay (vd `main` truoc khi chat merge) thi ke hoach bao vang, khong tao gi.
+    "chat_messaging": ["chat_messages", "chat_members", "chat_blocks", "chat_fanouts"],
 }
 
 

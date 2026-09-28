@@ -29,6 +29,8 @@ def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", default="")
     ap.add_argument("--chi", default="", help="chi chay mot lop test (vd CommunityTest)")
+    ap.add_argument("--mo-dun", default="test_live", choices=["test_live", "test_chat_live"],
+                    help="module test song trong scripts/staging/live (danh sach TRANG)")
     a = ap.parse_args(argv)
     try:
         cfg = bi_mat.nap()
@@ -44,12 +46,14 @@ def main(argv: List[str]) -> int:
         "FAS_SOCIAL_V1_SCHEMA": "1",
         "FAS_XP_ATOMIC": "1",
         "FAS_GAMES_V1": "1",
+        # Nhan tin tren Appwrite (`server/messaging/`) — CHI trong tien trinh con da khoa vao staging.
+        "FAS_CHAT_V1": "1",
         # Tran dang bai theo NGUOI (dem tren chinh du lieu Appwrite): du cho mot nguoi o lop community
         # (~8 bai), va `F_HanMuc` kiem dung tran nay (bai 13 -> 429).
         "FAS_SOCIAL_LIMITS": "post:12/60,comment:40/60",
         "FAS_VAR_DIR": tempfile.mkdtemp(prefix="fas-staging-var-"),
     })
-    muc = "scripts.staging.live.test_live" + (f".{a.chi}" if a.chi else "")
+    muc = f"scripts.staging.live.{a.mo_dun}" + (f".{a.chi}" if a.chi else "")
     print(f"Đích {cfg.endpoint} · {cfg.project_id} · db {cfg.database_id} · Appwrite {dt['appwrite_version']} · run {run_id}")
     t0 = time.time()
     p = subprocess.run([sys.executable, "-m", "unittest", "-v", muc], cwd=GOC, env=env, capture_output=True,

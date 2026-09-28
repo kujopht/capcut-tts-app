@@ -46,6 +46,22 @@ test("tat mac dinh va moi truong khong tu thanh production", () => {
   assert.match(codeOnly(read("app/layout.tsx")), /<SentryGate \/>/);
 });
 
+test("frontend CHI biet DSN va moi truong — khong bao gio mot token Sentry", () => {
+  // Token read-only cua AI Support (FAS_SUPPORT_SENTRY_TOKEN) va moi token Sentry khac CHI o backend.
+  // Mot NEXT_PUBLIC_* bi nhung vao bundle cong khai, nen moi ten bien Sentry o web phai nam trong
+  // danh sach cho phep, va khong duoc nhac toi bat ky bien token nao.
+  const choPhep = new Set(["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENV"]);
+  const tep = [...moiTep(SRC), fileURLToPath(new URL("../next.config.mjs", import.meta.url))];
+  for (const p of tep) {
+    const rel = p.replace(/\\/g, "/").split("/web/")[1];
+    const c = readFileSync(p, "utf8");
+    for (const m of c.matchAll(/\b[A-Z][A-Z0-9_]*SENTRY[A-Z0-9_]*\b/g)) {
+      if (m[0].startsWith("NEXT_PUBLIC_")) assert.ok(choPhep.has(m[0]), `${rel}: biến ${m[0]} ngoài danh sách cho phép`);
+    }
+    assert.ok(!/SENTRY[A-Z0-9_]*TOKEN|SUPPORT_SENTRY|SENTRY_AUTH/.test(c), `${rel} nhắc tới một biến token Sentry`);
+  }
+});
+
 test("SDK chi nap qua MOT diem import(), khong import tinh @sentry o dau khac", () => {
   const diem = [];
   for (const p of moiTep(SRC)) {

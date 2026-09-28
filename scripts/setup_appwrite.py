@@ -2292,11 +2292,15 @@ class Setup:
         request se thanh MAC DINH `false` cua Appwrite (mat quyen theo tung document) — khong bao gio de mac dinh.
         Thieu bat ky truong nao trong ban doc -> KHONG gui gi (nem loi ro rang)."""
         hien = self._call("GET", base, doc_thoi=True) or {}
-        can = ("name", "$permissions", "documentSecurity", "enabled")
-        if any(k not in hien for k in can):
+        # Kiem ca KIEU, khong ep: `bool(0)`/`bool("")` se lang le thanh false — mat cach ly theo tung document.
+        # (review doc lap 2026-09-29: day la duong an toan then chot.)
+        dung_kieu = (isinstance(hien.get("name"), str) and isinstance(hien.get("$permissions"), list)
+                     and all(isinstance(p, str) for p in hien.get("$permissions") or [])
+                     and isinstance(hien.get("documentSecurity"), bool) and isinstance(hien.get("enabled"), bool))
+        if not dung_kieu:
             raise SystemExit(f"Không đọc đủ thiết lập của {base} để làm mới cache an toàn — dừng, kiểm tra thủ công.")
         self._call("PUT", base, {"name": hien["name"], "permissions": list(hien["$permissions"]),
-                                 "documentSecurity": bool(hien["documentSecurity"]), "enabled": bool(hien["enabled"])},
+                                 "documentSecurity": hien["documentSecurity"], "enabled": hien["enabled"]},
                    doc_thoi=True)
         print(f"    (làm mới cache collection {base.rsplit('/', 1)[-1]} — không đổi thiết lập nào)")
 

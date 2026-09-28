@@ -268,6 +268,15 @@ class IndexCacheCollectionCuTest(unittest.TestCase):
             s._ensure_index(self.BASE, "x_idx", "key", ["created_at"])
         self.assertEqual(sum(1 for g in goi if g[0] == "PUT"), Setup.LAM_MOI_CACHE_TOI_DA)
 
+    def test_sai_kieu_documentSecurity_thi_khong_put(self):
+        for sai in ({"documentSecurity": 0}, {"documentSecurity": "true"}, {"enabled": None}, {"$permissions": "x"}):
+            s = self._setup()
+            goi, f = self._gia()
+            self.HIEN = {**IndexCacheCollectionCuTest.HIEN, **sai}
+            with patch.object(s, "_call", side_effect=f), self.assertRaises(SystemExit):
+                s._ensure_index(self.BASE, "x_idx", "key", ["created_at"])
+            self.assertFalse([g for g in goi if g[0] == "PUT"], f"sai kiểu {sai}: không được PUT")
+
     def test_thieu_truong_trong_ban_doc_thi_khong_put(self):
         s = self._setup()
         goi, f = self._gia()

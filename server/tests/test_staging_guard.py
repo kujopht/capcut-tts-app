@@ -7,6 +7,7 @@ production cua shell goi, khong in bi mat.
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -139,7 +140,14 @@ class _ClientGia:
         if "/databases" in url:
             return _Resp(self.db_status, {"total": 0, "databases": []} if self.db_status == 200 else {"message": "no"})
         if "/users" in url:
-            return _Resp(200, {"total": len(self.users), "users": self.users})
+            # Phan trang nhu Appwrite: limit 100, cursorAfter theo `$id`.
+            from urllib.parse import parse_qs, urlparse
+
+            qs = [json.loads(q) for q in parse_qs(urlparse(url).query).get("queries[]", [])]
+            sau = next((q["values"][0] for q in qs if q["method"] == "cursorAfter"), None)
+            ids = [u.get("$id") for u in self.users]
+            dau = ids.index(sau) + 1 if sau in ids else 0
+            return _Resp(200, {"total": len(self.users), "users": self.users[dau:dau + 100]})
         return _Resp(404, {"message": "?"})
 
 
@@ -157,6 +165,21 @@ class XacMinhSongTest(unittest.TestCase):
     def test_khoa_khong_thuoc_project_thi_dung(self):
         with self.assertRaises(guard.DichBiTuChoi):
             guard.xac_minh_song(_cfg(), client=_ClientGia([], db_status=401))
+
+    def test_hon_100_tai_khoan_tong_hop_van_qua_nho_phan_trang(self):
+        """Do that 2026-09-28: 101 tai khoan (0 that) lam CA test song lan `reset` bi khoa chet."""
+        ds = [{"$id": f"u{i:04d}", "email": f"qa-{i}@example.test"} for i in range(150)]
+        c = _ClientGia(ds)
+        bc = guard.xac_minh_song(_cfg(), client=c)
+        self.assertEqual((bc["users_total"], bc["users_tong_hop"]), (150, 150))
+        self.assertEqual(sum(1 for _, u in c.goi if "/users" in u), 2, "hai trang")
+        self.assertTrue(all(m == "GET" for m, _ in c.goi))
+
+    def test_tai_khoan_that_o_trang_hai_van_bi_bat(self):
+        ds = [{"$id": f"u{i:04d}", "email": f"qa-{i}@example.test"} for i in range(150)]
+        ds[140] = {"$id": "u0140", "email": "nguoi.that@gmail.com"}
+        with self.assertRaises(guard.DichBiTuChoi):
+            guard.xac_minh_song(_cfg(), client=_ClientGia(ds))
 
 
 class KeHoachMigrationTest(unittest.TestCase):

@@ -57,6 +57,8 @@ DICH_DUYET = DichDuyet(
 
 #: Mien TONG HOP cho moi tai khoan staging (RFC 2606 — khong bao gio la hop thu that).
 MIEN_TONG_HOP = "@example.test"
+#: Tran so tai khoan `xac_minh_song` chiu doc het (phan trang). Vuot -> dung (fail-closed).
+TRAN_KIEM_NGUOI_DUNG = 5000
 
 _DB_ID = re.compile(r"[a-z][a-z0-9_]{0,35}")
 
@@ -145,16 +147,31 @@ def xac_minh_song(cfg: CauHinhStaging, client: Any = None) -> Dict[str, Any]:
 
     from urllib.parse import quote
 
-    st, body = goi(cfg, "GET", "/users?queries[]=" + quote(_json_query("limit", [100])), client=client)
-    if st != 200:
-        raise DichBiTuChoi(f"Khoá không đọc được danh sách người dùng (HTTP {st}) — không xác minh được "
-                           "project không có dữ liệu thật.")
-    tong = int((body or {}).get("total") or 0)
-    that = [u for u in (body or {}).get("users", []) if not str(u.get("email") or "").lower().endswith(MIEN_TONG_HOP)]
-    if tong > 100 or that:
+    # DOC HET moi tai khoan (phan trang) roi moi ket luan. Ban dau chi doc MOT trang 100 va tu choi khi
+    # `total > 100` — dung la fail-closed, nhung sau vai lan chay test song (tai khoan tong hop moi lan)
+    # CA test lan `reset` (cong cu don duy nhat) deu bi khoa chet (do that 2026-09-28: 101 tai khoan, 0
+    # that). Van fail-closed: co MOT tai khoan khong tong hop, hoac vuot tran kiem -> dung.
+    tong, that, da_xem, con_tro = 0, [], 0, None
+    while True:
+        qs = [_json_query("limit", [100])] + ([_json_query("cursorAfter", [con_tro])] if con_tro else [])
+        st, body = goi(cfg, "GET", "/users?" + "&".join("queries[]=" + quote(q) for q in qs), client=client)
+        if st != 200:
+            raise DichBiTuChoi(f"Khoá không đọc được danh sách người dùng (HTTP {st}) — không xác minh được "
+                               "project không có dữ liệu thật.")
+        tong = int((body or {}).get("total") or 0)
+        trang = (body or {}).get("users", [])
+        that += [u for u in trang if not str(u.get("email") or "").lower().endswith(MIEN_TONG_HOP)]
+        da_xem += len(trang)
+        if not trang or da_xem >= tong:
+            break
+        if da_xem >= TRAN_KIEM_NGUOI_DUNG:
+            raise DichBiTuChoi(f"Project có hơn {TRAN_KIEM_NGUOI_DUNG} tài khoản — vượt trần kiểm; dọn bằng "
+                               "Console rồi chạy lại.")
+        con_tro = trang[-1].get("$id")
+    if that or da_xem < tong:
         raise DichBiTuChoi(
             f"Project có {tong} tài khoản, trong đó {len(that)} KHÔNG phải tài khoản tổng hợp "
-            f"({MIEN_TONG_HOP}). Staging chỉ được chứa dữ liệu tổng hợp — dừng.")
+            f"({MIEN_TONG_HOP}) (đã kiểm {da_xem}). Staging chỉ được chứa dữ liệu tổng hợp — dừng.")
     return {"endpoint": cfg.endpoint, "project_id": cfg.project_id, "database_id": cfg.database_id,
             "appwrite_version": phien_ban, "databases": databases, "users_total": tong,
             "users_tong_hop": tong - len(that)}

@@ -76,14 +76,48 @@ def _dam_bao_database(cfg: bi_mat.CauHinhStaging) -> str:
 
 
 def _trang_thai_collection(cfg: bi_mat.CauHinhStaging, cid: str) -> Dict[str, Any]:
-    st, body = guard.goi(cfg, "GET", f"/databases/{cfg.database_id}/collections/{cid}", khoa=cfg.khoa_schema)
+    """Doc THANG TablesDB (tien trinh nay khong cai lop dich) — staging Cloud 2.3 chi co scope nay."""
+    st, body = guard.goi(cfg, "GET", f"/tablesdb/{cfg.database_id}/tables/{cid}", khoa=cfg.khoa_schema)
     if st != 200:
         return {"ton_tai": False, "http": st}
-    tt = [a.get("status") for a in (body or {}).get("attributes", [])]
+    tt = [a.get("status") for a in (body or {}).get("columns", [])]
     ti = [i.get("status") for i in (body or {}).get("indexes", [])]
+    loi = [f"{c.get('key')}: {cfg.an(str(c.get('error') or ''))[:160]}" for c in (body or {}).get("columns", [])
+           if c.get("status") == "failed"]
     return {"ton_tai": True, "thuoc_tinh": len(tt), "thuoc_tinh_available": tt.count("available"),
             "index": len(ti), "index_available": ti.count("available"),
-            "document_security": (body or {}).get("documentSecurity")}
+            "row_security": (body or {}).get("rowSecurity"), "loi_cot": loi}
+
+
+def kiem(cfg: bi_mat.CauHinhStaging, schema: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """CHI DOC: doi chieu tung collection trong pham vi voi SCHEMA cua cay (so cot/index + available)."""
+    ra = []
+    for m in ke_hoach(schema):
+        tt = _trang_thai_collection(cfg, m["collection"])
+        ok = bool(tt.get("ton_tai")) and tt["thuoc_tinh"] == tt["thuoc_tinh_available"] == m["so_thuoc_tinh"] \
+            and tt["index"] == tt["index_available"] == m["so_index"] and tt.get("row_security") is True
+        ra.append({**m, "trang_thai": tt, "ok": ok})
+    return ra
+
+
+def chay_kiem(bao_cao: str = "") -> int:
+    cfg = bi_mat.nap()
+    danh_tinh = guard.xac_minh_song(cfg)
+    sys.path.insert(0, str(GOC))
+    from scripts.setup_appwrite import SCHEMA
+
+    kq = kiem(cfg, SCHEMA)
+    for m in kq:
+        tt = m["trang_thai"]
+        print(f"  {'OK ' if m['ok'] else 'LOI'} {m['collection']:<20} cột {tt.get('thuoc_tinh_available')}/"
+              f"{m['so_thuoc_tinh']} · index {tt.get('index_available')}/{m['so_index']} · rowSecurity="
+              f"{tt.get('row_security')}" + (f" · {tt['loi_cot']}" if tt.get("loi_cot") else ""))
+    dat = sum(1 for m in kq if m["ok"])
+    if bao_cao:
+        Path(bao_cao).write_text(json.dumps({"danh_tinh": danh_tinh, "kiem": kq}, ensure_ascii=False, indent=1),
+                                 encoding="utf-8")
+    print(f"\n{dat}/{len(kq)} collection khớp SCHEMA (đủ cột + index, tất cả available, rowSecurity).")
+    return 0 if dat == len(kq) else 1
 
 
 def chay(apply: bool, bao_cao: str = "") -> int:
@@ -141,9 +175,12 @@ def chay(apply: bool, bao_cao: str = "") -> int:
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--apply", action="store_true", help="ghi that (mac dinh chi in ke hoach)")
+    ap.add_argument("--kiem", action="store_true", help="CHI DOC: doi chieu staging voi SCHEMA cua cay")
     ap.add_argument("--bao-cao", default="", help="ghi bao cao JSON (khong chua bi mat)")
     a = ap.parse_args(argv)
     try:
+        if a.kiem:
+            return chay_kiem(a.bao_cao)
         return chay(a.apply, a.bao_cao)
     except (guard.DichBiTuChoi, bi_mat.ThieuCauHinh) as exc:
         print(f"TỪ CHỐI: {exc}", file=sys.stderr)

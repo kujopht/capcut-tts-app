@@ -193,6 +193,10 @@ class TestBackwardCompatible(CoverTestCase):
         "rendered_media_key", "qa_state", "processing_error",
         "rendered_archive_file_id", "rendered_checksum", "rendered_size_bytes",
     }
+    #: Default readable catalog filter (45085a4, 2026-09-23): `content_mode` lets the catalog tell
+    #: readable novels from media-only entries; audio state consolidation (7f8e80a, 2026-09-23):
+    #: `has_audio`. Same explicit-confirmation discipline as every set above.
+    NEW_CONTENT_MODE_FIELDS = {"content_mode", "has_audio"}
 
     def test_only_cover_url_was_added(self):
         token = self.user()
@@ -203,7 +207,7 @@ class TestBackwardCompatible(CoverTestCase):
             set(body) - self.OLD_NOVEL_FIELDS,
             {"cover_url"} | self.NEW_FANDOM_FIELDS | self.NEW_TAXONOMY_FIELDS
             | self.NEW_VIDEO_DRAFT_FIELDS | self.NEW_CHINESE_MEDIA_FIELDS
-            | self.NEW_MEDIA_PROCESSING_FIELDS)
+            | self.NEW_MEDIA_PROCESSING_FIELDS | self.NEW_CONTENT_MODE_FIELDS)
 
     def test_chapter_response_keeps_its_old_shape(self):
         token = self.user()

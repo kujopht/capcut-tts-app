@@ -146,7 +146,7 @@ class _ClientGia:
             qs = [json.loads(q) for q in parse_qs(urlparse(url).query).get("queries[]", [])]
             sau = next((q["values"][0] for q in qs if q["method"] == "cursorAfter"), None)
             ids = [u.get("$id") for u in self.users]
-            dau = ids.index(sau) + 1 if sau in ids else 0
+            dau = ids.index(sau) + 1 if sau is not None and sau in ids else 0
             return _Resp(200, {"total": len(self.users), "users": self.users[dau:dau + 100]})
         return _Resp(404, {"message": "?"})
 

@@ -33,6 +33,7 @@ from scripts.ops.cutover_target import (
     khang_dinh_khong_phai_production,
 )
 from scripts.staging.bi_mat import CauHinhStaging
+from server.appwrite_tablesdb_compat import STAGING_ENDPOINT, STAGING_PROJECT_ID, STAGING_PROJECT_NAME
 
 
 @dataclass(frozen=True)
@@ -45,11 +46,12 @@ class DichDuyet:
 
 #: DICH DUY NHAT duoc phep. Project ID do Appwrite tu sinh (ten hien thi: `fanfic-staging`);
 #: chu du an duyet ghim CHINH XAC ID nay ngay 2026-09-28 sau khi xac minh chi doc: Appwrite
-#: Cloud 2.3.0 vung Singapore, 0 database / 0 nguoi dung / 0 bucket.
+#: Cloud 2.3.0 vung Singapore, 0 database / 0 nguoi dung / 0 bucket. Gia tri lay tu MOT nguon
+#: (`server/appwrite_tablesdb_compat.py`) — lop dich staging va guard khong the lech nhau.
 DICH_DUYET = DichDuyet(
-    endpoint="https://sgp.cloud.appwrite.io/v1",
-    project_id="6ab9f4fa0036791d13d1",
-    ten_project="fanfic-staging",
+    endpoint=STAGING_ENDPOINT,
+    project_id=STAGING_PROJECT_ID,
+    ten_project=STAGING_PROJECT_NAME,
     duyet_ngay="2026-09-28",
 )
 
@@ -174,6 +176,8 @@ def moi_truong_con(cfg: CauHinhStaging, *, schema: bool = False,
         "PYTHONIOENCODING": "utf-8",
         "FAS_ENV_FILE": "",               # chuoi RONG = khong nap tep env nao
         "FAS_ENV": "staging",
+        # Bat TUONG MINH lop dich Databases->TablesDB (Cloud 2.3) — no tu kiem lai dich.
+        "APPWRITE_ENV": "staging",
         "FAS_INLINE_WORKER": "false",
         "FAS_CORS_ORIGINS": "http://localhost:3000",
         "DATA_BACKEND": "appwrite",

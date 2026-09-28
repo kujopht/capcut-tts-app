@@ -732,6 +732,103 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "indexes": [],
     },
     # ==========================================================================
+    # NHAN TIN 1:1 (Chat V1, phan chu) — xem `server/messaging/` va
+    # `docs/messaging/CHAT_APPWRITE.md`.
+    #
+    # Appwrite SO HUU du lieu + Realtime. Quyen cap BANG rong (khong ai tao/sua
+    # truc tiep); quyen theo HANG chi cap DOC: hoi thoai + tin -> hai thanh vien;
+    # thanh vien -> chinh chu; danh dau phat tan -> khong ai. Chan dung CHUNG
+    # `user_blocks` (dinh nghia DUNG nhu #229 Social/Profile, ben duoi).
+    # Realtime chi day su kien cho nguoi CO QUYEN DOC hang (do that Cloud 2.3).
+    #
+    # ROLLBACK: xoa bon bang `chat_*` (`user_blocks` thuoc Social — giu). Chi mat
+    # tin nhan. Production (1.9.6): CHUA tao — `FAS_CHAT_V1` tat.
+    "chat_conversations": {
+        "name": "Chat Conversations",
+        "attributes": [
+            ("kind", "string", True, 16),          # "dm" (V1 chi 1:1)
+            ("member_a", "string", True, 36),       # hai thanh vien, THEO THU TU (a < b)
+            ("member_b", "string", True, 36),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("member_a_idx", "key", ["member_a"]),
+            ("member_b_idx", "key", ["member_b"]),
+        ],
+    },
+    "chat_messages": {
+        "name": "Chat Messages",
+        "attributes": [
+            ("conversation_id", "string", True, 40),
+            ("sender_id", "string", True, 36),
+            ("recipient_id", "string", True, 36),
+            ("client_id", "string", True, 32),
+            ("text", "string", True, 2000),
+            ("created_at", "datetime", True, None),
+            ("kind", "string", False, 16),
+        ],
+        "indexes": [
+            # lich su (moi nhat truoc, con tro) + tin moi nhat cho ban xem truoc
+            ("conv_created_idx", "key", ["conversation_id", "created_at"]),
+            # dem "chua doc": tin GUI CHO TOI sau moc da doc
+            ("conv_recipient_created_idx", "key", ["conversation_id", "recipient_id", "created_at"]),
+        ],
+    },
+    "chat_members": {
+        "name": "Chat Members",
+        "attributes": [
+            ("conversation_id", "string", True, 40),
+            ("user_id", "string", True, 36),
+            ("peer_id", "string", True, 36),
+            ("unread_count", "integer", False, None),
+            ("last_read_at", "datetime", False, None),
+            ("last_read_message_id", "string", False, 40),
+            ("muted", "boolean", False, None),
+            ("last_message_id", "string", False, 40),
+            ("last_text", "string", False, 200),
+            ("last_at", "datetime", False, None),
+            ("last_sender_id", "string", False, 36),
+            ("updated_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("user_last_idx", "key", ["user_id", "last_at"]),  # hop thu, moi nhat truoc
+            ("conv_idx", "key", ["conversation_id"]),
+        ],
+    },
+    # CHAN MUC TAI KHOAN — DINH NGHIA GIONG HET #229 (Social/Profile, chua merge).
+    # Chat ghi DUNG dinh dang cua #229 (`block_id` = `social.block_key`, kind
+    # "block", quyen doc: nguoi chan) nen chan qua chat va qua trang ca nhan la
+    # MOT hang, MOT he thong. Khi #229 merge: giu MOT ban cua muc nay (hai ban
+    # giong het nhau), khong migrate du lieu.
+    "user_blocks": {
+        "name": "User blocks",
+        "attributes": [
+            ("block_id", "string", True, 64),
+            ("blocker_id", "string", True, 64),
+            ("blocked_id", "string", True, 64),
+            # "block" (hai chieu) hoac "mute" (mot chieu, chi an NOI DUNG — cua
+            # Social; chat khong dung "mute" nay, tat tieng hoi thoai o
+            # `chat_members.muted`).
+            ("kind", "enum", True, ["block", "mute"]),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("blocker_created_idx", "key", ["blocker_id", "created_at"]),
+            ("blocked_kind_idx", "key", ["blocked_id", "kind"]),
+            ("blocker_kind_idx", "key", ["blocker_id", "kind"]),
+        ],
+    },
+    # Hang DANH DAU "tin X da phat tan" — tao CUNG giao dich voi phep tang "chua
+    # doc": trung rowId -> ca giao dich hong -> tac dung phu DUNG MOT LAN.
+    "chat_fanouts": {
+        "name": "Chat Fanouts",
+        "attributes": [
+            ("message_id", "string", True, 40),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
+    # ==========================================================================
     # NHAP CHUONG HANG LOAT — hai bang, xem `server/bulk_import_domain.py`.
     #
     # Day la trang thai DIEU PHOI, khong phai noi dung cong bo. Chuong that nam

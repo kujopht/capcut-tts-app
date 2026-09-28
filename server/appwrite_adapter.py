@@ -289,6 +289,20 @@ class AppwriteIdentityAdapter:
             tier=Tier.FREE,
         ))
 
+    def user_id_from_token(self, token: str) -> str:
+        """
+        CHI xac minh session voi Appwrite (`GET /v1/account`) va tra `$id` — KHONG doc hang `profiles`.
+
+        Cho cac route chi can biet AI dang goi (nhan tin: moi lan gui/doc). Van xac minh voi Appwrite o
+        MOI request — khong bo nho dem, khong noi long gi; chi bo lan doc ho so thu hai (do that tren
+        staging: ~0,3 s moi lan goi). Loi anh xa y het `profile_from_token`.
+        """
+        data = self._request("GET", "/v1/account", session=(token or "").strip(), admin=False)
+        user_id = str(data.get("$id") or "")
+        if not user_id:
+            raise AuthError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn.")
+        return user_id
+
     def _merge_stored(self, profile: Profile) -> Profile:
         """
         Ghep `username` / `bio` / `author_status` / `avatar_key` / cac truong

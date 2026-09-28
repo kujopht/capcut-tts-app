@@ -33,6 +33,10 @@ python-dotenv>=1.0,<2.0
 httpx>=0.27,<1.0
 # requests: provider CapCut (capcut_tts_api).
 requests>=2.25.0
+# websockets: nhan tin — may chu mo WebSocket toi Appwrite Realtime THAY MAT nguoi xem
+# (server/messaging/realtime.py). Truoc day chi co gian tiep qua uvicorn; khai bao tuong minh vi
+# `FAS_CHAT_V1=1` tren Appwrite khong chay duoc neu thieu goi nay.
+websockets>=13,<16
 
 # --- Bat buoc: luu tru Cloudflare R2 (STORAGE_BACKEND=r2) ---
 # Day la RUNTIME dependency, khong phai goi cai tay. `server/r2_adapter.py`

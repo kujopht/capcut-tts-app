@@ -20,6 +20,7 @@ import { Avatar } from "@/components/Avatar";
 import { EmptyState, ErrorState, Loading, formatNumber } from "@/components/ui";
 import { IconHeadphones, IconShield, IconUser } from "@/components/Icons";
 import { FollowButton } from "@/components/FollowButton";
+import { StartChatButton } from "@/components/chat/StartChatButton";
 import { BadgeIcon, CosmeticFrame, OrnamentIcon } from "@/components/cosmetics/Cosmetics";
 import { ProfileTabs } from "./ProfileTabs";
 
@@ -149,6 +150,11 @@ export default function PublicProfilePage({
                   targetId={p.user_id}
                   initialFollowing={xh.following}
                 />
+              )}
+              {/* Nut phu, CANH "Theo dõi": nhan tin la hanh dong thu hai sau
+                  theo doi. Khong hien o ho so cua chinh minh, khong hien cho khach. */}
+              {xh.is_self ? null : (
+                <StartChatButton username={p.username} displayName={p.display_name || p.username} />
               )}
             </p>
           ) : null}

@@ -19,11 +19,20 @@ from __future__ import annotations
 
 import os
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from server.support.sanitize import sach_chuoi
 
 GOC_CHO_PHEP = ("https://sentry.io", "https://us.sentry.io", "https://de.sentry.io")
+# Tong thoi gian cua MOT lan doi chieu — PHAI nho hon `tools.THOI_GIAN_TOI_DA_GIAY` (3.0 s), neu khong
+# hop cong cu cat ngang va buoc nay LUON ra "qua thoi gian". Do that 2026-09-28 (VN -> sentry.io): moi
+# GET mot ket noi moi ~1.3-1.5 s, ba GET tuan tu ~4.2 s. Nen: dung lai ket noi, tra cac project SONG SONG,
+# va chi goi "su kien moi nhat" khi con du thoi gian.
+NGAN_SACH_GIAY = 2.6
+_CON_TOI_THIEU_GIAY = 0.25
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _MAU_DUONG = (
     re.compile(r"^/api/0/projects/(?P<org>[a-z0-9-]{1,64})/(?P<proj>[a-z0-9-]{1,64})/issues/$"),
@@ -52,6 +61,7 @@ class SentryChiDoc:
         self._headers = _headers
         self.org, self.projects, self.goc = org, tuple(projects), goc
         self._http, self._timeout = http, timeout
+        self._khoa = threading.Lock()
 
     def __repr__(self) -> str:  # KHONG BAO GIO in token
         return f"SentryChiDoc(org={self.org!r}, projects={self.projects!r}, goc={self.goc!r})"
@@ -79,14 +89,28 @@ class SentryChiDoc:
         if set(params) - _THAM_SO_CHO_PHEP:
             raise SentryBiTuChoi("Tham số ngoài danh sách trắng.")
 
-    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Tuple[int, Any]:
+    def _ket_noi(self) -> Any:
+        """MOT `httpx.Client` dung chung (giu ket noi) — tao luoi, an toan luong."""
+        if self._http is None:
+            import httpx
+
+            with self._khoa:
+                if self._http is None:
+                    self._http = httpx.Client(follow_redirects=False)
+        return self._http
+
+    def _get(self, path: str, params: Optional[Dict[str, Any]] = None, *,
+             timeout: Optional[float] = None) -> Tuple[int, Any]:
+        """(ma HTTP, JSON). Loi mang/qua han -> (0, None): nguoi goi KHONG duoc coi do la "khong co loi"."""
         params = dict(params or {})
-        self._kiem("GET", path, params)
+        self._kiem("GET", path, params)  # truoc MOI ket noi — ngoai danh sach trang thi khong gui gi
         import httpx
 
-        c = self._http or httpx
-        r = c.get(self.goc + path, params=params, timeout=self._timeout, follow_redirects=False,
-                  headers=self._headers())
+        try:
+            r = self._ket_noi().get(self.goc + path, params=params, follow_redirects=False,
+                                    timeout=self._timeout if timeout is None else timeout, headers=self._headers())
+        except httpx.HTTPError:
+            return 0, None
         try:
             return r.status_code, (r.json() if r.content else None)
         except ValueError:
@@ -107,30 +131,67 @@ class SentryChiDoc:
         tu = self.tu_truy_van(ma_loi, route_mau)
         if tu is None:
             return {"trang_thai": "khong_du_ngu_canh"}
-        van_de: List[Dict[str, Any]] = []
-        for proj in self.projects:
+        han = time.monotonic() + NGAN_SACH_GIAY
+
+        def con() -> float:
+            return han - time.monotonic()
+
+        def tim(proj: str) -> Tuple[str, int, Any]:
             st, ds = self._get(f"/api/0/projects/{self.org}/{proj}/issues/",
-                               {"query": f'is:unresolved "{tu}"', "statsPeriod": "24h", "limit": 5})
+                               {"query": f'is:unresolved "{tu}"', "statsPeriod": "24h", "limit": 5},
+                               timeout=max(_CON_TOI_THIEU_GIAY, min(self._timeout, con())))
+            return proj, st, ds
+
+        # SONG SONG: tong thoi gian ~ project cham nhat, khong phai tong cac project. Han chot CUNG bang
+        # `wait(timeout=)` — timeout cua httpx tinh theo TUNG PHA (ket noi/doc...), khong phai tong, nen
+        # rieng no khong giu duoc ngan sach (do that: 3.3 s voi ngan sach 2.6 s). Luong tre bi BO LAI
+        # (khong cho), tu ket thuc theo timeout cua chinh no.
+        ex = ThreadPoolExecutor(max_workers=min(4, len(self.projects)) + 1, thread_name_prefix="sentry-ro")
+        try:
+            tuong_lai = [ex.submit(tim, p) for p in self.projects]
+            xong, _ = wait(tuong_lai, timeout=max(0.0, con()))
+            tra_ve = [f.result() if f in xong else (p, 0, None) for p, f in zip(self.projects, tuong_lai)]
+            ket_qua = self._tong_hop(tu, build, tra_ve, ex, con)
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
+        if chi_tiet and ket_qua.get("trang_thai") == "ok":  # CHI quan tri — van da qua sach_chuoi
+            ket_qua["van_de"] = [{k: v for k, v in d.items() if k != "id"} for d in ket_qua["_van_de"]]
+        ket_qua.pop("_van_de", None)
+        return ket_qua
+
+    def _tong_hop(self, tu: str, build: str, tra_ve: List[Tuple[str, int, Any]], ex: ThreadPoolExecutor,
+                  con: Any) -> Dict[str, Any]:
+        van_de: List[Dict[str, Any]] = []
+        hong = 0
+        for proj, st, ds in tra_ve:
             if st != 200 or not isinstance(ds, list):
+                hong += 1
                 continue
             for it in ds[:5]:
+                if not isinstance(it, dict):
+                    continue
                 van_de.append({"project": proj, "id": str(it.get("id") or ""), "level": sach_chuoi(str(it.get("level") or ""), 16),
                                "count": _so(it.get("count")), "users": _so(it.get("userCount")),
                                "last_seen": sach_chuoi(str(it.get("lastSeen") or ""), 40),
                                "title": sach_chuoi(str(it.get("title") or ""), 160),
                                "culprit": sach_chuoi(str(it.get("culprit") or ""), 120)})
+        # Mot project KHONG tra loi ma cung khong thay van de nao -> KHONG duoc noi "chua ghi nhan"
+        # (truoc day loi 401/qua han bi dem thanh 0 van de — mot cau tra loi SAI nghe rat chac chan).
+        if hong and not van_de:
+            return {"trang_thai": "khong_tra_duoc", "tu_khoa": tu, "so_project_loi": hong}
         van_de.sort(key=lambda v: v["last_seen"], reverse=True)
-        cung_build = None
-        if van_de and build and build != "unknown" and van_de[0]["id"].isdigit():
-            st, ev = self._get(f"/api/0/issues/{van_de[0]['id']}/events/latest/")
+        cung_build = None  # None = chua biet (khong du thoi gian / khong co the build) — khong phai "khac build"
+        if van_de and build and build != "unknown" and van_de[0]["id"].isdigit() and con() >= 2 * _CON_TOI_THIEU_GIAY:
+            f = ex.submit(self._get, f"/api/0/issues/{van_de[0]['id']}/events/latest/",
+                          timeout=max(_CON_TOI_THIEU_GIAY, min(self._timeout, con())))
+            xong, _ = wait([f], timeout=max(0.0, con()))
+            st, ev = f.result() if xong else (0, None)
             if st == 200 and isinstance(ev, dict):
                 tags = {t.get("key"): str(t.get("value") or "") for t in ev.get("tags") or [] if isinstance(t, dict)}
                 cung_build = tags.get("build", "")[:10] == build[:10] if tags.get("build") else None
-        ra = {"trang_thai": "ok", "tu_khoa": tu, "so_van_de": len(van_de), "tong_su_kien": sum(v["count"] for v in van_de),
-              "lan_cuoi": van_de[0]["last_seen"] if van_de else "", "cung_build": cung_build}
-        if chi_tiet:  # CHI quan tri — van da qua sach_chuoi
-            ra["van_de"] = [{k: v for k, v in d.items() if k != "id"} for d in van_de]
-        return ra
+        return {"trang_thai": "ok", "tu_khoa": tu, "so_van_de": len(van_de), "tong_su_kien": sum(v["count"] for v in van_de),
+                "lan_cuoi": van_de[0]["last_seen"] if van_de else "", "cung_build": cung_build,
+                "day_du": not hong, "_van_de": van_de}
 
 
 def _so(x: Any) -> int:

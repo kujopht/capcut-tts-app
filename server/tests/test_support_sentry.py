@@ -122,6 +122,82 @@ class TuKhoaVaKetQuaTest(unittest.TestCase):
         self.assertEqual(_sentry(http).loi_gan_day(ma_loi="", route_mau="/?")["trang_thai"], "khong_du_ngu_canh")
         self.assertEqual(http.goi, [])
 
+    def test_project_khong_tra_loi_thi_khong_noi_chua_ghi_nhan(self):
+        """Truoc: 401/qua han bi dem thanh "0 van de" -> "chua ghi nhan loi tuong tu" (SAI, nghe rat chac)."""
+        class Hong(_HttpGia):
+            def get(self, url, **kw):
+                super().get(url, **kw)
+                return _Resp(401, {"detail": "x"})
+
+        self.assertEqual(_sentry(Hong()).loi_gan_day(ma_loi="audio_media")["trang_thai"], "khong_tra_duoc")
+
+        class LoiMang(_HttpGia):
+            def get(self, url, **kw):
+                import httpx
+
+                raise httpx.ConnectTimeout("qua han")
+
+        self.assertEqual(_sentry(LoiMang()).loi_gan_day(ma_loi="audio_media")["trang_thai"], "khong_tra_duoc")
+        # Mot project hong nhung project kia CO van de -> van bao, danh dau khong day du.
+        class MotHong(_HttpGia):
+            def get(self, url, **kw):
+                if "python-fastapi" in url:
+                    return _Resp(500, None)
+                return super().get(url, **kw)
+
+        kq = _sentry(MotHong()).loi_gan_day(ma_loi="audio_media")
+        self.assertEqual((kq["trang_thai"], kq["so_van_de"], kq["day_du"]), ("ok", 1, False))
+
+    def test_tra_cac_project_song_song_trong_ngan_sach(self):
+        """Do that: ba GET tuan tu ~4.2 s > ngan sach 3.0 s cua hop cong cu -> buoc nay LUON 'qua thoi gian'.
+        Nay: project SONG SONG + han chot tong; 'su kien moi nhat' bi bo qua khi het gio (cung_build=None)."""
+        import threading
+        import time
+
+        from server.support import sentry_lookup as sl
+        from server.support.tools import THOI_GIAN_TOI_DA_GIAY
+
+        self.assertLess(sl.NGAN_SACH_GIAY, THOI_GIAN_TOI_DA_GIAY)
+
+        class Cham(_HttpGia):
+            def __init__(self, tre):
+                super().__init__()
+                self.tre, self.luong = tre, set()
+
+            def get(self, url, **kw):
+                if url.endswith("/issues/"):
+                    self.luong.add(threading.get_ident())
+                time.sleep(self.tre)
+                return super().get(url, **kw)
+
+        http = Cham(0.4)
+        t = time.monotonic()
+        kq = _sentry(http).loi_gan_day(ma_loi="audio_media", build="a1b2c3d4e5")
+        # 2 project song song (~0.4) + su kien moi nhat (~0.4), khong phai 3 x 0.4.
+        self.assertLess(time.monotonic() - t, 1.1)
+        self.assertEqual(len(http.luong), 2, "hai project phai chay tren hai luong")
+        self.assertIs(kq["cung_build"], True)
+        with patch.object(sl, "NGAN_SACH_GIAY", 0.5):
+            http = Cham(0.4)
+            kq = _sentry(http).loi_gan_day(ma_loi="audio_media", build="a1b2c3d4e5")
+        self.assertEqual(kq["so_van_de"], 1)
+        self.assertIsNone(kq["cung_build"], "het ngan sach -> 'chua biet', khong phai 'khac build'")
+        self.assertFalse(any(g["url"].endswith("/events/latest/") for g in http.goi))
+
+        # Mot project TREO: ket qua van ve dung han chot (httpx timeout tinh theo tung pha, khong giu
+        # duoc tong) — va vi project treo co the co loi, KHONG duoc tra "chua ghi nhan".
+        class Treo(_HttpGia):
+            def get(self, url, **kw):
+                if "fanfic-web" in url:
+                    time.sleep(2.0)
+                return super().get(url, **kw)
+
+        with patch.object(sl, "NGAN_SACH_GIAY", 0.5):
+            t = time.monotonic()
+            kq = _sentry(Treo()).loi_gan_day(ma_loi="audio_media", build="a1b2c3d4e5")
+        self.assertLess(time.monotonic() - t, 1.0)
+        self.assertEqual(kq["trang_thai"], "khong_tra_duoc")
+
 
 class KeHoachTest(unittest.TestCase):
     def test_chi_doi_chieu_khi_co_ma_loi_that(self):

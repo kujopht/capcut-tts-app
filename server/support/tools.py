@@ -207,6 +207,8 @@ class DiagnosticToolbox:
         if self.sentry is None:
             return _kq("get_recent_sentry_issues", "unknown", "Chưa kết nối hệ thống giám sát lỗi — bỏ qua bước đối chiếu.")
         kq = self.sentry.loi_gan_day(ma_loi=ma_loi(code), route_mau=chuan_hoa_route(route), build=ban_build(build))
+        if kq.get("trang_thai") == "khong_tra_duoc":
+            return _kq("get_recent_sentry_issues", "unknown", "Chưa tra được hệ thống giám sát lỗi lúc này — bỏ qua bước đối chiếu.")
         if kq.get("trang_thai") != "ok":
             return _kq("get_recent_sentry_issues", "unknown", "Không đủ ngữ cảnh để đối chiếu với hệ thống giám sát lỗi.")
         n = kq["so_van_de"]

@@ -38,6 +38,7 @@ const TEN_KIEM_TRA: Record<string, string> = {
   get_recent_public_incidents: "Sự cố đã biết",
   get_sanitized_client_errors: "Lỗi trình duyệt đã ghi nhận",
   get_public_system_health: "Tình trạng hệ thống",
+  get_recent_sentry_issues: "Hệ thống giám sát lỗi",
 };
 
 const DAU: Record<SupportCheck["status"], { k: string; nhan: string }> = {

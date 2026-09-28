@@ -248,6 +248,44 @@ class QuaApiTest(unittest.TestCase):
         self.assertNotIn("RuntimeError", than, "tiêu đề lỗi Sentry không được tới người dùng")
         self.assertTrue(self.http.goi and all(g["auth"] == f"Bearer {TOKEN}" for g in self.http.goi))
 
+    def test_token_khong_vao_log_o_moi_muc(self):
+        """Bat MOI ban ghi log (DEBUG, moi logger — gom httpx va log ngoai le) qua duong API that, ca
+        nhanh thanh cong lan nhanh Sentry loi/qua han: token khong duoc xuat hien o dau."""
+        import logging
+
+        class Gom(logging.Handler):
+            def __init__(self):
+                super().__init__(logging.DEBUG)
+                self.dong: List[str] = []
+
+            def emit(self, record):
+                self.dong.append(record.getMessage())
+                if record.exc_info:
+                    self.dong.append(logging.Formatter().formatException(record.exc_info))
+
+        class LoiMang(_HttpGia):
+            def get(self, url, **kw):
+                import httpx
+
+                super().get(url, **kw)
+                raise httpx.ConnectTimeout(f"qua han {url}")
+
+        g, goc = Gom(), logging.getLogger()
+        muc_cu = goc.level
+        goc.addHandler(g)
+        goc.setLevel(logging.DEBUG)
+        try:
+            self.assertEqual(self._hoi().status_code, 200)
+            self.rt.toolbox.sentry = _sentry(LoiMang())
+            self.assertEqual(self._hoi().status_code, 200)
+        finally:
+            goc.removeHandler(g)
+            goc.setLevel(muc_cu)
+        self.assertTrue(g.dong, "phai bat duoc it nhat mot ban ghi log")
+        for d in g.dong:
+            self.assertNotIn(TOKEN, d)
+            self.assertNotIn("Bearer", d)
+
     def test_loi_nhan_gui_mo_hinh_khong_co_token(self):
         class Gw:
             def __init__(self):

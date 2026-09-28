@@ -310,6 +310,34 @@ class D_XpNguyenTuTest(unittest.TestCase):
         self.assertEqual(len(so_cai), 8)
         self.assertEqual(sum(e.xp_awarded for e in so_cai), 16)
 
+    def test_ghi_khong_doi_du_lieu_khong_khoa_xp_vinh_vien(self):
+        """HOI QUY Cloud 2.3 (do that 2026-09-28): cap nhat KHONG doi du lieu van commit nhung GIU
+        `$updatedAt`. Truoc ban sua `fix/xp-cas-noop-update`, marker CAS (xp, `$updatedAt`) trung dung
+        trang thai hien tai -> MOI lan ghi sau (ke ca cong XP) xung dot VINH VIEN. Sau ban sua: moi lan
+        ghi nguyen tu dat `updated_at` moi nen `$updatedAt` luon tien."""
+        from server import gamification_service as gsv
+        from server.gamification_domain import XpLedgerEntry
+
+        u, _ = nguoi("noop")
+        uid = u["user_id"]
+        kho = main.gamification_store
+
+        def e(i):
+            return XpLedgerEntry(entry_id=f"xn_{RUN}_{i}", user_id=uid, event_type="game_match_completed",
+                                 source_kind="game_match", source_id=f"stn_{RUN}_{i}", xp_awarded=2)
+
+        kho.award_xp_atomic(e(0))
+        truoc = kho.get_progress(uid)
+        for _ in range(2):
+            gsv.equip_title(kho, uid, "")  # khong doi gi ve mat nghiep vu (danh xung dang la mac dinh)
+        for i in (1, 2):
+            self.assertIsNotNone(kho.award_xp_atomic(e(i)), "cộng XP sau lần ghi không đổi dữ liệu phải thành công")
+        sau = kho.get_progress(uid)
+        self.assertEqual((truoc.xp, sau.xp), (2, 6))
+        self.assertNotEqual(sau.updated_at, truoc.updated_at)
+        so_cai = [x for x in kho.list_xp_events(uid) if x.source_id.startswith(f"stn_{RUN}_")]
+        self.assertEqual((len(so_cai), sum(x.xp_awarded for x in so_cai)), (3, 6))
+
     def test_doi_danh_xung_dong_thoi_khong_de_len_xp(self):
         from server import gamification_service as gsv
         from server.gamification_domain import XpLedgerEntry

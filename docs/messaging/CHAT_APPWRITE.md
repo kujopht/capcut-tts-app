@@ -1,157 +1,197 @@
 # Chat V1: tin nhắn chữ trên Appwrite
 
-**Trạng thái:** đã hiện thực và kiểm thật trên `fanfic-staging` (Appwrite Cloud 2.3) với người dùng tổng hợp.
+**Trạng thái (2026-09-28):** đã hiện thực, kiểm thật trên `fanfic-staging` (Appwrite Cloud 2.3) **và** trên một Appwrite **1.9.6 + MongoDB dùng một lần** (đúng dòng production), cả hai với người dùng tổng hợp `@example.test`.
 
-**Production chưa bật gì:**
-- `FAS_CHAT_V1` mặc định **TẮT** khi `DATA_BACKEND=appwrite`;
-- chưa tạo bảng `chat_*` nào trên Appwrite 1.9.6;
-- chưa deploy.
+**Production chưa bật gì — hai cờ đều TẮT mặc định:**
 
-**Giao diện Chat V1 (#239) giữ nguyên:** không component nào trong `web/src/components/chat/` đổi giao diện. Chỉ transport và hai điểm nối trong `ChatProvider` thay đổi.
+| Lớp | Cờ | Mặc định | Tắt thì |
+|---|---|---|---|
+| Máy chủ | `FAS_CHAT_V1` | tắt khi `DATA_BACKEND=appwrite` | mọi `/api/chat/*` trả 503 `chat_not_configured` |
+| Web (lúc build) | `NEXT_PUBLIC_CHAT_V1_ENABLED=1` → `CHAT_V1_ENABLED` (`web/src/lib/features.ts`) | tắt | không nút Tin nhắn, không nút "Nhắn tin" ở hồ sơ, `/messages` báo "Tin nhắn chưa mở", **0 request `/api/chat`** (đo trên Chrome: 0/22) |
 
-**Tencent Chat không còn cần cho tin nhắn chữ:**
-- `@tencentcloud/chat` đã được gỡ khỏi web;
-- `/api/chat/session` không còn ký UserSig;
-- Tencent/TRTC để dành cho gọi thoại/video (`server/chat_tencent.py` giữ nguyên, kèm bài test).
+Merge vào `main` rồi deploy web **không** tự mở tính năng. Chưa tạo bảng `chat_*` nào trên production, chưa deploy.
+
+**Tencent Chat không còn trong đường tin nhắn chữ:** không có `@tencentcloud/chat` trong web, `/api/chat/session` không ký UserSig, không có tệp Tencent nào trong PR. Tencent/TRTC để dành cho gọi thoại/video sau này; ID người dùng `fw_<uid>` (≤ 32 byte) giữ nguyên để TRTC dùng chung.
 
 ## Kiến trúc
 
 ```
-Trình duyệt ──(REST + SSE qua fetch, Bearer)──► API Fanfic ──(khoá máy chủ: ghi)──► Appwrite TablesDB
+Trình duyệt ──(REST + SSE qua fetch, Bearer)──► API Fanfic ──(khoá máy chủ: ghi)──► Appwrite
      ▲                                            │
      └────────── sự kiện đã lọc ◄──(WebSocket bằng SESSION CỦA NGƯỜI XEM)── Appwrite Realtime
 ```
 
-- **Appwrite sở hữu dữ liệu và Realtime.** Backend chỉ là lớp chuyển tiếp mỏng. Trình duyệt vẫn **chỉ biết `NEXT_PUBLIC_API_BASE`**: không có SDK Appwrite, không mở WebSocket trực tiếp, và endpoint Appwrite không lộ ra trình duyệt.
-- **Luồng `/api/chat/stream`:**
-  - máy chủ mở WebSocket tới Appwrite Realtime và xác thực bằng **chính session của người xem** (token Fanfic *là* session secret Appwrite — thiết kế có sẵn), **không bao giờ** bằng khoá API;
-  - vì vậy Appwrite tự lọc sự kiện theo quyền đọc của từng dòng;
-  - service lọc thêm một lần nữa để phòng thủ nhiều lớp.
+- **Appwrite sở hữu dữ liệu và Realtime.** Backend chỉ là lớp chuyển tiếp mỏng. Trình duyệt **chỉ biết `NEXT_PUBLIC_API_BASE`**: không SDK Appwrite, không WebSocket trực tiếp, endpoint Appwrite không lộ ra trình duyệt.
+- **Luồng `/api/chat/stream`:** máy chủ mở WebSocket tới Appwrite Realtime, xác thực bằng **chính session của người xem** (token Fanfic *là* session secret Appwrite — thiết kế có sẵn), **không bao giờ** bằng khoá API. Appwrite tự lọc sự kiện theo quyền đọc từng dòng; service lọc thêm một lần.
 - **Nhiều instance backend** không cần pub/sub nội bộ, vì Appwrite đã là pub/sub.
 
 ## Tầng mã
 
-Tất cả nằm ở `server/messaging/`. **Không** nhầm với `server/chat/`, là AI Chat/RAG.
+Tất cả ở `server/messaging/` (**không** nhầm với `server/chat/` là AI Chat/RAG).
 
 | Tệp | Vai trò |
 |---|---|
-| `ids.py` | ID tất định: người dùng `fw_<uid>` (dùng chung với TRTC); hội thoại `dm_<băm cặp người>`; tin `m_<client_id>`; chặn |
-| `domain.py` | Mô hình và lỗi có mã ổn định. **Không biết kho lưu trữ** |
-| `repository.py` | **Hợp đồng kho**, cộng bản trong bộ nhớ (mock/test) có Realtime mô phỏng đúng cách lọc của Appwrite |
-| `service.py` | Nghiệp vụ, chỉ nói chuyện với hợp đồng kho |
-| `appwrite_tablesdb.py` | Kho Appwrite TablesDB (`/v1/tablesdb/...`), không cần lớp dịch staging |
-| `realtime.py` | Appwrite Realtime → sự kiện |
-| `runtime.py` | Nơi duy nhất chọn kho theo môi trường |
-| `routes.py` | `/api/chat/*` (REST + SSE) |
+| `ids.py` | ID tất định: người dùng `fw_<uid>`; hội thoại `dm_<băm cặp>`; thành viên `cm_…`; tin `m_<client_id>`; chặn `blk_<sha256(chặn, bị chặn, kind)[:24]>` (**đúng định dạng #229**) |
+| `domain.py` | Mô hình (`Conversation`, `Member`, `Message`, `Block`…) và lỗi có mã ổn định. Không biết kho lưu trữ |
+| `repository.py` | **Hợp đồng `ChatRepository`** + bản trong bộ nhớ (mock/test) |
+| `appwrite.py` | **Hai hiện thực của CÙNG hợp đồng**, khác nhau DUY NHẤT ở ba hằng số (đường dẫn, khoá ID, khoá danh sách) |
+| `service.py` | Nghiệp vụ; chỉ nói chuyện với hợp đồng kho — không biết phiên bản Appwrite |
+| `realtime.py` | Appwrite Realtime → sự kiện (đăng ký tên kênh kiểu cũ — có mặt trên cả 2.3 lẫn 1.9.6) |
+| `runtime.py` | Nơi duy nhất chọn kho: `FAS_CHAT_APPWRITE_API` |
+| `routes.py` | `/api/chat/*` (REST + SSE); route gửi có `Server-Timing` |
 
-**Production 1.9.6 sau này:**
-- 1.9.6 đã có TablesDB, nên kho `tablesdb` có thể dùng được luôn (chưa kiểm trên production-parity);
-- nếu cần API Databases kiểu cũ: viết `ChatRepository` trong **một tệp** cạnh `appwrite_tablesdb.py`, rồi đặt `FAS_CHAT_APPWRITE_API` trỏ tới nó;
-- service, route và toàn bộ web **không đổi**;
-- Realtime đăng ký theo **tên kênh kiểu cũ**, vốn chạy trên cả hai phiên bản (đã đo).
+| `FAS_CHAT_APPWRITE_API` | Kho | API | Dùng cho |
+|---|---|---|---|
+| rỗng / `legacy` | `LegacyAppwriteChatRepository` | `/v1/databases/{db}/collections/{c}/documents` | **Production 1.9.6** (mặc định) |
+| `tablesdb` | `TablesDBChatRepository` | `/v1/tablesdb/{db}/tables/{t}/rows` | Staging Cloud 2.3 |
+| giá trị khác | — | — | chat TẮT, có lý do (không tự dò phiên bản) |
 
-## Các sự thật đã đo trên Cloud 2.3 (2026-09-28) và cách thiết kế dùng chúng
-
-| # | Đo được | Thiết kế |
-|---|---|---|
-| 1 | Realtime xác thực bằng session secret → đúng người dùng | Luồng dùng session của người xem, không dùng khoá |
-| 2 | Người thứ ba **không** nhận sự kiện của dòng chỉ A/B đọc được | Quyền đọc theo dòng là rào chính; `event_dto` lọc lại lần nữa |
-| 3 | Hai kết nối của cùng một người đều nhận sự kiện | Nhiều tab chạy song song, không tab nào "đẩy" tab nào (khác Tencent) |
-| 4 | Mỗi sự kiện mang **cả** tên kênh cũ lẫn tên TablesDB | Đăng ký kênh `databases.<db>.collections.<c>.documents` |
-| 5 | Dòng **tạo trong transaction không phát sự kiện Realtime** | Tin nhắn được tạo **ngoài** transaction |
-| 6 | Tạo trùng rowId trong transaction → 409 `transaction_conflict`, **không** thao tác nào được áp dụng | "+1 chưa đọc" đi cùng một **dòng đánh dấu** `chat_fanouts/f<message_id>` trong cùng transaction, nên đúng một lần kể cả khi 6 lần gửi lại chạy đồng thời |
-| 7 | 5 transaction đồng thời cùng `increment` một dòng → cả 5 commit, không mất lượt | `increment` cho số chưa đọc, không đọc-sửa-ghi |
-| 8 | Dòng được cập nhật hoặc tăng giá trị thì có phát sự kiện | Hộp thư, số chưa đọc và đồng bộ đã-đọc giữa các tab đi qua sự kiện của dòng `chat_members` |
+Cả hai dùng `/v1/tablesdb/transactions` cho giao dịch (1.9.6 đã có; production đang dùng cho `job_locks`).
 
 ## Bảng (`scripts/setup_appwrite.py`)
 
-Quyền **cấp bảng rỗng**: không người dùng nào tự tạo hay sửa được dòng (đã kiểm thật: 401/403). Quyền theo dòng **chỉ là đọc**.
+Quyền **cấp bảng rỗng**: không người dùng nào tự tạo/sửa dòng (đo: 401/403 trên cả hai phiên bản). Quyền dòng **chỉ là đọc**.
 
-| Bảng | Quyền dòng | Index |
+| Bảng | Quyền đọc dòng | Index |
 |---|---|---|
-| `chat_messages` | đọc: A, B | `(conversation_id, created_at)`, `(conversation_id, recipient_id, created_at)` |
-| `chat_members` | đọc: chính chủ | `(user_id, last_at)`, `(conversation_id)` |
-| `chat_blocks` | đọc: người chặn | `(blocker_id)`, `(blocked_id)` |
-| `chat_fanouts` | không ai | — |
+| `chat_conversations` | A, B | `member_a`, `member_b` |
+| `chat_messages` | A, B | `(conversation_id, created_at)`, `(conversation_id, recipient_id, created_at)` |
+| `chat_members` | chính chủ | `(user_id, last_at)`, `(conversation_id)` |
+| `chat_fanouts` | không ai | — (dòng đánh dấu "tin X đã phát tán") |
+| `user_blocks` | **người chặn** | giống hệt #229 (`blocker_created_idx`, `blocked_kind_idx`, `blocker_kind_idx`) |
+
+`user_blocks` là bảng của #229 (Community). PR này mang **bản sao y hệt** định nghĩa đó (đã so sánh bằng diff) vì #229 chưa merge được; khi #229 vào `main`, hai định nghĩa trùng nhau và `setup_appwrite` coi là "đã có".
 
 ## Ngữ nghĩa
 
-- **Quyền DM:**
-  - mọi route được gọi theo *người kia*, hội thoại = `dm_id(tôi, người kia)`, nên người gọi **luôn** là thành viên;
-  - không có tham số `conversation_id` nào để đoán;
-  - không nhắn được cho chính mình (400); người không tồn tại trả 404;
-  - con trỏ lấy từ hội thoại khác trả **cùng lỗi** với con trỏ rác, nên không dò được ID của người khác.
-- **Gửi idempotent:**
-  - client chọn `client_id` ngẫu nhiên; ID tin = `m_<client_id>` và cũng là ID của tin "đang gửi" trên giao diện;
-  - gửi lại thì trả **tin gốc**;
-  - `client_id` đã thuộc người khác trả 409.
-- **Chưa đọc và đã đọc:**
-  - chưa đọc = số tin *gửi cho tôi* có `created_at` > mốc đã đọc;
-  - `read` **đếm lại** từ kho, rồi đếm thêm lần nữa sau khi ghi;
-  - tổng trên nút Tin nhắn không tính hội thoại tắt tiếng.
-- **Chặn:** hai chiều (403 `chat_blocked`); người bị chặn không thấy ai chặn mình.
-- **Tắt tiếng:** vẫn đếm chưa đọc theo từng hội thoại, nhưng không đưa vào tổng.
-- **Bản xem trước hộp thư:**
-  - luôn là tin *mới nhất thật*, đọc lại từ kho;
-  - được cập nhật **sau khi trả response** (idempotent, tự sửa ở lần gửi sau);
-  - tin nhắn và "+1 chưa đọc" luôn xong **trước** khi trả, nên một lần gửi lại luôn tự hoàn tất được.
-- **Nối lại (web):**
-  - lùi dần 1 s → 30 s;
-  - **watchdog**: im lặng 45 s thì cắt (máy chủ gửi nhịp tim 15 s; `fetch` không tự có thời hạn cho luồng);
-  - `offline` thì cắt, `online` thì nối **ngay**;
-  - sau mỗi lần nối lại: tải lại hộp thư và **bù khoảng trống** (`after=<tin mới nhất đã biết>`).
-- **Giới hạn:**
-  - gửi 30/phút; đọc 120/phút; ghi 60/phút; mở luồng 12/phút;
-  - **tối đa 8 luồng đồng thời** mỗi người (mỗi luồng là một WebSocket upstream);
-  - mỗi luồng sống tối đa 25 phút rồi tự nối lại.
+- **Quyền DM:** mọi route gọi theo *người kia*; hội thoại = `dm_id(tôi, người kia)` nên người gọi **luôn** là thành viên; không có tham số `conversation_id` để đoán; không nhắn cho chính mình (400); người không tồn tại 404; con trỏ của hội thoại khác trả **cùng lỗi** với con trỏ rác.
+- **Gửi idempotent, phát tán đúng một lần:**
+  - client chọn `client_id`; ID tin = `m_<client_id>`, cũng là ID tin "đang gửi" trên giao diện; gửi lại trả **tin gốc**; `client_id` của người khác → 409;
+  - giao dịch {tạo `chat_fanouts/f<id>` + `increment unread_count`} được **chuẩn bị song song** với các phép kiểm; tin tạo **ngoài** giao dịch (dòng tạo trong giao dịch không phát Realtime); **commit luôn sau khi tin tồn tại**; trùng dòng đánh dấu → 409 → không cộng lần hai;
+  - bị chặn / người không tồn tại: trả lỗi **ngay**, giao dịch đã chuẩn bị bị huỷ khi nó chuẩn bị xong (không bao giờ commit).
+- **Chưa đọc / đã đọc:** chưa đọc = số tin *gửi cho tôi* sau mốc đã đọc; `read` **đếm lại** từ kho rồi đếm thêm lần nữa sau khi ghi; tổng trên nút Tin nhắn không tính hội thoại tắt tiếng.
+- **Chặn (mức TÀI KHOẢN, dùng chung `user_blocks` với #229):**
+  - một dòng `kind="block"`; chặn **hai chiều**: cả người chặn lẫn người bị chặn đều nhận 403 `chat_blocked` khi gửi tin mới;
+  - **lịch sử cũ giữ nguyên** cho cả hai; tin bị từ chối không cộng chưa đọc, không phát Realtime;
+  - người bị chặn **không** biết ai chặn mình (`/api/chat/blocks` chỉ liệt kê người *mình* chặn; dòng chỉ người chặn đọc được — đo: người bị chặn GET thẳng Appwrite → 404);
+  - `kind="mute"` của #229 là *tắt nội dung cộng đồng*, **không** chặn tin nhắn.
+- **Tắt tiếng (RIÊNG từng hội thoại, `chat_members.muted`):** tin vẫn đến và vẫn đếm chưa đọc trong hội thoại đó, nhưng không vào tổng trên nút Tin nhắn; hiện 🔕 và chấm chưa đọc màu mờ.
+- **Giao diện:** menu "⋯" ở đầu cuộc trò chuyện (drawer và `/messages`): Tắt/Bật thông báo (làm ngay), **Chặn** (qua `ConfirmDialog` danger, render bằng portal vào `body` vì `.chat-drawer` có `backdrop-filter`), Bỏ chặn. Đã chặn thì ô soạn được thay bằng dòng "Bạn đã chặn … · Bỏ chặn". Trước khi hộp thư / danh sách chặn tải xong, mục tương ứng hiện "Đang tải…" và bị khoá — không đoán trạng thái.
+- **Bản xem trước hộp thư:** luôn là tin *mới nhất thật*, cập nhật **sau khi trả response** (idempotent, tự sửa ở lần gửi sau). Tin + "+1 chưa đọc" luôn xong **trước** khi trả.
+- **Nối lại (web):** lùi 1 s → 30 s; watchdog im lặng 45 s thì cắt; `offline` cắt, `online` nối **ngay**; sau mỗi lần nối lại tải lại hộp thư và **bù khoảng trống** (`after=`).
+- **Giới hạn:** gửi 30/phút; đọc 120/phút; ghi 60/phút; mở luồng 12/phút; tối đa 8 luồng đồng thời mỗi người **mỗi instance**; luồng sống tối đa 25 phút rồi tự nối lại.
+
+## Ngữ nghĩa đo được: Cloud 2.3 so với 1.9.6 + MongoDB
+
+Cùng một script thăm dò, bảng tạm + người dùng tạm, tự dọn.
+
+| # | Hạng mục | Cloud 2.3 (staging) | 1.9.6 + MongoDB (máy kiểm) |
+|---|---|---|---|
+| 1 | Realtime xác thực bằng session secret → đúng người | có | có |
+| 2 | Người thứ ba nhận sự kiện của dòng chỉ A/B đọc | không | không |
+| 3 | Hai socket cùng người đều nhận | có | có |
+| 4 | Tên kênh trên sự kiện | kiểu cũ + TablesDB | kiểu cũ + TablesDB (`databases.collections`, `databases.tables`, `tablesdb.tables`) |
+| 5 | Dòng **tạo trong giao dịch** phát Realtime | không | không |
+| 6 | Trùng rowId trong giao dịch | 409 `transaction_conflict`, không áp dụng gì | 409 `transaction_conflict`, không áp dụng gì |
+| 7 | 5 giao dịch đồng thời `increment` một dòng | cả 5 commit | cả 5 commit (đếm = 6) |
+| 8 | Cập nhật / increment (kể cả trong giao dịch) phát sự kiện | có | có (kể cả cập nhật không đổi giá trị) |
+| 9 | `total` khi `limit(1)` | tổng thật | tổng thật |
+
+**Khác biệt thật đã gặp** (đều ở công cụ/khoá, không ở ngữ nghĩa chat):
+
+| Hạng mục | Cloud 2.3 | 1.9.6 + MongoDB |
+|---|---|---|
+| `GET collection` khi chờ thuộc tính sẵn sàng | trạng thái đúng | **bộ đệm cũ**: `novels.dub_audio_key` mãi "processing" trong khi `GET …/attributes/dub_audio_key` = "available" → `setup_appwrite` cũ báo kẹt sau 120 s. **Đã sửa**: chờ theo endpoint từng mục; 404 ngay sau POST = "chưa hiện", chờ tiếp |
+| `GET /health/version` kèm khoá | — | 401 (cần scope `public`) → rào máy kiểm gọi không kèm khoá |
+| Tạo khoá API (console) | — | bắt buộc `keyId`; không có scope `transactions.*` (giao dịch dùng `rows.*`) |
+| Độ trễ một thao tác kho (trung vị) | GET 251 · truy vấn 273 · stage 856 · tạo tin 246 · commit 614 ms (VN → SGP) | GET 11 · truy vấn 13 · stage 33 · tạo tin 15 · commit 66 ms (loopback) |
 
 ## Kết quả kiểm
 
 | Mức | Kết quả |
 |---|---|
-| Đơn vị (`server/tests/test_messaging.py`, `test_chat_session.py`) | 49/49. Có kho Appwrite giả mô phỏng đúng các hành vi đã đo; các bài Realtime chạy trên **uvicorn thật**, vì `TestClient` gom hết body SSE |
-| Hợp đồng schema | 89 bài, 0 hỏng |
-| Web (`realtime-chat-v1.test.mjs` + toàn bộ) | 1139/1145 (0 hỏng, 6 bỏ qua); typecheck 0; lint 0 lỗi; `cf:build` OK |
-| **Sống trên staging** (`python -m scripts.staging.run_live --mo-dun test_chat_live`) | **9/9** (cần #243) |
-| **Chrome hiển thị**: UI Chat V1 thật + backend thật + Appwrite staging | **17/17**. Hai người dùng + tab thứ hai; ảnh ở desktop 1440 và di động 390 |
+| Đơn vị `server/tests/test_messaging.py` + `test_chat_session.py` | **51/51** (cả hai kho Appwrite qua kho giả, thứ tự phát tán, chặn #229, cuộc hội thoại) |
+| `scripts/tests/test_chat_parity_guard.py` + `test_setup_appwrite_readiness.py` | **25/25** |
+| Web `realtime-chat-v1.test.mjs` (23) + toàn bộ | **1141/1147** (0 hỏng, 6 bỏ qua); typecheck 0; lint 0 lỗi |
+| Sống — **TablesDB trên Cloud 2.3** (`scripts.staging.run_live --mo-dun test_chat_live --chat-api tablesdb`) | **10/10** |
+| Sống — **Legacy trên Cloud 2.3** (`--chat-api legacy`) | **10/10** |
+| Sống — **Legacy trên 1.9.6 + MongoDB** (`scripts.chat_parity.run_parity --chat-api legacy`) | **10/10** |
+| Sống — **TablesDB trên 1.9.6 + MongoDB** | **10/10** |
+| Chrome hiện, cờ bật: chặn / tắt tiếng / drawer / 390 px | **32/32** |
+| Chrome hiện, cờ tắt (như production) | **7/7**, 0 request `/api/chat` |
 
-Bộ test sống trên staging kiểm các điểm sau:
-- truy cập **thẳng vào Appwrite** bằng session người thứ ba trả 404, và danh sách không lộ tin;
-- không ai (kể cả thành viên) tự ghi hay sửa được dòng: 401/403;
-- 6 lần gửi đồng thời cùng `client_id` tạo đúng 1 tin và 1 lượt chưa đọc;
-- Realtime tới cả hai phía và tab thứ hai; người thứ ba nhận 0 sự kiện;
-- đã đọc ở tab 1 thì tab 2 cập nhật;
-- mất kết nối thì bù khoảng trống;
-- phân trang lùi không trùng, không sót;
-- chặn hai chiều; tắt tiếng.
+Bộ test sống (cùng một tệp cho mọi đích) kiểm: quyền DM + truy cập **thẳng Appwrite** bằng session người thứ ba (404, danh sách không lộ tin, hàng hội thoại không đọc được); không ai tự ghi/sửa dòng; 6 lần gửi đồng thời cùng `client_id` → đúng 1 tin, 1 lượt chưa đọc; chưa đọc/đã đọc tới mốc; tắt tiếng không vào tổng; phân trang lùi không trùng/sót + tiến sau con trỏ; chặn hai chiều từ cả hai phía, dòng `user_blocks` định dạng #229 chỉ người chặn đọc được, lịch sử còn, bỏ chặn gửi lại được; Realtime tới hai phía + tab thứ hai, người thứ ba 0 sự kiện; mất kết nối thì bù khoảng trống.
 
-Trên Chrome, bài test cũng xác nhận trình duyệt **chỉ gọi web và API Fanfic**, không gọi Appwrite hay Tencent.
+## Độ trễ người gửi (ACK)
 
-**Độ trễ đo** (máy QA ở VN tới Appwrite SGP):
+Hồ sơ theo pha có ở header `Server-Timing` của route gửi: `xac_thuc`, `kiem`, `tao_tin`, `cho_gd`, `phat_tan`, `tong`.
+
+Đo **tuần tự** 12 tin/lần, mã cũ (#247) và mã mới chạy **xen kẽ** cùng mạng (VN → SGP) để khử nhiễu:
 
 | Hạng mục | Trước khi sửa | Sau khi sửa |
 |---|---|---|
-| Người nhận thấy tin (Realtime) | 1464 ms | **952–1170 ms** |
-| Người gửi nhận "đã gửi" | 3083 ms | **2444–2877 ms** |
+| ACK trung vị, vòng 1 | 2226 ms | **1430 ms** |
+| ACK trung vị, vòng 2 | 3518 ms | **1485 ms** |
+| ACK p90 (vòng 1 / 2) | 2778 / 4357 ms | 1715 / 1626 ms |
+| Tin đầu tiên (tạo hội thoại) | 3368 / 5684 ms | 1729 / 2068 ms |
+| ACK trên 1.9.6 cùng máy (≈ production nếu API và Appwrite cùng nơi) | — | **158 ms** (Legacy), Realtime 86 ms |
 
-Các con số là trung vị của từng lần chạy. Sau tối ưu đã chạy hai lần; mạng tới SGP dao động giữa các lần.
+Thời gian đi đâu (staging, sau sửa, trung vị): xác thực ~80–100 · kiểm ~120 · tạo tin ~115 · chờ giao dịch ~330 · commit ~400 ms. Phần lớn là **API giao dịch của Cloud** (stage ≈ 850 ms, commit ≈ 600 ms mỗi lần) cộng RTT ~114 ms tới SGP. Ba thay đổi rủi ro thấp, **không** nới "đúng một lần":
 
-## Giới hạn đã biết và việc tiếp theo
+1. xác thực nhẹ cho route chat (chỉ `GET /v1/account`, vẫn xác minh **mỗi** request, không bộ nhớ đệm);
+2. giao dịch được chuẩn bị song song với phép kiểm và chỉ được **chờ sau khi tạo tin** (commit vẫn luôn sau tạo tin);
+3. tin đầu tiên tạo hàng hội thoại + hai hàng thành viên song song.
 
-1. **Người gửi chờ xác nhận khoảng 2,4 s**: xác thực, kiểm tra song song, tạo tin, cộng 3 bước của transaction. Bước tiếp theo nếu cần là tách "chuẩn bị/commit" transaction để chạy song song với bước tạo tin; việc này cần mở rộng hợp đồng kho. Đặt backend cùng vùng với Appwrite sẽ giảm mạnh hơn nữa.
-2. **Gõ trước khi "sẵn sàng" thì Enter bị bỏ qua lặng lẽ.** Đây là hành vi có sẵn từ #239 (`ChatProvider.send()` khi transport chưa có). Chữ vẫn còn trong ô soạn. QA chờ `<html data-chat-sdk="logged-in">`. Sửa được mà không đổi UI (xếp hàng gửi trong provider), nhưng chưa làm.
-3. **Chưa có nút chặn/tắt tiếng trên giao diện.** Có API (`/mute`, `/block`, `/blocks`) và transport; không thêm control nào để giữ nguyên UI V1.
-4. **Chặn của chat tách khỏi `user_blocks` của Community (#229).** Khi #229 vào `main`: gộp thành một chính sách chặn chung (cắm vào `ChatService` qua hợp đồng kho).
-5. **Hộp thư chỉ tải 50 hội thoại gần nhất**; tổng chưa đọc tính trên 50 hội thoại đó.
-6. Hai lần gửi rất sát nhau có thể làm bản xem trước tạm thời là tin áp chót, tới lần ghi sau. Số chưa đọc thì luôn đếm lại chính xác khi đọc.
-7. Trần 8 luồng đồng thời tính **theo từng instance**. Có N worker thì một người giữ được tối đa 8×N luồng. Hạn mức 12 lần mở mỗi phút là lớp chặn chung giữa các instance. Review bảo mật độc lập (Antigravity Claude Opus) đã chấp nhận điểm này (LOW).
+Không làm (vì đổi đúng-một-lần hoặc bảo mật): commit sau khi trả lời; tạo tin song song với phép kiểm chặn; nhớ đệm token.
 
-## Bật trên production (CHƯA làm; cần chủ dự án duyệt)
+## Máy kiểm tương đương production (`scripts/chat_parity/`)
 
-1. Tạo 4 bảng `chat_*` trên production bằng `scripts/setup_appwrite.py --only <bảng>`, có dry-run trước.
-2. Chạy `scripts/staging/live/test_chat_live.py` trên một bản production-parity 1.9.6.
-3. Đặt `FAS_CHAT_V1=1`.
+```bash
+# Trên một máy có Docker (đã làm trên Lightning CPU Studio), Appwrite 1.9.6 + MongoDB, CHỈ bind 127.0.0.1
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/appwrite:/usr/src/code/appwrite:rw" \
+  --entrypoint=install appwrite/appwrite:1.9.6 --http-port=8080 --https-port=8443 \
+  --interactive=N --no-start=true --database=mongodb
+#  -> đổi cổng traefik thành 127.0.0.1:${_APP_HTTP_PORT}; _APP_OPTIONS_ABUSE=disabled (nhiều tài khoản từ một IP)
+(cd appwrite && docker compose up -d)
+python -m scripts.chat_parity.bootstrap --endpoint http://127.0.0.1:8080/v1 --ra parity.json   # project + khoá + schema
+python -m scripts.chat_parity.run_parity --cau-hinh parity.json --chat-api legacy               # bộ test sống
+python -m scripts.chat_parity.run_parity --cau-hinh parity.json --chat-api legacy --do-tre 8    # độ trễ từng thao tác
+```
 
-**Rollback:** đặt `FAS_CHAT_V1=0`; nếu cần thì xoá 4 bảng. Chỉ mất tin nhắn.
+Rào `guard.py` (fail-closed): chỉ **IP loopback** (không tên miền nào, kể cả `localhost`; không `user@host`), project `parity-*`, Appwrite **1.9.x**, mọi tài khoản `@example.test`, không trùng toạ độ production (`scripts/ops/cutover_target.py`), tiến trình con nhận môi trường tối thiểu và không cho ghi đè `APPWRITE_*`. `parity.json` chỉ nằm trên máy kiểm (600).
 
-**Dọn staging:** `python -m scripts.staging.reset --du-lieu --apply` (xoá tài khoản `@example.test` và dữ liệu tổng hợp).
+## Kế hoạch tạo schema trên production (CHƯA làm — chủ dự án chạy, sau khi duyệt)
+
+Chỉ **thêm** bảng mới; không đụng bảng đang có. Chạy trên môi trường production (khoá schema `APPWRITE_SCHEMA_API_KEY`), từng bảng, xem trước bằng `--dry-run`:
+
+```bash
+python -m scripts.setup_appwrite --dry-run --only chat_conversations   # lặp lại cho từng bảng bên dưới
+python -m scripts.setup_appwrite --only chat_conversations
+python -m scripts.setup_appwrite --only chat_messages
+python -m scripts.setup_appwrite --only chat_members
+python -m scripts.setup_appwrite --only chat_fanouts
+python -m scripts.setup_appwrite --only user_blocks    # nếu #229 đã tạo thì script báo "đã có", không đổi gì
+```
+
+Script chờ **từng** thuộc tính/index "available" theo endpoint từng mục (đã chạy trọn schema 787 mục trên 1.9.6 + MongoDB sạch: 0 lỗi). **Không** đặt `FAS_CHAT_V1=1`, **không** build web với cờ Chat V1 trong bước này.
+
+**Trước khi BẬT (bước sau, cần duyệt riêng):**
+1. #229 (hoặc riêng hai commit `69aaf4f` + `399f5fb` của nó) phải vào `main`: nếu không, một lần Appwrite trả 5xx cho `GET /v1/account` (đã gặp trên 1.9.6 + Mongo khi nhiều request đồng thời) bị ánh xạ thành **401** và luồng chat tự dừng tới khi tải lại trang.
+2. Chạy `scripts.chat_parity.run_parity` trên máy kiểm với đúng commit sẽ deploy.
+3. Máy chủ: `FAS_CHAT_V1=1` (để trống `FAS_CHAT_APPWRITE_API` = legacy). Web: build với `NEXT_PUBLIC_CHAT_V1_ENABLED=1`.
+
+**Rollback:**
+- Tắt ngay: `FAS_CHAT_V1=0` (API trả 503, giao diện hiện lỗi trung thực) và/hoặc build lại web không có cờ (mọi UI chat biến mất, 0 request). Không cần xoá dữ liệu.
+- Gỡ hẳn: xoá 4 bảng `chat_*` — chỉ mất tin nhắn. **Không** xoá `user_blocks` nếu #229 đang dùng.
+
+**Dọn staging:** `python -m scripts.staging.reset --du-lieu --apply` (xoá tài khoản `@example.test` và dữ liệu tổng hợp). Bảng `chat_blocks` cũ trên staging không còn được dùng (chặn đã chuyển sang `user_blocks`); để nguyên, không xoá tự động.
+
+## Giới hạn đã biết
+
+1. **Sập máy chủ đúng giữa "tạo tin" và "commit"**: tin đã có nhưng "+1 chưa đọc" chưa cộng; nếu client không gửi lại, huy hiệu của người nhận thiếu 1 cho tới lần mở hội thoại (lúc đó đếm lại chính xác). Chỉ xảy ra khi sập; review độc lập ghi nhận là rủi ro còn lại.
+2. **5xx của Appwrite → 401** ở `appwrite_adapter` (mã có sẵn, dùng chung) — xem điều kiện 1 ở trên.
+3. Gõ trước khi "sẵn sàng" thì Enter bị bỏ qua lặng lẽ (hành vi có sẵn từ #239). Chữ vẫn còn trong ô soạn.
+4. Hộp thư tải 50 hội thoại gần nhất; tổng chưa đọc tính trên 50 hội thoại đó.
+5. Hai lần gửi rất sát nhau có thể làm bản xem trước tạm là tin áp chót tới lần ghi sau (số chưa đọc luôn đếm lại đúng khi đọc).
+6. Trần 8 luồng đồng thời tính theo từng instance (N worker → tối đa 8×N); hạn mức mở luồng 12/phút là lớp chặn chung.
+7. Ngay sau khi tải lại trang, nếu danh sách chặn chưa về mà người dùng gửi cho người đã chặn, tin hiện "Không gửi được (mã 403)" rồi ô soạn đổi thành thông báo đã chặn.

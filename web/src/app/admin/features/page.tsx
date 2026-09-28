@@ -18,7 +18,7 @@
 import { useCallback } from "react";
 import { gamesConfig, social, type ServerLimits } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
-import { MUSIC_ENABLED } from "@/lib/features";
+import { CHAT_V1_ENABLED, MUSIC_ENABLED } from "@/lib/features";
 import { Loading } from "@/components/ui";
 import { IconSliders } from "@/components/Icons";
 
@@ -136,6 +136,12 @@ export default function AdminFeaturesPage() {
       <div className="card stack-2">
         <h3 className="section-title-sm">Music (biến môi trường build NEXT_PUBLIC_MUSIC_ENABLED)</h3>
         <HangCo nhan="Nhạc nền / playlist" trangThai={MUSIC_ENABLED ? "on" : "off"} />
+      </div>
+
+      <div className="card stack-2">
+        {/* Ten bien cua co nam o `lib/features.ts` (mot cho duy nhat). May chu con can FAS_CHAT_V1=1. */}
+        <h3 className="section-title-sm">Tin nhắn Chat V1 (cờ build, xem lib/features.ts)</h3>
+        <HangCo nhan="Nút Tin nhắn · /messages · Nhắn tin ở hồ sơ" trangThai={CHAT_V1_ENABLED ? "on" : "off"} />
       </div>
     </section>
   );

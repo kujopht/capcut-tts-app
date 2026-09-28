@@ -163,8 +163,12 @@ class KeHoachMigrationTest(unittest.TestCase):
     def test_pham_vi_hep_va_bao_vang_thay_vi_bia(self):
         cot = migrate.moi_collection()
         self.assertEqual(len(cot), len(set(cot)))
-        for khong_duoc in ("novels", "chapters", "tts_jobs", "audio_tracks", "translation_jobs"):
+        for khong_duoc in ("chapters", "tts_jobs", "audio_tracks", "translation_jobs"):
             self.assertNotIn(khong_duoc, cot)
+        # Phu thuoc THAT do duoc tren staging (khong phai mo rong tuy y): dang bai cap nhat
+        # author_stats ngay sau khi ghi; feed loc fandom doc novels cho bai story_update.
+        for can in ("author_stats", "novels"):
+            self.assertIn(can, cot)
         kh = migrate.ke_hoach({"profiles": {"attributes": [1, 2], "indexes": [1]}})
         hs = next(m for m in kh if m["collection"] == "profiles")
         self.assertEqual((hs["co_trong_cay"], hs["so_thuoc_tinh"], hs["so_index"]), (True, 2, 1))

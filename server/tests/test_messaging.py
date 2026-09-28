@@ -614,6 +614,150 @@ class RealtimeTest(MessagingCase):
         self.assertEqual(self.sv.event_dto("B", ChatEvent("update", member=tv))["type"], "conversation")
 
 
+class _RealtimeBoTin:
+    """Realtime 'cham vo han' cho TIN (chi con ready/nhip tim + su kien thanh vien) — de chung minh tin toi
+    nguoi nhan qua DUONG TAT cung instance, khong phai qua Realtime."""
+
+    def __init__(self, goc: Any) -> None:
+        self.goc = goc
+
+    async def subscribe(self, viewer_id: str, credential: str, *, heartbeat_s: float = 15.0):
+        trong = self.goc.subscribe(viewer_id, credential, heartbeat_s=heartbeat_s)
+        try:
+            async for ev in trong:
+                if ev is not None and ev.message is not None:
+                    continue
+                yield ev
+        finally:
+            await trong.aclose()
+
+
+class DuongTatCungInstanceTest(MessagingCase):
+    """`local_bus.py`: tin vua tao -> luong SSE cung instance NGAY, Realtime van la nguon chinh; trung thi bo."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from server.messaging.local_bus import LocalChatBus
+
+        self._bus_cu = self.rt.bus
+        self.rt.bus = self.bus = LocalChatBus()
+
+    def tearDown(self) -> None:
+        self.rt.bus = self._bus_cu
+        super().tearDown()
+
+    @staticmethod
+    def _so_lan(st, mid) -> int:
+        return sum(1 for t, d in list(st["events"]) if d.get("type") == "message" and d["message"]["id"] == mid)
+
+    def test_hai_nguon_cung_toi_trinh_duyet_thay_dung_mot_lan(self):
+        ua, a, ha = self.nguoi("bt1")
+        ub, b, hb = self.nguoi("bt2")
+        sa, sb = self.nghe(ha), self.nghe(hb)
+        try:
+            mid = self.gui(ha, b, 71, "một lần thôi").json()["message"]["id"]
+            self.assertTrue(self.cho(sb, lambda evs: any(d.get("type") == "message" for _, d in evs)))
+            time.sleep(0.6)  # Realtime (bo nho) cung da toi — phai bi bo
+            self.assertEqual((self._so_lan(sa, mid), self._so_lan(sb, mid)), (1, 1))
+        finally:
+            self.dong(sa, sb)
+
+    def test_realtime_cham_van_giao_qua_duong_tat_chi_cho_nguoi_trong_tin(self):
+        self.rt.events = _RealtimeBoTin(self.rt.events)
+        ua, a, ha = self.nguoi("bt3")
+        ub, b, hb = self.nguoi("bt4")
+        uc, c, hc = self.nguoi("bt5")
+        sb, sc = self.nghe(hb), self.nghe(hc)
+        try:
+            mid = self.gui(ha, b, 72, "đường tắt").json()["message"]["id"]
+            self.assertTrue(self.cho(sb, lambda evs: self._so_lan({"events": evs}, mid) == 1, 2.0),
+                            "tin phải tới người nhận qua đường tắt khi Realtime chậm")
+            tin = next(d["message"] for t, d in sb["events"] if d.get("type") == "message")
+            self.assertEqual((tin["from_me"], tin["peer_id"], tin["text"]), (False, a, "đường tắt"))
+            time.sleep(0.4)
+            self.assertEqual(sc["events"], [], "người thứ ba KHÔNG nhận gì qua đường tắt")
+        finally:
+            self.dong(sb, sc)
+        het = time.time() + 3
+        while (self.bus.so_luong(ub) or self.bus.so_luong(uc)) and time.time() < het:
+            time.sleep(0.05)
+        self.assertEqual((self.bus.so_luong(ub), self.bus.so_luong(uc)), (0, 0), "đăng ký phải gỡ khi luồng đóng")
+
+    def test_gui_lai_cung_client_id_khong_phat_lai_va_duong_tat_hong_khong_lam_hong_gui(self):
+        ua, a, _ = self.nguoi("bt6")
+        ub, b, _ = self.nguoi("bt7")
+        phat: List[str] = []
+        self.sv.send(ua, b, cid(73), "x", on_created=lambda m: phat.append(m.id))
+        self.sv.send(ua, b, cid(73), "x", on_created=lambda m: phat.append(m.id))
+        self.assertEqual(len(phat), 1, "lần gửi lại (idempotent) không phát tin lần nữa")
+
+        def hong(_m):
+            raise RuntimeError("bus sập")
+        tin, moi = self.sv.send(ua, b, cid(74), "vẫn gửi", on_created=hong)
+        self.assertTrue(moi)
+        self.assertEqual(self.repo.get_members(dm_id(ua, ub))[ub].unread_count, 2)
+
+    def test_bus_don_vi_chi_nguoi_trong_tin_huy_dang_ky_vong_da_dong_hang_day(self):
+        from server.messaging.local_bus import LocalChatBus
+
+        bus = LocalChatBus()
+        vong = asyncio.new_event_loop()
+        try:
+            qa, qb, qc = asyncio.Queue(), asyncio.Queue(), asyncio.Queue(maxsize=1)
+            huy_a = bus.subscribe("A", vong, qa)
+            bus.subscribe("B", vong, qb)
+            bus.subscribe("C", vong, qc)
+            m = Message(id="m_b1", conversation_id="dm_x", sender_id="A", recipient_id="B", client_id=cid(1),
+                        text="t", created_at="2026-09-29T00:00:00.000+00:00")
+            self.assertEqual(bus.publish_message(m), 2)
+            vong.run_until_complete(asyncio.sleep(0))
+            self.assertEqual((qa.qsize(), qb.qsize(), qc.qsize()), (1, 1, 0))
+            huy_a()
+            self.assertEqual(bus.publish_message(m), 1)
+            # hang doi day: bo, khong nem
+            bus.subscribe("B", vong, qc)
+            qc.put_nowait(("x", None))
+            bus.publish_message(m)
+            vong.run_until_complete(asyncio.sleep(0))
+            self.assertEqual(qc.qsize(), 1)
+        finally:
+            vong.close()
+        self.assertEqual(bus.publish_message(m), 0, "vòng sự kiện đã đóng: bỏ qua, không ném")
+
+
+class CuocDuaDaDocTest(MessagingCase):
+    """`mark_read` dem TRUOC khi "+1" cua chinh tin do duoc commit (nguoi nhan dang mo cua so, tin toi qua duong
+    tat) -> buoc xem truoc (sau commit) phai sua ve 0; KHONG dung vao chua doc that."""
+
+    def test_da_doc_truoc_cong_mot_duoc_sua_ve_khong(self):
+        ua, a, _ = self.nguoi("cd1")
+        ub, b, hb = self.nguoi("cd2")
+        hoan: List[Any] = []
+        tin, _ = self.sv.send(ua, b, cid(81), "đọc ngay", defer=lambda f, *x: hoan.append((f, x)))
+        cid_dm = dm_id(ua, ub)
+        tv_b = self.repo.get_members(cid_dm)[ub]
+        # Dung cuoc dua: mark_read da ghi moc = tin nay (0 chua doc), roi "+1" commit roi xuong SAU.
+        self.repo.update_member(tv_b.id, {"last_read_at": tin.created_at, "last_read_message_id": tin.id,
+                                          "unread_count": 1})
+        f, x = hoan[0]
+        f(*x)
+        tv_b = self.repo.get_members(cid_dm)[ub]
+        self.assertEqual((tv_b.unread_count, tv_b.last_message_id), (0, tin.id))
+        self.assertEqual(self.hop_thu(hb)["unread_total"], 0)
+
+    def test_chua_doc_that_khong_bi_dung(self):
+        ua, a, _ = self.nguoi("cd3")
+        ub, b, hb = self.nguoi("cd4")
+        t1, _ = self.sv.send(ua, b, cid(82), "cũ")
+        self.sv.mark_read(ub, a)
+        hoan: List[Any] = []
+        self.sv.send(ua, b, cid(83), "mới, chưa đọc", defer=lambda f, *x: hoan.append((f, x)))
+        f, x = hoan[0]
+        f(*x)
+        self.assertEqual(self.repo.get_members(dm_id(ua, ub))[ub].unread_count, 1)
+        self.assertEqual(self.hop_thu(hb)["unread_total"], 1)
+
+
 # ============================================================================ kho Appwrite (gia, HAI API)
 
 

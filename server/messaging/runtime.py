@@ -7,6 +7,8 @@ Lap rap nhan tin theo moi truong — noi DUY NHAT chon kho luu tru.
     FAS_CHAT_APPWRITE_API  "legacy" (MAC DINH khi DATA_BACKEND=appwrite) — API Databases, Appwrite 1.9.6
                            tu luu tru (production). "tablesdb" — Cloud 2.x (staging, `run_live` dat tuong
                            minh). Gia tri khac -> TU CHOI bat, khong doan. Khong tu do phien ban luc khoi dong.
+    FAS_CHAT_LOCAL_FASTPATH "0" tat duong tat CUNG INSTANCE (`local_bus.py`). MAC DINH bat voi kho Appwrite
+                           (kho bo nho da giao tuc thi, khong can).
 
 Nghiep vu (`ChatService`), route va giao dien GIONG HET giua hai kho. Tencent Chat KHONG duoc dung cho
 tin nhan chu.
@@ -17,6 +19,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
 
+from server.messaging.local_bus import LocalChatBus
 from server.messaging.repository import InMemoryChatRepository, InMemoryEventSource
 from server.messaging.service import ChatService
 
@@ -34,9 +37,12 @@ class MessagingRuntime:
     #: Mot luong song toi da ngan nay roi dong (client tu noi lai + bu khoang trong): khong co ket noi
     #: "treo vo han", va phien het han/bi thu hoi duoc kiem lai dinh ky.
     max_stream_s: float = 25 * 60
+    #: Duong tat cung instance cho tin moi (`local_bus.py`); `None` = chi Realtime.
+    bus: Optional[LocalChatBus] = None
 
     def describe(self) -> dict:
-        return {"enabled": self.enabled, "backend": self.backend, "reason": self.reason or None}
+        return {"enabled": self.enabled, "backend": self.backend, "reason": self.reason or None,
+                "local_fastpath": self.bus is not None}
 
 
 def _co(e: Mapping[str, str], ten: str) -> Optional[bool]:
@@ -75,5 +81,6 @@ def build_runtime(settings: Any, *, user_exists: Callable[[str], bool],
 
     repo = (LegacyAppwriteChatRepository if api == "legacy" else TablesDBChatRepository)(settings)
     # Realtime dang ky ten kenh KIEU CU — do that: Cloud 2.3 phat ca hai kieu ten, 1.9.6 phat kieu cu.
+    bus = None if _co(e, "FAS_CHAT_LOCAL_FASTPATH") is False else LocalChatBus()
     return MessagingRuntime(True, ChatService(repo, user_exists=user_exists, blocks=blocks, viewer_of=viewer_of),
-                            AppwriteRealtimeSource(settings), f"appwrite-{api}")
+                            AppwriteRealtimeSource(settings), f"appwrite-{api}", bus=bus)

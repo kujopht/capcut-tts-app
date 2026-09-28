@@ -16,10 +16,12 @@ Tat (`FAS_CHAT_V1`) -> 503 `chat_not_configured`. Loi nghiep vu -> `{code, messa
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
-from typing import Any, Callable, Dict, Literal, Optional
+from collections import OrderedDict
+from typing import Any, Callable, Dict, Literal, Optional, Tuple
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -40,6 +42,9 @@ HAN_MUC = {  # (so lan, cua so giay) theo NGUOI
 #: Luong DONG THOI toi da moi nguoi (moi instance). Moi luong giu MOT WebSocket toi Appwrite toi 25 phut —
 #: han muc "12 lan mo/phut" mot minh van cho mot nguoi tich ~300 ket noi upstream. Du cho nhieu tab that.
 LUONG_DONG_THOI_TOI_DA = 8
+#: So ID tin gan nhat moi luong nho de bo ban trung (duong tat + Realtime). Realtime toi tre toi vai giay,
+#: khong phai vai tram tin — 256 la du rong.
+DA_GUI_TOI_DA = 256
 PeerId = Annotated[str, StringConstraints(min_length=4, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")]
 MsgId = Annotated[str, StringConstraints(min_length=4, max_length=36, pattern=r"^[A-Za-z0-9_-]+$")]
 
@@ -122,9 +127,11 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
         do: Dict[str, float] = {"xac_thuc": round((time.perf_counter() - t0) * 1000, 1)}
         _han_muc("send", p.user_id)
         # Ban xem truoc hop thu cap nhat SAU khi tra loi (idempotent, tu sua) — nguoi gui khong phai cho.
+        # Tin vua ton tai -> day thang toi luong SSE cung instance (`local_bus.py`), khong cho Realtime.
         tin, moi = _chay(lambda: sv.send(p.user_id, peer, payload.client_id, payload.text,
                                          kind=payload.kind, sticker_id=payload.sticker_id,
-                                         defer=background.add_task, timing=do))
+                                         defer=background.add_task, timing=do,
+                                         on_created=rt.bus.publish_message if rt.bus is not None else None))
         do["tong"] = round((time.perf_counter() - t0) * 1000, 1)
         # `Server-Timing` (chuan W3C): CHI ten buoc + mili-giay — khong du lieu nguoi dung nao.
         response.headers["Server-Timing"] = ", ".join(f"{k};dur={v}" for k, v in do.items())
@@ -200,9 +207,37 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
         async def luong():
             bat_dau = time.monotonic()
             nguon = rt.events.subscribe(p.user_id, credential, heartbeat_s=rt.heartbeat_s)
+            # MOT hang doi cho hai nguon: Realtime (bom boi mot tac vu) + duong tat cung instance (`local_bus`).
+            hang: "asyncio.Queue[Tuple[str, Any]]" = asyncio.Queue(maxsize=512)
+
+            async def bom() -> None:
+                try:
+                    async for ev in nguon:
+                        await hang.put(("rt", ev))
+                    await hang.put(("het", None))
+                except ChatError as exc:
+                    await hang.put(("loi", exc))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 — chuyen sang luong chinh de no that bai nhu cu
+                    await hang.put(("hong", exc))
+
+            tac = asyncio.create_task(bom())
+            huy_dk = (rt.bus.subscribe(p.user_id, asyncio.get_running_loop(), hang)
+                      if rt.bus is not None else (lambda: None))
+            #: ID tin da gui xuong luong nay — duong tat va Realtime cung toi: trinh duyet thay DUNG MOT LAN.
+            da_gui: "OrderedDict[str, None]" = OrderedDict()
             da_san_sang = False
             try:
-                async for ev in nguon:
+                while True:
+                    loai, ev = await hang.get()
+                    if loai == "het":
+                        return
+                    if loai == "loi":
+                        yield "event: error\ndata: " + json.dumps({"code": ev.code}) + "\n\n"
+                        return
+                    if loai == "hong":
+                        raise ev
                     if ev is None:
                         if not da_san_sang:
                             da_san_sang = True
@@ -210,16 +245,27 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
                         else:
                             yield ": ping\n\n"
                     else:
+                        tin = ev.message if ev.kind == "create" else None
+                        if tin is not None and tin.id in da_gui:
+                            continue
                         dto = sv.event_dto(p.user_id, ev)
                         if dto is not None:
+                            if tin is not None:
+                                da_gui[tin.id] = None
+                                if len(da_gui) > DA_GUI_TOI_DA:
+                                    da_gui.popitem(last=False)
                             yield "data: " + json.dumps(dto, ensure_ascii=False) + "\n\n"
                     if time.monotonic() - bat_dau > rt.max_stream_s:
                         yield "event: bye\ndata: {}\n\n"
                         return
-            except ChatError as exc:
-                yield "event: error\ndata: " + json.dumps({"code": exc.code}) + "\n\n"
             finally:
+                huy_dk()
                 tra_cho()
+                tac.cancel()
+                try:
+                    await tac
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001 — dang dong luong
+                    pass
                 await nguon.aclose()
 
         return StreamingResponse(luong(), media_type="text/event-stream",

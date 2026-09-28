@@ -2256,14 +2256,49 @@ class Setup:
                 "appwrite-worker-databases) trước khi chạy lại."
             )
 
+    #: So lan "lam moi cache collection roi thu lai" toi da cho MOT index (xem `_ensure_index`).
+    LAM_MOI_CACHE_TOI_DA = 2
+
     def _ensure_index(self, base: str, name: str, kind: str, keys: List[str]) -> None:
-        result = self._call("POST", f"{base}/indexes", {
-            "key": name,
-            "type": kind,
-            "attributes": keys,
-            "orders": ["ASC"] * len(keys),
-        })
+        body = {"key": name, "type": kind, "attributes": keys, "orders": ["ASC"] * len(keys)}
+        lan = 0
+        while True:
+            try:
+                result = self._call("POST", f"{base}/indexes", body)
+                break
+            except SystemExit as exc:
+                # Appwrite 1.9.6 + MongoDB (do that tren may kiem 1.9.6, 2026-09-29, `user_follows.created_at`):
+                # doc TUNG MUC tra 'available', nhung TAI LIEU collection trong cache Redis (TTL -1) van ghi
+                # 'processing' -> POST index 400 "not yet available" — chay lai script cung chet DUNG cho do
+                # (cache chi lam moi o lan thay doi schema KE TIEP). Mot lan cap nhat collection KHONG DOI GI lam
+                # moi cache (do that: 'processing' -> 'available'), roi thu lai. CHI khi moi thuoc tinh cua index
+                # da 'available' theo doc tung muc — con lai la loi that, nem nguyen van.
+                if (self.dry_run or lan >= self.LAM_MOI_CACHE_TOI_DA or "not yet available" not in str(exc)
+                        or not self._thuoc_tinh_deu_san_sang(base, keys)):
+                    raise
+                lan += 1
+                self._lam_moi_cache_collection(base)
         print(f"    * index {name} {keys}: {'đã có' if result == 'exists' else 'đã tạo'}")
+
+    def _thuoc_tinh_deu_san_sang(self, base: str, keys: List[str]) -> bool:
+        import time
+        han_chot = time.monotonic() + 30.0
+        return all((self._doc_muc_that(base, "attributes", k, han_chot) or {}).get("status") == "available"
+                   for k in keys)
+
+    def _lam_moi_cache_collection(self, base: str) -> None:
+        """PUT collection voi CHINH gia tri dang co (ten, quyen, documentSecurity, enabled) — khong doi gi, chi
+        buoc Appwrite ghi lai tai lieu + xoa cache. Gui TUONG MINH ca bon truong: `documentSecurity` bi bo trong
+        request se thanh MAC DINH `false` cua Appwrite (mat quyen theo tung document) — khong bao gio de mac dinh.
+        Thieu bat ky truong nao trong ban doc -> KHONG gui gi (nem loi ro rang)."""
+        hien = self._call("GET", base, doc_thoi=True) or {}
+        can = ("name", "$permissions", "documentSecurity", "enabled")
+        if any(k not in hien for k in can):
+            raise SystemExit(f"Không đọc đủ thiết lập của {base} để làm mới cache an toàn — dừng, kiểm tra thủ công.")
+        self._call("PUT", base, {"name": hien["name"], "permissions": list(hien["$permissions"]),
+                                 "documentSecurity": bool(hien["documentSecurity"]), "enabled": bool(hien["enabled"])},
+                   doc_thoi=True)
+        print(f"    (làm mới cache collection {base.rsplit('/', 1)[-1]} — không đổi thiết lập nào)")
 
     def run(self, only: str = "") -> None:
         """

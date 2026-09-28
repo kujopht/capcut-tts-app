@@ -201,6 +201,83 @@ class CacheCollectionCuKhongChanVongChoTest(unittest.TestCase):
         self.assertNotIn(self.BASE, [c.args[1] for c in m.call_args_list])
 
 
+class IndexCacheCollectionCuTest(unittest.TestCase):
+    """Do that 2026-09-29 (may kiem 1.9.6, `user_follows.created_at`): doc tung muc 'available' nhung POST index
+    400 "not yet available" vi tai lieu collection trong cache van 'processing'; chay lai cung chet dung cho do.
+    PUT collection KHONG DOI GI lam moi cache (do that) -> thu lai thanh cong."""
+
+    BASE = "/v1/databases/db/collections/user_follows"
+    HIEN = {"name": "User follows", "$permissions": [], "documentSecurity": True, "enabled": True,
+            "attributes": [{"key": "created_at", "status": "processing"}]}
+    LOI = SystemExit("Appwrite lỗi 400: The requested attribute 'created_at' is not yet available. Please try again later.")
+
+    def _gia(self, trang_thai="available", lan_hong=1):
+        goi = []
+
+        def _call(method, path, payload=None, **kw):
+            goi.append((method, path, payload))
+            if method == "POST" and path.endswith("/indexes"):
+                if sum(1 for g in goi if g[0] == "POST") <= lan_hong:
+                    raise self.LOI
+                return {}
+            if method == "GET" and path == self.BASE:
+                return dict(self.HIEN)
+            if method == "GET" and "/attributes/" in path:
+                return _thuoc_tinh(path.rsplit("/", 1)[-1], trang_thai)
+            if method == "PUT":
+                return {}
+            raise AssertionError((method, path))
+        return goi, _call
+
+    def _setup(self):
+        s = _tao_setup()
+        s.dry_run = False
+        return s
+
+    def test_lam_moi_cache_bang_put_khong_doi_gi_roi_thu_lai(self):
+        s = self._setup()
+        goi, f = self._gia()
+        with patch.object(s, "_call", side_effect=f):
+            s._ensure_index(self.BASE, "follower_created_idx", "key", ["follower_id", "created_at"])
+        put = [g for g in goi if g[0] == "PUT"]
+        self.assertEqual(len(put), 1)
+        # Gui TUONG MINH ca bon truong, dung gia tri dang co — documentSecurity KHONG bao gio de mac dinh false.
+        self.assertEqual(put[0][2], {"name": "User follows", "permissions": [], "documentSecurity": True, "enabled": True})
+        self.assertEqual(sum(1 for g in goi if g[0] == "POST"), 2)
+
+    def test_thuoc_tinh_that_su_chua_san_sang_thi_khong_cham_collection(self):
+        s = self._setup()
+        goi, f = self._gia(trang_thai="processing")
+        with patch.object(s, "_call", side_effect=f), self.assertRaises(SystemExit):
+            s._ensure_index(self.BASE, "follower_created_idx", "key", ["follower_id", "created_at"])
+        self.assertFalse([g for g in goi if g[0] == "PUT"], "lỗi thật: không được PUT collection")
+
+    def test_loi_400_khac_nem_nguyen_van(self):
+        s = self._setup()
+
+        def _call(method, path, payload=None, **kw):
+            raise SystemExit("Appwrite lỗi 400: Invalid index type")
+        with patch.object(s, "_call", side_effect=_call), self.assertRaises(SystemExit) as ctx:
+            s._ensure_index(self.BASE, "x_idx", "key", ["a"])
+        self.assertIn("Invalid index type", str(ctx.exception))
+
+    def test_co_tran_so_lan_lam_moi(self):
+        s = self._setup()
+        goi, f = self._gia(lan_hong=99)
+        with patch.object(s, "_call", side_effect=f), self.assertRaises(SystemExit):
+            s._ensure_index(self.BASE, "x_idx", "key", ["created_at"])
+        self.assertEqual(sum(1 for g in goi if g[0] == "PUT"), Setup.LAM_MOI_CACHE_TOI_DA)
+
+    def test_thieu_truong_trong_ban_doc_thi_khong_put(self):
+        s = self._setup()
+        goi, f = self._gia()
+        self.HIEN = {"name": "User follows", "enabled": True}  # thieu documentSecurity / $permissions
+        with patch.object(s, "_call", side_effect=f), self.assertRaises(SystemExit) as ctx:
+            s._ensure_index(self.BASE, "x_idx", "key", ["created_at"])
+        self.assertIn("làm mới cache an toàn", str(ctx.exception))
+        self.assertFalse([g for g in goi if g[0] == "PUT"])
+
+
 class IdempotentSauThatBaiMotPhanTest(unittest.TestCase):
     """Kich ban 7: chay lai sau khi mot thuoc tinh da bi xoa+tao lai (mo
     phong sua loi thu cong sau su co that) — thuoc tinh 'da co' van phai

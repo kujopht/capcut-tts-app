@@ -221,11 +221,14 @@ class ChatService:
     def send(self, me: str, peer_chat_id: str, client_id: str, text: Any, *,
              kind: str = "text", sticker_id: Optional[str] = None,
              defer: Optional[Callable[..., Any]] = None,
-             timing: Optional[Dict[str, float]] = None) -> Tuple[Message, bool]:
+             timing: Optional[Dict[str, float]] = None,
+             on_created: Optional[Callable[[Message], Any]] = None) -> Tuple[Message, bool]:
         """`defer(fn)`: chay `fn` SAU khi tra loi (vd `BackgroundTasks.add_task`). Chi ban xem truoc hop
         thu duoc hoan — no idempotent va tu sua o lan gui sau. Tin + "+1 chua doc" LUON xong truoc khi
         tra loi: mot lan gui lai phai tu hoan tat duoc, nen khong buoc nao "con no" duoc hoan.
         `timing`: neu co, ghi mili-giay tung buoc (route dua vao header `Server-Timing`).
+        `on_created(tin)`: goi NGAY khi tin MOI da ton tai trong kho (truoc phat tan) — duong tat cung
+        instance toi luong SSE cua nguoi nhan (`local_bus.py`). Loi cua no KHONG bao gio lam hong lan gui.
         `kind="sticker"`: `sticker_id` phai co trong catalog va goi cua no MO KHOA cho nguoi gui (may chu
         quyet); `text` bi bo qua — tin luu nhan thay the "Nhãn dán: …"."""
         do = timing if timing is not None else {}
@@ -278,6 +281,11 @@ class ChatService:
                     raise ChatUnavailable("Không đọc lại được tin nhắn — thử lại.")
                 if tin.sender_id != me or tin.conversation_id != cid:
                     raise ChatConflict("Mã tin nhắn đã được dùng.", code="chat_id_taken")
+            if tao_moi and on_created is not None:
+                try:
+                    on_created(tin)
+                except Exception:  # noqa: BLE001 — duong tat hong thi Realtime van giao
+                    log.warning("messaging: đường tắt cùng instance bị lỗi (Realtime vẫn giao)", exc_info=True)
             moc("tao_tin")
             # Giao dich phat tan duoc CHUAN BI song song tu dau; chi CHO no o day — sau khi tin da ton tai.
             # (Do that staging: stage ~860 ms > ca ba phep kiem ~270 ms — cho truoc khi tao tin la de
@@ -318,19 +326,30 @@ class ChatService:
             log.warning("messaging: cập nhật xem trước bị lỗi (tự sửa ở lần gửi sau)", exc_info=True)
 
     def _cap_nhat_xem_truoc(self, cid: str) -> None:
+        """Chay SAU commit phat tan. Them mot viec: sua cuoc dua "da doc truoc +1". Nguoi nhan dang mo cua so
+        nhan tin (qua Realtime / duong tat) va `mark_read` DEM TRUOC khi "+1" cua chinh tin do duoc commit ->
+        "+1" roi xuong SAU -> 1 chua doc cho mot tin DA DOC. Dau hieu: moc da doc LA CHINH tin moi nhat
+        (`last_read_message_id`, KHONG so thoi gian — hai tin cung mili-giay la chuyen thuong) ma van con chua
+        doc -> dem lai tu kho (cung phep dem cua `mark_read`), ghi CHUNG lan cap nhat xem truoc."""
         f_cuoi = _POOL.submit(self.repo.latest_message, cid)
         tv = self.repo.get_members(cid)
         cuoi = f_cuoi.result()
         if cuoi is None:
             return
         for m in tv.values():
-            if m.last_message_id == cuoi.id:
-                continue
-            if m.last_at and iso_ms(m.last_at) > iso_ms(cuoi.created_at):
-                continue  # mot request khac da ghi ban MOI HON
-            self.repo.update_member(m.id, {"last_message_id": cuoi.id, "last_text": cuoi.text[:PREVIEW_MAX],
-                                           "last_at": cuoi.created_at, "last_sender_id": cuoi.sender_id,
-                                           "updated_at": self._gio()})
+            sua: Dict[str, Any] = {}
+            if (m.user_id == cuoi.recipient_id and m.unread_count and m.last_read_at
+                    and m.last_read_message_id == cuoi.id):
+                n = self.repo.count_unread(cid, m.user_id, iso_ms(m.last_read_at))
+                if n != m.unread_count:
+                    sua["unread_count"] = n
+            if m.last_message_id != cuoi.id and not (m.last_at and iso_ms(m.last_at) > iso_ms(cuoi.created_at)):
+                # (last_at MOI HON = mot request khac da ghi ban moi hon — khong de len)
+                sua.update({"last_message_id": cuoi.id, "last_text": cuoi.text[:PREVIEW_MAX],
+                            "last_at": cuoi.created_at, "last_sender_id": cuoi.sender_id})
+            if sua:
+                sua["updated_at"] = self._gio()
+                self.repo.update_member(m.id, sua)
 
     # ------------------------------------------------------------------ doc
     def _con_tro(self, cid: str, message_id: Optional[str]) -> Optional[str]:

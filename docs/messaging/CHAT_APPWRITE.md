@@ -131,8 +131,10 @@ Trên Chrome, bài test cũng xác nhận trình duyệt **chỉ gọi web và A
 
 | Hạng mục | Trước khi sửa | Sau khi sửa |
 |---|---|---|
-| Người nhận thấy tin (Realtime) | 1464 ms | **952 ms** |
-| Người gửi nhận "đã gửi" | 3083 ms | **2444 ms** |
+| Người nhận thấy tin (Realtime) | 1464 ms | **952–1170 ms** |
+| Người gửi nhận "đã gửi" | 3083 ms | **2444–2877 ms** |
+
+Các con số là trung vị của từng lần chạy. Sau tối ưu đã chạy hai lần; mạng tới SGP dao động giữa các lần.
 
 ## Giới hạn đã biết và việc tiếp theo
 

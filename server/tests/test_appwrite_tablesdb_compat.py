@@ -94,6 +94,10 @@ class AnhXaTest(unittest.TestCase):
                                     "documents", 200)
         self.assertEqual(ds["documents"][0]["$collectionId"], "posts")
         self.assertNotIn("rows", ds)
+        # MOT dong vua tao co COT ten `rows` (game_runs: so hang luoi) — khong duoc coi la danh sach.
+        dong = lop.dich_than_phan_hoi({"$id": "mr_1", "$tableId": "game_runs", "rows": 3, "cols": 4},
+                                      "documents", 201)
+        self.assertEqual((dong["rows"], dong["$collectionId"]), (3, "game_runs"))
         t = lop.dich_than_phan_hoi({"$id": "posts", "columns": [{"key": "a", "status": "available"}],
                                     "indexes": [{"key": "i", "columns": ["a"]}], "rowSecurity": True}, "collection", 200)
         self.assertEqual(t["attributes"][0]["key"], "a")

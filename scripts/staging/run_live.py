@@ -44,7 +44,9 @@ def main(argv: List[str]) -> int:
         "FAS_SOCIAL_V1_SCHEMA": "1",
         "FAS_XP_ATOMIC": "1",
         "FAS_GAMES_V1": "1",
-        "FAS_SOCIAL_LIMITS": "post:5/60,comment:40/60",
+        # Tran dang bai theo NGUOI (dem tren chinh du lieu Appwrite): du cho mot nguoi o lop community
+        # (~8 bai), va `F_HanMuc` kiem dung tran nay (bai 13 -> 429).
+        "FAS_SOCIAL_LIMITS": "post:12/60,comment:40/60",
         "FAS_VAR_DIR": tempfile.mkdtemp(prefix="fas-staging-var-"),
     })
     muc = "scripts.staging.live.test_live" + (f".{a.chi}" if a.chi else "")

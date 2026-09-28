@@ -166,10 +166,14 @@ def dich_than_phan_hoi(body: Any, loai: str, status: int) -> Any:
     if loai in ("document",):
         return _row_ve_document(body)
     if loai == "documents":
-        b = dict(body)
-        if "rows" in b:
+        # `.../rows` tra DANH SACH (GET, bulk) {total, rows:[...]} HOAC MOT dong (POST tao mot dong).
+        # KHONG dua vao rieng khoa "rows": mot bang co COT ten `rows` (vd `game_runs.rows` = so hang
+        # luoi Memory) — do that tren staging: coi dong do la danh sach -> TypeError.
+        if "total" in body and isinstance(body.get("rows"), list):
+            b = dict(body)
             b["documents"] = [_row_ve_document(r) for r in b.pop("rows")]
-        return b
+            return b
+        return _row_ve_document(body)
     if loai == "collection":
         return _table_ve_collection(body)
     if loai == "collections":

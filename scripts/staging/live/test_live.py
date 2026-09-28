@@ -314,16 +314,29 @@ class D_XpNguyenTuTest(unittest.TestCase):
         from server import gamification_service as gsv
         from server.gamification_domain import XpLedgerEntry
 
+        from server.appwrite_adapter import AppwriteUnavailableError
+
         u, _ = nguoi("title")
         uid = u["user_id"]
         kho = main.gamification_store
-        viec = [lambda i=i: kho.award_xp_atomic(XpLedgerEntry(
-            entry_id=f"xt_{RUN}_{i}", user_id=uid, event_type="game_match_completed", source_kind="game_match",
-            source_id=f"stt_{RUN}_{i}", xp_awarded=2)) for i in range(6)]
+        entries = [XpLedgerEntry(entry_id=f"xt_{RUN}_{i}", user_id=uid, event_type="game_match_completed",
+                                 source_kind="game_match", source_id=f"stt_{RUN}_{i}", xp_awarded=2) for i in range(6)]
+        viec = [lambda e=e: kho.award_xp_atomic(e) for e in entries]
         viec += [lambda: gsv.equip_title(kho, uid, "") for _ in range(4)]
         _, loi = _chay_dong_thoi(viec)
-        self.assertTrue(all(isinstance(e, gsv.GamificationError) for e in loi), loi)
+        # Duoi tranh chap THAT (10 writer, cung mot hang, qua mang toi SGP) mot so luot co the het luot thu CAS
+        # -> AppwriteUnavailableError (API tra 503, client thu lai). KHONG hop le: loi khac, mat hay trung XP.
+        self.assertTrue(all(isinstance(e, (gsv.GamificationError, AppwriteUnavailableError)) for e in loi), loi)
+        tam_thoi = sum(isinstance(e, AppwriteUnavailableError) for e in loi)
+        print(f"\n[XP-HON-HOP] loi_tam_thoi={tam_thoi}/{len(viec)} (het luot thu CAS)", flush=True)
+        so_cai = lambda: [e for e in kho.list_xp_events(uid) if e.source_id.startswith(f"stt_{RUN}_")]  # noqa: E731
+        self.assertEqual(kho.get_progress(uid).xp, sum(e.xp_awarded for e in so_cai()),
+                         "tiến độ lệch sổ cái: mất hoặc trùng một lượt cộng")
+        # Client thu lai TUAN TU moi entry: da ghi thi la no-op (idempotent), chua ghi thi ghi dung mot lan.
+        for e in entries:
+            kho.award_xp_atomic(e)
         self.assertEqual(kho.get_progress(uid).xp, 12)
+        self.assertEqual(len(so_cai()), 6)
 
 
 class E_GamesTest(unittest.TestCase):
@@ -390,10 +403,21 @@ class E_GamesTest(unittest.TestCase):
         self.assertEqual(self._xp(self.tk_x), xp)
 
     def test_bang_xep_hang_co_nguoi_thang(self):
+        # unittest chay theo thu tu chu cai: bai nay chay TRUOC cac van o bai khac — tu choi mot van voi
+        # hai tai khoan MOI (khong dung tran cap-doi-thu cua cap x/o o cac bai khac).
+        cu = (self.x, self.tk_x, self.o, self.tk_o)
+        try:
+            self.x, self.tk_x = nguoi("bxhx")
+            self.o, self.tk_o = nguoi("bxho")
+            self._danh_het(self._phong_dang_choi())
+            x_id, o_id = self.x["user_id"], self.o["user_id"]
+        finally:
+            self.x, self.tk_x, self.o, self.tk_o = cu
         r = client.get("/api/games/leaderboard?game=caro&limit=100")
         self.assertEqual(r.status_code, 200, r.text)
         diem = {it["user_id"]: it["points"] for it in r.json()["items"]}
-        self.assertGreaterEqual(diem.get(self.x["user_id"], 0), 3, "người thắng chưa có trên bảng xếp hạng")
+        self.assertEqual(diem.get(x_id), 3, "người thắng chưa có trên bảng xếp hạng")
+        self.assertEqual(diem.get(o_id), 0)
         self.assertEqual(client.get("/api/games/leaderboard?game=chess").status_code, 400)
 
     def test_memory_khong_lo_bo_cuc_va_chi_chu_luot(self):
@@ -415,11 +439,11 @@ class F_HanMucVaDongThoiTest(unittest.TestCase):
         u, tk = nguoi("hanmuc")
         khoa_dau = _khoa("hm")
         ma = []
-        for i in range(5):  # FAS_SOCIAL_LIMITS=post:5/60 (run_live)
+        for i in range(12):  # FAS_SOCIAL_LIMITS=post:12/60 (run_live)
             r = client.post("/api/posts", json={"text": f"bài {i}", "client_key": khoa_dau if i == 0 else ""}, headers=tk)
             ma.append(r.status_code)
-        self.assertEqual(ma, [201] * 5)
-        self.assertEqual(client.post("/api/posts", json={"text": "bài 6"}, headers=tk).status_code, 429)
+        self.assertEqual(ma, [201] * 12)
+        self.assertEqual(client.post("/api/posts", json={"text": "bài 13"}, headers=tk).status_code, 429)
         # Gui lai client_key cu KHONG bi tinh vao han muc.
         self.assertEqual(client.post("/api/posts", json={"text": "x", "client_key": khoa_dau}, headers=tk).status_code, 200)
 

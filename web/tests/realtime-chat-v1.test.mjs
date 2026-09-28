@@ -119,7 +119,7 @@ test("2. mo /messages khoi tao chat MOT lan (co khoa), moChat idempotent", () =>
     vao thang /messages. `moChat` phai doc phien tu closure.
   */
   const moChat = p.slice(p.indexOf("const moChat = useCallback"), p.indexOf("const dungOTabNay"));
-  assert.match(moChat, /if \(!coPhienFanfic\) return false;/);
+  assert.match(moChat, /if \(!CHAT_V1_ENABLED \|\| !coPhienFanfic\) return false;/);
   assert.ok(!/profileIdRef/.test(moChat), "moChat không được dựa vào ref do effect của provider gán");
 });
 
@@ -144,7 +144,9 @@ test("4. khong bi mat nao o frontend, va token KHONG BAO GIO len URL cua luong",
   for (const p of moiTep()) {
     const s = readFileSync(p, "utf8");
     assert.ok(!/SECRET_KEY|SDKSecretKey|secretKey/i.test(s), `${tuongDoi(p)} nhắc tới khoá bí mật`);
-    assert.ok(!/NEXT_PUBLIC_[A-Z_]*(TENCENT|CHAT)/.test(s), `${tuongDoi(p)} đưa cấu hình chat ra biến NEXT_PUBLIC_`);
+    // Duy nhat MOT co bat/tat (boolean, khong phai cau hinh) duoc phep, va chi o `lib/features.ts`.
+    const conLai = s.replace(/NEXT_PUBLIC_CHAT_V1_ENABLED/g, tuongDoi(p) === "lib/features.ts" ? "" : "NEXT_PUBLIC_CHAT_V1_ENABLED");
+    assert.ok(!/NEXT_PUBLIC_[A-Z_]*(TENCENT|CHAT)/.test(conLai), `${tuongDoi(p)} đưa cấu hình chat ra biến NEXT_PUBLIC_`);
   }
   assert.ok(!/2004736[23]/.test(moiTep().map((p) => readFileSync(p, "utf8")).join("\n")), "SDKAppID bị chép cứng vào frontend");
   // EventSource khong gui duoc Authorization -> ai do se "tien" dat token vao query. Chan tu goc.
@@ -336,6 +338,11 @@ test("chan / tat tieng: nut THAT o drawer + /messages, chan qua ConfirmDialog (p
   assert.match(p, /setKhaNang\(\{ mute: !!tt\?\.setMuted, block: !!tt\?\.setBlocked \}\);/);
   assert.match(p, /tt\?\.blockedPeers\?\.\(\)/);
   assert.match(menu, /if \(!canMute && !canBlock\) return null;/);
+  // Ngay sau khi tai lai trang, hop thu/danh sach chan CHUA ve: khong duoc hien trang thai doan (do that
+  // tren Chrome QA — menu tung hien "Tắt thông báo" cho mot hoi thoai DA tat tieng).
+  assert.match(menu, /disabled=\{!inboxLoaded\}/);
+  assert.match(menu, /!blocksLoaded \? \(/);
+  assert.match(p, /\.finally\(\(\) => setDaTaiChan\(true\)\);/);
   // Dang xuat: xoa trang thai chan/tat tieng cua nguoi truoc.
   assert.match(p, /setChan\(\{\}\);\s*setTatTieng\(\{\}\);/);
   // Transport: tat tieng cap nhat hop thu NGAY (tong tren nut Tin nhan tru hoi thoai tat tieng).
@@ -345,6 +352,17 @@ test("chan / tat tieng: nut THAT o drawer + /messages, chan qua ConfirmDialog (p
   assert.equal(doiHoiThoai({ peer_id: "fw_b", unread: 1, muted: true, last_text: "", last_time: 1, last_from_me: false, last_message_id: "m" }).muted, true);
   // Danh sach: dau tat tieng + doc cho trinh doc man hinh.
   assert.match(codeOnly(read("components/chat/ConversationList.tsx")), /c\.muted \? ", đã tắt thông báo" : ""/);
+});
+
+test("co web CHAT_V1_ENABLED TAT mac dinh: khong nut, khong khung, khong request chat nao", () => {
+  const f = codeOnly(read("lib/features.ts"));
+  assert.match(f, /export const CHAT_V1_ENABLED = process\.env\.NEXT_PUBLIC_CHAT_V1_ENABLED === "1";/);
+  assert.match(codeOnly(read("components/chat/ChatLauncher.tsx")), /if \(!CHAT_V1_ENABLED\) return null;/);
+  assert.match(codeOnly(read("components/chat/StartChatButton.tsx")), /if \(!CHAT_V1_ENABLED\) return null;/);
+  const trang = codeOnly(read("app/messages/page.tsx"));
+  assert.match(trang, /if \(!CHAT_V1_ENABLED\) \{\s*return \(/);
+  // Moi duong mo chat (nut, /messages, ho so, tu mo lai sau khi tai trang) deu qua `moChat`.
+  assert.match(provider(), /if \(!CHAT_V1_ENABLED \|\| !coPhienFanfic\) return false;/);
 });
 
 test("nut Nhan tin o ho so: khong cho khach, khong cho chinh minh", () => {

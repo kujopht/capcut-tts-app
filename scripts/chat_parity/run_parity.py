@@ -38,6 +38,7 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--chat-api", default="legacy", choices=["legacy", "tablesdb"])
     ap.add_argument("--chi", default="", help="chi chay mot lop test (vd F_ChanTest)")
     ap.add_argument("--log", default="")
+    ap.add_argument("--do-tre", type=int, default=0, help="thay bo test bang do tre TUNG thao tac kho (N lan)")
     a = ap.parse_args(argv)
     try:
         cfg = nap(a.cau_hinh)
@@ -56,6 +57,11 @@ def main(argv: List[str]) -> int:
     muc = "scripts.staging.live.test_chat_live" + (f".{a.chi}" if a.chi else "")
     print(f"Đích {cfg.endpoint} · {cfg.project_id} · db {cfg.database_id} · Appwrite {dt['appwrite_version']} · "
           f"kho appwrite-{a.chat_api} · run {run_id}", flush=True)
+    if a.do_tre:
+        p = subprocess.run([sys.executable, "-m", "scripts.chat_parity.do_tre", str(a.do_tre)], cwd=GOC, env=env,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+        print(cfg.an(p.stdout + p.stderr)[-4000:])
+        return p.returncode
     t0 = time.time()
     p = subprocess.run([sys.executable, "-m", "unittest", "-v", muc], cwd=GOC, env=env, capture_output=True,
                        text=True, encoding="utf-8", errors="replace", timeout=3600)

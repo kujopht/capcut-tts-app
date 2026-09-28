@@ -12,6 +12,7 @@
  */
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CHAT_V1_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import { MAN_HINH_CHAT_NHO, useChat } from "./ChatProvider";
 import { InboxPopover } from "./InboxPopover";
@@ -43,6 +44,7 @@ export function ChatLauncher() {
     };
   }, [mo, dong]);
 
+  if (!CHAT_V1_ENABLED) return null;
   if (!profile) return null;
 
   const bam = () => {

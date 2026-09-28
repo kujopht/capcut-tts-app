@@ -6,6 +6,7 @@
  * Bam = nguoi dung chu dong mo chat -> `nhanTinVoi` goi `moChat("profile-dm")`.
  */
 import { useState } from "react";
+import { CHAT_V1_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import { useChat } from "./ChatProvider";
 
@@ -13,6 +14,7 @@ export function StartChatButton({ username, displayName }: { username: string; d
   const { profile } = useSession();
   const { nhanTinVoi } = useChat();
   const [dang, setDang] = useState(false);
+  if (!CHAT_V1_ENABLED) return null;
   if (!profile) return null;
   return (
     <button

@@ -40,6 +40,7 @@ import {
 } from "react";
 import type { TaiTransport } from "./ChatEngine";
 import { ApiError, chatApi, type ChatIdentity, type ChatSessionResponse } from "@/lib/api";
+import { CHAT_V1_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import { dem, ghiLyDo, ghiSdk, ghiTrangThai } from "@/lib/chat/metrics";
 import {
@@ -143,6 +144,10 @@ interface ChatValue {
   /** Transport co ho tro tat tieng / chan khong — khong thi giao dien an nut. */
   canMute: boolean;
   canBlock: boolean;
+  /** Hop thu da tai tu may chu it nhat MOT lan — truoc do `isMuted` chua biet trang thai that. */
+  inboxLoaded: boolean;
+  /** Danh sach nguoi minh da chan da tai (hoac tai hong — may chu van tu choi 403, nen khong treo nut). */
+  blocksLoaded: boolean;
   isMuted: (peerId: string) => boolean;
   /** Nem loi khi may chu tu choi — noi goi tu hien thong bao. */
   setMuted: (peerId: string, muted: boolean) => Promise<void>;
@@ -216,6 +221,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   /** Tat tieng mot hoi thoai CHUA co tin (chua nam trong hop thu) — co tin roi thi hop thu la nguon that. */
   const [tatTieng, setTatTieng] = useState<Record<string, boolean>>({});
   const [khaNang, setKhaNang] = useState({ mute: false, block: false });
+  const [daTaiHopThu, setDaTaiHopThu] = useState(false);
+  const [daTaiChan, setDaTaiChan] = useState(false);
   /** `true` = da den luc render `ChatEngine` (tai chunk SDK). Chi bat trong `moChat`. */
   const [canDongCo, setCanDongCo] = useState(false);
   const choDongCoRef = useRef<{ p: Promise<TaiTransport>; ok: (t: TaiTransport) => void; hong: () => void } | null>(null);
@@ -434,11 +441,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             setKhaNang({ mute: !!tt?.setMuted, block: !!tt?.setBlocked });
             tt?.blockedPeers?.()
               .then((ds) => setChan(Object.fromEntries(ds.map((id) => [id, true as const]))))
-              .catch(() => {});
+              .catch(() => {})
+              .finally(() => setDaTaiChan(true));
             transportRef.current
               ?.conversations()
               .then((ds) => {
                 setConversations(ds);
+                setDaTaiHopThu(true);
                 hoiDanhTinh(ds.map((c) => c.peerId));
               })
               .catch(() => {});
@@ -457,6 +466,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           },
           onConversations: (ds) => {
             setConversations(ds);
+            setDaTaiHopThu(true);
             hoiDanhTinh(ds.map((c) => c.peerId));
           },
           onUnread: (n) => setUnreadTotal(n),
@@ -530,7 +540,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, [moChatThat]);
 
   const moChat = useCallback(async (lyDo: string): Promise<boolean> => {
-    if (!coPhienFanfic) return false;
+    // Web chua bat Chat V1 (co build o `lib/features.ts`): KHONG xin phien, KHONG mo luong — 0 request.
+    if (!CHAT_V1_ENABLED || !coPhienFanfic) return false;
     // Bi day sang noi khac: KHONG tu chiem lai (se day tab/thiet bi kia ra) —
     // de giao dien hien lua chon "Dung o tab nay", nguoi dung tu quyet.
     if (status === "kicked") return false;
@@ -580,6 +591,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setChan({});
         setTatTieng({});
         setKhaNang({ mute: false, block: false });
+        setDaTaiHopThu(false);
+        setDaTaiChan(false);
       });
     }
     // Da bat tin nhan trong tab nay truoc khi tai lai trang -> mo lai.
@@ -728,10 +741,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     status, errorCode, kickReason, me, conversations, unreadTotal, threads, identities,
     drawer: drawerHien, drafts, moChat, dungOTabNay, thuLai, openThread, nhanTinVoi, openDrawer,
     minimizeDrawer, closeDrawer, send, retry, loadOlder, markRead, setDraft, identityOf,
-    blocked: chan, canMute: khaNang.mute, canBlock: khaNang.block, isMuted, setMuted, setBlocked,
+    blocked: chan, canMute: khaNang.mute, canBlock: khaNang.block, inboxLoaded: daTaiHopThu,
+    blocksLoaded: daTaiChan, isMuted, setMuted, setBlocked,
   }), [status, errorCode, kickReason, me, conversations, unreadTotal, threads, identities, drawerHien,
     drafts, moChat, dungOTabNay, thuLai, openThread, nhanTinVoi, openDrawer, minimizeDrawer, closeDrawer,
-    send, retry, loadOlder, markRead, setDraft, identityOf, chan, khaNang, isMuted, setMuted, setBlocked]);
+    send, retry, loadOlder, markRead, setDraft, identityOf, chan, khaNang, daTaiHopThu, daTaiChan, isMuted,
+    setMuted, setBlocked]);
 
   return (
     <ChatContext.Provider value={value}>

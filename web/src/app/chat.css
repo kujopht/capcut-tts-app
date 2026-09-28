@@ -154,6 +154,7 @@ a.chat-uh-nguoi:hover .chat-uh-ten { text-decoration: underline; }
 }
 .chat-menu-muc:hover, .chat-menu-muc:focus-visible { background: var(--bg-3); outline: none; }
 .chat-menu-muc-nguy { color: var(--danger); }
+.chat-menu-muc:disabled { color: var(--text-2); cursor: default; background: none; }
 .chat-menu-loi {
   position: absolute;
   top: calc(100% + 4px);

@@ -20,7 +20,7 @@ import { ConfirmDialog } from "@/components/ui";
 import { useChat } from "./ChatProvider";
 
 export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName: string }) {
-  const { canMute, canBlock, isMuted, blocked, setMuted, setBlocked } = useChat();
+  const { canMute, canBlock, inboxLoaded, blocksLoaded, isMuted, blocked, setMuted, setBlocked } = useChat();
   const [mo, setMo] = useState(false);
   const [hoiChan, setHoiChan] = useState(false);
   const [dangLam, setDangLam] = useState(false);
@@ -37,12 +37,20 @@ export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName:
       if (!hop.current?.contains(e.target as Node)) setMo(false);
     };
     document.addEventListener("pointerdown", ngoai);
-    const khung = requestAnimationFrame(() => hop.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
-    return () => {
-      cancelAnimationFrame(khung);
-      document.removeEventListener("pointerdown", ngoai);
-    };
+    return () => document.removeEventListener("pointerdown", ngoai);
   }, [mo]);
+
+  // Tieu diem vao muc DAU TIEN bat duoc — ca khi muc vua het "Đang tải…" (tai hop thu/danh sach chan xong
+  // SAU luc mo menu). Khong giat tieu diem neu nguoi dung da o trong menu.
+  useEffect(() => {
+    if (!mo) return;
+    const khung = requestAnimationFrame(() => {
+      const bang = hop.current?.querySelector('[role="menu"]');
+      if (bang?.contains(document.activeElement)) return;
+      bang?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    });
+    return () => cancelAnimationFrame(khung);
+  }, [mo, inboxLoaded, blocksLoaded]);
 
   if (!canMute && !canBlock) return null;
 
@@ -104,7 +112,7 @@ export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName:
           return;
         }
         if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-        const muc = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+        const muc = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
         const i = muc.indexOf(document.activeElement as HTMLButtonElement);
         e.preventDefault();
         muc[(i + (e.key === "ArrowDown" ? 1 : muc.length - 1) + muc.length) % muc.length]?.focus();
@@ -126,14 +134,21 @@ export function ChatThreadMenu({ peerId, peerName }: { peerId: string; peerName:
       </button>
       {mo ? (
         <div id={menuId} className="chat-menu-bang" role="menu" aria-label="Tuỳ chọn cuộc trò chuyện">
+          {/* Chua tai hop thu / danh sach chan: CHUA BIET trang thai that -> khoa muc, khong doan. */}
           {canMute ? (
-            <button type="button" role="menuitem" className="chat-menu-muc" onClick={() => void doiTatTieng()}>
+            <button type="button" role="menuitem" className="chat-menu-muc" disabled={!inboxLoaded}
+              onClick={() => void doiTatTieng()}>
               <span aria-hidden="true">{tatTieng ? "🔔" : "🔕"}</span>
-              {tatTieng ? "Bật thông báo" : "Tắt thông báo"}
+              {!inboxLoaded ? "Đang tải…" : tatTieng ? "Bật thông báo" : "Tắt thông báo"}
             </button>
           ) : null}
           {canBlock ? (
-            daChan ? (
+            !blocksLoaded ? (
+              <button type="button" role="menuitem" className="chat-menu-muc" disabled>
+                <span aria-hidden="true">⛔</span>
+                Đang tải…
+              </button>
+            ) : daChan ? (
               <button type="button" role="menuitem" className="chat-menu-muc" onClick={() => void boChan()}>
                 <span aria-hidden="true">↺</span>
                 Bỏ chặn

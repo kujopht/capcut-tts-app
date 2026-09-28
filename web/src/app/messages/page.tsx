@@ -15,6 +15,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef } from "react";
 import { EmptyState, Loading, PageHeader } from "@/components/ui";
+import { CHAT_V1_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import { useChat } from "@/components/chat/ChatProvider";
 import { ChatAvatar, danhXung, tenHien } from "@/components/chat/ChatAvatar";
@@ -57,6 +58,14 @@ function KhongGianTinNhan() {
     openThread(peer);
   }, [peer, coNoiDung, openThread]);
 
+  if (!CHAT_V1_ENABLED) {
+    return (
+      <div className="page">
+        <PageHeader title="Tin nhắn" />
+        <EmptyState icon="💬" title="Tin nhắn chưa mở" hint="Tính năng nhắn tin sẽ sớm có mặt trên Fanfic." />
+      </div>
+    );
+  }
   if (loading) return <div className="page"><Loading /></div>;
   if (!profile) {
     return (

@@ -103,13 +103,16 @@ def _kq(tool: str, status: str, summary: str, **data: Any) -> Dict[str, Any]:
 class DiagnosticToolbox:
     CONG_CU = ("get_public_system_health", "check_api_health", "check_route", "check_novel",
                "check_chapter", "check_audio_track", "check_audio_range", "check_current_build",
-               "check_feature_status", "get_recent_public_incidents", "get_sanitized_client_errors")
+               "check_feature_status", "get_recent_public_incidents", "get_sanitized_client_errors",
+               "get_recent_sentry_issues")
 
-    def __init__(self, deps: SupportDeps, store, *, clock=time.monotonic) -> None:
+    def __init__(self, deps: SupportDeps, store, *, clock=time.monotonic, sentry: Any = None) -> None:
         self.d = deps
         self.store = store
         self._clock = clock
         self._san_sang_cache: Optional[tuple] = None  # (luc, {metadata, storage})
+        #: `server.support.sentry_lookup.SentryChiDoc` hoac None (TAT). Token song TRONG doi tuong do.
+        self.sentry = sentry
 
     # ------------------------------------------------------------ chay
     def chay(self, ten: str, args: Dict[str, Any], *, viewer: Any, owner_key: str) -> Dict[str, Any]:
@@ -193,6 +196,28 @@ class DiagnosticToolbox:
         return _kq("get_sanitized_client_errors", "warn" if ds else "ok",
                    f"Trình duyệt của bạn đã ghi nhận {len(ds)} lỗi gần đây." if ds else "Chưa ghi nhận lỗi nào từ trình duyệt của bạn.",
                    errors=ds)
+
+    def _get_recent_sentry_issues(self, *, viewer, owner_key, code: str = "", route: str = "",
+                                  build: str = "") -> Dict[str, Any]:
+        """Doi chieu voi Sentry (CHI DOC, danh sach trang — xem `sentry_lookup.py`). Tu khoa do MAY CHU
+        chon tu ma loi/mau route cua ngu canh; nguoi dung va mo hinh chi thay SO DEM + thoi diem +
+        co trung ban build khong — khong tieu de loi, khong token."""
+        from server.support.sanitize import ban_build, ma_loi
+
+        if self.sentry is None:
+            return _kq("get_recent_sentry_issues", "unknown", "Chưa kết nối hệ thống giám sát lỗi — bỏ qua bước đối chiếu.")
+        kq = self.sentry.loi_gan_day(ma_loi=ma_loi(code), route_mau=chuan_hoa_route(route), build=ban_build(build))
+        if kq.get("trang_thai") != "ok":
+            return _kq("get_recent_sentry_issues", "unknown", "Không đủ ngữ cảnh để đối chiếu với hệ thống giám sát lỗi.")
+        n = kq["so_van_de"]
+        if not n:
+            return _kq("get_recent_sentry_issues", "ok", "Hệ thống giám sát chưa ghi nhận lỗi tương tự trong 24 giờ qua.",
+                       so_van_de=0)
+        cung = kq.get("cung_build")
+        return _kq("get_recent_sentry_issues", "warn",
+                   f"Hệ thống giám sát đã ghi nhận {n} lỗi tương tự ({kq['tong_su_kien']} lần) trong 24 giờ qua"
+                   + (", ở đúng bản build bạn đang dùng" if cung else "") + ".",
+                   so_van_de=n, tong_su_kien=kq["tong_su_kien"], lan_cuoi=kq["lan_cuoi"], cung_build=cung)
 
     # ------------------------------------------------------------ trang
     def _check_route(self, *, viewer, owner_key, route: str = "") -> Dict[str, Any]:

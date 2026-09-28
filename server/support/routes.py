@@ -119,8 +119,11 @@ class SupportRuntime:
 
 
 def build_support_runtime(deps: SupportDeps, llm_settings: Any, *, env=None) -> SupportRuntime:
+    from server.support.sentry_lookup import SentryChiDoc
+
     store = InMemorySupportStore()
-    tb = DiagnosticToolbox(deps, store)
+    # Sentry CHI DOC — None (TAT) khi thieu FAS_SUPPORT_SENTRY_TOKEN/ORG/PROJECTS.
+    tb = DiagnosticToolbox(deps, store, sentry=SentryChiDoc.tu_moi_truong(env))
     muoi = (os.environ if env is None else env).get("FAS_SUPPORT_HASH_SALT") or secrets.token_hex(16)
     engine = SupportEngine(tb, store, gateway=xay_gateway(llm_settings, env), muoi=muoi)
     return SupportRuntime(store=store, toolbox=tb, engine=engine, limiter=SlidingWindowRateLimiter())

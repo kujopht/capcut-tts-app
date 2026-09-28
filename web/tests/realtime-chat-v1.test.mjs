@@ -301,6 +301,13 @@ test("noi lai co tran va client_id hop le voi may chu (idempotent theo m_<client
   assert.match(t, /e\.status === 401 \|\| e\.status === 403/);
   // Nhieu tab: transport KHONG BAO GIO "day" tab khac.
   assert.ok(!/onKicked\(/.test(t), "transport phát kicked — nhiều tab phải cùng chạy");
+  // `fetch` KHONG co thoi han cho luong: im lang qua lau (TCP nua song) -> cat + noi lai; mang tat/bat
+  // -> cat ngay / noi NGAY (Chrome offline KHONG tu cat ket noi dang mo — do that trong QA).
+  assert.match(t, /export const IM_LANG_TOI_DA_MS = 45_000;/);
+  assert.match(t, /if \(Date\.now\(\) - lanCuoiCoByte > IM_LANG_TOI_DA_MS\) \{\s*lanCuoiCoByte = Date\.now\(\);\s*ctrl\?\.abort\(\);/);
+  assert.match(t, /window\.addEventListener\("offline", khiOffline\);\s*window\.addEventListener\("online", khiOnline\);/);
+  assert.match(t, /const khiOnline = \(\) => \{\s*lanNoi = 0;\s*danhThuc\?\.\(\);/);
+  assert.match(t, /async destroy\(\) \{\s*dong = true;\s*tatNghe\(\);/, "gỡ listener/interval khi huỷ");
 });
 
 test("nut Nhan tin o ho so: khong cho khach, khong cho chinh minh", () => {

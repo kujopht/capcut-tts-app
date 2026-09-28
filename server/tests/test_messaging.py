@@ -376,6 +376,23 @@ class RealtimeTest(MessagingCase):
         finally:
             self.dong(sb2)
 
+    def test_tran_luong_dong_thoi_moi_nguoi_va_tra_cho_khi_dong(self):
+        from unittest.mock import patch
+
+        from server.messaging import routes as r
+
+        _, _, ha = self.nguoi("tr")
+        with patch.object(r, "LUONG_DONG_THOI_TOI_DA", 1):
+            s1 = self.nghe(ha)
+            try:
+                x = httpx.get(self.may_that() + "/api/chat/stream", headers=ha, timeout=10)
+                self.assertEqual((x.status_code, x.json()["detail"]["code"]), (429, "chat_too_many_streams"))
+            finally:
+                self.dong(s1)
+            time.sleep(0.5)
+            s2 = self.nghe(ha)  # cho da duoc tra khi luong 1 dong
+            self.dong(s2)
+
     def test_luong_tu_dong_sau_han_song_toi_da(self):
         _, _, ha = self.nguoi("la")
         self.rt.max_stream_s = 0.5

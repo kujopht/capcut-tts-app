@@ -37,12 +37,21 @@ interface DangGui {
   time: number;
 }
 
+/**
+ * May chu gui nhip tim moi ~15 s. Khong nhan BYTE nao trong 45 s = ket noi chet ma khong ai bao
+ * (TCP nua song sau khi doi Wi-Fi/ngu may) -> cat va noi lai. `fetch` KHONG tu co thoi han cho luong.
+ */
+export const IM_LANG_TOI_DA_MS = 45_000;
+
 export async function taiFanficTransport(_phien: ChatSessionResponse, h: TransportHandlers): Promise<ChatTransport> {
   let toi = "";
   let dong = false;
   let ctrl: AbortController | null = null;
   let lanNoi = 0;
   let daSanSang = false;
+  let lanCuoiCoByte = Date.now();
+  /** Goi de cat ngang giac cho noi lai (su kien `online`). */
+  let danhThuc: (() => void) | null = null;
   const hoiThoai = new Map<string, ConversationDto>();
   /** peerId -> ID tin moi nhat da biet (bu khoang trong + "da doc toi dau"). */
   const moiNhat = new Map<string, { id: string; time: number }>();
@@ -98,6 +107,7 @@ export async function taiFanficTransport(_phien: ChatSessionResponse, h: Transpo
     for (;;) {
       const { value, done } = await doc.read();
       if (done) return sanSang;
+      lanCuoiCoByte = Date.now();
       boDem += giai.decode(value, { stream: true });
       const { khung, conLai } = tachKhungSse(boDem);
       boDem = conLai;
@@ -138,7 +148,14 @@ export async function taiFanficTransport(_phien: ChatSessionResponse, h: Transpo
 
   const vongLuong = async () => {
     while (!dong) {
+      // Trinh duyet bao mat mang: KHONG thu (se hong ngay) — cho su kien `online` danh thuc.
+      while (!dong && typeof navigator !== "undefined" && navigator.onLine === false) {
+        h.onNetState("disconnected");
+        await ngu(30_000);
+      }
+      if (dong) return;
       ctrl = new AbortController();
+      lanCuoiCoByte = Date.now();
       let cho = 0;
       try {
         if (!(await docLuong(ctrl.signal))) {
@@ -158,8 +175,47 @@ export async function taiFanficTransport(_phien: ChatSessionResponse, h: Transpo
       }
       if (dong) return;
       h.onNetState(daSanSang ? "connecting" : "disconnected");
-      if (cho) await new Promise((r) => setTimeout(r, cho));
+      if (cho) await ngu(cho);
     }
+  };
+
+  /** Ngu `ms`, nhung `danhThuc()` (su kien `online`) cat ngang — co mang lai thi noi NGAY. */
+  const ngu = (ms: number) =>
+    new Promise<void>((xong) => {
+      const hen = setTimeout(() => {
+        danhThuc = null;
+        xong();
+      }, ms);
+      danhThuc = () => {
+        clearTimeout(hen);
+        danhThuc = null;
+        xong();
+      };
+    });
+
+  const khiOffline = () => ctrl?.abort();
+  const khiOnline = () => {
+    lanNoi = 0;
+    danhThuc?.();
+  };
+  let choTim: ReturnType<typeof setInterval> | null = null;
+  const batNghe = () => {
+    if (typeof window === "undefined") return;
+    window.addEventListener("offline", khiOffline);
+    window.addEventListener("online", khiOnline);
+    choTim = setInterval(() => {
+      if (Date.now() - lanCuoiCoByte > IM_LANG_TOI_DA_MS) {
+        lanCuoiCoByte = Date.now();
+        ctrl?.abort(); // luong "im lang" qua lau = da chet — noi lai (va bu khoang trong)
+      }
+    }, 10_000);
+  };
+  const tatNghe = () => {
+    if (typeof window === "undefined") return;
+    window.removeEventListener("offline", khiOffline);
+    window.removeEventListener("online", khiOnline);
+    if (choTim !== null) clearInterval(choTim);
+    choTim = null;
   };
 
   const guiThat = (id: string, g: DangGui, onStatus: (m: ChatMessage) => void) => {
@@ -189,10 +245,14 @@ export async function taiFanficTransport(_phien: ChatSessionResponse, h: Transpo
     async login(userId) {
       toi = userId;
       dong = false;
+      tatNghe();
+      batNghe();
       void vongLuong();
     },
     async logout() {
       dong = true;
+      tatNghe();
+      danhThuc?.();
       ctrl?.abort();
     },
     async conversations() {
@@ -229,6 +289,8 @@ export async function taiFanficTransport(_phien: ChatSessionResponse, h: Transpo
     },
     async destroy() {
       dong = true;
+      tatNghe();
+      danhThuc?.();
       ctrl?.abort();
       hoiThoai.clear();
       moiNhat.clear();

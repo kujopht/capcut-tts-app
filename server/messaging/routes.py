@@ -15,6 +15,7 @@ Tat (`FAS_CHAT_V1`) -> 503 `chat_not_configured`. Loi nghiep vu -> `{code, messa
 from __future__ import annotations
 
 import json
+import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
@@ -34,6 +35,9 @@ HAN_MUC = {  # (so lan, cua so giay) theo NGUOI
     "write": (60, 60.0),
     "stream": (12, 60.0),
 }
+#: Luong DONG THOI toi da moi nguoi (moi instance). Moi luong giu MOT WebSocket toi Appwrite toi 25 phut —
+#: han muc "12 lan mo/phut" mot minh van cho mot nguoi tich ~300 ket noi upstream. Du cho nhieu tab that.
+LUONG_DONG_THOI_TOI_DA = 8
 PeerId = Annotated[str, StringConstraints(min_length=4, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")]
 MsgId = Annotated[str, StringConstraints(min_length=4, max_length=36, pattern=r"^[A-Za-z0-9_-]+$")]
 
@@ -61,6 +65,8 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
                            limiter: Optional[SlidingWindowRateLimiter] = None) -> APIRouter:
     r = APIRouter()
     lim = limiter or SlidingWindowRateLimiter()
+    dang_mo: Dict[str, int] = {}
+    khoa_luong = threading.Lock()
 
     def _bat():
         if not rt.enabled or rt.service is None:
@@ -146,9 +152,23 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
         sv = _bat()
         p = await run_in_threadpool(resolve_profile, authorization)
         _han_muc("stream", p.user_id)
+        with khoa_luong:
+            if dang_mo.get(p.user_id, 0) >= LUONG_DONG_THOI_TOI_DA:
+                raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
+                                    {"code": "chat_too_many_streams", "message": "Đang mở quá nhiều tab tin nhắn."},
+                                    headers={"Retry-After": "30"})
+            dang_mo[p.user_id] = dang_mo.get(p.user_id, 0) + 1
         # Credential cho Realtime = CHINH session cua nguoi goi (da xac minh o tren) — de Appwrite tu loc
         # theo quyen doc. Khong bao gio ghi ra log / tra lai trinh duyet.
         credential = authorization.split(" ", 1)[1].strip()
+
+        def tra_cho():
+            with khoa_luong:
+                con = dang_mo.get(p.user_id, 1) - 1
+                if con > 0:
+                    dang_mo[p.user_id] = con
+                else:
+                    dang_mo.pop(p.user_id, None)
 
         async def luong():
             bat_dau = time.monotonic()
@@ -172,6 +192,7 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
             except ChatError as exc:
                 yield "event: error\ndata: " + json.dumps({"code": exc.code}) + "\n\n"
             finally:
+                tra_cho()
                 await nguon.aclose()
 
         return StreamingResponse(luong(), media_type="text/event-stream",

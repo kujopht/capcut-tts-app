@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import unittest
 
+from server import gamification_service as gsv
 from server.appwrite_games_store import AppwriteGamesStore
 from server.appwrite_gamification_store import AppwriteGamificationStore
 from server.config import AppwriteSettings
@@ -43,6 +44,10 @@ class _FakeTxAppwrite(FakeAppwrite):
         #: KE TIEP — khac voi that bai do trung rowId (CAS that), day la
         #: loi VAN CHUYEN, khong lien quan gi den du lieu.
         self.fail_next_commit_transport = False
+        #: Appwrite Cloud 2.3 (TablesDB) — DO THAT tren staging 2026-09-28: mot `update` co du lieu Y HET
+        #: hang hien tai KHONG tang `$updatedAt` (van commit). 1.9.6 + Mongo luon tang. Bat co nay de mo
+        #: phong ban moi hon.
+        self.cap_nhat_khong_doi_giu_updated_at = False
 
     def request(self, method, url, json=None, params=None, headers=None):
         if method == "POST" and url.endswith("/v1/tablesdb/transactions"):
@@ -74,8 +79,12 @@ class _FakeTxAppwrite(FakeAppwrite):
                 if op["action"] == "create":
                     table[op["rowId"]] = dict(op.get("data") or {}, **{"$updatedAt": dau})
                 elif op["action"] == "update":
-                    table.setdefault(op["rowId"], {}).update(op.get("data") or {})
-                    table[op["rowId"]]["$updatedAt"] = dau
+                    hang = table.setdefault(op["rowId"], {})
+                    moi = op.get("data") or {}
+                    khong_doi = all(hang.get(k) == v for k, v in moi.items())
+                    hang.update(moi)
+                    if not (khong_doi and self.cap_nhat_khong_doi_giu_updated_at):
+                        hang["$updatedAt"] = dau
             return {"status": "committed"}
         return super().request(method, url, json=json, params=params, headers=headers)
 
@@ -284,6 +293,28 @@ class AwardXpAtomicContractTest(unittest.TestCase):
         self.assertEqual(store.award_xp_atomic(eB).xp, 7)
         self.assertEqual(lan["n"], 1)
         self.assertEqual(that_get("user_progress", "usr_1")["xp"], 7)
+
+    def test_ghi_khong_doi_du_lieu_khong_lam_ket_marker_cloud_2_3(self):
+        """HOI QUY (do THAT tren Appwrite Cloud 2.3 staging, 2026-09-28): `equip_title("")` khi danh xung
+        da la mac dinh -> du lieu cap nhat Y HET -> Appwrite 2.3 commit nhung GIU `$updatedAt`. Marker
+        (xp, $updatedAt) vua tao trung DUNG trang thai hien tai -> MOI writer sau (ke ca cong XP) thua
+        commit vinh vien -> AppwriteUnavailableError, nguoi dung khong bao gio duoc cong XP nua. Moi lan
+        ghi phai lam du lieu hang THAY DOI (dau `updated_at` moi) de `$updatedAt` luon tien."""
+        fake = _FakeTxAppwrite()
+        fake.cap_nhat_khong_doi_giu_updated_at = True
+        store = _gami_store(fake)
+        store.xp_atomic = True  # DUNG duong staging/production dung khi FAS_XP_ATOMIC=1
+        store.award_xp_atomic(XpLedgerEntry(entry_id="xp_n1", user_id="usr_1", event_type="game_match_completed",
+                                            source_kind="game_match", source_id="rm_n1-1|caro-v1", xp_awarded=2))
+        dau_truoc = fake.rows["user_progress"]["usr_1"]["$updatedAt"]
+        gsv.equip_title(store, "usr_1", "")  # khong doi gi ve mat nghiep vu
+        self.assertNotEqual(fake.rows["user_progress"]["usr_1"]["$updatedAt"], dau_truoc,
+                            "lần ghi phải làm dữ liệu hàng thay đổi để $updatedAt tiến")
+        gsv.equip_title(store, "usr_1", "")
+        p = store.award_xp_atomic(XpLedgerEntry(entry_id="xp_n2", user_id="usr_1", event_type="game_match_completed",
+                                                source_kind="game_match", source_id="rm_n2-1|caro-v1", xp_awarded=2))
+        self.assertIsNotNone(p)
+        self.assertEqual(store.get_progress("usr_1").xp, 4)
 
     def test_duplicate_entry_id_second_call_returns_none(self):
         fake = _FakeTxAppwrite()

@@ -565,6 +565,16 @@ class AppwriteGamificationStore:
                 prior_state = ""
             prior_xp = progress.xp
             moi = mutator(copy.deepcopy(progress))
+            # MOI lan ghi phai lam du lieu hang THAY DOI. Do THAT tren Appwrite Cloud 2.3 (staging,
+            # 2026-09-28): mot `update` Y HET du lieu cu (vd `equip_title("")` khi da la mac dinh) van
+            # commit nhung GIU NGUYEN `$updatedAt` -> marker (xp, $updatedAt) vua tao trung trang thai
+            # hien tai -> moi writer sau thua commit VINH VIEN. 1.9.6 luon tang `$updatedAt` nen chua
+            # lo ra. Dau `updated_at` moi o moi lan ghi = `$updatedAt` luon tien, tren moi phien ban.
+            moi.updated_at = now_iso()
+            if moi.updated_at == progress.updated_at:  # cung micro giay (hiem) — van phai khac
+                from datetime import datetime, timedelta
+
+                moi.updated_at = (datetime.fromisoformat(progress.updated_at) + timedelta(microseconds=1)).isoformat()
 
             operations = []
             if ledger_entry is not None:

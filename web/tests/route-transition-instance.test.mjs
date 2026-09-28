@@ -25,8 +25,9 @@ const src = () => read("../src/lib/routeTransitionInstance.ts");
 test("napAnhThat dung Image that de nap truoc, khong doi mang", () => {
   const s = src();
   assert.match(s, /new Image\(\)/, "không nạp trước bằng Image() thật");
-  assert.match(s, /img\.src = anhNen\(ten\)/,
-    "phải dùng CHÍNH ham anhNen() mà CSS dùng để vẽ — lệch nhau thì nạp trước một tấm, vẽ tấm khác");
+  // Dien thoai: CSS ve `--anh-nho` (anhNenNho) duoi MAN_HINH_NHO; may tinh: `--anh` (anhNen).
+  assert.match(s, /img\.src = window\.matchMedia\(MAN_HINH_NHO\)\.matches \? anhNenNho\(ten\) : anhNen\(ten\)/,
+    "phải dùng CHÍNH tấm mà CSS vẽ ở từng cỡ màn — lệch nhau thì nạp trước một tấm, vẽ tấm khác");
 });
 
 test("uu tien decode() cho anh da trong cache, luon co fallback onload/onerror", () => {

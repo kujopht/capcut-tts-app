@@ -37,6 +37,8 @@ export const HO_ENDPOINT = [
   // tinh diem, phong Caro 2 nguoi, bang xep hang theo game/mua). Ho rieng vi
   // khong thuoc ve truyen/nguoi dung/cong dong; client chi gui hanh dong. Xem
   // `server/games_service.py`, `docs/reports/SOCIAL_PLAY_V1_C.md`.
+  // Trang thai co FAS_GAMES_V1 doc qua `GET /api/games/config` — xem
+  // `gamesConfig()` o `lib/api.ts` va trang `/admin/games`.
   "games",
   "health",
   // Image Studio V1 (overnight build) — Quick Free/Fanfic Credits/My

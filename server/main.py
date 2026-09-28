@@ -245,6 +245,12 @@ from server.image_service import (
     UnknownOrDisabledModel,
 )
 from server.rate_limit import RateLimitMiddleware
+from server.observability import khoi_tao_sentry
+
+# Sentry (project `python-fastapi`) — TAT khi khong co FAS_SENTRY_DSN. Phai goi TRUOC khi tao app
+# de tich hop FastAPI/Starlette bat duoc loi route. Moi su kien qua `lam_sach_su_kien` (cookie,
+# token, UserSig, khoa Appwrite, query URL ky... khong bao gio roi tien trinh).
+khoi_tao_sentry(get_settings())
 
 app = FastAPI(
     title="Fanfic Audio Studio API",

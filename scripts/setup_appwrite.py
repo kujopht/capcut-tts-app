@@ -14,6 +14,7 @@ Chay:
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -1807,6 +1808,9 @@ ARRAY_ATTRIBUTES = frozenset({
 #: Quyen DOC van do tung document quyet dinh (documentSecurity=True).
 COLLECTION_PERMISSIONS: List[str] = []
 
+#: Duong DOC trang thai tung muc (`GET {collection}/attributes/<key>` / `/indexes/<key>`) — xem `Setup._call`.
+_MUC_TUNG_CAI = re.compile(r"/(?:attributes|indexes)/([^/?]+)$")
+
 
 class Setup:
     def __init__(self, dry_run: bool = False):
@@ -1854,7 +1858,7 @@ class Setup:
         return response.status_code == 200
 
     def _call(self, method: str, path: str, payload: Optional[Dict] = None,
-              *, doc_thoi: bool = False, khi_404: Any = None) -> Any:
+              *, doc_thoi: bool = False) -> Any:
         """
         :param doc_thoi: mot phep DOC de so sanh, khong phai mot thay doi —
             khong in dong dry-run va khong cong vao bo dem `created`. Khong co
@@ -1873,8 +1877,12 @@ class Setup:
         if response.status_code == 409:
             self.skipped += 1
             return "exists"
-        if response.status_code == 404 and khi_404 is not None:
-            return khi_404  # chi phep DOC trang thai tung muc (`_muc`) — noi goi tu quyet 404 nghia la gi
+        muc = _MUC_TUNG_CAI.search(path)
+        if response.status_code == 404 and doc_thoi and method == "GET" and muc:
+            # Phep DOC trang thai TUNG MUC (`_doc_muc_that`): ngay sau POST, endpoint `.../attributes/<key>`
+            # hoac `.../indexes/<key>` co the 404 mot luc — "chua hien", KHONG phai "xong" cung khong phai loi
+            # chot. Vong cho coi no la chua san sang va cho tiep toi han (review doc lap 2026-09-28).
+            return {"key": muc.group(1), "status": "chưa hiện (404)"}
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -1994,7 +2002,7 @@ class Setup:
             if not self.dry_run:
                 self._cho_index_san_sang(base, name)
 
-    def _goi_doc_thoi_thu_lai(self, base: str, han_chot: float, *, khi_404: Any = None) -> Optional[Dict]:
+    def _goi_doc_thoi_thu_lai(self, base: str, han_chot: float) -> Optional[Dict]:
         """`GET base` (doc_thoi=True) nhưng KHÔNG để một lỗi mạng thoáng qua
         (vd `httpx.ReadTimeout`, connection reset) làm sập cả vòng chờ.
 
@@ -2009,8 +2017,6 @@ class Setup:
         thời gian đã có (`han_chot`), không phải một lý do để dừng khác."""
         import time
         try:
-            if khi_404 is not None:
-                return self._call("GET", base, doc_thoi=True, khi_404=khi_404)
             return self._call("GET", base, doc_thoi=True)
         except httpx.TransportError as exc:
             if time.monotonic() >= han_chot:
@@ -2020,18 +2026,28 @@ class Setup:
                 ) from exc
             return None
 
-    def _muc(self, base: str, loai: str, key: str, han_chot: float) -> Optional[Dict]:
-        """`GET {base}/{loai}/{key}` — trang thai TUNG MUC, KHONG doc qua `GET base`.
+    def _doc_muc_that(self, base: str, loai: str, key: str,
+                      han_chot: float) -> Optional[Dict]:
+        """Doc TRUC TIEP MOT thuoc tinh/index — `GET {base}/attributes/{key}`
+        hoac `GET {base}/indexes/{key}` — KHONG qua tai lieu collection
+        (`GET {base}`). Tra None khi loi mang thoang qua (xem
+        `_goi_doc_thoi_thu_lai`).
 
-        Do that 2026-09-28 tren Appwrite 1.9.6 + MongoDB tu dung (dung ban production): `GET collection`
-        tra BO DEM cu (TTL -1) — `novels.dub_audio_key` van 'processing' o do trong khi
-        `GET .../attributes/dub_audio_key` = 'available'. Doc qua collection thi script bao "kẹt" SAU
-        120 s cho mot thuoc tinh da dung duoc tu lau.
-
-        404 o endpoint TUNG MUC = "chua hien" (khoang ngan ngay sau POST), KHONG phai "xong" cung KHONG phai
-        loi chot: vong cho coi no nhu mot trang thai chua san sang va tiep tuc toi han (review doc lap)."""
-        return self._goi_doc_thoi_thu_lai(f"{base}/{loai}/{key}", han_chot,
-                                          khi_404={"key": key, "status": "chưa hiện (404)"})
+        VI SAO KHONG DOC COLLECTION (do that, Appwrite 1.9.6 + MongoDB tu luu
+        tru, project THU `fas-socialplay-test`, 2026-09-26): sau khi worker da
+        xu ly xong `createAttribute` (hang doi 179/179 thanh cong, 0 dang xu
+        ly, 0 hong), `GET {base}` VAN tra `novels.rights_mode` = 'processing'
+        trong khi `GET {base}/attributes/rights_mode`, `GET {base}/attributes`
+        va chinh tai lieu trong MongoDB deu la 'available'. Khoa cache Redis cua
+        tai lieu collection giu ban cu voi TTL -1 (khong bao gio het han). Day la
+        mot cuoc dua cache-aside: vong cho doc collection tu DB ngay truoc khi
+        worker doi trang thai, worker xoa cache, roi ban cu duoc ghi lai vao
+        cache SAU lan xoa. Cache chi duoc lam moi o lan thay doi schema KE TIEP
+        cua collection do — ma script lai dang dung cho chinh thuoc tinh nay
+        truoc khi lam thay doi ke tiep, nen ba lan chay lai lien tiep deu het
+        120s o cung mot cho. Doc tung muc thi di duong khac, khong vuong cache
+        do. Rat co the day cung la ban chat cua su co 2026-08-21 ben duoi."""
+        return self._goi_doc_thoi_thu_lai(f"{base}/{loai}/{key}", han_chot)
 
     def _cho_thuoc_tinh_san_sang(self, base: str, key: str,
                                  *, timeout_giay: float = 120.0) -> None:
@@ -2049,7 +2065,7 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            thuoc_tinh = self._muc(base, "attributes", key, han_chot)
+            thuoc_tinh = self._doc_muc_that(base, "attributes", key, han_chot)
             if thuoc_tinh is None:
                 # Loi mang thoang qua, da trong ngan sach thoi gian — thu lai,
                 # KHONG coi la "thuoc tinh bien mat".
@@ -2092,7 +2108,7 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            idx = self._muc(base, "indexes", key, han_chot)
+            idx = self._doc_muc_that(base, "indexes", key, han_chot)
             if idx is None:
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
@@ -2189,9 +2205,10 @@ class Setup:
         'available' thay vì để Appwrite trả lỗi 400 mơ hồ 'not yet
         available' không nói rõ thuộc tính nào."""
         import time
+        # Tung thuoc tinh MOT, khong qua tai lieu collection — xem `_doc_muc_that`.
         han_chot = time.monotonic() + 30.0
-        # TUNG MUC, khong qua `GET base` (bo dem cu tren 1.9.6 + Mongo — xem `_muc`).
-        trang_thai = {k: (self._muc(base, "attributes", k, han_chot) or {}).get("status") for k in keys}
+        trang_thai = {k: (self._doc_muc_that(base, "attributes", k, han_chot) or {}).get("status")
+                      for k in keys}
         chua_san_sang = [k for k in keys if trang_thai.get(k) != "available"]
         if chua_san_sang:
             raise SystemExit(

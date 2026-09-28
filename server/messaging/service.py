@@ -123,21 +123,37 @@ class ChatService:
     def _dam_bao_thanh_vien(self, cid: str, me: str, peer: str,
                             co_san: Optional[Dict[str, Member]] = None) -> Dict[str, Member]:
         tv = dict(co_san) if co_san is not None else self.repo.get_members(cid)
-        if me not in tv or peer not in tv:
-            # Tin DAU TIEN (hoac lan tao do dang): hang hoi thoai TRUOC, roi hai hang thanh vien.
-            a, b = sorted((me, peer))
+        if me in tv and peer in tv:
+            return tv
+        # Tin DAU TIEN (hoac lan tao do dang): hang hoi thoai + hai hang thanh vien la BA phep tao DOC LAP,
+        # ID tat dinh, 409 = da co -> tao SONG SONG (do that staging: tuan tu ~3 x 250 ms cho tin dau).
+        a, b = sorted((me, peer))
+
+        def tao_hoi_thoai() -> None:
             try:
                 self.repo.create_conversation(Conversation(id=cid, member_a=a, member_b=b, created_at=self._gio()))
             except RepoConflict:
                 pass
-        for uid, kia in ((me, peer), (peer, me)):
-            if uid in tv:
-                continue
+
+        def tao_thanh_vien(uid: str, kia: str) -> Optional[Member]:
             try:
-                tv[uid] = self.repo.create_member(Member(id=member_row_id(cid, uid), conversation_id=cid,
-                                                         user_id=uid, peer_id=kia, updated_at=self._gio()))
-            except RepoConflict:  # request song song vua tao — doc lai
-                tv = {**tv, **self.repo.get_members(cid)}
+                return self.repo.create_member(Member(id=member_row_id(cid, uid), conversation_id=cid,
+                                                      user_id=uid, peer_id=kia, updated_at=self._gio()))
+            except RepoConflict:  # request song song vua tao — doc lai ben duoi
+                return None
+
+        f_ht = _POOL.submit(tao_hoi_thoai)
+        f_tv = {uid: _POOL.submit(tao_thanh_vien, uid, kia) for uid, kia in ((me, peer), (peer, me)) if uid not in tv}
+        f_ht.result()
+        doc_lai = False
+        for uid, f in f_tv.items():
+            m = f.result()
+            if m is None:
+                doc_lai = True
+            else:
+                tv[uid] = m
+        if doc_lai:
+            tv = {**tv, **self.repo.get_members(cid)}
         if me not in tv or peer not in tv:
             raise ChatUnavailable("Chưa tạo được hội thoại — thử lại.")
         return tv
@@ -178,7 +194,6 @@ class ChatService:
             if f_chan.result():
                 raise ChatForbidden("Không gửi được tin nhắn cho người này.", code="chat_blocked")
             tv = self._dam_bao_thanh_vien(cid, me, peer, co_san=f_tv.result())
-            gd = f_gd.result()
             moc("kiem")
             moi = Message(id=mid, conversation_id=cid, sender_id=me, recipient_id=peer, client_id=client_id,
                           text=van_ban, created_at=self._gio())
@@ -191,9 +206,18 @@ class ChatService:
                 if tin.sender_id != me or tin.conversation_id != cid:
                     raise ChatConflict("Mã tin nhắn đã được dùng.", code="chat_id_taken")
             moc("tao_tin")
+            # Giao dich phat tan duoc CHUAN BI song song tu dau; chi CHO no o day — sau khi tin da ton tai.
+            # (Do that staging: stage ~860 ms > ca ba phep kiem ~270 ms — cho truoc khi tao tin la de
+            # tao tin nam SAU stage tren duong gang.) Thu tu CAM KET khong doi: commit chi sau tao tin.
+            gd = f_gd.result()
+            moc("cho_gd")
         except BaseException:
-            # Khong tao duoc tin cua minh -> KHONG BAO GIO commit "+1": huy giao dich da chuan bi.
-            _POOL.submit(self.repo.discard_fanout, gd if gd is not None else f_gd.result())
+            # Khong tao duoc tin cua minh -> KHONG BAO GIO commit "+1": huy giao dich da chuan bi. Khong CHO
+            # stage xong o day (tra loi 403/404 ngay); huy khi no xong, tren pool.
+            if gd is not None:
+                _POOL.submit(self.repo.discard_fanout, gd)
+            else:
+                f_gd.add_done_callback(lambda f: _POOL.submit(self._huy_gd_khi_xong, f))
             raise
         try:
             self.repo.commit_fanout(gd)
@@ -205,6 +229,14 @@ class ChatService:
         else:
             self._cap_nhat_xem_truoc(cid)
         return tin, tao_moi
+
+    def _huy_gd_khi_xong(self, f: Any) -> None:
+        if f.cancelled() or f.exception() is not None:
+            return  # stage hong = khong co giao dich nao de huy (het han tu dong)
+        try:
+            self.repo.discard_fanout(f.result())
+        except Exception:  # noqa: BLE001 — giao dich khong commit se tu het han; chi ghi log
+            log.warning("messaging: huỷ giao dịch chuẩn bị bị lỗi (tự hết hạn)", exc_info=True)
 
     def _cap_nhat_xem_truoc_an_toan(self, cid: str) -> None:
         try:

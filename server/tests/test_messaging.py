@@ -223,6 +223,55 @@ class GuiIdempotentTest(MessagingCase):
         self.assertEqual(self.hop_thu(hb)["items"][0]["unread"], 1)
 
 
+class ThuTuPhatTanTest(MessagingCase):
+    """Giao dich phat tan duoc CHUAN BI song song, nhung: tao tin KHONG cho no (do tre), commit LUON sau tao
+    tin (dung mot lan), va bi chan thi tra loi NGAY roi huy giao dich khi no chuan bi xong — khong commit."""
+
+    def _ghi(self, cham: float) -> List[str]:
+        sk: List[str] = []
+        khoa = threading.Lock()
+
+        def boc(ten, fn, truoc=0.0):
+            def f(*a, **k):
+                if truoc:
+                    time.sleep(truoc)
+                kq = fn(*a, **k)
+                with khoa:
+                    sk.append(ten)
+                return kq
+            return f
+        r = self.repo
+        r.stage_fanout = boc("stage", r.stage_fanout, cham)
+        r.create_message = boc("tao_tin", r.create_message)
+        r.commit_fanout = boc("commit", r.commit_fanout)
+        r.discard_fanout = boc("huy", r.discard_fanout)
+        return sk
+
+    def test_tao_tin_khong_cho_stage_commit_sau_ca_hai(self):
+        ua, a, _ = self.nguoi("ta")
+        ub, b, hb = self.nguoi("tb")
+        sk = self._ghi(0.3)
+        self.sv.send(ua, b, cid(61), "một")
+        self.assertEqual(sk, ["tao_tin", "stage", "commit"])
+        self.assertEqual(self.hop_thu(hb)["items"][0]["unread"], 1)
+
+    def test_bi_chan_tra_loi_ngay_huy_giao_dich_khong_commit(self):
+        from server.messaging.domain import ChatForbidden
+
+        ua, a, _ = self.nguoi("tc")
+        ub, b, hb = self.nguoi("td")
+        self.sv.set_blocked(ub, a, True)
+        sk = self._ghi(0.4)
+        t0 = time.perf_counter()
+        with self.assertRaises(ChatForbidden):
+            self.sv.send(ua, b, cid(62), "bị chặn")
+        self.assertLess(time.perf_counter() - t0, 0.3, "403 không được chờ giao dịch chuẩn bị")
+        het = time.time() + 3
+        while "huy" not in sk and time.time() < het:
+            time.sleep(0.02)
+        self.assertEqual(sk, ["stage", "huy"])
+
+
 class DoTreGuiTest(MessagingCase):
     def test_xem_truoc_duoc_hoan_nhung_chua_doc_thi_khong(self):
         ua, a, _ = self.nguoi("da")

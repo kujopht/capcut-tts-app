@@ -2016,6 +2016,15 @@ class Setup:
                 ) from exc
             return None
 
+    def _muc(self, base: str, loai: str, key: str, han_chot: float) -> Optional[Dict]:
+        """`GET {base}/{loai}/{key}` — trang thai TUNG MUC, KHONG doc qua `GET base`.
+
+        Do that 2026-09-28 tren Appwrite 1.9.6 + MongoDB tu dung (dung ban production): `GET collection`
+        tra BO DEM cu (TTL -1) — `novels.dub_audio_key` van 'processing' o do trong khi
+        `GET .../attributes/dub_audio_key` = 'available'. Doc qua collection thi script bao "kẹt" SAU
+        120 s cho mot thuoc tinh da dung duoc tu lau."""
+        return self._goi_doc_thoi_thu_lai(f"{base}/{loai}/{key}", han_chot)
+
     def _cho_thuoc_tinh_san_sang(self, base: str, key: str,
                                  *, timeout_giay: float = 120.0) -> None:
         """Cho DUY NHAT MOT thuoc tinh dat 'available', backoff mu tang dan
@@ -2032,16 +2041,14 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
-            if hien is None:
+            thuoc_tinh = self._muc(base, "attributes", key, han_chot)
+            if thuoc_tinh is None:
                 # Loi mang thoang qua, da trong ngan sach thoi gian — thu lai,
                 # KHONG coi la "thuoc tinh bien mat".
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
                 continue
-            thuoc_tinh = next((a for a in hien.get("attributes", [])
-                               if a.get("key") == key), None)
-            if thuoc_tinh is None:
+            if thuoc_tinh.get("key") != key:
                 raise SystemExit(
                     f"Thuộc tính '{key}' biến mất khỏi {base} trong lúc chờ "
                     "sẵn sàng — không nên xảy ra, kiểm tra thủ công."
@@ -2077,13 +2084,12 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
-            if hien is None:
+            idx = self._muc(base, "indexes", key, han_chot)
+            if idx is None:
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
                 continue
-            idx = next((i for i in hien.get("indexes", []) if i.get("key") == key), None)
-            if idx is None:
+            if idx.get("key") != key:
                 raise SystemExit(
                     f"Index '{key}' biến mất khỏi {base} trong lúc chờ sẵn sàng."
                 )
@@ -2175,9 +2181,9 @@ class Setup:
         'available' thay vì để Appwrite trả lỗi 400 mơ hồ 'not yet
         available' không nói rõ thuộc tính nào."""
         import time
-        hien = self._goi_doc_thoi_thu_lai(base, time.monotonic() + 30.0) or {}
-        trang_thai = {a.get("key"): a.get("status")
-                      for a in hien.get("attributes", [])}
+        han_chot = time.monotonic() + 30.0
+        # TUNG MUC, khong qua `GET base` (bo dem cu tren 1.9.6 + Mongo — xem `_muc`).
+        trang_thai = {k: (self._muc(base, "attributes", k, han_chot) or {}).get("status") for k in keys}
         chua_san_sang = [k for k in keys if trang_thai.get(k) != "available"]
         if chua_san_sang:
             raise SystemExit(

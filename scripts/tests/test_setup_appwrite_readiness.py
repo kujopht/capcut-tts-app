@@ -34,11 +34,40 @@ def _tao_setup() -> Setup:
 
 
 def _thuoc_tinh(key: str, status: str, error: str = "") -> dict:
-    return {"attributes": [{"key": key, "status": status, "error": error}]}
+    """Hinh dang `GET .../attributes/<key>` (TUNG MUC) — xem `Setup._muc`."""
+    return {"key": key, "status": status, "error": error}
 
 
 def _index(key: str, status: str, error: str = "") -> dict:
-    return {"indexes": [{"key": key, "status": status, "error": error}]}
+    return {"key": key, "status": status, "error": error}
+
+
+class BoDemCollectionCuTest(unittest.TestCase):
+    """Do that 2026-09-28 tren Appwrite 1.9.6 + MongoDB (dung ban production): `GET collection` tra bo dem
+    cu — thuoc tinh 'processing' mai o do, trong khi `GET .../attributes/<key>` da 'available'. Moi phep
+    cho san sang phai doc TUNG MUC, khong bao gio qua `GET base`."""
+
+    def _call_theo_duong(self, duong_goi):
+        def _call(method, path, payload=None, *, doc_thoi=False):
+            duong_goi.append(path)
+            if path.endswith("/attributes/a") or path.endswith("/attributes/b"):
+                return {"key": path.rsplit("/", 1)[1], "status": "available"}
+            if path.endswith("/indexes/t_idx"):
+                return {"key": "t_idx", "status": "available"}
+            # Bo dem cu cua collection: noi doi 'processing'.
+            return {"attributes": [{"key": "a", "status": "processing"}, {"key": "b", "status": "processing"}],
+                    "indexes": [{"key": "t_idx", "status": "processing"}]}
+        return _call
+
+    def test_cho_va_kiem_truoc_index_doc_tung_muc(self):
+        s = _tao_setup()
+        duong: list = []
+        with patch.object(s, "_call", side_effect=self._call_theo_duong(duong)):
+            s._cho_thuoc_tinh_san_sang("/v1/db/t", "a", timeout_giay=0.01)
+            s._kiem_thuoc_tinh_san_sang_cho_index("/v1/db/t", "t_idx", ["a", "b"])
+            s._cho_index_san_sang("/v1/db/t", "t_idx", timeout_giay=0.01)
+        self.assertEqual(duong, ["/v1/db/t/attributes/a", "/v1/db/t/attributes/a", "/v1/db/t/attributes/b",
+                                 "/v1/db/t/indexes/t_idx"])
 
 
 class ChoThuocTinhSanSangTest(unittest.TestCase):
@@ -100,7 +129,7 @@ class ChoThuocTinhSanSangTest(unittest.TestCase):
 
     def test_thuoc_tinh_bien_mat_nem_loi(self):
         s = _tao_setup()
-        with patch.object(s, "_call", return_value={"attributes": []}):
+        with patch.object(s, "_call", return_value={}):
             with self.assertRaises(SystemExit):
                 s._cho_thuoc_tinh_san_sang("/v1/.../profiles", "user_id")
 
@@ -126,13 +155,13 @@ class IndexChoTatCaThuocTinhTest(unittest.TestCase):
 
     def test_index_tu_choi_khi_mot_thuoc_tinh_chua_available(self):
         s = _tao_setup()
-        trang_thai = {
-            "attributes": [
-                {"key": "a", "status": "available"},
-                {"key": "b", "status": "processing"},
-            ]
-        }
-        with patch.object(s, "_call", return_value=trang_thai):
+        trang_thai = {"a": "available", "b": "processing"}
+
+        def _call(method, path, payload=None, *, doc_thoi=False):
+            k = path.rsplit("/", 1)[1]
+            return {"key": k, "status": trang_thai[k]}
+
+        with patch.object(s, "_call", side_effect=_call):
             with self.assertRaises(SystemExit) as ctx:
                 s._kiem_thuoc_tinh_san_sang_cho_index(
                     "/v1/.../t", "t_idx", ["a", "b"])
@@ -143,13 +172,11 @@ class IndexChoTatCaThuocTinhTest(unittest.TestCase):
 
     def test_index_khong_bao_loi_khi_tat_ca_da_available(self):
         s = _tao_setup()
-        trang_thai = {
-            "attributes": [
-                {"key": "a", "status": "available"},
-                {"key": "b", "status": "available"},
-            ]
-        }
-        with patch.object(s, "_call", return_value=trang_thai):
+
+        def _call(method, path, payload=None, *, doc_thoi=False):
+            return {"key": path.rsplit("/", 1)[1], "status": "available"}
+
+        with patch.object(s, "_call", side_effect=_call):
             s._kiem_thuoc_tinh_san_sang_cho_index("/v1/.../t", "t_idx", ["a", "b"])
 
 

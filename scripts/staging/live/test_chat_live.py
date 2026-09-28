@@ -102,6 +102,10 @@ def tearDownModule() -> None:
     if DO["realtime_ms"]:
         print(f"[DO] gửi -> nhận qua Realtime: trung vị {statistics.median(DO['realtime_ms']):.0f} ms, "
               f"max {max(DO['realtime_ms']):.0f} ms, n={len(DO['realtime_ms'])}", flush=True)
+    pha = [(k[3:], v) for k, v in DO.items() if k.startswith("st_") and v]
+    if pha:
+        print("[DO] Server-Timing gửi (trung vị ms): "
+              + " · ".join(f"{k} {statistics.median(v):.0f}" for k, v in pha), flush=True)
 
 
 _dem = [0]
@@ -142,14 +146,26 @@ def cli_moi() -> str:
         return f"L{RUN}{_cli_dem[0]:010d}"[:32]
 
 
-def gui(a, b, text="xin chào", client_id=None):
+def gui(a, b, text="xin chào", client_id=None, *, dem=True):
     t0 = time.time()
     with http() as c:
         r = c.post(f"/api/chat/dm/{b['cid']}/messages", headers=a["hd"],
                    json={"client_id": client_id or cli_moi(), "text": text})
-    if r.status_code == 200:
+    if r.status_code == 200 and dem:
         DO["gui_ms"].append((time.time() - t0) * 1000)
+        # `Server-Timing` cua route gui: xac_thuc / kiem / tao_tin / phat_tan / tong (ms, phia may chu).
+        for phan in (r.headers.get("server-timing") or "").split(","):
+            ten, _, gt = phan.strip().partition(";dur=")
+            if ten and gt:
+                DO.setdefault("st_" + ten, []).append(float(gt))
     return r
+
+
+def lich_su(nguoi_xem, peer, **q) -> Dict[str, Any]:
+    with http() as c:
+        r = c.get(f"/api/chat/dm/{peer['cid']}/messages", headers=nguoi_xem["hd"], params=q)
+    assert r.status_code == 200, f"{r.status_code} {r.text[:300]}"
+    return r.json()
 
 
 def hop_thu(u) -> Dict[str, Any]:
@@ -280,7 +296,8 @@ class C_GuiIdempotentTest(unittest.TestCase):
 
         def mot():
             rao.wait()
-            ma.append(gui(a, b, "cùng lúc", k2).status_code)
+            # dem=False: 6 request TRANH NHAU mot client_id do su dung dan, khong phai do tre ACK binh thuong.
+            ma.append(gui(a, b, "cùng lúc", k2, dem=False).status_code)
         ts = [threading.Thread(target=mot) for _ in range(6)]
         [t.start() for t in ts]
         [t.join(120) for t in ts]
@@ -316,20 +333,19 @@ class E_PhanTrangTest(unittest.TestCase):
         for i in range(23):
             sv.send(a["uid"], b["cid"], cli_moi(), f"tin {i:02d}")
         thay, tro, trang = [], None, 0
-        with http() as c:
-            while True:
-                d = c.get(f"/api/chat/dm/{a['cid']}/messages?limit=10" + (f"&before={tro}" if tro else ""), headers=b["hd"]).json()
-                thay = [m["text"] for m in d["messages"]] + thay
-                trang += 1
-                tro = d["cursor"]
-                if not tro:
-                    break
-            self.assertEqual((trang, thay), (3, [f"tin {i:02d}" for i in range(23)]))
-            moc = c.get(f"/api/chat/dm/{a['cid']}/messages?limit=1", headers=b["hd"]).json()["messages"][0]["id"]
-            for i in range(2):
-                gui(a, b, f"mới {i}")
-            d = c.get(f"/api/chat/dm/{a['cid']}/messages?after={moc}", headers=b["hd"]).json()
-            self.assertEqual([m["text"] for m in d["messages"]], ["mới 0", "mới 1"])
+        while True:
+            d = lich_su(b, a, limit=10, **({"before": tro} if tro else {}))
+            thay = [m["text"] for m in d["messages"]] + thay
+            trang += 1
+            tro = d["cursor"]
+            if not tro:
+                break
+        self.assertEqual((trang, thay), (3, [f"tin {i:02d}" for i in range(23)]))
+        moc = lich_su(b, a, limit=1)["messages"][0]["id"]
+        for i in range(2):
+            self.assertEqual(gui(a, b, f"mới {i}").status_code, 200)
+        d = lich_su(b, a, after=moc)
+        self.assertEqual([m["text"] for m in d["messages"]], ["mới 0", "mới 1"])
 
 
 class F_ChanTest(unittest.TestCase):

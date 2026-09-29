@@ -6,7 +6,9 @@ Mọi bước dưới đây là **thay đổi production** trừ khi ghi "chỉ 
 
 ## Cổng 0 — backup MỚI, khôi phục được (BẮT BUỘC trước mọi lệnh ghi schema)
 
-Host Appwrite: AWS `54.179.200.223` (`i-064abacf35ebe2c8a`), MongoDB `8.2.5` (replica set), MariaDB `10.11`. Từ máy điều hành, cổng 22 và 443 của host **timeout** (đo lại 2026-09-29T04:12:01Z) — agent không tạo được bản backup. Bạn chạy trên chính host qua đường vào bạn có (SSM Session Manager / EC2 Instance Connect / console). Mật khẩu chỉ được tham chiếu bằng TÊN biến **bên trong** container (không lên dòng lệnh host, không vào history). Bản chứng minh gần nhất (`docs/reports/appwrite-backup-proven-2026-09-07.md`) đã 22 ngày — **không dùng thay được**.
+**Host Appwrite production (xác minh 2026-09-29T06:04Z): `18.143.12.30`** — bản ghi DNS gốc Cloudflare `appwrite-dev.fanfic.world → 18.143.12.30` (proxied, sửa **2026-09-19T01:36Z**); gọi thẳng vào IP với SNI đúng → `Server: Appwrite`, header `X-Debug-*`, `{"version":"1.9.6"}`, chứng chỉ hợp lệ; cổng 443 mở, cổng 22 đóng. **`54.179.200.223` trong các tài liệu cũ là host TRƯỚC 2026-09-19** (cả 22 lẫn 443 timeout). Instance ID chưa xác minh được từ máy điều hành (không có AWS CLI/credential) — xem trong Console. MongoDB `8.2.5` (replica set), MariaDB `10.11` theo lần kiểm kê gần nhất (host cũ) — xác nhận lại bằng lệnh dưới.
+
+Đường vào ưu tiên: **SSM Session Manager** (không mở SSH ra Internet). Bạn chạy trên chính host. Mật khẩu chỉ được tham chiếu bằng TÊN biến **bên trong** container (không lên dòng lệnh host, không vào history). Bản chứng minh gần nhất (`docs/reports/appwrite-backup-proven-2026-09-07.md`) đã 22 ngày — **không dùng thay được**.
 
 ```bash
 # Xác nhận TÊN container / TÊN biến (không in giá trị):

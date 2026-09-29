@@ -33,12 +33,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  IconCompass,
-  IconFeather,
-  IconMic,
   IconSparkles,
 } from "@/components/Icons";
 import { MotifNebulaOrbit } from "@/components/Ornaments";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 export interface MucStudio {
   href: string;
@@ -75,25 +73,25 @@ export const MUC_STUDIO: MucStudio[] = [
     href: "/studio",
     nhan: "Dự án",
     mo_ta: "Mọi dự án của bạn — mở lại cái đang làm dở.",
-    icon: IconCompass,
+    icon: (p) => <FanficIcon name="studio" size={p.size} />,
   },
   {
     href: "/studio/content",
     nhan: "Nội dung",
     mo_ta: "Viết truyện và dịch — cùng một chỗ.",
-    icon: IconFeather,
+    icon: (p) => <FanficIcon name="book" size={p.size} />,
   },
   {
     href: "/studio/audio",
     nhan: "Audio",
     mo_ta: "Tạo, nghe và tải lời đọc cho tác phẩm của bạn.",
-    icon: IconMic,
+    icon: (p) => <FanficIcon name="audio" size={p.size} />,
   },
   {
     href: "/studio/image",
     nhan: "Hình ảnh",
     mo_ta: "Tạo bìa và ảnh minh hoạ cho tác phẩm.",
-    icon: IconSparkles,
+    icon: (p) => <FanficIcon name="image" size={p.size} />,
   },
 ];
 

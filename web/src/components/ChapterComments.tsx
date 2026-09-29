@@ -18,6 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { ApiError, social, type ServerLimits } from "@/lib/api";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 import { CommentThread } from "@/components/CommentThread";
 
 export function ChapterComments({ chapterId }: { chapterId: string }) {
@@ -71,7 +72,7 @@ export function ChapterComments({ chapterId }: { chapterId: string }) {
         aria-expanded={mo}
         onClick={() => setMo((v) => !v)}
       >
-        <span aria-hidden="true">💬</span>
+        <FanficIcon name="comment" size={16} />
         <strong>
           Bình luận{tong !== null ? ` (${tong})` : ""}
         </strong>

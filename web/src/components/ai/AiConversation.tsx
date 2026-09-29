@@ -61,8 +61,10 @@ function AiSaveToProjectMenu({ content }: { content: string }) {
 }
 
 export function AiConversation() {
-  const { messages, streaming, streamingText, conversationId, mode } = useAi();
+  const { messages, streaming, streamingText, conversationId, mode, regenerate } = useAi();
   const cuoiRef = useRef<HTMLDivElement | null>(null);
+  // "Tao lai" la dieu khien THUONG cho tin tra loi CUOI (ke ca da dung/loi) — khong chi trong banner loi.
+  const idCuoi = [...messages].reverse().find((m) => m.role === "assistant")?.message_id;
 
   useEffect(() => {
     cuoiRef.current?.scrollIntoView({ block: "end" });
@@ -101,6 +103,13 @@ export function AiConversation() {
           ) : null}
           {mode === "writer" && m.role === "assistant" && m.status === "complete" ? (
             <AiSaveToProjectMenu content={m.content} />
+          ) : null}
+          {m.message_id === idCuoi && !streaming ? (
+            <button type="button" className="ai-nut-tao-lai" onClick={() => void regenerate()}
+              aria-label="Tạo lại câu trả lời">
+              <FanficIcon name="refresh" size={14} />
+              Tạo lại
+            </button>
           ) : null}
         </div>
       ))}

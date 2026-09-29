@@ -236,6 +236,21 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
 }
 .ai-bong-loi { outline: 1px solid var(--danger); outline-offset: 2px; }
 .ai-bong-ghichu { display: block; margin-top: 4px; font-size: 11px; color: var(--text-3); }
+.ai-nut-tao-lai {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--s2);
+  padding: 2px var(--s2);
+  border: 1px solid #ffffff1f;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ai-nut-tao-lai:hover { color: var(--text); background: var(--bg-3); }
+.ai-nut-tao-lai:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .ai-trichdan { list-style: none; margin: var(--s2) 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-trichdan a { font-size: 12px; }
 

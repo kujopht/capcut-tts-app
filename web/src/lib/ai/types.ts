@@ -116,3 +116,46 @@ export interface AiProjectSummary {
   title: string;
   updated_at: string;
 }
+
+/**
+ * Dự án viết (`writer` mode, §6) — `outline`/`characters`/`world` ở backend
+ * là `Dict[str, Any]` (JSON tự do), KHÔNG phải chuỗi. Giao diện V1 chỉ cần
+ * MỘT trường văn bản mỗi mục, nên quy ước lưu dưới khoá `text`
+ * (`{ text: "..." }`) — xem `projectFieldText()`/`withProjectFieldText()`
+ * trong `client.ts`. Bất kỳ hình dạng JSON nào khác (từ một bản ghi cũ hoặc
+ * client khác) đều đọc được: field không đúng quy ước hiện NHƯ RỖNG thay vì
+ * vỡ giao diện, và Lưu luôn ghi lại đúng quy ước `{ text }`.
+ */
+export interface AiProjectDetail {
+  project_id: string;
+  title: string;
+  premise: string;
+  outline: Record<string, unknown>;
+  characters: Record<string, unknown>;
+  world: Record<string, unknown>;
+  notes: string;
+  updated_at: string;
+}
+
+export type AiProjectJsonField = "outline" | "characters" | "world";
+export type AiProjectTextField = "premise" | "notes";
+/** Mọi mục có thể "Lưu vào dự án" từ một tin nhắn trợ lý. */
+export type AiProjectField = AiProjectTextField | AiProjectJsonField;
+
+export const AI_PROJECT_FIELD_LABELS: Record<AiProjectField, string> = {
+  premise: "Ý tưởng",
+  outline: "Dàn ý",
+  characters: "Nhân vật",
+  world: "Thế giới",
+  notes: "Ghi chú",
+};
+
+/** Trần ký tự phía giao diện — khớp `ai_projects` §5 (premise/notes 4000,
+ *  outline/characters/world_json 8000; trừ hao cho khung `{"text":"..."}`). */
+export const AI_PROJECT_FIELD_MAX: Record<AiProjectField, number> = {
+  premise: 4000,
+  notes: 4000,
+  outline: 7900,
+  characters: 7900,
+  world: 7900,
+};

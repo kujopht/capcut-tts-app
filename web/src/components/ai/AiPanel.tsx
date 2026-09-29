@@ -11,6 +11,7 @@ import { useAi } from "./AiProvider";
 import { AiControls } from "./AiControls";
 import { AiConversation } from "./AiConversation";
 import { AiComposer } from "./AiComposer";
+import { AiWriterBar } from "./AiWriterBar";
 
 export function AiPanel() {
   const { enabled, availability, open } = useAi();
@@ -56,6 +57,7 @@ export function AiPanel() {
       style={dockOffset ? ({ ["--ai-dock-offset" as string]: `${dockOffset}px` } as React.CSSProperties) : undefined}
     >
       <AiControls />
+      <AiWriterBar />
       <AiConversation />
       <AiComposer />
     </div>

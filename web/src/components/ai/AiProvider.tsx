@@ -26,7 +26,7 @@ import {
   useState,
 } from "react";
 import { ApiError } from "@/lib/api";
-import { aiApi, taoClientId } from "@/lib/ai/client";
+import { aiApi, docVanBanTruongDuAn, ghepBodyDuAn, taoClientId } from "@/lib/ai/client";
 import { AI_ASSISTANT_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import type {
@@ -37,6 +37,9 @@ import type {
   AiMessage,
   AiMode,
   AiPreferences,
+  AiProjectDetail,
+  AiProjectField,
+  AiProjectSummary,
 } from "@/lib/ai/types";
 
 const CO_MO = "fas.ai.open";
@@ -85,6 +88,13 @@ interface AiState {
   /** `true` khi hội thoại ĐANG MỞ không được lưu quá phiên (`memory_enabled=false` lúc tạo, §5). */
   ephemeral: boolean;
   preferences: AiPreferences | null;
+  /** Dự án viết đang chọn (mode `writer`, §6) — độc lập với hội thoại: chọn dự án KHÔNG tự tạo/đổi hội thoại. */
+  projects: AiProjectSummary[];
+  activeProjectId: string | null;
+  activeProject: AiProjectDetail | null;
+  loadingProject: boolean;
+  /** Nội dung ô soạn — nâng lên Provider để chip gợi ý (Brainstorm/Dàn ý/...) chèn được vào composer. */
+  draft: string;
 }
 
 interface AiContextValue extends AiState {
@@ -102,6 +112,14 @@ interface AiContextValue extends AiState {
   deleteAllMemory: (includeProjects?: boolean) => Promise<void>;
   stopStreaming: () => void;
   regenerate: () => Promise<void>;
+  setDraft: (text: string) => void;
+  loadProjects: () => Promise<void>;
+  createProject: (title: string) => Promise<void>;
+  selectProject: (id: string | null) => Promise<void>;
+  renameProject: (id: string, title: string) => Promise<void>;
+  deleteProjectById: (id: string) => Promise<void>;
+  /** "Lưu vào dự án" từ một tin nhắn trợ lý — LUÔN do người dùng bấm, không bao giờ tự động. */
+  saveToProjectField: (field: AiProjectField, text: string, appendMode?: "replace" | "append") => Promise<void>;
 }
 
 const AiContext = createContext<AiContextValue | null>(null);
@@ -134,6 +152,11 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     loadingConversation: false,
     ephemeral: false,
     preferences: null,
+    projects: [],
+    activeProjectId: null,
+    activeProject: null,
+    loadingProject: false,
+    draft: "",
   });
   const ctrlRef = useRef<AbortController | null>(null);
   const assistantIdRef = useRef<string | null>(null);
@@ -237,8 +260,12 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     async (mode?: AiMode) => {
       ctrlRef.current?.abort();
       setState((s) => ({ ...s, error: null }));
+      const modeThat = mode ?? state.mode;
       try {
-        const conv = await aiApi.createConversation(mode ?? state.mode);
+        const conv = await aiApi.createConversation(
+          modeThat,
+          modeThat === "writer" && state.activeProjectId ? { context: { project_id: state.activeProjectId } } : undefined,
+        );
         setState((s) => ({
           ...s,
           conversationId: conv.conversation_id,
@@ -253,7 +280,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         setState((s) => ({ ...s, error: loiTuApiError(e) }));
       }
     },
-    [state.mode, taiLichSu],
+    [state.mode, state.activeProjectId, taiLichSu],
   );
 
   const deleteConversationById = useCallback(
@@ -284,7 +311,10 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       let convId = state.conversationId;
       if (!convId) {
         try {
-          const conv = await aiApi.createConversation(state.mode);
+          const conv = await aiApi.createConversation(
+            state.mode,
+            state.mode === "writer" && state.activeProjectId ? { context: { project_id: state.activeProjectId } } : undefined,
+          );
           convId = conv.conversation_id;
           setState((s) => ({ ...s, conversationId: convId }));
           ghiPhien(CO_HOI_THOAI, convId);
@@ -373,7 +403,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [state.streaming, state.conversationId, state.mode],
+    [state.streaming, state.conversationId, state.mode, state.activeProjectId],
   );
 
   const sendMessage = useCallback((text: string) => guiVanBan(text), [guiVanBan]);
@@ -423,6 +453,99 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const setDraft = useCallback((text: string) => {
+    setState((s) => ({ ...s, draft: text }));
+  }, []);
+
+  /** Tải danh sách dự án viết — gọi khi vào mode `writer`/mở thanh dự án, KHÔNG lúc mount. */
+  const loadProjects = useCallback(async () => {
+    try {
+      const r = await aiApi.listProjects();
+      setState((s) => ({ ...s, projects: r.items }));
+    } catch (e) {
+      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+    }
+  }, []);
+
+  const createProject = useCallback(async (title: string) => {
+    try {
+      const body = ghepBodyDuAn(null, { title });
+      const { project_id } = await aiApi.createProject(body);
+      await loadProjects();
+      const detail = await aiApi.getProject(project_id);
+      setState((s) => ({ ...s, activeProjectId: project_id, activeProject: detail }));
+    } catch (e) {
+      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadProjects]);
+
+  const selectProject = useCallback(async (id: string | null) => {
+    if (!id) {
+      setState((s) => ({ ...s, activeProjectId: null, activeProject: null }));
+      return;
+    }
+    setState((s) => ({ ...s, loadingProject: true }));
+    try {
+      const detail = await aiApi.getProject(id);
+      setState((s) => ({ ...s, activeProjectId: id, activeProject: detail, loadingProject: false }));
+    } catch (e) {
+      setState((s) => ({ ...s, loadingProject: false, error: loiTuApiError(e) }));
+    }
+  }, []);
+
+  const renameProject = useCallback(async (id: string, title: string) => {
+    try {
+      const hienTai = state.activeProjectId === id ? state.activeProject : await aiApi.getProject(id);
+      const body = ghepBodyDuAn(hienTai, { title });
+      await aiApi.updateProject(id, body);
+      await loadProjects();
+      if (state.activeProjectId === id) {
+        const detail = await aiApi.getProject(id);
+        setState((s) => ({ ...s, activeProject: detail }));
+      }
+    } catch (e) {
+      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.activeProjectId, state.activeProject, loadProjects]);
+
+  const deleteProjectById = useCallback(async (id: string) => {
+    try {
+      await aiApi.deleteProject(id);
+      setState((s) => ({
+        ...s,
+        projects: s.projects.filter((p) => p.project_id !== id),
+        ...(s.activeProjectId === id ? { activeProjectId: null, activeProject: null } : {}),
+      }));
+    } catch (e) {
+      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+    }
+  }, []);
+
+  /**
+   * "Lưu vào dự án" — LUÔN do người dùng bấm (nút trên mỗi tin nhắn trợ lý
+   * hoặc nút Lưu trong trình soạn dự án), KHÔNG BAO GIỜ tự động sau khi
+   * stream xong. `appendMode="append"` nối thêm dòng mới vào nội dung cũ.
+   */
+  const saveToProjectField = useCallback(
+    async (field: AiProjectField, text: string, appendMode: "replace" | "append" = "append") => {
+      if (!state.activeProjectId) return;
+      try {
+        const hienTai = state.activeProject ?? (await aiApi.getProject(state.activeProjectId));
+        const cu = docVanBanTruongDuAn(field, hienTai[field]);
+        const moi = appendMode === "append" && cu ? `${cu}\n\n${text}` : text;
+        const body = ghepBodyDuAn(hienTai, { [field]: moi } as Partial<Record<AiProjectField, string>>);
+        await aiApi.updateProject(state.activeProjectId, body);
+        const detail = await aiApi.getProject(state.activeProjectId);
+        setState((s) => ({ ...s, activeProject: detail }));
+      } catch (e) {
+        setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      }
+    },
+    [state.activeProjectId, state.activeProject],
+  );
+
   const value = useMemo<AiContextValue>(
     () => ({
       ...state,
@@ -440,6 +563,13 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       loadPreferences,
       setMemoryEnabled,
       deleteAllMemory,
+      setDraft,
+      loadProjects,
+      createProject,
+      selectProject,
+      renameProject,
+      deleteProjectById,
+      saveToProjectField,
     }),
     [
       state,
@@ -456,6 +586,13 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       loadPreferences,
       setMemoryEnabled,
       deleteAllMemory,
+      setDraft,
+      loadProjects,
+      createProject,
+      selectProject,
+      renameProject,
+      deleteProjectById,
+      saveToProjectField,
     ],
   );
 

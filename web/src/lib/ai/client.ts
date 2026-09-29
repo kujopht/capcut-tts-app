@@ -18,9 +18,52 @@ import type {
   AiConversationSummary,
   AiMode,
   AiPreferences,
+  AiProjectDetail,
+  AiProjectField,
+  AiProjectJsonField,
   AiProjectSummary,
   AiStreamEvent,
 } from "./types";
+
+const CAC_TRUONG_JSON: readonly AiProjectJsonField[] = ["outline", "characters", "world"];
+
+/** Đọc phần văn bản của một mục JSON tự do (§6) theo quy ước `{ text }` —
+ *  hình dạng khác (bản ghi cũ/client khác) đọc như RỖNG, không ném lỗi. */
+export function docVanBanTruongDuAn(field: AiProjectField, value: unknown): string {
+  if (!CAC_TRUONG_JSON.includes(field as AiProjectJsonField)) {
+    return typeof value === "string" ? value : "";
+  }
+  if (value && typeof value === "object" && typeof (value as Record<string, unknown>).text === "string") {
+    return (value as Record<string, unknown>).text as string;
+  }
+  return "";
+}
+
+interface ProjectPayload {
+  title: string;
+  premise: string;
+  outline: Record<string, unknown>;
+  characters: Record<string, unknown>;
+  world: Record<string, unknown>;
+  notes: string;
+}
+
+/** Dựng lại body `ProjectIn` đầy đủ từ một bản chi tiết + MỘT trường vừa đổi (PUT ghi đè toàn bộ, không patch từng phần). */
+export function ghepBodyDuAn(hienTai: AiProjectDetail | null, doi: Partial<Record<AiProjectField, string> & { title: string }>): ProjectPayload {
+  const layVanBan = (field: AiProjectTextFieldNoiBo) =>
+    doi[field] !== undefined ? (doi[field] as string) : hienTai ? (hienTai[field] as string) : "";
+  const layJson = (field: AiProjectJsonField) =>
+    doi[field] !== undefined ? { text: doi[field] as string } : (hienTai ? hienTai[field] : {}) ?? {};
+  return {
+    title: doi.title !== undefined ? doi.title : hienTai?.title ?? "",
+    premise: layVanBan("premise"),
+    notes: layVanBan("notes"),
+    outline: layJson("outline"),
+    characters: layJson("characters"),
+    world: layJson("world"),
+  };
+}
+type AiProjectTextFieldNoiBo = "premise" | "notes";
 
 function headers(json: boolean): HeadersInit {
   const token = getToken();
@@ -113,6 +156,40 @@ export const aiApi = {
   async listProjects(): Promise<{ items: AiProjectSummary[] }> {
     const res = await fetch(`${API_BASE}/api/ai/projects`, { headers: headers(false), cache: "no-store" });
     return doc(res);
+  },
+
+  async createProject(payload: ProjectPayload): Promise<{ project_id: string }> {
+    const res = await fetch(`${API_BASE}/api/ai/projects`, {
+      method: "POST",
+      headers: headers(true),
+      body: JSON.stringify(payload),
+    });
+    return doc(res);
+  },
+
+  async getProject(projectId: string): Promise<AiProjectDetail> {
+    const res = await fetch(`${API_BASE}/api/ai/projects/${encodeURIComponent(projectId)}`, {
+      headers: headers(false),
+      cache: "no-store",
+    });
+    return doc(res);
+  },
+
+  async updateProject(projectId: string, payload: ProjectPayload): Promise<{ project_id: string; updated_at: string }> {
+    const res = await fetch(`${API_BASE}/api/ai/projects/${encodeURIComponent(projectId)}`, {
+      method: "PUT",
+      headers: headers(true),
+      body: JSON.stringify(payload),
+    });
+    return doc(res);
+  },
+
+  async deleteProject(projectId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/ai/projects/${encodeURIComponent(projectId)}`, {
+      method: "DELETE",
+      headers: headers(false),
+    });
+    await doc(res);
   },
 
   /**

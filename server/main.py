@@ -983,6 +983,9 @@ def health() -> Dict[str, Any]:
         # chua he thu gi. Ca hai deu khien mot lan kiem `/api/health` ngay sau
         # deploy tra loi sai — da xay ra that.
         "job_lock_ready": getattr(store, "_job_lock_ready", None),
+        # Tin nhan Chat V1: bat/tat, kho, khan gia (canary | all) va SO LUONG canary — KHONG BAO GIO liet ke ID.
+        # De kiem tra mot lan bat canary ma khong can dang nhap (xem `docs/messaging/CHAT_APPWRITE.md`).
+        "messaging": messaging_runtime.describe(),
     }
 
 

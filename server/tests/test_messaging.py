@@ -1116,6 +1116,13 @@ class CanaryRouteTest(MessagingCase):
                          {"enabled": False, "reason": "off"})
         self.assertEqual(self._ma(self.client.post("/api/chat/session", headers=self.ha)), (503, "chat_not_configured"))
 
+    def test_health_bao_khan_gia_va_SO_LUONG_khong_liet_ke_id(self):
+        r = self.client.get("/api/health")
+        m = r.json()["messaging"]
+        self.assertEqual((m["enabled"], m["audience"], m["canary_users"]), (True, "canary", 2))
+        self.assertNotIn(self.ua, r.text)
+        self.assertNotIn(self.ub, r.text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -479,7 +479,6 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       setState((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadProjects]);
 
   const selectProject = useCallback(async (id: string | null) => {
@@ -509,7 +508,6 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       setState((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.activeProjectId, state.activeProject, loadProjects]);
 
   const deleteProjectById = useCallback(async (id: string) => {

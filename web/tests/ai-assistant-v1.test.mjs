@@ -194,3 +194,58 @@ test("17. Ephemeral (memory_enabled=false) hiện huy hiệu, và xoá ký ức 
   assert.match(provider, /deleteAllMemory/);
   assert.match(provider, /setMemoryEnabled/);
 });
+
+test("18. Writer Studio: thanh dự án CHỈ hiện ở mode `writer`, không render khi mode khác", () => {
+  const bar = read("components/ai/AiWriterBar.tsx");
+  assert.match(bar, /if \(mode !== "writer"\) return null;/);
+  // AiPanel/`/assistant` đều mount AiWriterBar KHÔNG ĐIỀU KIỆN theo mode ở
+  // JSX (bản thân component tự gate) — panel/trang không được tự thêm một
+  // điều kiện `mode === "writer"` NGOÀI component (một nguồn chân lý duy nhất).
+  const panel = read("components/ai/AiPanel.tsx");
+  const page = read("app/assistant/page.tsx");
+  assert.match(panel, /<AiWriterBar \/>/);
+  assert.match(page, /<AiWriterBar \/>/);
+});
+
+test("19. Không component nào trong components/ai dùng window.confirm/window.prompt (xác nhận LUÔN trong trang)", () => {
+  const CAM = /window\.(confirm|prompt)/;
+  const viPham = AI_FILES.filter((p) => CAM.test(codeOnly(read(tuongDoiSrc(p)))));
+  assert.deepEqual(viPham.map(tuongDoiSrc), []);
+});
+
+test("20. Xoá dự án dùng xác nhận hai bước trong trang, có nút Huỷ", () => {
+  const bar = codeOnly(read("components/ai/AiWriterBar.tsx"));
+  assert.match(bar, /xoaXacNhan/);
+  assert.match(bar, /Xác nhận xoá/);
+  assert.match(bar, /Huỷ/);
+});
+
+test("21. \"Lưu vào dự án\" (nối thêm) và \"Lưu dự án\" (ghi đè) đều LUÔN do người dùng bấm, không tự động sau khi stream xong", () => {
+  const provider = codeOnly(read("components/ai/AiProvider.tsx"));
+  // Khối xử lý sự kiện `done` của luồng SSE không được gọi thẳng
+  // saveToProjectField/saveProjectFields — hai hàm đó chỉ được gọi từ onClick
+  // của component (AiConversation/AiProjectEditor), không từ vòng lặp stream.
+  const doanDone = provider.match(/ev\.type === "done"\) \{[\s\S]*?\n {12}\}/)?.[0] ?? "";
+  assert.ok(!/saveToProjectField|saveProjectFields/.test(doanDone),
+    "xử lý sự kiện done không được tự lưu vào dự án");
+  const conv = codeOnly(read("components/ai/AiConversation.tsx"));
+  const editor = codeOnly(read("components/ai/AiProjectEditor.tsx"));
+  assert.match(conv, /onClick=\{\(\) => \{\s*void saveToProjectField/);
+  assert.match(editor, /onClick=\{\(\) => void luu\(\)\}/);
+});
+
+test("22. Chip gợi ý Studio viết chèn vào draft dùng chung của composer, không tự gửi", () => {
+  const bar = codeOnly(read("components/ai/AiWriterBar.tsx"));
+  for (const nhan of ["Brainstorm", "Premise", "Dàn ý", "Nhân vật", "Thế giới", "Viết nháp chương"]) {
+    assert.match(bar, new RegExp(nhan.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(bar, /setDraft\(/);
+  assert.ok(!/void sendMessage|sendMessage\(/.test(bar), "chip không được tự gửi tin thay người dùng");
+});
+
+test("23. /assistant: nút Đóng điều hướng lùi (router.back, fallback \"/\"), không chỉ tắt cờ open", () => {
+  const page = read("app/assistant/page.tsx");
+  assert.match(page, /router\.back\(\)/);
+  assert.match(page, /router\.push\("\/"\)/);
+  assert.match(page, /onClose=\{veTruoc\}/);
+});

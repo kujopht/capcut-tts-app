@@ -11,26 +11,29 @@
  * bộ MỖI KHI đổi dự án (`activeProjectId`), không seed lại mỗi lần
  * `activeProject` refetch sau lưu, để không ghi đè phần người dùng đang gõ.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAi } from "./AiProvider";
 import { docVanBanTruongDuAn } from "@/lib/ai/client";
 import { AI_PROJECT_FIELD_LABELS, AI_PROJECT_FIELD_MAX, type AiProjectField } from "@/lib/ai/types";
 
 const CAC_TRUONG: AiProjectField[] = ["premise", "outline", "characters", "world", "notes"];
 
+const RONG: Record<AiProjectField, string> = { premise: "", outline: "", characters: "", world: "", notes: "" };
+
 export function AiProjectEditor() {
   const { activeProjectId, activeProject, saveProjectFields } = useAi();
-  const [gia, setGia] = useState<Record<AiProjectField, string>>({
-    premise: "",
-    outline: "",
-    characters: "",
-    world: "",
-    notes: "",
-  });
+  const [gia, setGia] = useState<Record<AiProjectField, string>>(RONG);
   const [dangLuu, setDangLuu] = useState(false);
-
-  useEffect(() => {
-    if (!activeProject) return;
+  /**
+   * Seed lại khi ĐỔI dự án, KHÔNG mỗi lần `activeProject` refetch sau lưu —
+   * cập nhật state TRONG lúc render (mẫu "điều chỉnh state theo props đổi"
+   * của React, https://react.dev/learn/you-might-not-need-an-effect), không
+   * phải trong `useEffect`: một effect gọi `setState` đồng bộ ngay khi chạy
+   * kích hoạt thêm một lượt render lồng nhau không cần thiết.
+   */
+  const [duAnDaSeed, setDuAnDaSeed] = useState<string | null>(null);
+  if (activeProject && activeProjectId !== duAnDaSeed) {
+    setDuAnDaSeed(activeProjectId);
     setGia({
       premise: activeProject.premise ?? "",
       outline: docVanBanTruongDuAn("outline", activeProject.outline),
@@ -38,9 +41,7 @@ export function AiProjectEditor() {
       world: docVanBanTruongDuAn("world", activeProject.world),
       notes: activeProject.notes ?? "",
     });
-    // Chỉ seed lại khi ĐỔI dự án — không mỗi lần activeProject refetch sau lưu.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId]);
+  }
 
   if (!activeProjectId) return null;
 

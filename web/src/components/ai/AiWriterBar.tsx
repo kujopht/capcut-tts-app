@@ -49,11 +49,19 @@ export function AiWriterBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  useEffect(() => {
+  /**
+   * Đóng các form phụ (đổi tên/xoá/soạn dự án) khi ĐỔI dự án — điều chỉnh
+   * state TRONG lúc render (không phải `useEffect`, xem lý do ở
+   * `AiProjectEditor.tsx`), vì đây chỉ là dọn dẹp UI cục bộ theo prop đổi,
+   * không phải đồng bộ với hệ thống ngoài.
+   */
+  const [duAnTruoc, setDuAnTruoc] = useState(activeProjectId);
+  if (duAnTruoc !== activeProjectId) {
+    setDuAnTruoc(activeProjectId);
     setDangSua(false);
     setXoaXacNhan(false);
     setSuaMo(false);
-  }, [activeProjectId]);
+  }
 
   if (mode !== "writer") return null;
 

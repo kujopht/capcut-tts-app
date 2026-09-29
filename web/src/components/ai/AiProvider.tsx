@@ -120,6 +120,8 @@ interface AiContextValue extends AiState {
   deleteProjectById: (id: string) => Promise<void>;
   /** "Lưu vào dự án" từ một tin nhắn trợ lý — LUÔN do người dùng bấm, không bao giờ tự động. */
   saveToProjectField: (field: AiProjectField, text: string, appendMode?: "replace" | "append") => Promise<void>;
+  /** Lưu (GHI ĐÈ) nhiều trường cùng lúc từ trình soạn dự án — MỘT lượt PUT, khác `saveToProjectField` (nối thêm, từng trường). */
+  saveProjectFields: (patch: Partial<Record<AiProjectField, string>>) => Promise<void>;
 }
 
 const AiContext = createContext<AiContextValue | null>(null);
@@ -546,6 +548,23 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     [state.activeProjectId, state.activeProject],
   );
 
+  /** Lưu từ trình soạn dự án (`AiProjectEditor`) — GHI ĐÈ một hoặc nhiều trường trong MỘT lượt PUT. */
+  const saveProjectFields = useCallback(
+    async (patch: Partial<Record<AiProjectField, string>>) => {
+      if (!state.activeProjectId) return;
+      try {
+        const hienTai = state.activeProject ?? (await aiApi.getProject(state.activeProjectId));
+        const body = ghepBodyDuAn(hienTai, patch);
+        await aiApi.updateProject(state.activeProjectId, body);
+        const detail = await aiApi.getProject(state.activeProjectId);
+        setState((s) => ({ ...s, activeProject: detail }));
+      } catch (e) {
+        setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      }
+    },
+    [state.activeProjectId, state.activeProject],
+  );
+
   const value = useMemo<AiContextValue>(
     () => ({
       ...state,
@@ -570,6 +589,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       renameProject,
       deleteProjectById,
       saveToProjectField,
+      saveProjectFields,
     }),
     [
       state,
@@ -593,6 +613,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       renameProject,
       deleteProjectById,
       saveToProjectField,
+      saveProjectFields,
     ],
   );
 

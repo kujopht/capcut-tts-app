@@ -11,6 +11,7 @@
  */
 import { useEffect, useState } from "react";
 import { useAi } from "./AiProvider";
+import { AiProjectEditor } from "./AiProjectEditor";
 import { FanficIcon } from "@/components/icons/FanficIcon";
 
 const CHIPS: { label: string; goi: string }[] = [
@@ -41,6 +42,7 @@ export function AiWriterBar() {
   const [dangSua, setDangSua] = useState(false);
   const [tieuDeSua, setTieuDeSua] = useState("");
   const [xoaXacNhan, setXoaXacNhan] = useState(false);
+  const [suaMo, setSuaMo] = useState(false);
 
   useEffect(() => {
     if (mode === "writer") void loadProjects();
@@ -50,6 +52,7 @@ export function AiWriterBar() {
   useEffect(() => {
     setDangSua(false);
     setXoaXacNhan(false);
+    setSuaMo(false);
   }, [activeProjectId]);
 
   if (mode !== "writer") return null;
@@ -103,6 +106,16 @@ export function AiWriterBar() {
               onClick={() => setXoaXacNhan(true)}
             >
               <FanficIcon name="trash" size={14} />
+            </button>
+            <button
+              type="button"
+              className="ai-nut ai-nut-nho"
+              aria-label={suaMo ? "Đóng trình soạn dự án" : "Mở trình soạn dự án"}
+              aria-expanded={suaMo}
+              title="Ý tưởng/Dàn ý/Nhân vật/Thế giới/Ghi chú"
+              onClick={() => setSuaMo((v) => !v)}
+            >
+              <FanficIcon name="book" size={14} />
             </button>
           </>
         ) : null}
@@ -181,6 +194,8 @@ export function AiWriterBar() {
           </div>
         </div>
       ) : null}
+
+      {suaMo && activeProjectId ? <AiProjectEditor /> : null}
 
       <div className="ai-writerbar-chip" role="group" aria-label="Gợi ý bắt đầu">
         {CHIPS.map((c) => (

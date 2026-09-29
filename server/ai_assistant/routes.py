@@ -322,7 +322,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         profile = resolve_profile(authorization)
         _own_conversation(profile.user_id, conversation_id)
         # Harmless no-op on whichever store the conversation ISN'T in.
-        rt.repo.delete_conversation(conversation_id)
+        _run(lambda: rt.repo.delete_conversation(conversation_id))
         rt.ephemeral.delete_conversation(conversation_id)
         return {"deleted": True}
 
@@ -594,7 +594,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def get_preferences(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = resolve_profile(authorization)
-        prefs = rt.repo.get_preferences(profile.user_id)
+        prefs = _run(lambda: rt.repo.get_preferences(profile.user_id))
         if prefs is None:
             return {"memory_enabled": True, "preferences": {}}
         return {"memory_enabled": prefs.memory_enabled,
@@ -605,10 +605,24 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                         authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = resolve_profile(authorization)
+        # L12/M7 (review finding): this used to silently `[:2000]`-truncate
+        # the serialized JSON — truncating a JSON string mid-structure
+        # produces INVALID JSON, so `get_preferences`'s own
+        # `json.loads(prefs.preferences_json or "{}")` would then raise on
+        # the very next read (a write-time bug surfacing as a read-time
+        # 500). Reject oversized input with a clean 400 instead of writing
+        # something the reader can't parse back; redact BEFORE persisting
+        # (matches the AppwriteAiRepo-only redaction this used to skip for
+        # InMemoryAiRepo).
+        prefs_json = redact(json.dumps(payload.preferences, ensure_ascii=False))
+        if len(prefs_json) > 2000:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                {"code": "ai_context_too_large",
+                                 "message": "Sở thích đã lưu quá lớn (tối đa 2000 ký tự)."})
         prefs = AiPreferences(
             user_id=profile.user_id, memory_enabled=payload.memory_enabled,
-            preferences_json=json.dumps(payload.preferences, ensure_ascii=False)[:2000])
-        rt.repo.put_preferences(prefs)
+            preferences_json=prefs_json)
+        _run(lambda: rt.repo.put_preferences(prefs))
         return {"memory_enabled": prefs.memory_enabled,
                 "preferences": json.loads(prefs.preferences_json)}
 
@@ -617,7 +631,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                       authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = resolve_profile(authorization)
-        rt.repo.delete_all_memory(profile.user_id, include_projects=include_projects)
+        _run(lambda: rt.repo.delete_all_memory(profile.user_id, include_projects=include_projects))
         # Also clears any live ephemeral (memory-off) entries for this
         # user — a superset of the ≤1h TTL guarantee, not a requirement of
         # it, but "xoá toàn bộ ký ức AI" should mean exactly that from the
@@ -631,9 +645,23 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def list_projects(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = resolve_profile(authorization)
-        items = rt.repo.list_projects(profile.user_id)
+        items = _run(lambda: rt.repo.list_projects(profile.user_id))
         return {"items": [{"project_id": p.project_id, "title": p.title, "updated_at": p.updated_at}
                           for p in items]}
+
+    def _bounded_json(value: Dict[str, Any], *, limit: int, field_name: str) -> str:
+        """L12 (review finding): `outline`/`characters`/`world` are
+        arbitrary user dicts serialized to a size-bounded Appwrite
+        attribute — silently `[:N]`-truncating the serialized JSON (as
+        `preferences_json` used to) can produce INVALID JSON, corrupting
+        the field for every future read. Reject oversized input with a
+        clean 400 instead."""
+        s = json.dumps(value, ensure_ascii=False)
+        if len(s) > limit:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                {"code": "ai_context_too_large",
+                                 "message": f"Trường '{field_name}' quá lớn (tối đa {limit} ký tự)."})
+        return s
 
     @r.post("/api/ai/projects")
     def create_project(payload: ProjectIn,
@@ -642,9 +670,10 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         profile = resolve_profile(authorization)
         proj = AiProject(
             project_id=_new_id(), user_id=profile.user_id, title=payload.title,
-            premise=payload.premise, outline_json=json.dumps(payload.outline, ensure_ascii=False),
-            characters_json=json.dumps(payload.characters, ensure_ascii=False),
-            world_json=json.dumps(payload.world, ensure_ascii=False), notes=payload.notes)
+            premise=payload.premise,
+            outline_json=_bounded_json(payload.outline, limit=8000, field_name="outline"),
+            characters_json=_bounded_json(payload.characters, limit=8000, field_name="characters"),
+            world_json=_bounded_json(payload.world, limit=8000, field_name="world"), notes=payload.notes)
         proj = _run(lambda: rt.repo.create_project(proj))
         return {"project_id": proj.project_id}
 
@@ -666,11 +695,12 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         _bat()
         profile = resolve_profile(authorization)
         _own_project(profile.user_id, project_id)
-        p = rt.repo.update_project(project_id, {
+        p = _run(lambda: rt.repo.update_project(project_id, {
             "title": payload.title, "premise": payload.premise,
-            "outline_json": json.dumps(payload.outline, ensure_ascii=False),
-            "characters_json": json.dumps(payload.characters, ensure_ascii=False),
-            "world_json": json.dumps(payload.world, ensure_ascii=False), "notes": payload.notes})
+            "outline_json": _bounded_json(payload.outline, limit=8000, field_name="outline"),
+            "characters_json": _bounded_json(payload.characters, limit=8000, field_name="characters"),
+            "world_json": _bounded_json(payload.world, limit=8000, field_name="world"),
+            "notes": payload.notes}))
         return {"project_id": p.project_id, "updated_at": p.updated_at}
 
     @r.delete("/api/ai/projects/{project_id}")
@@ -679,7 +709,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         _bat()
         profile = resolve_profile(authorization)
         _own_project(profile.user_id, project_id)
-        rt.repo.delete_project(project_id)
+        _run(lambda: rt.repo.delete_project(project_id))
         return {"deleted": True}
 
     # ---------------------------------------------------------------- support

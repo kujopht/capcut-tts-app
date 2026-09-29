@@ -8,28 +8,135 @@ reviewed and passes after the paired fix.
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 import time
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Iterator, List, Optional
+from unittest import mock
 
 import httpx
 from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 
+from server.ai_assistant.ephemeral import EphemeralConversationStore
 from server.ai_assistant.gateway import AiGateway
 from server.ai_assistant.limits import StreamGuard
-from server.ai_assistant.memory import InMemoryAiRepo
-from server.ai_assistant.routes import _tier_of, build_ai_router
+from server.ai_assistant.memory import (
+    AiConversation, AiMessage, AiPreferences, AiProject, AppwriteAiRepo, InMemoryAiRepo,
+)
+from server.ai_assistant.routes import _hashed_user_ref, _tier_of, build_ai_router
 from server.ai_assistant.runtime import AiRuntime
 from server.ai_assistant.tools import ToolContext
+from server.config import AppwriteSettings
 from server.domain import Tier
-from server.llm_gateway.chat_providers import MockChatProvider
+from server.llm_gateway.chat_provider import (
+    ChatProvider, ChatTurn, Delta, Done, GenerateRequest, GenerateResult, ProviderCapabilities,
+    ProviderUsageSnapshot, StreamEvent,
+)
+from server.llm_gateway.chat_providers import MockChatProvider, OpenAICompatChatProvider
 
 from server.tests.test_ai_routes import _auth, _enabled_runtime, _make_app, _resolve_profile
+
+
+# --------------------------------------------------------------- fake Appwrite
+
+
+def _parse_queries(request: httpx.Request) -> List[Dict[str, Any]]:
+    raw = request.url.params.get_list("queries[]")
+    return [json.loads(q) for q in raw]
+
+
+class FakeAppwriteTransport:
+    """A tiny, in-memory stand-in for the Legacy Appwrite documents API —
+    enough of `equal`/`orderAsc`/`orderDesc`/`limit`/`cursorAfter` to
+    exercise `AppwriteAiRepo`'s REAL query-building code (`_q`/`_list`/...)
+    end-to-end, not just the python-side slicing in isolation."""
+
+    def __init__(self) -> None:
+        self.collections: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self.order: Dict[str, List[str]] = {}
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        m = re.search(r"/collections/([^/]+)/documents(?:/([^/?]+))?$", request.url.path)
+        if not m:
+            return httpx.Response(404, json={"message": "route not found"})
+        coll, doc_id = m.group(1), m.group(2)
+        store = self.collections.setdefault(coll, {})
+        order = self.order.setdefault(coll, [])
+
+        if request.method == "POST":
+            body = json.loads(request.content)
+            did = body["documentId"]
+            if did in store:
+                return httpx.Response(409, json={"message": "exists"})
+            data = dict(body["data"])
+            data["$id"] = did
+            store[did] = data
+            order.append(did)
+            return httpx.Response(201, json=data)
+
+        if request.method == "GET" and doc_id:
+            if doc_id not in store:
+                return httpx.Response(404, json={"message": "not found"})
+            return httpx.Response(200, json=store[doc_id])
+
+        if request.method == "GET":
+            docs = [store[d] for d in order if d in store]
+            limit = None
+            for q in _parse_queries(request):
+                method = q["method"]
+                if method == "equal":
+                    attr = q["attribute"]
+                    vals = q["values"]
+                    docs = [d for d in docs if d.get(attr) in vals]
+                elif method == "orderAsc":
+                    attr = q["attribute"]
+                    docs = sorted(docs, key=lambda d, a=attr: d.get(a))
+                elif method == "orderDesc":
+                    attr = q["attribute"]
+                    docs = sorted(docs, key=lambda d, a=attr: d.get(a), reverse=True)
+                elif method == "limit":
+                    limit = q["values"][0]
+                elif method == "cursorAfter":
+                    cursor = q["values"][0]
+                    ids = [d["$id"] for d in docs]
+                    if cursor in ids:
+                        docs = docs[ids.index(cursor) + 1:]
+            total = len(docs)
+            if limit is not None:
+                docs = docs[:limit]
+            return httpx.Response(200, json={"documents": docs, "total": total})
+
+        if request.method == "PATCH":
+            if doc_id not in store:
+                return httpx.Response(404, json={"message": "not found"})
+            body = json.loads(request.content)
+            store[doc_id].update(body["data"])
+            return httpx.Response(200, json=store[doc_id])
+
+        if request.method == "DELETE":
+            store.pop(doc_id, None)
+            if doc_id in order:
+                order.remove(doc_id)
+            return httpx.Response(204)
+
+        return httpx.Response(400, json={"message": "unsupported"})
+
+
+@dataclass
+class _FakeSettings:
+    appwrite: AppwriteSettings
+
+
+def _fake_appwrite_repo(transport: FakeAppwriteTransport) -> AppwriteAiRepo:
+    client = httpx.Client(transport=httpx.MockTransport(transport))
+    aw = AppwriteSettings(endpoint="https://appwrite.example/v1", project_id="proj",
+                         api_key="key", database_id="db")
+    return AppwriteAiRepo(_FakeSettings(appwrite=aw), client=client)
 
 
 # =============================================================================== B1
@@ -211,6 +318,325 @@ class TestH3ProfileAndOwnershipOffLoop(unittest.TestCase):
             resolve_threads[0], rpm_limiter.threads[0],
             "resolve_profile() ran on the SAME thread as an always-on-loop call "
             "(rt.rpm_limiter.check) — it was not actually offloaded via run_in_threadpool")
+
+
+# =============================================================================== H4
+
+
+class TestH4ListMessagesReturnsNewestNotOldest(unittest.TestCase):
+    """`orderAsc` + `limit` returned the OLDEST N messages of a conversation
+    — for any conversation with more messages than `limit`, every caller
+    (context building, the conversation-detail route) got the very START
+    of the conversation instead of its most recent turns."""
+
+    def test_list_messages_with_limit_returns_newest_in_chronological_order(self) -> None:
+        transport = FakeAppwriteTransport()
+        repo = _fake_appwrite_repo(transport)
+        repo.create_conversation(AiConversation(conversation_id="c1", user_id="u1", mode="general"))
+        for i in range(10):
+            repo.create_message(AiMessage(
+                message_id=f"m{i}", conversation_id="c1", user_id="u1", role="user",
+                content=f"msg {i}", created_at=f"2026-01-01T00:00:{i:02d}"))
+
+        got = repo.list_messages("c1", limit=3)
+
+        self.assertEqual([m.message_id for m in got], ["m7", "m8", "m9"],
+                         "expected the NEWEST 3 messages, in chronological order")
+
+
+# =============================================================================== H5
+
+
+class TestH5BoundedFieldsAndUnavailableMapping(unittest.TestCase):
+    def test_repo_unavailable_maps_to_503_not_500(self) -> None:
+        """A 500-class Appwrite response is `AiUnavailable` at the repo
+        layer — every route now routes its `rt.repo.*` calls through
+        `_run()`, which previously did not catch it at all (falling
+        through to FastAPI's opaque default 500 handler)."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("Appwrite unreachable")
+
+        client_ = httpx.Client(transport=httpx.MockTransport(handler))
+        aw = AppwriteSettings(endpoint="https://appwrite.example/v1", project_id="proj",
+                             api_key="key", database_id="db")
+        transport_repo = AppwriteAiRepo(_FakeSettings(appwrite=aw), client=client_)
+
+        rt = _enabled_runtime()
+        rt.repo = transport_repo
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=_resolve_profile))
+        client = TestClient(app)
+
+        r = client.get("/api/ai/preferences", headers=_auth("alice"))
+        self.assertEqual(r.status_code, 503)
+        self.assertEqual(r.json()["detail"]["code"], "ai_storage_unavailable")
+
+    def test_oversized_context_ids_are_truncated_not_a_500(self) -> None:
+        """`ai_messages`/`ai_conversations`' `context_*_id` attributes are
+        `size=64` — a client-supplied id longer than that used to reach
+        Appwrite verbatim, which would 400 -> (before H5) an uncaught
+        `AiUnavailable` -> 500."""
+        rt = _enabled_runtime()
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=_resolve_profile))
+        client = TestClient(app)
+        huge_id = "n" * 500
+        r = client.post("/api/ai/conversations", headers=_auth("alice"),
+                        json={"mode": "story", "context": {"novel_id": huge_id}})
+        self.assertEqual(r.status_code, 200)
+        cid = r.json()["conversation_id"]
+        conv = rt.repo.get_conversation(cid)
+        self.assertLessEqual(len(conv.context_novel_id), 64)
+
+
+# =============================================================================== H6
+
+
+class TestH6PaginatedDeleteAll(unittest.TestCase):
+    def test_delete_conversation_removes_more_than_one_page_of_messages(self) -> None:
+        transport = FakeAppwriteTransport()
+        repo = _fake_appwrite_repo(transport)
+        repo.create_conversation(AiConversation(conversation_id="c1", user_id="u1", mode="general"))
+        for i in range(130):
+            repo.create_message(AiMessage(
+                message_id=f"m{i}", conversation_id="c1", user_id="u1", role="user",
+                content=f"msg {i}", created_at=f"2026-01-01T00:{i // 60:02d}:{i % 60:02d}"))
+
+        repo.delete_conversation("c1")
+
+        remaining = transport.collections.get("ai_messages", {})
+        self.assertEqual(len(remaining), 0, "messages beyond the first page were never deleted")
+
+    def test_delete_all_memory_removes_more_than_one_page_of_conversations(self) -> None:
+        transport = FakeAppwriteTransport()
+        repo = _fake_appwrite_repo(transport)
+        for i in range(130):
+            repo.create_conversation(AiConversation(
+                conversation_id=f"c{i}", user_id="u1", mode="general"))
+
+        repo.delete_all_memory("u1")
+
+        remaining = transport.collections.get("ai_conversations", {})
+        self.assertEqual(len(remaining), 0, "conversations beyond the first page were never deleted")
+
+
+# =============================================================================== M7
+
+
+class _RecordingProvider(ChatProvider):
+    """Captures the exact `GenerateRequest` the gateway handed it — lets a
+    test assert on what a REAL provider adapter would have sent out over
+    the wire, without any network."""
+
+    name = "rec"
+
+    def __init__(self) -> None:
+        self.received: Optional[GenerateRequest] = None
+
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(streaming=True, tools=False, web_search=False, vision=False,
+                                    max_context_tokens=8000)
+
+    def usage(self) -> ProviderUsageSnapshot:
+        return ProviderUsageSnapshot()
+
+    def generate(self, req: GenerateRequest) -> GenerateResult:
+        raise NotImplementedError
+
+    def stream(self, req: GenerateRequest) -> Iterator[StreamEvent]:
+        self.received = req
+        yield Delta(text="ok")
+        yield Done()
+
+
+class TestM7RedactBeforeProvider(unittest.TestCase):
+    def test_secret_shaped_content_never_reaches_provider_or_storage(self) -> None:
+        rt = _enabled_runtime()
+        provider = _RecordingProvider()
+        rt.gateway = AiGateway(providers={"rec": provider}, provider_chain=["rec"])
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=_resolve_profile))
+        client = TestClient(app)
+        created = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+        cid = created.json()["conversation_id"]
+
+        secret = "sk-abcdefghijklmnopqrstuvwx"
+        with client.stream(
+                "POST", f"/api/ai/conversations/{cid}/messages", headers=_auth("alice"),
+                json={"content": f"khoá của tôi là Bearer {secret} giúp tôi với",
+                     "client_id": "c1"}) as resp:
+            list(resp.iter_text())
+
+        self.assertIsNotNone(provider.received)
+        joined = "\n".join(t.content for t in provider.received.messages)
+        self.assertNotIn(secret, joined, "raw secret reached the provider")
+
+        got = client.get(f"/api/ai/conversations/{cid}", headers=_auth("alice"))
+        contents = [m["content"] for m in got.json()["messages"]]
+        self.assertTrue(all(secret not in c for c in contents), "raw secret was persisted")
+
+
+# =============================================================================== M8
+
+
+class TestM8HashedUserRef(unittest.TestCase):
+    def test_user_ref_sent_to_provider_is_hmac_not_raw_user_id(self) -> None:
+        rt = _enabled_runtime()
+        provider = _RecordingProvider()
+        rt.gateway = AiGateway(providers={"rec": provider}, provider_chain=["rec"])
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=_resolve_profile))
+        client = TestClient(app)
+        created = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+        cid = created.json()["conversation_id"]
+
+        with client.stream(
+                "POST", f"/api/ai/conversations/{cid}/messages", headers=_auth("alice"),
+                json={"content": "hi", "client_id": "c1"}) as resp:
+            list(resp.iter_text())
+
+        self.assertIsNotNone(provider.received)
+        self.assertNotEqual(provider.received.user_ref, "user_alice")
+        self.assertEqual(provider.received.user_ref, _hashed_user_ref(rt, "user_alice"))
+
+
+# =============================================================================== M9
+
+
+class TestM9FixedErrorMessageNoLeakage(unittest.TestCase):
+    def test_mid_stream_httpx_readerror_yields_a_fixed_generic_message(self) -> None:
+        class _FlakyStream:
+            def __iter__(self):
+                yield b'data: {"choices":[{"delta":{"content":"Xin"}}]}\n\n'
+                raise httpx.ReadError("connection reset by peer, upstream=10.0.0.7:443")
+
+            def close(self) -> None:
+                pass
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=_FlakyStream())
+
+        provider = OpenAICompatChatProvider(name="qwen_test", base_url="https://x.invalid", api_key="k")
+        provider._client._transport = httpx.MockTransport(handler)  # noqa: SLF001 — test wiring
+
+        rt = _enabled_runtime()
+        rt.gateway = AiGateway(providers={"qwen_test": provider}, provider_chain=["qwen_test"])
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=_resolve_profile))
+        client = TestClient(app)
+        created = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+        cid = created.json()["conversation_id"]
+
+        with client.stream(
+                "POST", f"/api/ai/conversations/{cid}/messages", headers=_auth("alice"),
+                json={"content": "hi", "client_id": "c1"}) as resp:
+            body = "".join(resp.iter_text())
+
+        self.assertIn("event: error", body)
+        error_block = [b for b in body.split("\n\n") if b.startswith("event: error")][0]
+        data_line = [l for l in error_block.splitlines() if l.startswith("data:")][0]
+        payload = json.loads(data_line[len("data:"):].strip())
+        self.assertNotIn("qwen_test", payload["message"])
+        self.assertNotIn("connection reset", payload["message"])
+        self.assertNotIn("10.0.0.7", payload["message"])
+
+
+# =============================================================================== M10
+
+
+class TestM10UntrustedPreambleAndReadPermission(unittest.TestCase):
+    def test_retrieval_skipped_when_read_permission_denied(self) -> None:
+        from server.chat.embedding_provider import EmbeddingProvider
+        from server.chat.vector_store import VectorStore
+        from server.ai_assistant.tools import retrieve_story_chunks
+
+        class _DenyingCtx:
+            pass
+
+        ctx = ToolContext(
+            vector_store=mock.Mock(spec=VectorStore), embedding_provider=mock.Mock(spec=EmbeddingProvider),
+            may_read_novel_fn=lambda novel_id, user_id: False)
+        ctx.embedding_provider.embed.return_value = [[0.1, 0.2]]
+
+        results = retrieve_story_chunks(
+            ctx, "what happened?", novel_id="other_users_draft", current_chapter_index=5,
+            user_id="intruder")
+
+        self.assertEqual(results, [])
+        ctx.vector_store.query.assert_not_called()
+
+    def test_retrieval_block_carries_untrusted_data_preamble(self) -> None:
+        from server.ai_assistant.tools import UNTRUSTED_DATA_PREAMBLE
+
+        rt = _enabled_runtime()
+        rt.tool_ctx = ToolContext(search_library_fn=lambda q, n: [
+            __import__("server.ai_assistant.tools", fromlist=["LibraryHit"]).LibraryHit(
+                novel_id="n1", title="Some Title", author="Some Author")])
+        provider = _RecordingProvider()
+        rt.gateway = AiGateway(providers={"rec": provider}, provider_chain=["rec"])
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=_resolve_profile))
+        client = TestClient(app)
+        created = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+        cid = created.json()["conversation_id"]
+
+        with client.stream(
+                "POST", f"/api/ai/conversations/{cid}/messages", headers=_auth("alice"),
+                json={"content": "tìm giúp tôi", "client_id": "c1", "use_library": True}) as resp:
+            list(resp.iter_text())
+
+        joined = "\n".join(t.content for t in provider.received.messages)
+        self.assertIn(UNTRUSTED_DATA_PREAMBLE, joined)
+
+
+# =============================================================================== M11
+
+
+class TestM11EphemeralCapAndRpm(unittest.TestCase):
+    def test_ephemeral_conversations_count_toward_the_per_user_cap(self) -> None:
+        rt = _enabled_runtime()
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=_resolve_profile))
+        client = TestClient(app)
+        client.put("/api/ai/preferences", headers=_auth("alice"),
+                   json={"memory_enabled": False, "preferences": {}})
+
+        with mock.patch("server.ai_assistant.routes.MAX_CONVERSATIONS_PER_USER", 2):
+            r1 = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+            r2 = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+            r3 = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r3.status_code, 400)
+        self.assertEqual(r3.json()["detail"]["code"], "ai_context_too_large")
+
+    def test_create_conversation_is_rate_limited(self) -> None:
+        rt = _enabled_runtime()
+        rt.rpm = 1
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=_resolve_profile))
+        client = TestClient(app)
+
+        r1 = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+        r2 = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 429)
+        self.assertEqual(r2.json()["detail"]["code"], "ai_rate_limited")
+
+    def test_ephemeral_eviction_prefers_the_flooding_users_own_entries(self) -> None:
+        store = EphemeralConversationStore(max_conversations=2)
+        store.create_conversation(AiConversation(conversation_id="a1", user_id="userA", mode="general"))
+        store.create_conversation(AiConversation(conversation_id="a2", user_id="userA", mode="general"))
+        # userB's first conversation pushes the GLOBAL store over capacity —
+        # it must evict userA's OLDEST ("a1"), never userB's own brand-new
+        # entry, and never leave userB with zero conversations.
+        store.create_conversation(AiConversation(conversation_id="b1", user_id="userB", mode="general"))
+
+        self.assertIsNone(store.get_conversation("a1"), "userA's oldest should have been evicted")
+        self.assertIsNotNone(store.get_conversation("a2"))
+        self.assertIsNotNone(store.get_conversation("b1"), "userB's own new conversation was evicted")
 
 
 if __name__ == "__main__":

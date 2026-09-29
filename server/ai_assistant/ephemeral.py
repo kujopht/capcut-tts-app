@@ -66,10 +66,28 @@ class EphemeralConversationStore:
     def _touch_locked(self, cid: str) -> None:
         self._entries[cid].expires_at = self._clock() + self._ttl
 
-    def _evict_if_needed_locked(self) -> None:
+    def _evict_if_needed_locked(self, *, protect_id: str, user_id: str) -> None:
+        """M11 (review finding): eviction used to always drop the GLOBAL
+        oldest conversation regardless of whose it was — a single heavy
+        memory-off user opening many ephemeral conversations could evict a
+        COMPLETELY UNRELATED user's ephemeral history. Now prefers evicting
+        the SAME user's own oldest entry first (protecting `protect_id`,
+        the conversation that was just inserted and triggered this call,
+        from being immediately evicted); only falls back to the global
+        oldest (still excluding `protect_id`) once this user has no other
+        entry left to give up — this still bounds total store size, it
+        just makes one user's own flood cost THAT user first."""
         while len(self._entries) > self._max_conversations and self._order:
-            oldest = self._order.pop(0)
-            self._entries.pop(oldest, None)
+            victim = next(
+                (cid for cid in self._order
+                 if cid != protect_id and self._entries[cid].conversation.user_id == user_id),
+                None)
+            if victim is None:
+                victim = next((cid for cid in self._order if cid != protect_id), None)
+            if victim is None:
+                break  # only entry left is the protected one — nothing safe to evict
+            self._order.remove(victim)
+            self._entries.pop(victim, None)
 
     # -- conversations -------------------------------------------------------
     def create_conversation(self, conv: AiConversation) -> AiConversation:
@@ -78,7 +96,7 @@ class EphemeralConversationStore:
             self._entries[conv.conversation_id] = _Entry(
                 conversation=conv, expires_at=self._clock() + self._ttl)
             self._order.append(conv.conversation_id)
-            self._evict_if_needed_locked()
+            self._evict_if_needed_locked(protect_id=conv.conversation_id, user_id=conv.user_id)
         return conv
 
     def get_conversation(self, conversation_id: str) -> Optional[AiConversation]:

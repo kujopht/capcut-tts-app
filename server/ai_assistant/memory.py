@@ -558,9 +558,31 @@ class AppwriteAiRepo(AiRepo):
         r = self._update(T_CONV, conversation_id, fields)
         return self._row_to_conv(r)
 
+    def _delete_all_matching(self, t: str, *, attribute: str, value: str, page_size: int = 100) -> None:
+        """H6 (review finding): repeatedly deletes the FIRST `page_size`
+        documents still matching `attribute == value` until none are left
+        — no cursor bookkeeping needed (unlike a cursor-based "next page",
+        this is safe against Appwrite's requirement that a `cursorAfter`
+        document still exist: here every deleted document simply drops out
+        of the NEXT identical query on its own). A single
+        `limit=100`/`limit=1000` page (the previous code) silently left
+        every document beyond that page permanently undeleted — for
+        `delete_conversation` a conversation with over 1000 messages, for
+        `delete_all_memory` a user with over 100 conversations/projects."""
+        while True:
+            qs = [self._q("equal", attribute, [value]), self._q("limit", values=[page_size])]
+            rows = self._list(t, qs)
+            if not rows:
+                return
+            for r in rows:
+                rid = str(r.get("$id") or "")
+                if rid:
+                    self._delete(t, rid)
+            if len(rows) < page_size:
+                return
+
     def delete_conversation(self, conversation_id: str) -> None:
-        for m in self.list_messages(conversation_id, limit=1000):
-            self._delete(T_MSG, m.message_id)
+        self._delete_all_matching(T_MSG, attribute="conversation_id", value=conversation_id)
         self._delete(T_SUM, conversation_id)
         self._delete(T_CONV, conversation_id)
 
@@ -658,11 +680,24 @@ class AppwriteAiRepo(AiRepo):
         return p
 
     # ------------------------------------------------------------- projects
+    #: H5 (review finding): kept in ONE place, reused by both
+    #: `create_project` and `update_project` — `update_project` previously
+    #: redacted but never TRUNCATED these fields, so an update (unlike
+    #: create) could still hand Appwrite an over-length attribute -> 400 ->
+    #: uncaught `AiUnavailable` -> 500. `outline_json`/`characters_json`/
+    #: `world_json` are NOT re-sliced by `[:N]` here beyond what
+    #: `routes.py::_bounded_json` already rejected with a clean 400 at the
+    #: API boundary — truncating a JSON string blindly can corrupt it
+    #: (same lesson as `preferences_json`'s own L12 fix); a caller that
+    #: bypasses that boundary gets `_Loi`/`AiUnavailable` instead of
+    #: silently corrupted data.
+    _PROJECT_TEXT_LIMITS = {"title": 120, "premise": 4000, "notes": 4000}
+
     def create_project(self, p: AiProject) -> AiProject:
-        data = {"user_id": p.user_id, "title": redact(p.title), "premise": redact(p.premise)[:4000],
-                "outline_json": redact(p.outline_json)[:8000],
-                "characters_json": redact(p.characters_json)[:8000],
-                "world_json": redact(p.world_json)[:8000], "notes": redact(p.notes)[:4000],
+        data = {"user_id": p.user_id, "title": redact(p.title)[:120],
+                "premise": redact(p.premise)[:4000],
+                "outline_json": redact(p.outline_json), "characters_json": redact(p.characters_json),
+                "world_json": redact(p.world_json), "notes": redact(p.notes)[:4000],
                 "updated_at": p.updated_at}
         self._create(T_PROJ, p.project_id, data)
         return p
@@ -689,7 +724,9 @@ class AppwriteAiRepo(AiRepo):
         fields["updated_at"] = now_iso()
         for k in ("title", "premise", "outline_json", "characters_json", "world_json", "notes"):
             if k in fields and isinstance(fields[k], str):
-                fields[k] = redact(fields[k])
+                value = redact(fields[k])
+                limit = self._PROJECT_TEXT_LIMITS.get(k)
+                fields[k] = value[:limit] if limit else value
         self._update(T_PROJ, project_id, fields)
         return self.get_project(project_id)  # type: ignore
 
@@ -742,14 +779,23 @@ class AppwriteAiRepo(AiRepo):
 
     # ------------------------------------------------------------- bulk delete
     def delete_all_memory(self, user_id: str, *, include_projects: bool = False) -> None:
-        qs = [self._q("equal", "user_id", [user_id]), self._q("limit", values=[100])]
-        for r in self._list(T_CONV, qs):
-            cid = str(r.get("$id") or "")
-            if cid:
-                self.delete_conversation(cid)
+        # H6 (review finding): a single `limit=100` page silently left every
+        # conversation/project beyond the 100th (project beyond the 100th)
+        # permanently undeleted for a user with more than that many — loop
+        # a page at a time (each `delete_conversation` call also now
+        # paginates ITS OWN message deletion, see `_delete_all_matching`)
+        # until none are left.
+        while True:
+            qs = [self._q("equal", "user_id", [user_id]), self._q("limit", values=[100])]
+            rows = self._list(T_CONV, qs)
+            if not rows:
+                break
+            for r in rows:
+                cid = str(r.get("$id") or "")
+                if cid:
+                    self.delete_conversation(cid)
+            if len(rows) < 100:
+                break
         self._delete(T_PREF, user_id)
         if include_projects:
-            for r in self._list(T_PROJ, qs):
-                pid = str(r.get("$id") or "")
-                if pid:
-                    self._delete(T_PROJ, pid)
+            self._delete_all_matching(T_PROJ, attribute="user_id", value=user_id)

@@ -18,6 +18,7 @@ stitched into one answer.
 """
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Dict, Iterator, List, Optional
 
@@ -88,10 +89,20 @@ class AiGateway:
                 user_ref=user_ref)
             started = False
             try:
-                for ev in provider.stream(req):
-                    if isinstance(ev, Delta):
-                        started = True
-                    yield ev
+                # R3 (review finding): `contextlib.closing` ensures the
+                # provider's own generator (holding its httpx streaming
+                # context manager / socket open) is closed the moment we
+                # stop iterating it here — whether that's a normal
+                # `return`, a `ProviderError`, or the CALLER of THIS
+                # generator closing/abandoning it (e.g. a client
+                # disconnect in `server/ai_assistant/routes.py`, which
+                # propagates as `GeneratorExit` at this exact suspension
+                # point) — never left to eventual GC.
+                with contextlib.closing(provider.stream(req)) as provider_events:
+                    for ev in provider_events:
+                        if isinstance(ev, Delta):
+                            started = True
+                        yield ev
                 self.circuit_breaker.record_success(name)
                 return
             except ProviderError as exc:
@@ -100,6 +111,21 @@ class AiGateway:
                     yield ErrorEvent(code="ai_provider_interrupted", message=str(exc))
                     return
                 continue  # not started yet -> try next provider in chain
+            except Exception:
+                # R1 (review finding): a provider bug that raises something
+                # OTHER than `ProviderError` must still be treated as a
+                # provider failure for circuit-breaker/fallback purposes —
+                # and must NEVER leak raw exception text to the client
+                # (every `ChatProvider` implementation in this repo already
+                # converts its own internals to `ProviderError`; this is a
+                # defense-in-depth backstop for a THIRD-PARTY/future
+                # provider that doesn't).
+                self.circuit_breaker.record_failure(name)
+                if started:
+                    yield ErrorEvent(code="ai_provider_interrupted",
+                                     message="Nhà cung cấp AI gặp sự cố không mong đợi.")
+                    return
+                continue
         if tried_any:
             yield ErrorEvent(
                 code="ai_provider_unavailable",

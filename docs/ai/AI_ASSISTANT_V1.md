@@ -231,16 +231,38 @@ backend foundation... behind a server flag that defaults OFF").
    `TablesDBAiRepo` sau này là một lớp con nhỏ nếu cần (Legacy đã tách
    toàn bộ logic dùng chung vào `_AppwriteChatRepo`-style helper trong
    `_call`/`_get`/`_create`/`_update`/`_delete`/`_list`).
-2. **`memory_enabled=false` chưa nối `_TTLCache` (1 giờ) vào đường đi của
-   route.** `memory.py` đã có hạ tầng `_TTLCache` đúng đặc tả nhưng
-   `routes.py` hiện xử lý đơn giản hơn: khi tắt ghi nhớ, tin nhắn KHÔNG
-   được ghi vào `AiRepo` cho lượt đó (không rò rỉ ra kho bền), nhưng cũng
-   KHÔNG được giữ lại 1 giờ để tiếp tục hội thoại trong phiên — mỗi lượt
-   khi tắt ghi nhớ hiện chỉ thấy system prompt, không thấy lịch sử lượt
-   trước. Đây là gap nhỏ nhất còn lại của §5; cắm `_TTLCache` vào
-   `context_builder.build_context`'s `pending_recent_messages` param (đã
-   có sẵn tham số này cho đúng mục đích) là việc còn lại, chưa làm trong
-   mission này vì ưu tiên còn lại (routes hoàn chỉnh + test) lớn hơn.
+2. **[ĐÃ SỬA — không còn là sai lệch]** Bản đầu có gap: khi tắt ghi nhớ,
+   tin nhắn không ghi vào `AiRepo` (đúng) nhưng cũng không giữ lại được gì
+   để tiếp tục hội thoại trong phiên (sai — mỗi lượt chỉ thấy system
+   prompt). Đã sửa bằng `server/ai_assistant/ephemeral.py::
+   EphemeralConversationStore` (TTL 1 giờ mặc định, refresh khi đọc/ghi;
+   trần TỔNG số hội thoại và trần tin/hội thoại — hai lớp chặn kích thước
+   ĐỘC LẬP với TTL) + nối dây đầy đủ trong `routes.py`:
+   - `POST /api/ai/conversations`/`.../messages` ghi vào
+     `rt.ephemeral` thay vì `rt.repo` khi `memory_enabled=False` tại THỜI
+     ĐIỂM gọi (đánh giá lại mỗi lần, không khoá theo cả hội thoại) — bật
+     lại ghi nhớ giữa chừng thì tin nhắn MỚI lập tức quay về ghi bền,
+     không cần đợi hội thoại mới.
+   - `GET/DELETE /api/ai/conversations/{id}`, `GET /api/ai/conversations`
+     đọc/xoá ở CẢ HAI kho (`_find_conversation`/`_recent_messages_
+     combined`); mục ở kho tạm luôn có `"ephemeral": true` trong response.
+   - `context_builder.build_context` (đã đúng từ đầu, xác nhận lại bằng
+     test): sở thích/tóm tắt CHỈ được chèn khi `memory_enabled=True`; lịch
+     sử tin nhắn dùng THẲNG danh sách đã gộp (durable+ephemeral) truyền
+     qua `pending_recent_messages` — nên lượt hiện tại LUÔN thấy được
+     chính nó dù ghi nhớ tắt hay bật.
+   - `DELETE /api/ai/memory` giờ xoá CẢ kho ephemeral của người dùng đó
+     (bao trùm hơn yêu cầu TTL, không phải thay thế nó).
+   - Bật ghi nhớ KHÔNG xoá lịch sử đã lưu bền trước đó (không route nào
+     xoá gì khi `PUT /api/ai/preferences` chạy — chỉ ghi đè giá trị cờ).
+   - Đo lường usage (`ai_usage_daily`) LUÔN đi qua `rt.repo` (kho bền),
+     không phụ thuộc cờ — vì bản ghi đó CHỈ có bộ đếm (`AiUsageDay`, xem
+     docstring của lớp), không có nội dung, nên không vi phạm nguyên tắc
+     "không lưu khi tắt ghi nhớ".
+   Kiểm bằng `server/tests/test_ai_memory_off.py` (9 bài, dùng repo có
+   "gián điệp" đếm lời gọi ghi — chứng minh CON SỐ ghi bằng 0, không chỉ
+   tin ở hình dạng response) + `test_ai_review_findings.py`'s R2 vẫn đúng
+   (usage tính phí không phụ thuộc `memory_enabled`).
 3. **Ngân sách token khi provider không báo cáo usage: dùng ước lượng
    ký tự/3.5** trên PROMPT đã gửi + văn bản đã sinh — không cố tính lại
    chính xác token thật của từng model (mỗi nhà cung cấp có tokenizer
@@ -304,7 +326,5 @@ thật trong bản đầu; cả 4 đã sửa VÀ có bài kiểm khoá lại
 - Giao diện web §11 (nút nổi, `/assistant`, component stream).
 - Test web `.test.mjs`/typecheck/lint/build/quét bundle của §12.
 - `TablesDBAiRepo` (biến thể Appwrite Cloud 2.x — xem sai lệch #1).
-- Nối `_TTLCache` vào `context_builder` cho `memory_enabled=false` (sai
-  lệch #2).
 - Vòng lặp model-tự-gọi-tool qua `tool_calls` thật (sai lệch #5) — hạ
   tầng (`ToolSpec`/`ToolCall`) đã sẵn, chỉ thiếu vòng lặp điều phối.

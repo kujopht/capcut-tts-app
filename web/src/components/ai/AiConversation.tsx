@@ -126,7 +126,8 @@ export function AiConversation() {
             </button>
           ) : null}
         </div>
-      ))}
+        );
+      })}
       {streaming && streamingText ? (
         <div className="ai-bong ai-bong-assistant">
           <div className="ai-bong-noidung">{renderMarkdownLite(streamingText)}</div>

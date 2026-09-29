@@ -237,6 +237,8 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
 }
 .ai-bong-loi { outline: 1px solid var(--danger); outline-offset: 2px; }
 .ai-bong-ghichu { display: block; margin-top: 4px; font-size: 11px; color: var(--text-3); }
+/* F2: bong bóng dừng/lỗi TRƯỚC token đầu tiên — nội dung rỗng đổi thành một câu giải thích, không phải khoảng trắng vô hình. */
+.ai-bong-rong { color: var(--text-3); font-style: italic; }
 .ai-nut-tao-lai {
   display: inline-flex;
   align-items: center;

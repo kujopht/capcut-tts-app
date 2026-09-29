@@ -262,3 +262,34 @@ test("23. /assistant: nút Đóng điều hướng lùi (router.back, fallback \
   assert.match(page, /router\.push\("\/"\)/);
   assert.match(page, /onClose=\{veTruoc\}/);
 });
+
+test("F2. Dừng/lỗi TRƯỚC token đầu tiên vẫn để lại một bong bóng trợ lý (không lượt hỏi nào biến mất)", () => {
+  const provider = codeOnly(read("components/ai/AiProvider.tsx"));
+  // Nhánh `catch` khi `ctrl.signal.aborted` phải LUÔN thêm một tin nhắn
+  // `status: "stopped"` vào `messages`, kể cả khi `streamingText` rỗng —
+  // không còn nhánh chỉ tắt `streaming` mà không để lại dấu vết.
+  const doanAbort = provider.match(/if \(ctrl\.signal\.aborted\) \{[\s\S]*?\n {8}\} else \{/)?.[0] ?? "";
+  assert.match(doanAbort, /status:\s*"stopped"\s*as const/, "nhánh abort phải luôn thêm bong bóng status:\"stopped\"");
+  assert.match(doanAbort, /messages:\s*\[\s*\.\.\.s\.messages/, "phải nối vào messages, không bỏ qua");
+  // Sự kiện `error` cũng LUÔN thêm bong bóng — không còn điều kiện
+  // `s.streamingText ? {...} : {}` (đường cũ bỏ qua khi chưa có token nào).
+  const doanError = provider.match(/\} else if \(ev\.type === "error"\) \{[\s\S]*?\n {12}\}\n {10}\}/)?.[0] ?? "";
+  assert.ok(!/s\.streamingText\s*\?\s*\{/.test(doanError), "sự kiện error không được điều kiện theo streamingText nữa");
+  assert.match(doanError, /messages:\s*\[\s*\.\.\.s\.messages/);
+});
+
+test("F2. Tạo lại luôn nhắm vào lượt người dùng CUỐI CÙNG, không đòi hỏi có sẵn bong bóng trợ lý", () => {
+  const provider = codeOnly(read("components/ai/AiProvider.tsx"));
+  const doanRegen = provider.match(/const regenerate = useCallback\(async \(\) => \{[\s\S]*?\n {2}\}, \[state\.messages, guiVanBan\]\);/)?.[0] ?? "";
+  assert.ok(doanRegen, "không tìm thấy regenerate()");
+  assert.ok(!/if \(!lastAssistant \|\|/.test(doanRegen), "regenerate không được bắt buộc phải có bong bóng trợ lý mới chạy");
+  assert.match(doanRegen, /if \(!lastUserTextRef\.current\) return;/);
+});
+
+test("F2. Bong bóng trợ lý rỗng (dừng/lỗi) hiện câu giải thích rõ ràng, không phải markdown rỗng vô hình", () => {
+  const conv = codeOnly(read("components/ai/AiConversation.tsx"));
+  assert.match(conv, /Đã dừng — chưa có nội dung\./);
+  assert.match(conv, /Không có phản hồi do lỗi\./);
+  const css = read("components/ai/ai.css");
+  assert.match(css, /\.ai-bong-rong/);
+});

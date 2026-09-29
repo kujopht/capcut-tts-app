@@ -83,16 +83,20 @@ test("6. Không khoá API/bí mật nào bị nhúng vào bundle web (chỉ NEXT
   assert.deepEqual(viPhamKhoa.map(tuongDoiSrc), []);
 });
 
-test("7. AiLauncher: z-index 56, bottom offset, và ẩn hẳn ở màn hình <=1023px (bao trùm mốc ≤640px di động)", () => {
+test("7. AiLauncher: z-index 56, bottom offset, dịch trái theo .chat-dock (F1), và ẩn hẳn ở màn hình <=1023px", () => {
   const css = read("components/ai/ai.css");
   const khoiLauncher = css.match(/\.ai-launcher \{[\s\S]*?\n\}/)?.[0] ?? "";
-  assert.match(khoiLauncher, /right:\s*16px/);
+  assert.match(khoiLauncher, /right:\s*calc\(16px \+ var\(--ai-dock-offset\)\)/,
+    "F1: launcher phải dùng CÙNG offset dock với panel, không đứng yên right:16px");
   assert.match(khoiLauncher, /bottom:\s*88px/);
   assert.match(khoiLauncher, /z-index:\s*56/);
   assert.match(css, /@media \(max-width:\s*1023px\)\s*\{\s*\.ai-launcher\s*\{\s*display:\s*none;/,
     "nút nổi phải ẩn hẳn ở màn hình hẹp (di động vào qua /assistant, không nút nổi)");
   // Nâng theo mini player, cùng kỹ thuật body:has(.mini) với chat.css — KHÔNG sửa chat.css.
   assert.match(css, /body:has\(\.mini\) \.ai-launcher/);
+  const launcherTsx = read("components/ai/AiLauncher.tsx");
+  assert.match(launcherTsx, /useChatDockOffset/);
+  assert.match(launcherTsx, /if \(open\) return null;/, "F1: launcher phải tự ẩn khi panel đang mở, không đè lên góc panel");
 });
 
 test("8. AiPanel neo phải z-index 56, kích thước 380px x min(600px, 100dvh-160px), và tự dịch trái theo .chat-dock", () => {
@@ -102,11 +106,20 @@ test("8. AiPanel neo phải z-index 56, kích thước 380px x min(600px, 100dvh
   assert.match(khoiPanel, /height:\s*min\(600px,\s*calc\(100dvh - 160px\)\)/);
   assert.match(khoiPanel, /z-index:\s*56/);
   const panelTsx = read("components/ai/AiPanel.tsx");
-  assert.match(panelTsx, /ResizeObserver/);
-  assert.match(panelTsx, /querySelector<HTMLElement>\(".chat-dock"\)/);
+  assert.match(panelTsx, /useChatDockOffset/);
   assert.match(panelTsx, /--ai-dock-offset/);
   // KHÔNG chạm file Chat V1.
   assert.ok(!/from "@\/components\/chat\//.test(panelTsx), "AiPanel không được import trực tiếp mã Chat V1");
+  const hookTsx = read("components/ai/useChatDockOffset.ts");
+  assert.match(hookTsx, /ResizeObserver/);
+  assert.match(hookTsx, /querySelector<HTMLElement>\(".chat-dock"\)/);
+});
+
+test("F3. AiPanel/AiLauncher KHÔNG mount trên /assistant — tránh .ai-panel-tin nhân đôi trong DOM", () => {
+  const panelTsx = read("components/ai/AiPanel.tsx");
+  const launcherTsx = read("components/ai/AiLauncher.tsx");
+  assert.match(panelTsx, /pathname === "\/assistant"\) return null;/);
+  assert.match(launcherTsx, /pathname === "\/assistant"\) return null;/);
 });
 
 test("9. /assistant tồn tại, an toàn vùng-an-toàn, và là lối vào chính trên di động (không nút nổi ở đó)", () => {

@@ -9,8 +9,9 @@
 */
 
 .ai-launcher {
+  --ai-dock-offset: 0px;
   position: fixed;
-  right: 16px;
+  right: calc(16px + var(--ai-dock-offset));
   bottom: 88px;
   z-index: 56;
   width: 52px;

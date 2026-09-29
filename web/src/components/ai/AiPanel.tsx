@@ -3,11 +3,18 @@
 /**
  * Cửa sổ trợ lý AI trên desktop — 380px × min(600px, 100dvh-160px), neo phải
  * dưới `AiLauncher`. Nếu `.chat-dock` (Chat V1) đang có cửa sổ mở, panel này
- * tự dịch sang TRÁI của dock bằng `ResizeObserver` đo trực tiếp DOM — KHÔNG
- * sửa `components/chat/**`, chỉ quan sát nó từ bên ngoài.
+ * tự dịch sang TRÁI của dock bằng `useChatDockOffset()` (đo DOM trực tiếp,
+ * KHÔNG sửa `components/chat/**`).
+ *
+ * KHÔNG mount trên `/assistant` — trang đó tự vẽ đúng ba component con
+ * (`AiControls`/`AiWriterBar`/`AiConversation`/`AiComposer`) trong bố cục
+ * toàn màn hình riêng của nó; mount thêm panel nổi ở đây từng khiến
+ * `.ai-panel-tin` xuất hiện HAI LẦN trong DOM (bài học F3).
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
+import { usePathname } from "next/navigation";
 import { useAi } from "./AiProvider";
+import { useChatDockOffset } from "./useChatDockOffset";
 import { AiControls } from "./AiControls";
 import { AiConversation } from "./AiConversation";
 import { AiComposer } from "./AiComposer";
@@ -15,35 +22,11 @@ import { AiWriterBar } from "./AiWriterBar";
 
 export function AiPanel() {
   const { enabled, availability, open } = useAi();
-  const [dockOffset, setDockOffset] = useState(0);
+  const dockOffset = useChatDockOffset();
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const pathname = usePathname();
 
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    let ro: ResizeObserver | null = null;
-    const capNhat = () => {
-      const el = document.querySelector<HTMLElement>(".chat-dock");
-      ro?.disconnect();
-      if (el) {
-        ro = new ResizeObserver((entries) => {
-          for (const e of entries) setDockOffset(e.contentRect.width > 0 ? e.contentRect.width + 12 : 0);
-        });
-        ro.observe(el);
-        const w = el.getBoundingClientRect().width;
-        setDockOffset(w > 0 ? w + 12 : 0);
-      } else {
-        setDockOffset(0);
-      }
-    };
-    capNhat();
-    const mo = new MutationObserver(capNhat);
-    mo.observe(document.body, { childList: true, subtree: true });
-    return () => {
-      ro?.disconnect();
-      mo.disconnect();
-    };
-  }, []);
-
+  if (pathname === "/assistant") return null;
   if (!enabled || !open) return null;
   if (availability === false || (availability && !availability.enabled)) return null;
 

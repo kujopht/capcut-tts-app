@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from server.ai_assistant.config import resolve_provider_chain
+from server.ai_assistant.ephemeral import EphemeralConversationStore
 from server.ai_assistant.gateway import AiGateway
 from server.ai_assistant.limits import RpmLimiter, StreamGuard
 from server.ai_assistant.memory import AiRepo, AiUnavailable, AppwriteAiRepo, InMemoryAiRepo
@@ -27,6 +28,9 @@ class AiRuntime:
     enabled: bool
     reason: str = ""
     repo: Optional[AiRepo] = None
+    #: `memory_enabled=false` destination (contract §5) — NEVER durable,
+    #: NEVER touched when memory is on. See `ephemeral.py`'s own docstring.
+    ephemeral: EphemeralConversationStore = field(default_factory=EphemeralConversationStore)
     gateway: Optional[AiGateway] = None
     tool_ctx: ToolContext = field(default_factory=ToolContext)
     rpm_limiter: RpmLimiter = field(default_factory=RpmLimiter)

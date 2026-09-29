@@ -120,6 +120,13 @@ class AiProject:
 
 @dataclass
 class AiUsageDay:
+    """Counters ONLY — no message/prompt content anywhere in this record,
+    by construction (there is no field for it). This is intentional and is
+    why usage metering keeps recording even for a user with
+    `memory_enabled=False` (contract §5/§9): counting tokens/requests is
+    not "remembering what was said", and the privacy guarantee that
+    matters (no content persisted) holds either way."""
+
     user_id: str
     day: str  # "yyyymmdd"
     requests: int = 0

@@ -11,6 +11,19 @@ import { AI_MODES, AI_MODE_LABELS, type AiErrorCode } from "@/lib/ai/types";
 import { FanficIcon } from "@/components/icons/FanficIcon";
 
 /**
+ * F4 (QA Chrome thật): nhãn usage từng hiện thẳng số TOKEN dưới nhãn "lượt"
+ * ("Đã dùng 2.188/30.000 lượt hôm nay") — gây hiểu lầm token là số lượt
+ * hỏi. Số token thô (không lộ khái niệm "token" ra câu chữ chính, chỉ ở
+ * `title` — người dùng thường không cần biết đơn vị đo ngân sách) chuyển
+ * xuống tooltip; câu chính chỉ còn phần trăm hạn mức đã dùng.
+ */
+function phanTramSuDung(used: number, limit: number): string {
+  if (!Number.isFinite(limit) || limit <= 0) return "—";
+  const pct = Math.min(100, Math.max(0, Math.round((used / limit) * 100)));
+  return `${pct}%`;
+}
+
+/**
  * Popover cài đặt ký ức — bật/tắt ghi nhớ (`memory_enabled`) và "Xoá toàn bộ
  * ký ức AI" (§5). Xoá dùng XÁC NHẬN TRONG TRANG hai bước (bấm lần 1 hiện
  * cảnh báo + nút "Xác nhận xoá", bấm lần 2 mới gọi API) — KHÔNG
@@ -213,9 +226,11 @@ export function AiControls({ onClose }: { onClose?: () => void } = {}) {
       </header>
 
       {availability && availability.limits ? (
-        <div className="ai-usage hint">
-          Đã dùng {availability.limits.used_today.toLocaleString("vi-VN")}/
-          {availability.limits.limit_today.toLocaleString("vi-VN")} lượt hôm nay
+        <div
+          className="ai-usage hint"
+          title={`${availability.limits.used_today.toLocaleString("vi-VN")}/${availability.limits.limit_today.toLocaleString("vi-VN")} token`}
+        >
+          Đã dùng {phanTramSuDung(availability.limits.used_today, availability.limits.limit_today)} hạn mức hôm nay
         </div>
       ) : null}
 

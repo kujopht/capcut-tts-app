@@ -293,3 +293,22 @@ test("F2. Bong bóng trợ lý rỗng (dừng/lỗi) hiện câu giải thích r
   const css = read("components/ai/ai.css");
   assert.match(css, /\.ai-bong-rong/);
 });
+
+test("F3. /assistant là bố cục toàn màn hình CỐ ĐỊNH ở <=1023px (z-index 70, inset 0), không nằm trong luồng dưới header site", () => {
+  const css = read("components/ai/ai.css");
+  const khoiMedia = css.match(/@media \(max-width: 1023px\) \{\s*\.ai-trang \{[\s\S]*?\n {2}\}\n\}/)?.[0] ?? "";
+  assert.match(khoiMedia, /position:\s*fixed/, "F3: /assistant phải position:fixed ở màn hình hẹp — nếu không nó nằm dưới header site và ô soạn tin lọt ra ngoài khung nhìn");
+  assert.match(khoiMedia, /inset:\s*0/);
+  assert.match(khoiMedia, /z-index:\s*70/, "cùng bậc z-index với overlay di động của Chat V1 (.chat-co-hoi-thoai .chat-cot-tin)");
+  // Ô soạn tin luôn thấy được, tránh vùng an toàn đáy (home indicator iOS).
+  assert.match(css, /\.ai-trang \.ai-panel-soan \{[\s\S]*?env\(safe-area-inset-bottom/);
+});
+
+test("F4. Nhãn hạn mức hiện PHẦN TRĂM (không phải số token thô) trong câu chính; số token chỉ ở tooltip", () => {
+  const controls = codeOnly(read("components/ai/AiControls.tsx"));
+  assert.match(controls, /Đã dùng \{phanTramSuDung\(/, "F4: câu chính phải hiện phần trăm, không phải used_today/limit_today thô");
+  assert.match(controls, /hạn mức hôm nay/);
+  assert.match(controls, /title=\{`\$\{availability\.limits\.used_today[\s\S]*?token`\}/, "số token thô chỉ nằm trong title (tooltip)");
+  assert.ok(!/Đã dùng \{availability\.limits\.used_today\.toLocaleString\("vi-VN"\)\}\//.test(controls),
+    "không còn hiện thẳng used_today/limit_today ở câu chính (dạng cũ gây hiểu lầm token = lượt hỏi)");
+});

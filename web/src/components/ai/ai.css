@@ -357,3 +357,25 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
   overflow: hidden;
 }
 .ai-trang .ai-panel-tin { padding: var(--s3) max(var(--s3), env(safe-area-inset-left, 0)); }
+.ai-trang .ai-panel-soan { padding-bottom: calc(var(--s2) + env(safe-area-inset-bottom, 0)); }
+/*
+  F3 (QA Chrome thật, 390x844 và ≤1023px nói chung): `/assistant` trước đây
+  chỉ là MỘT khối `height:100dvh` nằm TRONG luồng tài liệu, DƯỚI header
+  site (213px) — kết quả là khối 100dvh đó bị đẩy xuống dưới màn hình, ô
+  soạn tin nằm ở y≈991 trong khung nhìn 859px (ngoài màn hình), và footer
+  site kéo theo sau. `position:fixed;inset:0` gỡ nó khỏi luồng tài liệu và
+  phủ đúng khung nhìn — CÙNG kỹ thuật `.chat-co-hoi-thoai .chat-cot-tin`
+  (`chat.css`, z-index 70) cho `/messages` di động, đọc GIÁ TRỊ z-index đó
+  chứ không import file kia. Không cần vô hiệu hoá transform/backdrop-filter
+  như chat.css phải làm — `.ai-trang` không nằm trong `.page` hay bất kỳ
+  khối nào áp transform/backdrop-filter cho chuyển cảnh route.
+*/
+@media (max-width: 1023px) {
+  .ai-trang {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    height: 100dvh;
+    background: var(--bg);
+  }
+}

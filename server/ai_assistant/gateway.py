@@ -1,0 +1,109 @@
+"""
+AI Assistant gateway — Fanfic AI Assistant V1 §3.
+
+Mode -> ordered provider fallback chain, reusing
+`server.llm_gateway.usage_limits.CircuitBreaker` VERBATIM (same class, own
+instance — this package's providers are a disjoint namespace from the
+reader-AI's `LLMGateway`, so sharing ONE `CircuitBreaker` instance across
+both would let an outage on one feature spuriously open a breaker for the
+other; two separate instances of the same class is the correct reuse,
+not a new implementation).
+
+Fallback policy (THE safety-relevant rule in this module): a provider may
+only be swapped for the next one in the chain if it fails BEFORE its first
+`Delta` ever reached the caller. Once even one `Delta` has been yielded,
+any further provider failure becomes an `ErrorEvent(code="ai_provider_
+interrupted")` and the stream ends — two providers are never silently
+stitched into one answer.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, Iterator, List, Optional
+
+from server.ai_assistant.config import MODE_LIMITS, estimate_tokens
+from server.llm_gateway.chat_provider import (
+    ChatProvider, ChatTurn, Delta, GenerateRequest, ProviderError, StreamEvent,
+)
+from server.llm_gateway.usage_limits import CircuitBreaker
+
+
+@dataclass(frozen=True)
+class ErrorEvent:
+    code: str
+    message: str
+
+
+def trim_context(messages: List[ChatTurn], *, max_tokens: int) -> List[ChatTurn]:
+    """Backstop trim (contract §3: "cắt ngữ cảnh theo max_context_tokens của
+    mode") — keeps every `system` turn (prompt/preferences/summary/
+    retrieval block), then keeps as many of the most RECENT non-system
+    turns as fit the remaining budget. `context_builder.py` already keeps
+    its own output near budget; this is a second, independent backstop so
+    the gateway never trusts a caller's trimming alone."""
+    system_turns = [t for t in messages if t.role == "system"]
+    other_turns = [t for t in messages if t.role != "system"]
+    used = sum(estimate_tokens(t.content) for t in system_turns)
+    kept: List[ChatTurn] = []
+    for t in reversed(other_turns):
+        cost = estimate_tokens(t.content)
+        if used + cost > max_tokens and kept:
+            break
+        used += cost
+        kept.append(t)
+    kept.reverse()
+    return system_turns + kept
+
+
+@dataclass
+class AiGateway:
+    providers: Dict[str, ChatProvider]
+    provider_chain: List[str]
+    #: mode -> provider_name -> model override (falls back to the
+    #: provider's own default model when absent).
+    model_overrides: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    circuit_breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
+
+    def _model_for(self, mode: str, provider_name: str, provider: ChatProvider) -> str:
+        override = self.model_overrides.get(mode, {}).get(provider_name)
+        if override:
+            return override
+        return getattr(provider, "_default_model", provider_name)
+
+    def stream(self, messages: List[ChatTurn], *, mode: str,
+              user_ref: str = "") -> Iterator[StreamEvent]:
+        limits = MODE_LIMITS.get(mode, MODE_LIMITS["general"])
+        trimmed = trim_context(messages, max_tokens=limits["max_context_tokens"])
+        tried_any = False
+        for name in self.provider_chain:
+            if self.circuit_breaker.is_open(name):
+                continue
+            provider = self.providers.get(name)
+            if provider is None:
+                continue
+            tried_any = True
+            model = self._model_for(mode, name, provider)
+            req = GenerateRequest(
+                messages=trimmed, model=model, max_output_tokens=limits["max_output_tokens"],
+                user_ref=user_ref)
+            started = False
+            try:
+                for ev in provider.stream(req):
+                    if isinstance(ev, Delta):
+                        started = True
+                    yield ev
+                self.circuit_breaker.record_success(name)
+                return
+            except ProviderError as exc:
+                self.circuit_breaker.record_failure(name)
+                if started:
+                    yield ErrorEvent(code="ai_provider_interrupted", message=str(exc))
+                    return
+                continue  # not started yet -> try next provider in chain
+        if tried_any:
+            yield ErrorEvent(
+                code="ai_provider_unavailable",
+                message="Tất cả nhà cung cấp AI đều đang gặp sự cố — thử lại sau.")
+        else:
+            yield ErrorEvent(
+                code="ai_no_provider", message="Chưa có nhà cung cấp AI nào khả dụng.")

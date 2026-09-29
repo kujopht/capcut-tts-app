@@ -19,6 +19,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { StickerRef } from "@/lib/chat/types";
 import { useChat } from "./ChatProvider";
 import { StickerPicker } from "./StickerPicker";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 const TOI_DA = 2000;
 const EMOJI = ["😀", "😂", "🥰", "😍", "😅", "😭", "😢", "🤔", "👍", "🙏", "👏", "❤️", "🔥", "🎉", "✨", "👀"];
@@ -189,7 +190,7 @@ function OSoan({ peerId, peerName, autoFocus = false }: { peerId: string; peerNa
         {gt.length > TOI_DA - 200 ? <span className="hint chat-soan-dem" aria-live="polite">{gt.length}/{TOI_DA}</span> : null}
         <button type="submit" className="chat-nut chat-nut-gui" disabled={!guiDuoc || rong}
           aria-label={guiDuoc ? "Gửi tin nhắn" : "Chưa gửi được — đang chờ kết nối"}>
-          <span aria-hidden="true">➤</span>
+          <FanficIcon name="send" size={16} />
         </button>
       </div>
     </form>

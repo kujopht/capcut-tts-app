@@ -7,6 +7,7 @@ import { useChat } from "./ChatProvider";
 import { ChatAvatar, tenHien } from "./ChatAvatar";
 import { ChatEmptyState } from "./ChatEmptyState";
 import { UnreadBadge } from "./UnreadBadge";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 export function ConversationList({
   onSelect,
@@ -78,7 +79,11 @@ export function ConversationList({
               <span className="chat-ds-chu">
                 <span className="chat-ds-dong">
                   <strong className="truncate">{ten}</strong>
-                  {c.muted ? <span className="chat-ds-tat" aria-hidden="true" title="Đã tắt thông báo">🔕</span> : null}
+                  {c.muted ? (
+                    <span className="chat-ds-tat" title="Đã tắt thông báo">
+                      <FanficIcon name="mute" size={14} />
+                    </span>
+                  ) : null}
                   {c.lastTime ? (
                     <span className="hint chat-ds-luc">{khiNao(new Date(c.lastTime).toISOString())}</span>
                   ) : null}

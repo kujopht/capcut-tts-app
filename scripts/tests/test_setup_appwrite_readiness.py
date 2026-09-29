@@ -388,6 +388,38 @@ class PlanChiDocTest(unittest.TestCase):
         self.assertEqual(tong["tao_index"], len(SCHEMA["chat_messages"]["indexes"]))
         self.assertEqual(tong["khac"], 1, "size lệch phải được báo")
 
+    def test_dau_cuoi_main_plan_chi_phat_GET_ra_mang(self):
+        """Qua `main(["--plan", ...])` that (cau hinh gia, transport gia): MOI request roi may deu la GET."""
+        import contextlib
+        import io
+
+        from scripts import setup_appwrite as sa
+
+        cac_goi = []
+
+        def xu_ly(req: httpx.Request) -> httpx.Response:
+            cac_goi.append((req.method, req.url.path))
+            if req.url.path.endswith("/databases/db_gia"):
+                return httpx.Response(200, json={"$id": "db_gia"})
+            return httpx.Response(404, json={"message": "not found", "type": "collection_not_found"})
+
+        that = httpx.Client
+
+        def client_gia(*a, **kw):
+            kw.pop("transport", None)
+            return that(*a, transport=httpx.MockTransport(xu_ly), **kw)
+
+        env = {"FAS_ENV_FILE": "", "DATA_BACKEND": "appwrite", "APPWRITE_ENDPOINT": "https://aw.example.test/v1",
+               "APPWRITE_PROJECT_ID": "du-an-gia", "APPWRITE_DATABASE_ID": "db_gia", "APPWRITE_API_KEY": "khoa-gia-khong-in"}
+        ra = io.StringIO()
+        with patch.dict(os.environ, env), patch.object(sa.httpx, "Client", side_effect=client_gia), \
+                contextlib.redirect_stdout(ra):
+            self.assertEqual(sa.main(["--plan", "--only", "chat_messages,chat_fanouts"]), 0)
+        self.assertTrue(cac_goi, "phải có request đọc")
+        self.assertEqual({m for m, _ in cac_goi}, {"GET"}, cac_goi)
+        self.assertIn("SẼ TẠO 2 bảng", ra.getvalue())
+        self.assertNotIn("khoa-gia-khong-in", ra.getvalue(), "không bao giờ in khoá")
+
     def test_khoa_khong_du_quyen_bao_ro(self):
         s = self._setup()
         with patch.object(s, "_doc", return_value=(401, {})), self.assertRaises(SystemExit) as ctx:

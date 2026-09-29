@@ -1039,6 +1039,8 @@ class RuntimeTest(unittest.TestCase):
         r = build_runtime(aw, user_exists=lambda u: True,
                           env={"FAS_CHAT_V1": "1", "FAS_CHAT_V1_CANARY_USERS": " u_a, u_b;u_c  ban@example.com ../x "})
         self.assertEqual(r.canary_users, frozenset({"u_a", "u_b", "u_c"}), "chỉ nhận user ID — email/đường dẫn bị bỏ")
+        # Luat ID Appwrite: bat dau bang chu/so, <= 36 ky tu — "..", ".", "-x", "_x", qua dai deu bi bo.
+        self.assertEqual(doc_canary(".. . -x _x a/b a@b " + "a" * 37 + " ok1"), (frozenset({"ok1"}), 7))
         self.assertTrue(r.allows("u_b"))
         self.assertFalse(r.allows("u_d"))
         mo_ta = json.dumps(r.describe())
@@ -1115,6 +1117,38 @@ class CanaryRouteTest(MessagingCase):
         self.assertEqual(self.client.get("/api/chat/availability", headers=self.ha).json(),
                          {"enabled": False, "reason": "off"})
         self.assertEqual(self._ma(self.client.post("/api/chat/session", headers=self.ha)), (503, "chat_not_configured"))
+
+    def test_MOI_route_chat_dang_ky_trong_app_deu_qua_cong_canary(self):
+        """Liet ke TAT CA route /api/chat/* dang co trong app (khong phai danh sach viet tay) — mot route them sau
+        ma quen cong se lam CI do. Ngoai le co chu dich: /api/chat/ask (AI Chat, tinh nang khac), /api/chat/availability."""
+        from fastapi.routing import APIRoute
+
+        def moi_route(routes, tien_to=""):
+            # FastAPI moi boc router con (`include_router`) trong mot doi tuong rieng — di de quy vao do.
+            for x in routes:
+                if isinstance(x, APIRoute):
+                    yield tien_to + x.path, x
+                    continue
+                goc = getattr(x, "original_router", None) or getattr(x, "router", None)  # FastAPI >= 0.140 / cu
+                con = getattr(goc, "routes", None) or getattr(x, "routes", None)
+                them = getattr(getattr(x, "include_context", None), "prefix", None) or getattr(x, "prefix", "") or ""
+                if con is not None:
+                    yield from moi_route(con, tien_to + them)
+
+        than = {"messages": {"client_id": cid(9), "text": "x"}, "read": {}, "mute": {"muted": True},
+                "block": {"blocked": True}, "identities": {"chat_user_ids": [self.a]}}
+        da_kiem = []
+        for duong, rt in moi_route(server_main.app.routes):
+            if not duong.startswith("/api/chat/") or duong in ("/api/chat/ask", "/api/chat/availability"):
+                continue
+            url = duong.replace("{peer}", self.a)
+            for m in sorted(rt.methods - {"HEAD", "OPTIONS"}):
+                body = than.get(url.rsplit("/", 1)[-1]) if m == "POST" else None
+                r = self.client.request(m, url, headers=self.hc, json=body)
+                self.assertEqual(self._ma(r), (403, "chat_not_enabled"), f"{m} {duong} lọt cổng canary")
+                da_kiem.append(f"{m} {duong}")
+        # 11 route co cong luc viet (9 o messaging/routes.py + session + identities) — it hon = bo duyet hong.
+        self.assertGreaterEqual(len(da_kiem), 11, da_kiem)
 
     def test_health_bao_khan_gia_va_SO_LUONG_khong_liet_ke_id(self):
         r = self.client.get("/api/health")

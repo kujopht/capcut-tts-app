@@ -37,8 +37,9 @@ log = logging.getLogger("fanfic.messaging")
 
 KHO_APPWRITE = ("legacy", "tablesdb")
 KHAN_GIA = ("canary", "all")
-#: ID tai khoan Appwrite: chu, so, `.`, `_`, `-` (toi da 36 theo Appwrite; nhan toi 64 cho kho khac).
-_ID_HOP_LE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+#: ID tai khoan Appwrite: BAT DAU bang chu/so, sau do chu, so, `.`, `_`, `-`; toi da 36 ky tu (luat ID cua Appwrite).
+#: Email (`@`), duong dan (`/`, `..`), khoang trang KHONG bao gio khop.
+_ID_HOP_LE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$")
 
 
 @dataclass

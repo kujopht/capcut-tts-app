@@ -372,26 +372,27 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
                 return { ...s, messages: [...s.messages, assistantMsg], streaming: false, streamingText: "" };
               });
             } else if (ev.type === "error") {
+              // F2: LUÔN thêm một bong bóng trợ lý — kể cả khi CHƯA có token
+              // nào (`streamingText` rỗng) — để không có lượt hỏi nào "biến
+              // mất" (tin người dùng hiện ra mà không có gì nối theo, và
+              // "Tạo lại" trước đây nhắm nhầm vào câu trả lời TRƯỚC ĐÓ vì
+              // không tìm thấy bong bóng trợ lý nào của lượt này).
               setState((s) => ({
                 ...s,
                 streaming: false,
+                streamingText: "",
                 error: { code: ev.code, message: ev.message, reset_at: ev.reset_at },
-                ...(s.streamingText
-                  ? {
-                      messages: [
-                        ...s.messages,
-                        {
-                          message_id: assistantIdRef.current ?? `local_asst_${clientId}`,
-                          role: "assistant" as const,
-                          content: s.streamingText,
-                          status: "error" as const,
-                          citations: [],
-                          created_at: new Date().toISOString(),
-                        },
-                      ],
-                      streamingText: "",
-                    }
-                  : {}),
+                messages: [
+                  ...s.messages,
+                  {
+                    message_id: assistantIdRef.current ?? `local_asst_${clientId}`,
+                    role: "assistant" as const,
+                    content: s.streamingText,
+                    status: "error" as const,
+                    citations: [],
+                    created_at: new Date().toISOString(),
+                  },
+                ],
               }));
             }
           },
@@ -399,7 +400,27 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         );
       } catch (e) {
         if (ctrl.signal.aborted) {
-          setState((s) => ({ ...s, streaming: false }));
+          // F2: người dùng bấm Dừng TRƯỚC token đầu tiên — trước đây không
+          // để lại dấu vết gì (không bong bóng trợ lý, không "Đã dừng"), nên
+          // lượt hỏi trông như biến mất và "Tạo lại" nhắm nhầm câu trả lời
+          // trước. Luôn thêm một bong bóng `status:"stopped"` (nội dung rỗng
+          // nếu chưa có token nào — `AiConversation` tự hiện chú thích).
+          setState((s) => ({
+            ...s,
+            streaming: false,
+            streamingText: "",
+            messages: [
+              ...s.messages,
+              {
+                message_id: assistantIdRef.current ?? `local_asst_${clientId}`,
+                role: "assistant" as const,
+                content: s.streamingText,
+                status: "stopped" as const,
+                citations: [],
+                created_at: new Date().toISOString(),
+              },
+            ],
+          }));
         } else {
           setState((s) => ({ ...s, streaming: false, streamingText: "", error: loiTuApiError(e) }));
         }
@@ -414,11 +435,20 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     ctrlRef.current?.abort();
   }, []);
 
+  /**
+   * "Tạo lại" luôn nhắm vào LƯỢT NGƯỜI DÙNG CUỐI CÙNG (§F2) — không đòi hỏi
+   * phải có sẵn một bong bóng trợ lý mới hoạt động: nếu lượt cuối chưa có
+   * trả lời (rất hiếm sau khi đã luôn thêm bong bóng `stopped`/`error` ở
+   * trên, nhưng vẫn giữ làm lưới an toàn), vẫn gửi lại được — chỉ khi CÓ một
+   * bong bóng trợ lý cuối mới xoá nó trước khi gửi lại.
+   */
   const regenerate = useCallback(async () => {
+    if (!lastUserTextRef.current) return;
     const lastAssistant = [...state.messages].reverse().find((m) => m.role === "assistant");
-    if (!lastAssistant || !lastUserTextRef.current) return;
-    setState((s) => ({ ...s, messages: s.messages.filter((m) => m.message_id !== lastAssistant.message_id) }));
-    await guiVanBan(lastUserTextRef.current, lastAssistant.message_id);
+    if (lastAssistant) {
+      setState((s) => ({ ...s, messages: s.messages.filter((m) => m.message_id !== lastAssistant.message_id) }));
+    }
+    await guiVanBan(lastUserTextRef.current, lastAssistant?.message_id);
   }, [state.messages, guiVanBan]);
 
   /** Tải sở thích (bật/tắt ghi nhớ) — gọi khi mở popover cài đặt, KHÔNG lúc mount (idle gần như zero mạng). */

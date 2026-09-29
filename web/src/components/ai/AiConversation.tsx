@@ -86,10 +86,24 @@ export function AiConversation() {
           </p>
         </div>
       ) : null}
-      {messages.map((m) => (
+      {messages.map((m) => {
+        const rong = m.role === "assistant" && !m.content.trim();
+        return (
         <div key={m.message_id} className={`ai-bong ai-bong-${m.role}${m.status === "error" ? " ai-bong-loi" : ""}`}>
-          <div className="ai-bong-noidung">{renderMarkdownLite(m.content)}</div>
-          {m.status === "stopped" ? <span className="ai-bong-ghichu">Đã dừng</span> : null}
+          {/*
+            F2: trước đây một lượt bị dừng/lỗi TRƯỚC token đầu tiên để lại
+            một bong bóng nội dung rỗng gần như vô hình — người dùng thấy
+            câu hỏi của mình "rơi vào im lặng". Rỗng + stopped/error thì hiện
+            một câu giải thích rõ ràng thay vì markdown của chuỗi rỗng.
+          */}
+          {rong && m.status === "stopped" ? (
+            <div className="ai-bong-noidung ai-bong-rong">Đã dừng — chưa có nội dung.</div>
+          ) : rong && m.status === "error" ? (
+            <div className="ai-bong-noidung ai-bong-rong">Không có phản hồi do lỗi.</div>
+          ) : (
+            <div className="ai-bong-noidung">{renderMarkdownLite(m.content)}</div>
+          )}
+          {m.status === "stopped" && !rong ? <span className="ai-bong-ghichu">Đã dừng</span> : null}
           {m.citations.length ? (
             <ul className="ai-trichdan">
               {m.citations.map((c, i) => (

@@ -59,8 +59,10 @@ function TrangThaiTin({ m, onRetry }: { m: ChatMessage; onRetry: () => void }) {
 }
 
 export function ChatThread({ peerId }: { peerId: string }) {
-  const { threads, retry, loadOlder } = useChat();
+  const { threads, retry, loadOlder, identityOf } = useChat();
   const th = threads[conversationIdFor(peerId)];
+  // Canary: nguoi kia chua trong nhom duoc dung chat — khong moi "gui loi chao" khi o soan da bi thay bang thong bao.
+  const chuaMo = identityOf(peerId)?.chat_enabled === false;
   const items = th?.items ?? [];
   const hop = useRef<HTMLDivElement | null>(null);
   const oCuoi = useRef(true);
@@ -139,7 +141,9 @@ export function ChatThread({ peerId }: { peerId: string }) {
             </button>
           </div>
         ) : null}
-        {!items.length ? (
+        {!items.length && chuaMo ? (
+          <ChatEmptyState icon="⏳" title="Chưa nhắn tin được" hint="Người này chưa dùng được Tin nhắn trong giai đoạn thử." />
+        ) : !items.length ? (
           <ChatEmptyState icon="👋" title="Bắt đầu cuộc trò chuyện" hint="Gửi lời chào đầu tiên — tin nhắn chỉ hai người thấy." />
         ) : (
           items.map((m, i) => {

@@ -496,6 +496,8 @@ test("canary: web hoi may chu /api/chat/availability; CHI hien chat khi availabl
   assert.match(trang, /Tin nhắn chưa mở cho tài khoản này/);
   // Nguoi KIA ngoai canary: khong o soan (may chu se 403) — noi that.
   assert.match(codeOnly(read("components/chat/ChatComposer.tsx")), /if \(it\?\.found && it\.chat_enabled === false\) return <ChuaMo/);
+  // ...va khung tin khong moi "gui loi chao dau tien" (do that tren Chrome QA canary).
+  assert.match(codeOnly(read("components/chat/ChatThread.tsx")), /\{!items\.length && chuaMo \? \(\s*<ChatEmptyState icon="⏳" title="Chưa nhắn tin được"/);
   assert.match(codeOnly(read("lib/api.ts")), /availability: \(\) => request<ChatAvailability>\("\/api\/chat\/availability"\)/);
 });
 

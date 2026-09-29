@@ -14,6 +14,7 @@ Chay:
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -776,6 +777,86 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "attributes": [
             ("job_id", "string", True, 64),
             ("owner_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
+    # ==========================================================================
+    # NHAN TIN 1:1 (Chat V1, phan chu) — xem `server/messaging/` va
+    # `docs/messaging/CHAT_APPWRITE.md`.
+    #
+    # Appwrite SO HUU du lieu + Realtime. Quyen cap BANG rong (khong ai tao/sua
+    # truc tiep); quyen theo HANG chi cap DOC: hoi thoai + tin -> hai thanh vien;
+    # thanh vien -> chinh chu; danh dau phat tan -> khong ai. Chan dung CHUNG
+    # `user_blocks` (dinh nghia DUNG nhu #229 Social/Profile, ben duoi).
+    # Realtime chi day su kien cho nguoi CO QUYEN DOC hang (do that Cloud 2.3).
+    #
+    # ROLLBACK: xoa bon bang `chat_*` (`user_blocks` thuoc Social — giu). Chi mat
+    # tin nhan. Production (1.9.6): CHUA tao — `FAS_CHAT_V1` tat.
+    "chat_conversations": {
+        "name": "Chat Conversations",
+        "attributes": [
+            ("kind", "string", True, 16),          # "dm" (V1 chi 1:1)
+            ("member_a", "string", True, 36),       # hai thanh vien, THEO THU TU (a < b)
+            ("member_b", "string", True, 36),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("member_a_idx", "key", ["member_a"]),
+            ("member_b_idx", "key", ["member_b"]),
+        ],
+    },
+    "chat_messages": {
+        "name": "Chat Messages",
+        "attributes": [
+            ("conversation_id", "string", True, 40),
+            ("sender_id", "string", True, 36),
+            ("recipient_id", "string", True, 36),
+            ("client_id", "string", True, 32),
+            ("text", "string", True, 2000),
+            ("created_at", "datetime", True, None),
+            ("kind", "string", False, 16),
+            # kind "sticker": CHI ma nhan dan (`server/messaging/stickers.py`) — KHONG nhung anh; anh o R2.
+            # `text` cua tin nhan dan = nhan thay the ("Nhãn dán: …") cho ban xem truoc/doc man hinh.
+            ("sticker_id", "string", False, 64),
+        ],
+        "indexes": [
+            # lich su (moi nhat truoc, con tro) + tin moi nhat cho ban xem truoc
+            ("conv_created_idx", "key", ["conversation_id", "created_at"]),
+            # dem "chua doc": tin GUI CHO TOI sau moc da doc
+            ("conv_recipient_created_idx", "key", ["conversation_id", "recipient_id", "created_at"]),
+        ],
+    },
+    "chat_members": {
+        "name": "Chat Members",
+        "attributes": [
+            ("conversation_id", "string", True, 40),
+            ("user_id", "string", True, 36),
+            ("peer_id", "string", True, 36),
+            ("unread_count", "integer", False, None),
+            ("last_read_at", "datetime", False, None),
+            ("last_read_message_id", "string", False, 40),
+            ("muted", "boolean", False, None),
+            ("last_message_id", "string", False, 40),
+            ("last_text", "string", False, 200),
+            ("last_at", "datetime", False, None),
+            ("last_sender_id", "string", False, 36),
+            ("updated_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("user_last_idx", "key", ["user_id", "last_at"]),  # hop thu, moi nhat truoc
+            ("conv_idx", "key", ["conversation_id"]),
+        ],
+    },
+    # CHAN MUC TAI KHOAN: bang `user_blocks` cua Social Play V1 (#229, o tren) — MOT bang, MOT he thong.
+    # Chat doc/ghi DUNG hang do (`social.block_key`, kind "block"); tat tieng hoi thoai la
+    # `chat_members.muted`, KHONG phai kind "mute" (cua Social: an noi dung).
+    # Hang DANH DAU "tin X da phat tan" — tao CUNG giao dich voi phep tang "chua
+    # doc": trung rowId -> ca giao dich hong -> tac dung phu DUNG MOT LAN.
+    "chat_fanouts": {
+        "name": "Chat Fanouts",
+        "attributes": [
+            ("message_id", "string", True, 40),
             ("created_at", "datetime", True, None),
         ],
         "indexes": [],
@@ -1759,6 +1840,9 @@ ARRAY_ATTRIBUTES = frozenset({
 #: Quyen DOC van do tung document quyet dinh (documentSecurity=True).
 COLLECTION_PERMISSIONS: List[str] = []
 
+#: Duong DOC trang thai tung muc (`GET {collection}/attributes/<key>` / `/indexes/<key>`) — xem `Setup._call`.
+_MUC_TUNG_CAI = re.compile(r"/(?:attributes|indexes)/([^/?]+)$")
+
 
 class Setup:
     def __init__(self, dry_run: bool = False):
@@ -1830,6 +1914,12 @@ class Setup:
         if response.status_code == 409:
             self.skipped += 1
             return "exists"
+        muc = _MUC_TUNG_CAI.search(path)
+        if response.status_code == 404 and doc_thoi and method == "GET" and muc:
+            # Phep DOC trang thai TUNG MUC (`_doc_muc_that`): ngay sau POST, endpoint `.../attributes/<key>`
+            # hoac `.../indexes/<key>` co the 404 mot luc — "chua hien", KHONG phai "xong" cung khong phai loi
+            # chot. Vong cho coi no la chua san sang va cho tiep toi han (review doc lap 2026-09-28).
+            return {"key": muc.group(1), "status": "chưa hiện (404)"}
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -1973,6 +2063,29 @@ class Setup:
                 ) from exc
             return None
 
+    def _doc_muc_that(self, base: str, loai: str, key: str,
+                      han_chot: float) -> Optional[Dict]:
+        """Doc TRUC TIEP MOT thuoc tinh/index — `GET {base}/attributes/{key}`
+        hoac `GET {base}/indexes/{key}` — KHONG qua tai lieu collection
+        (`GET {base}`). Tra None khi loi mang thoang qua (xem
+        `_goi_doc_thoi_thu_lai`).
+
+        VI SAO KHONG DOC COLLECTION (do that, Appwrite 1.9.6 + MongoDB tu luu
+        tru, project THU `fas-socialplay-test`, 2026-09-26): sau khi worker da
+        xu ly xong `createAttribute` (hang doi 179/179 thanh cong, 0 dang xu
+        ly, 0 hong), `GET {base}` VAN tra `novels.rights_mode` = 'processing'
+        trong khi `GET {base}/attributes/rights_mode`, `GET {base}/attributes`
+        va chinh tai lieu trong MongoDB deu la 'available'. Khoa cache Redis cua
+        tai lieu collection giu ban cu voi TTL -1 (khong bao gio het han). Day la
+        mot cuoc dua cache-aside: vong cho doc collection tu DB ngay truoc khi
+        worker doi trang thai, worker xoa cache, roi ban cu duoc ghi lai vao
+        cache SAU lan xoa. Cache chi duoc lam moi o lan thay doi schema KE TIEP
+        cua collection do — ma script lai dang dung cho chinh thuoc tinh nay
+        truoc khi lam thay doi ke tiep, nen ba lan chay lai lien tiep deu het
+        120s o cung mot cho. Doc tung muc thi di duong khac, khong vuong cache
+        do. Rat co the day cung la ban chat cua su co 2026-08-21 ben duoi."""
+        return self._goi_doc_thoi_thu_lai(f"{base}/{loai}/{key}", han_chot)
+
     def _cho_thuoc_tinh_san_sang(self, base: str, key: str,
                                  *, timeout_giay: float = 120.0) -> None:
         """Cho DUY NHAT MOT thuoc tinh dat 'available', backoff mu tang dan
@@ -1989,16 +2102,14 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
-            if hien is None:
+            thuoc_tinh = self._doc_muc_that(base, "attributes", key, han_chot)
+            if thuoc_tinh is None:
                 # Loi mang thoang qua, da trong ngan sach thoi gian — thu lai,
                 # KHONG coi la "thuoc tinh bien mat".
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
                 continue
-            thuoc_tinh = next((a for a in hien.get("attributes", [])
-                               if a.get("key") == key), None)
-            if thuoc_tinh is None:
+            if thuoc_tinh.get("key") != key:
                 raise SystemExit(
                     f"Thuộc tính '{key}' biến mất khỏi {base} trong lúc chờ "
                     "sẵn sàng — không nên xảy ra, kiểm tra thủ công."
@@ -2034,13 +2145,12 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
-            if hien is None:
+            idx = self._doc_muc_that(base, "indexes", key, han_chot)
+            if idx is None:
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
                 continue
-            idx = next((i for i in hien.get("indexes", []) if i.get("key") == key), None)
-            if idx is None:
+            if idx.get("key") != key:
                 raise SystemExit(
                     f"Index '{key}' biến mất khỏi {base} trong lúc chờ sẵn sàng."
                 )
@@ -2132,9 +2242,10 @@ class Setup:
         'available' thay vì để Appwrite trả lỗi 400 mơ hồ 'not yet
         available' không nói rõ thuộc tính nào."""
         import time
-        hien = self._goi_doc_thoi_thu_lai(base, time.monotonic() + 30.0) or {}
-        trang_thai = {a.get("key"): a.get("status")
-                      for a in hien.get("attributes", [])}
+        # Tung thuoc tinh MOT, khong qua tai lieu collection — xem `_doc_muc_that`.
+        han_chot = time.monotonic() + 30.0
+        trang_thai = {k: (self._doc_muc_that(base, "attributes", k, han_chot) or {}).get("status")
+                      for k in keys}
         chua_san_sang = [k for k in keys if trang_thai.get(k) != "available"]
         if chua_san_sang:
             raise SystemExit(
@@ -2145,14 +2256,53 @@ class Setup:
                 "appwrite-worker-databases) trước khi chạy lại."
             )
 
+    #: So lan "lam moi cache collection roi thu lai" toi da cho MOT index (xem `_ensure_index`).
+    LAM_MOI_CACHE_TOI_DA = 2
+
     def _ensure_index(self, base: str, name: str, kind: str, keys: List[str]) -> None:
-        result = self._call("POST", f"{base}/indexes", {
-            "key": name,
-            "type": kind,
-            "attributes": keys,
-            "orders": ["ASC"] * len(keys),
-        })
+        body = {"key": name, "type": kind, "attributes": keys, "orders": ["ASC"] * len(keys)}
+        lan = 0
+        while True:
+            try:
+                result = self._call("POST", f"{base}/indexes", body)
+                break
+            except SystemExit as exc:
+                # Appwrite 1.9.6 + MongoDB (do that tren may kiem 1.9.6, 2026-09-29, `user_follows.created_at`):
+                # doc TUNG MUC tra 'available', nhung TAI LIEU collection trong cache Redis (TTL -1) van ghi
+                # 'processing' -> POST index 400 "not yet available" — chay lai script cung chet DUNG cho do
+                # (cache chi lam moi o lan thay doi schema KE TIEP). Mot lan cap nhat collection KHONG DOI GI lam
+                # moi cache (do that: 'processing' -> 'available'), roi thu lai. CHI khi moi thuoc tinh cua index
+                # da 'available' theo doc tung muc — con lai la loi that, nem nguyen van.
+                if (self.dry_run or lan >= self.LAM_MOI_CACHE_TOI_DA or "not yet available" not in str(exc)
+                        or not self._thuoc_tinh_deu_san_sang(base, keys)):
+                    raise
+                lan += 1
+                self._lam_moi_cache_collection(base)
         print(f"    * index {name} {keys}: {'đã có' if result == 'exists' else 'đã tạo'}")
+
+    def _thuoc_tinh_deu_san_sang(self, base: str, keys: List[str]) -> bool:
+        import time
+        han_chot = time.monotonic() + 30.0
+        return all((self._doc_muc_that(base, "attributes", k, han_chot) or {}).get("status") == "available"
+                   for k in keys)
+
+    def _lam_moi_cache_collection(self, base: str) -> None:
+        """PUT collection voi CHINH gia tri dang co (ten, quyen, documentSecurity, enabled) — khong doi gi, chi
+        buoc Appwrite ghi lai tai lieu + xoa cache. Gui TUONG MINH ca bon truong: `documentSecurity` bi bo trong
+        request se thanh MAC DINH `false` cua Appwrite (mat quyen theo tung document) — khong bao gio de mac dinh.
+        Thieu bat ky truong nao trong ban doc -> KHONG gui gi (nem loi ro rang)."""
+        hien = self._call("GET", base, doc_thoi=True) or {}
+        # Kiem ca KIEU, khong ep: `bool(0)`/`bool("")` se lang le thanh false — mat cach ly theo tung document.
+        # (review doc lap 2026-09-29: day la duong an toan then chot.)
+        dung_kieu = (isinstance(hien.get("name"), str) and isinstance(hien.get("$permissions"), list)
+                     and all(isinstance(p, str) for p in hien.get("$permissions") or [])
+                     and isinstance(hien.get("documentSecurity"), bool) and isinstance(hien.get("enabled"), bool))
+        if not dung_kieu:
+            raise SystemExit(f"Không đọc đủ thiết lập của {base} để làm mới cache an toàn — dừng, kiểm tra thủ công.")
+        self._call("PUT", base, {"name": hien["name"], "permissions": list(hien["$permissions"]),
+                                 "documentSecurity": hien["documentSecurity"], "enabled": hien["enabled"]},
+                   doc_thoi=True)
+        print(f"    (làm mới cache collection {base.rsplit('/', 1)[-1]} — không đổi thiết lập nào)")
 
     def run(self, only: str = "") -> None:
         """

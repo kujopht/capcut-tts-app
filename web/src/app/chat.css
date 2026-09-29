@@ -1,0 +1,686 @@
+/*
+ * Fanfic Chat V1 — giao dien tin nhan.
+ *
+ * CHI dung token co san trong `globals.css` (mau, kinh, bo goc, khoang cach).
+ * Chat phai trong nhu MOT PHAN cua Fanfic World — cung lop kinh voi bang
+ * thong bao (`.menu-panel`), cung avatar/khung voi trang ca nhan — khong
+ * phai mot widget dan vao.
+ */
+
+/* ------------------------------------------------------------- nen chung */
+/* Vung cuon trong chat: thanh cuon mong theo mau giao dien, khong phai thanh
+   xam co mui ten mac dinh cua Windows. */
+.chat-tin-hop, .chat-cot-ds, .chat-cot-ttin, .chat-inbox, .chat-soan-o {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.chat-nut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: var(--r2);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.chat-nut:hover { background: var(--bg-3); color: var(--text); }
+.chat-nut:disabled { opacity: 0.45; cursor: not-allowed; }
+.chat-nut:focus-visible,
+.chat-ds-muc:focus-visible,
+.chat-emoji:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+/* Avatar trong tin nhan: `Avatar` + `CosmeticFrame` cua ho so, chi doi co. */
+.chat-avt { display: inline-flex; flex: 0 0 auto; }
+.chat-avt .avatar { width: 36px; height: 36px; font-size: 13px; }
+.chat-avt-sm .avatar { width: 30px; height: 30px; font-size: 11px; }
+.chat-avt-lg .avatar { width: 76px; height: 76px; font-size: 24px; }
+
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s6) var(--s4);
+  text-align: center;
+  color: var(--text-2);
+}
+.chat-empty strong { color: var(--text); }
+.chat-empty .hint { max-width: 34ch; margin: 0; }
+.chat-empty-icon { font-size: 28px; }
+
+.chat-trang-thai {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s4);
+  color: var(--text-2);
+  font-size: var(--t-sm);
+}
+.chat-trang-thai-gon { padding: var(--s3); }
+
+.chat-mang {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--t-xs);
+}
+.chat-mang-mat { background: var(--danger-soft); color: var(--danger); }
+
+/* ------------------------------------------------ dau cuoc tro chuyen */
+.chat-uh {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  flex: 1;
+}
+.chat-uh-nguoi {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-width: 0;
+  flex: 1;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--r2);
+}
+a.chat-uh-nguoi:hover .chat-uh-ten { text-decoration: underline; }
+.chat-uh-chu { display: flex; flex-direction: column; min-width: 0; }
+.chat-uh-ten { font-size: var(--t-base); color: var(--text); }
+.chat-uh-phu { font-size: var(--t-xs); }
+/* Dau cua so hep (304 px, 5 nut): cap + danh xung MOT dong, danh xung cat "…" — `.cap-do-gon` mac dinh
+   xuong dong (do that o 1024 px: "Lv. 1" / "Lữ Khách" tach hai dong). */
+.chat-uh-phu .cap-do-gon { display: flex; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+.chat-uh-phu .cap-do-gon > * { min-width: 0; white-space: nowrap; }
+.chat-uh-phu .cap-do-danh-xung { overflow: hidden; text-overflow: ellipsis; }
+.chat-uh-nut { display: inline-flex; gap: var(--s1); flex: 0 0 auto; }
+
+/* ------------------------------------------ menu "⋯": tat tieng / chan */
+.chat-menu { position: relative; display: inline-flex; }
+.chat-menu-bang {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 200px;
+  padding: var(--s1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r3);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-3);
+}
+.chat-menu-muc {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 40px;
+  padding: var(--s2) var(--s3);
+  border: 0;
+  border-radius: var(--r2);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-menu-muc:hover, .chat-menu-muc:focus-visible { background: var(--bg-3); outline: none; }
+.chat-menu-muc-nguy { color: var(--danger); }
+.chat-menu-muc:disabled { color: var(--text-2); cursor: default; background: none; }
+.chat-menu-loi {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 32px));
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r2);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--t-xs);
+}
+.chat-menu-loi-hop { color: var(--danger); }
+.chat-ds-tat { flex: 0 0 auto; font-size: 12px; opacity: 0.7; }
+.chat-badge.chat-badge-tat { background: var(--bg-3); color: var(--text-2); }
+.chat-soan.chat-da-chan { align-items: center; gap: var(--s3); padding: var(--s3); }
+.chat-da-chan-chu { flex: 1; min-width: 0; font-size: var(--t-sm); color: var(--text-2); }
+
+/* --------------------------------------------------- danh sach hoi thoai */
+.chat-ds { list-style: none; margin: 0; padding: var(--s1); display: flex; flex-direction: column; gap: 2px; }
+.chat-ds-muc {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  border: 1px solid transparent;
+  border-radius: var(--r2);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.chat-ds-muc:hover { background: var(--bg-3); }
+.chat-ds-muc-dang { background: var(--brand-soft); border-color: var(--brand-line); }
+.chat-ds-muc-moi strong { color: var(--text); }
+.chat-ds-muc-moi .chat-ds-tin { color: var(--text); font-weight: 600; }
+.chat-ds-chu { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.chat-ds-dong { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0; }
+.chat-ds-dong strong { font-size: var(--t-sm); color: var(--text); font-weight: 650; }
+.chat-ds-luc { font-size: 11px; flex: 0 0 auto; }
+.chat-ds-tin { font-size: var(--t-xs); min-width: 0; }
+.chat-ds-gon .chat-ds-muc { padding: 6px var(--s2); }
+
+/* -------------------------------------------------------- bang Inbox */
+.chat-inbox {
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(560px, 70vh);
+  overflow-y: auto;
+  padding: var(--s2);
+}
+.chat-inbox-dau {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2) var(--s2);
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: var(--s1);
+}
+.chat-inbox-tieu-de { font-size: var(--t-sm); color: var(--text); font-weight: 650; }
+.chat-inbox-tieu-de .hint { font-weight: 500; }
+
+/* ------------------------------------------------------------ tin nhan */
+.chat-tin-khung { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.chat-tin-hop {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--s3) var(--s3) var(--s2);
+  display: flex;
+  flex-direction: column;
+}
+/*
+  Neo tin o DAY khung nhu ung dung nhan tin: vach dem co gian an het cho trong
+  khi it tin, tu co ve 0 khi tin tran — khong dung `justify-content: flex-end`
+  vi no lam mat kha nang cuon len dau o mot so trinh duyet.
+*/
+.chat-tin-hop::before { content: ""; flex: 1 1 auto; }
+.chat-tin-hop-rong { justify-content: center; }
+.chat-tin-hop-rong::before { display: none; }
+.chat-tin.chat-sk { width: 78%; }
+.chat-sk-bong { display: block; height: 34px; border-radius: 16px; }
+.chat-tin-out .chat-sk-bong { margin-left: auto; }
+.chat-ds-sk { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3); }
+.chat-ds-sk .sk-tron { width: 30px; height: 30px; border-radius: var(--r-full); flex: 0 0 auto; }
+.chat-ds-sk .chat-ds-chu { gap: 6px; }
+.chat-tin-cu { display: flex; justify-content: center; padding-bottom: var(--s2); }
+.chat-tin-o { display: flex; flex-direction: column; }
+.chat-tin-ngay {
+  display: flex;
+  justify-content: center;
+  margin: var(--s3) 0 var(--s2);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.chat-tin-ngay span { padding: 2px var(--s3); border-radius: var(--r-full); background: var(--bg-2); border: 1px solid var(--line-soft); }
+.chat-tin { display: flex; flex-direction: column; max-width: 78%; margin-top: var(--s2); }
+.chat-tin-noi { margin-top: 3px; }
+.chat-tin-in { align-self: flex-start; align-items: flex-start; }
+.chat-tin-out { align-self: flex-end; align-items: flex-end; }
+.chat-tin-bong {
+  padding: 8px 12px;
+  border-radius: 16px;
+  font-size: var(--t-base);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-tin-in .chat-tin-bong { background: var(--bg-3); color: var(--text); border: 1px solid var(--line-soft); border-bottom-left-radius: 6px; }
+.chat-tin-out .chat-tin-bong { background: linear-gradient(135deg, var(--brand-deep), var(--brand)); color: #fff; border-bottom-right-radius: 6px; }
+.chat-tin-la { font-style: italic; opacity: 0.8; }
+.chat-tin-in .chat-tin-bong.chat-tin-emoji,
+.chat-tin-out .chat-tin-bong.chat-tin-emoji {
+  padding: 0 2px;
+  background: none;
+  border: 0;
+  font-size: 34px;
+  line-height: 1.2;
+}
+.chat-tin-loi .chat-tin-bong { outline: 1px solid var(--danger); outline-offset: 1px; }
+.chat-tin-duoi { display: flex; align-items: center; gap: var(--s2); margin-top: 2px; font-size: 11px; color: var(--text-3); }
+.chat-tin-tt { color: var(--text-3); }
+.chat-tin-hong { color: var(--danger); }
+.chat-tin-thu-lai {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.chat-tin-moi-nut {
+  position: absolute;
+  left: 50%;
+  bottom: var(--s2);
+  transform: translateX(-50%);
+  padding: 6px var(--s3);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-full);
+  background: var(--glass-strong);
+  color: var(--text);
+  font-size: var(--t-xs);
+  box-shadow: var(--shadow-2);
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------ o soan tin */
+.chat-soan {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3) var(--s3);
+  border-top: 1px solid var(--line-soft);
+}
+.chat-soan-o {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  max-height: 132px;
+  resize: none;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  background: var(--bg-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--t-base);
+  line-height: 1.4;
+  overflow-y: hidden;
+}
+.chat-soan-o:focus { outline: none; border-color: var(--brand-line); box-shadow: var(--ring); }
+.chat-nut-gui { background: var(--brand); color: #fff; }
+.chat-nut-gui:hover { background: var(--brand-hover); color: #fff; }
+.chat-nut-gui:disabled { background: var(--bg-3); color: var(--text-3); }
+.chat-soan-emoji { position: relative; }
+.chat-emoji-bang {
+  position: absolute;
+  bottom: calc(100% + var(--s2));
+  left: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(8, 36px);
+  gap: 2px;
+  padding: var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r3);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  box-shadow: var(--shadow-3);
+}
+.chat-emoji {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--r2);
+  background: none;
+  font-size: 19px;
+  cursor: pointer;
+}
+.chat-emoji:hover { background: var(--bg-3); }
+.chat-soan-dem { position: absolute; right: var(--s4); top: -18px; font-size: 11px; }
+/* Hai hang: o nhap tren, hang cong cu duoi — vua cua so dock hep lan trang /messages. */
+.chat-soan.chat-soan-2 { flex-direction: column; align-items: stretch; gap: 6px; padding: var(--s2) var(--s2) var(--s2); }
+.chat-soan-2 .chat-soan-o { flex: 0 0 auto; }
+.chat-soan-cong-cu { position: relative; display: flex; align-items: center; gap: 2px; }
+.chat-soan-gian { flex: 1; }
+.chat-soan-cong-cu .chat-soan-dem { position: static; margin-right: var(--s2); }
+.chat-win .chat-emoji-bang { grid-template-columns: repeat(6, 34px); }
+.chat-win .chat-emoji { width: 34px; height: 34px; }
+
+/* ------------------------------------------------------------ nhan dan */
+.chat-nd {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: var(--s2);
+  right: var(--s2);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  max-height: min(320px, 55dvh);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r3);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+.chat-nd-tab {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.chat-nd-tab-nut {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 36px;
+  height: 32px;
+  max-width: 120px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r2);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.chat-nd-tab-nut[aria-selected="true"] { background: var(--bg-3); color: var(--text); border-color: var(--line); }
+.chat-nd-tab-nut:focus-visible, .chat-nd-nut:focus-visible, .chat-nd-thich:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.chat-nd-than { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s2); scrollbar-width: thin; }
+.chat-nd-trong { margin: var(--s2); text-align: center; }
+.chat-nd-khoa { margin: 0 0 var(--s2); padding: 6px var(--s2); border-radius: var(--r2); background: var(--bg-3);
+  font-size: var(--t-xs); color: var(--text-2); }
+.chat-nd-luoi { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.chat-nd-o { position: relative; }
+.chat-nd-nut {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--r2);
+  background: none;
+  cursor: pointer;
+}
+.chat-nd-nut img { width: 100%; height: 100%; object-fit: contain; }
+.chat-nd-nut:hover:not(:disabled) { background: var(--bg-3); }
+.chat-nd-nut:disabled { opacity: 0.38; filter: grayscale(0.8); cursor: not-allowed; }
+.chat-nd-thich {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg-1) 80%, transparent);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.chat-nd-o:hover .chat-nd-thich, .chat-nd-thich:focus-visible, .chat-nd-thich[aria-pressed="true"] { opacity: 1; }
+.chat-nd-thich[aria-pressed="true"] { color: #f5b301; }
+@media (hover: none) { .chat-nd-thich { opacity: 1; } }
+.chat-tin-nd img { display: block; width: 112px; height: 112px; object-fit: contain; }
+.chat-tin-loi .chat-tin-nd { outline: 1px solid var(--danger); outline-offset: 2px; border-radius: var(--r3); }
+
+/* ------------------------------------------- Chat Dock (desktop / may tinh bang) */
+/* Cua so gan DAY man hinh, cua so moi nhat sat mep phai (row-reverse). Khong keo tha (co y). Be rong khop
+   `lib/chat/dock.ts` (CUA_SO_RONG / CUA_SO_RONG_HEP) — do la noi tinh so cua so vua man hinh. */
+.chat-dock {
+  position: fixed;
+  right: 16px;
+  bottom: 0;
+  z-index: 55;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: flex-end;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+.chat-dock > * { pointer-events: auto; }
+.chat-win {
+  --chat-win-w: 336px;
+  width: var(--chat-win-w);
+  height: min(480px, calc(100dvh - 104px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-bottom: 0;
+  border-radius: var(--r4) var(--r4) 0 0;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  box-shadow: var(--shadow-3), var(--edge);
+  overflow: hidden;
+  animation: chat-vao var(--dur) var(--ease);
+  transition: height var(--dur) var(--ease);
+}
+.chat-win-thu { height: 52px; animation: chat-thu var(--dur) var(--ease); }
+.chat-win-dau {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  min-height: 52px;
+  padding: 6px var(--s2) 6px var(--s3);
+  border-bottom: 1px solid var(--line-soft);
+}
+.chat-win-thu .chat-win-dau { border-bottom: 0; }
+.chat-win-dau .chat-uh { gap: var(--s1); }
+.chat-win-dau .chat-uh-nguoi { gap: var(--s2); }
+.chat-win-dau .chat-uh-nut { gap: 2px; }
+.chat-win-dau .chat-nut { width: 30px; height: 30px; font-size: 14px; }
+.chat-win-dau .chat-nut-nho { width: 26px; height: 26px; font-size: 12px; }
+.chat-win-dau .chat-avt .avatar { width: 32px; height: 32px; font-size: 12px; }
+.chat-win-mo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 4px;
+  border: 0;
+  border-radius: var(--r2);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-win-mo:hover { background: var(--bg-3); }
+.chat-win-mo:focus-visible, .chat-tran-nut:focus-visible, .chat-tran-mo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.chat-win-ten { min-width: 0; }
+.chat-nut-goi:disabled { opacity: 0.4; }
+/* Ngan tran "+N": cac cuoc dang mo nhung khong vua man hinh. */
+.chat-tran { position: relative; align-self: flex-end; margin-bottom: 8px; }
+.chat-tran-nut {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-full);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  box-shadow: var(--shadow-3), var(--edge);
+  cursor: pointer;
+}
+.chat-tran-cham { position: absolute; top: -4px; right: -4px; }
+.chat-tran-ds {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  max-height: min(360px, 60dvh);
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--s1);
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r3);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-3);
+}
+.chat-tran-muc { display: flex; align-items: center; gap: 2px; }
+.chat-tran-mo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 44px;
+  padding: 4px var(--s2);
+  border: 0;
+  border-radius: var(--r2);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-tran-mo:hover { background: var(--bg-3); }
+/* Thanh phat nho (`.mini`) nam day man hinh — nang dock len tren no. */
+body:has(.mini) .chat-dock { bottom: 88px; }
+body:has(.mini) .chat-win { height: min(480px, calc(100dvh - 192px)); }
+@media (max-width: 1279px) { .chat-win { --chat-win-w: 304px; } }
+@media (max-width: 1023px) { .chat-win { --chat-win-w: min(380px, calc(100vw - 32px)); } }
+@keyframes chat-vao { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes chat-thu { from { transform: translateY(8px); } to { transform: none; } }
+
+/* --------------------------------------------------------- trang /messages */
+.chat-trang { padding-bottom: var(--s5); }
+.chat-trang-dau { margin: var(--s4) 0 var(--s3); }
+.chat-trang-dau .page-title { margin: 0; }
+.chat-khong-gian {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 280px;
+  /* Do that: luoi bat dau o y~208px (header noi + tieu de). 228px = 208 + le
+     day 20px — o soan tin luon nam trong man hinh, khong phai cuon trang. */
+  height: max(520px, calc(100dvh - 228px));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r4);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  box-shadow: var(--shadow-3), var(--edge);
+  overflow: hidden;
+}
+.chat-cot { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.chat-cot-ds { border-right: 1px solid var(--line-soft); overflow-y: auto; }
+.chat-cot-tin { position: relative; }
+.chat-cot-tin > .chat-empty { margin: auto; }
+.chat-cot-tin-dau {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-bottom: 1px solid var(--line-soft);
+}
+.chat-nut-lui { display: none; }
+.chat-cot-ttin { border-left: 1px solid var(--line-soft); overflow-y: auto; }
+.chat-ttin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s6) var(--s4);
+  text-align: center;
+}
+.chat-ttin-ten { font-size: var(--t-md); color: var(--text); margin-top: var(--s2); }
+
+@media (max-width: 1200px) {
+  .chat-khong-gian { grid-template-columns: 300px minmax(0, 1fr); }
+  .chat-cot-ttin { display: none; }
+}
+
+/* -------------------------------------------------------------- di dong */
+@media (max-width: 640px) {
+  .chat-dock { display: none; }
+  .chat-nut { width: 44px; height: 44px; }
+  .chat-emoji { width: 44px; height: 44px; }
+  .chat-emoji-bang { grid-template-columns: repeat(6, 44px); }
+  .chat-nd-tab-nut { min-width: 44px; height: 44px; }
+  .chat-nd-thich { width: 32px; height: 32px; }
+  .chat-ds-muc { min-height: 60px; }
+  .chat-khong-gian { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 60dvh; }
+  .chat-cot-ds { border-right: 0; }
+  .chat-khong-gian:not(.chat-co-hoi-thoai) .chat-cot-tin { display: none; }
+  .chat-co-hoi-thoai .chat-cot-ds { display: none; }
+  /*
+    `position: fixed` bi "giam" boi to tien co `transform` (`.page` co hieu
+    ung vao trang) hoac `backdrop-filter` (khung kinh) — do that tren 390px:
+    cuoc tro chuyen nam TRONG the thay vi phu man hinh. Chi bo hai thuoc tinh
+    do khi dang mo mot cuoc tro chuyen o di dong.
+  */
+  .chat-trang:has(.chat-co-hoi-thoai) { transform: none; animation: none; }
+  .chat-co-hoi-thoai { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  /* Cuoc tro chuyen phu toan man hinh; o soan tin dinh day, tranh vung an toan. */
+  .chat-co-hoi-thoai .chat-cot-tin {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    height: 100dvh;
+    background: var(--bg);
+    padding-top: env(safe-area-inset-top, 0);
+  }
+  .chat-co-hoi-thoai .chat-cot-tin-dau { position: sticky; top: 0; background: var(--bg-1); z-index: 1; }
+  .chat-co-hoi-thoai .chat-soan { padding-bottom: calc(var(--s3) + env(safe-area-inset-bottom, 0)); background: var(--bg-1); }
+  .chat-co-hoi-thoai .chat-nut-lui { display: inline-flex; }
+  .chat-tin { max-width: 86%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-win, .chat-win-thu { animation: none; transition: none; }
+  .chat-nut, .chat-ds-muc { transition: none; }
+}

@@ -27,6 +27,7 @@ import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { ConfirmDialog, EmptyState, ErrorState, Loading, formatNumber } from "@/components/ui";
 import { IconHeadphones, IconUser } from "@/components/Icons";
 import { FollowButton } from "@/components/FollowButton";
+import { StartChatButton } from "@/components/chat/StartChatButton";
 import { BadgeIcon, OrnamentIcon } from "@/components/cosmetics/Cosmetics";
 import { UserAvatar, tenHienThi } from "@/components/UserAvatar";
 import { CapDoTaiKhoan } from "@/components/CapDoTaiKhoan";
@@ -298,6 +299,11 @@ export default function PublicProfilePage({
                 <>
                   {xh && !p.viewer_relation?.blocked ? (
                     <FollowButton kind="user" targetId={p.user_id} initialFollowing={xh.following} />
+                  ) : null}
+                  {/* Nhan tin: CANH "Theo dõi" — hanh dong thu hai. Khong o ho so cua chinh minh (nhanh
+                      `laToi` o tren), khong cho khach (StartChatButton tu an), khong khi DANG chan. */}
+                  {!p.viewer_relation?.blocked ? (
+                    <StartChatButton username={p.username} displayName={p.display_name || p.username} />
                   ) : null}
                   {toi ? <MenuHoSo p={p} limits={limits} onDoi={reload} /> : null}
                 </>

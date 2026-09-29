@@ -20,3 +20,12 @@
  * được bằng cách sửa localStorage.
  */
 export const MUSIC_ENABLED = process.env.NEXT_PUBLIC_MUSIC_ENABLED === "1";
+
+/**
+ * `CHAT_V1_ENABLED` — tin nhắn 1:1 (Chat V1 trên Appwrite). TẮT mặc định: chưa bật thì KHÔNG có nút Tin
+ * nhắn, nút "Nhắn tin" ở hồ sơ, khung chat, và `/messages` chỉ báo "chưa mở" — 0 request chat nào. Bật
+ * cần CẢ HAI: build web với `NEXT_PUBLIC_CHAT_V1_ENABLED=1` VÀ máy chủ `FAS_CHAT_V1=1` (thiếu máy chủ thì
+ * giao diện hiện lỗi trung thực `not_configured`). Nhờ vậy merge vào `main` rồi deploy web KHÔNG tự mở
+ * một tính năng nửa vời trên production.
+ */
+export const CHAT_V1_ENABLED = process.env.NEXT_PUBLIC_CHAT_V1_ENABLED === "1";

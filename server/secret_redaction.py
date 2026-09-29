@@ -38,6 +38,9 @@ SECRET_KEY_NAMES = frozenset({
     "apikey", "api_key", "x-appwrite-key",
     "authorization", "auth",
     "secret", "client_secret",
+    # Khoa ky chung (vd SDK goi thoai/video sau nay) + chu ky dang nhap cua SDK — phong thu chung,
+    # khong phu thuoc nha cung cap nao dang duoc dung.
+    "secret_key", "sdk_secret_key", "sdksecretkey", "usersig", "user_sig",
     "password", "app_password",
     "access_token", "refresh_token", "id_token",
     "encrypted_access_token", "encrypted_refresh_token",

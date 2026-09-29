@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 import { NotificationBell } from "@/components/NotificationBell";
+import { ChatLauncher } from "@/components/chat/ChatLauncher";
 import { StreakBadge } from "@/components/StreakBadge";
 import { UserAvatar } from "@/components/UserAvatar";
 import { hoSoHref } from "@/lib/communityFeed";
@@ -307,6 +308,9 @@ export function NavAuth() {
       <StreakBadge />
       {/* Chuông đứng TRƯỚC menu tài khoản: nó là thứ người ta nhìn thường
           xuyên hơn, và đặt nó sau avatar sẽ đẩy nó ra rìa màn hình ở mobile. */}
+      {/* Tin nhắn đứng NGAY TRƯỚC chuông: hai nút cùng hình, đọc như một bộ.
+          Vẽ nút KHÔNG mở chat — chỉ bấm mới mở (xem `ChatLauncher`). */}
+      <ChatLauncher />
       <NotificationBell />
       <AccountMenu />
     </div>

@@ -167,6 +167,12 @@ def classify_request(request: Request) -> Tuple[str, int]:
         return TIER_A, limit_a
     if path.startswith("/api/admin/") and method in ("POST", "PUT", "DELETE", "PATCH"):
         return TIER_A, limit_a
+    # Fanfic Chat V1: mo phien nhan tin + tra danh tinh — co them han muc rieng
+    # theo nguoi dung trong route `/api/chat/session` (xem `server/main.py`).
+    # Cac route nhan tin khac co han muc rieng o `server/messaging/routes.py`.
+    # Liet ke DUNG hai route: `/api/chat/ask` (AI chat co san) giu Tier B.
+    if path in ("/api/chat/session", "/api/chat/identities") and method == "POST":
+        return TIER_A, limit_a
     if method == "DELETE":
         return TIER_A, limit_a
 

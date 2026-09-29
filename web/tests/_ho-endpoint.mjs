@@ -29,6 +29,10 @@ export const HO_ENDPOINT = [
   "audio",
   "auth",
   "chapters",
+  // Fanfic Chat V1 — nhan tin 1:1, du lieu + Realtime o Appwrite (qua API
+  // Fanfic): phien, danh tinh, hoi thoai/tin/da doc/tat tieng/chan, luong SSE.
+  // Xem `server/messaging/`.
+  "chat",
   // --- tang xa hoi ---
   "comments",
   "creator",

@@ -11,11 +11,14 @@ the threadpool, not on the asyncio loop (contract §0.2's explicit lesson:
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import hmac
 import json
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
+import anyio
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
 from fastapi.responses import StreamingResponse
@@ -31,7 +34,8 @@ from server.ai_assistant.limits import (
     AiBudgetExceeded, AiBusy, AiRateLimited, budget_status, enforce_budget, record_usage,
 )
 from server.ai_assistant.memory import (
-    AiConversation, AiEscalation, AiMessage, AiPreferences, AiProject, RepoConflict, now_iso,
+    AiConversation, AiEscalation, AiMessage, AiPreferences, AiProject, AiUnavailable, RepoConflict,
+    now_iso,
 )
 from server.ai_assistant.runtime import AiRuntime
 from server.ai_assistant.tools import (
@@ -115,6 +119,18 @@ def _tier_of(profile: Any) -> str:
 
 def _daily_limit(rt: AiRuntime, tier: str) -> int:
     return rt.daily_tokens_premium if tier == "premium" else rt.daily_tokens_free
+
+
+def _hashed_user_ref(rt: AiRuntime, user_id: str) -> str:
+    """M8 (review finding): `GenerateRequest.user_ref`'s own contract is
+    "HASH of the real user id, never the raw id" — this call previously
+    passed `profile.user_id` straight through, handing every real user id
+    to whichever LLM provider is in the fallback chain. HMAC-SHA256 keyed
+    on a server-side salt (never the raw id, never reversible without that
+    salt) — see `AiRuntime.user_ref_salt`'s own docstring for the salt's
+    source/fallback."""
+    return hmac.new(rt.user_ref_salt.encode("utf-8"), user_id.encode("utf-8"),
+                    hashlib.sha256).hexdigest()
 
 
 def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]], Any]) -> APIRouter:
@@ -384,9 +400,75 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             in_tok = out_tok = 0
             final_status = "complete"
             error_payload: Optional[Dict[str, Any]] = None
+            finalize_result: Dict[str, Any] = {}
+
+            async def _finalize() -> None:
+                """Records usage + persists the assistant message — MUST run
+                exactly once per turn, on every exit path (normal
+                completion, provider error, AND client disconnect). Called
+                from `finally` below under a shielded cancel scope (B2
+                review finding): on a client disconnect, Starlette's
+                `StreamingResponse` races `stream_response()` against
+                `listen_for_disconnect()` in one `anyio` task group and
+                cancels the loser — that cancellation lands as a
+                `CancelledError` at whatever `await` this coroutine is
+                suspended on, unwinds the `async for` below, and (without
+                the shield) would ALSO cancel any further `await` made
+                while handling it, silently dropping billed usage and the
+                partial assistant reply on the floor. `anyio.CancelScope
+                (shield=True)` makes this block immune to that outer
+                cancellation so the repo/ephemeral writes below always
+                complete."""
+                final_text = "".join(text_parts)
+                # R2 (review finding, kept): budget must never be bypassed
+                # just because a provider omitted/zeroed its own usage
+                # report — an interrupted/stopped/error stream that still
+                # produced text is billed on an ESTIMATE (contract §3's own
+                # conservative chars/3.5 estimator) covering the prompt
+                # actually sent plus whatever text was actually generated.
+                # Nothing is charged for a turn that produced NEITHER real
+                # usage NOR any text (a pure before-first-delta failure).
+                estimated_in = estimate_tokens(prompt_text)
+                estimated_out = estimate_tokens(final_text)
+                counted_in = in_tok or estimated_in
+                counted_out = out_tok or estimated_out
+                if final_text or in_tok or out_tok:
+                    budget = await run_in_threadpool(
+                        lambda: record_usage(
+                            rt.repo, user_id=profile.user_id, input_tokens=counted_in,
+                            output_tokens=counted_out, daily_limit=daily_limit))
+                else:
+                    counted_in = counted_out = 0
+                    budget = await run_in_threadpool(
+                        lambda: budget_status(rt.repo, user_id=profile.user_id, daily_limit=daily_limit))
+
+                if final_text:
+                    citations_json = json.dumps([
+                        {"novel_id": c.novel_id, "chapter_id": c.chapter_id} for c in citations],
+                        ensure_ascii=False)
+                    assistant_message = AiMessage(
+                        message_id=assistant_message_id, conversation_id=conversation_id,
+                        user_id=profile.user_id, role="assistant", content=final_text,
+                        status=final_status, citations_json=citations_json,
+                        provider_name="", model="", input_tokens=counted_in,
+                        output_tokens=counted_out)
+                    # Same store as the user turn above (contract §5): durable
+                    # when memory is on, TTL-bounded in-process cache when off
+                    # — an assistant reply is exactly as much "memory" as the
+                    # question it answers, so it follows the identical rule.
+                    if memory_enabled:
+                        await run_in_threadpool(rt.repo.create_message, assistant_message)
+                    else:
+                        await run_in_threadpool(rt.ephemeral.create_message, assistant_message)
+
+                finalize_result["counted_in"] = counted_in
+                finalize_result["counted_out"] = counted_out
+                finalize_result["budget"] = budget
+
             yield _sse("meta", {"message_id": assistant_message_id, "conversation_id": conversation_id})
             try:
-                gen = rt.gateway.stream(turns, mode=conv.mode, user_ref=profile.user_id)
+                gen = rt.gateway.stream(turns, mode=conv.mode,
+                                       user_ref=_hashed_user_ref(rt, profile.user_id))
                 # R3 (review finding): `contextlib.closing` guarantees the
                 # provider's underlying generator (which holds the httpx
                 # streaming context manager / upstream connection open) is
@@ -409,59 +491,38 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                             break
                         elif isinstance(ev, Done):
                             pass
+            except BaseException:
+                # B2 (review finding): reached on a real client disconnect —
+                # the task group above cancels this coroutine mid-`async
+                # for`, which surfaces here as a `CancelledError` (never a
+                # normal `return`). Treat it exactly like an
+                # `is_disconnected()`-observed stop for billing/persistence
+                # purposes, run `_finalize()` in `finally` below, then
+                # re-raise so Starlette's own cancellation bookkeeping still
+                # completes correctly.
+                final_status = "stopped"
+                raise
             finally:
-                rt.stream_guard.release(profile.user_id)
+                try:
+                    with anyio.CancelScope(shield=True):
+                        await _finalize()
+                finally:
+                    rt.stream_guard.release(profile.user_id)
 
-            final_text = "".join(text_parts)
+            # Everything below is unreachable when the `except BaseException`
+            # branch above re-raised (i.e. on a real disconnect) — Starlette
+            # has already stopped reading from this generator by then, so
+            # there is nothing left to send it anyway.
             if citations:
                 yield _sse("citations", {"items": [
                     {"novel_id": c.novel_id, "chapter_id": c.chapter_id,
                      "chapter_title": c.chapter_title, "excerpt": c.excerpt}
                     for c in citations]})
 
-            # R2 (review finding): budget must never be bypassed just
-            # because a provider omitted/zeroed its own usage report — an
-            # interrupted/stopped/error stream that still produced text is
-            # billed on an ESTIMATE (contract §3's own conservative
-            # chars/3.5 estimator) covering the prompt actually sent plus
-            # whatever text was actually generated. Nothing is charged for
-            # a turn that produced NEITHER real usage NOR any text (a pure
-            # before-first-delta failure) — see docs/ai/AI_ASSISTANT_V1.md
-            # "Implementation notes".
-            estimated_in = estimate_tokens(prompt_text)
-            estimated_out = estimate_tokens(final_text)
-            counted_in = in_tok or estimated_in
-            counted_out = out_tok or estimated_out
-            if final_text or in_tok or out_tok:
-                budget = await run_in_threadpool(
-                    lambda: record_usage(
-                        rt.repo, user_id=profile.user_id, input_tokens=counted_in,
-                        output_tokens=counted_out, daily_limit=daily_limit))
-            else:
-                counted_in = counted_out = 0
-                budget = await run_in_threadpool(
-                    lambda: budget_status(rt.repo, user_id=profile.user_id, daily_limit=daily_limit))
-            yield _sse("usage", {"input_tokens": counted_in, "output_tokens": counted_out,
-                                 "used_today": budget.used_today, "limit_today": budget.limit_today})
-
-            if final_text:
-                citations_json = json.dumps([
-                    {"novel_id": c.novel_id, "chapter_id": c.chapter_id} for c in citations],
-                    ensure_ascii=False)
-                assistant_message = AiMessage(
-                    message_id=assistant_message_id, conversation_id=conversation_id,
-                    user_id=profile.user_id, role="assistant", content=final_text,
-                    status=final_status, citations_json=citations_json,
-                    provider_name="", model="", input_tokens=counted_in,
-                    output_tokens=counted_out)
-                # Same store as the user turn above (contract §5): durable
-                # when memory is on, TTL-bounded in-process cache when off
-                # — an assistant reply is exactly as much "memory" as the
-                # question it answers, so it follows the identical rule.
-                if memory_enabled:
-                    await run_in_threadpool(rt.repo.create_message, assistant_message)
-                else:
-                    await run_in_threadpool(rt.ephemeral.create_message, assistant_message)
+            yield _sse("usage", {"input_tokens": finalize_result["counted_in"],
+                                 "output_tokens": finalize_result["counted_out"],
+                                 "used_today": finalize_result["budget"].used_today,
+                                 "limit_today": finalize_result["budget"].limit_today})
 
             if error_payload is not None:
                 yield _sse("error", error_payload)

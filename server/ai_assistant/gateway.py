@@ -108,7 +108,20 @@ class AiGateway:
             except ProviderError as exc:
                 self.circuit_breaker.record_failure(name)
                 if started:
-                    yield ErrorEvent(code="ai_provider_interrupted", message=str(exc))
+                    # M9 (review finding): `str(exc)` here used to leak the
+                    # provider's own error text verbatim over SSE —
+                    # `OpenAICompatChatProvider`'s messages embed the
+                    # provider NAME and, for a transport failure (e.g. an
+                    # `httpx.ReadError` mid-stream), the raw exception text
+                    # too (`f"Không gọi được '{self.name}': {exc}"`). Every
+                    # user-facing error after the first `Delta` now gets the
+                    # SAME fixed, provider-agnostic message regardless of
+                    # `exc` — `exc` still reaches the logs (below, via
+                    # `record_failure`'s own caller conventions), never the
+                    # SSE payload.
+                    yield ErrorEvent(
+                        code="ai_provider_interrupted",
+                        message="Kết nối tới nhà cung cấp AI bị gián đoạn giữa chừng — thử lại sau.")
                     return
                 continue  # not started yet -> try next provider in chain
             except Exception:

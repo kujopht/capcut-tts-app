@@ -294,6 +294,12 @@ class AiAssistantSettings:
     daily_tokens_premium: int = 200000
     rpm: int = 8
     max_streams: int = 4
+    #: M8 (review finding): server-side salt for HMAC-SHA256(user_id) sent
+    #: to providers as `GenerateRequest.user_ref` (its own docstring: "HASH
+    #: of the real user id, never the raw id"). Empty by default — see
+    #: `server/ai_assistant/runtime.py::AiRuntime.user_ref_salt` for the
+    #: documented per-process-random fallback when this is unset.
+    user_ref_salt: str = ""
 
     def describe(self) -> dict:
         """KHONG BAO GIO chua API key that — cung quy uoc voi
@@ -1055,6 +1061,7 @@ def _ai_assistant_settings() -> AiAssistantSettings:
         daily_tokens_premium=_int("FAS_AI_DAILY_TOKENS_PREMIUM", 200000),
         rpm=_int("FAS_AI_RPM", 8),
         max_streams=_int("FAS_AI_MAX_STREAMS", 4),
+        user_ref_salt=_env("FAS_AI_USER_REF_SALT"),
     )
 
 

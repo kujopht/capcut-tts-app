@@ -6,6 +6,7 @@ storage backend + provider set for the environment actually running.
 from __future__ import annotations
 
 import logging
+import secrets
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
@@ -41,6 +42,15 @@ class AiRuntime:
     rpm: int = 8
     web_search_enabled: bool = False
     heartbeat_s: float = 15.0
+    #: M8 (review finding): HMAC-SHA256 key for `routes.py::_hashed_user_ref`
+    #: — never the raw user id is sent to a provider as `user_ref`. Sourced
+    #: from `settings.ai_assistant.user_ref_salt` (`FAS_AI_USER_REF_SALT`)
+    #: when configured; falls back to a per-process random salt (documented
+    #: here, not silently — a random salt still satisfies "never the raw
+    #: id", it just means the same user hashes to a DIFFERENT `user_ref` on
+    #: a restart, which is fine: this value is abuse-tracking-only, never
+    #: looked up by us, never persisted).
+    user_ref_salt: str = field(default_factory=lambda: secrets.token_hex(32))
 
     def describe(self) -> dict:
         return {"enabled": self.enabled, "reason": self.reason or None,
@@ -97,9 +107,13 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None) -
     else:
         repo = InMemoryAiRepo()
 
+    kwargs: Dict[str, Any] = {}
+    if getattr(ai, "user_ref_salt", ""):
+        kwargs["user_ref_salt"] = ai.user_ref_salt
+
     return AiRuntime(
         True, repo=repo, gateway=gateway, tool_ctx=tool_ctx or ToolContext(),
         assistant_name=ai.assistant_name,
         daily_tokens_free=ai.daily_tokens_free, daily_tokens_premium=ai.daily_tokens_premium,
         rpm=ai.rpm, web_search_enabled=(ai.web_search_provider or "off") != "off",
-        stream_guard=StreamGuard(max_streams_per_instance=ai.max_streams))
+        stream_guard=StreamGuard(max_streams_per_instance=ai.max_streams), **kwargs)

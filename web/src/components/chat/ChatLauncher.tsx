@@ -19,7 +19,7 @@ import { InboxPopover } from "./InboxPopover";
 
 export function ChatLauncher() {
   const { profile } = useSession();
-  const { unreadTotal, moChat } = useChat();
+  const { unreadTotal, moChat, available } = useChat();
   const router = useRouter();
   const [mo, setMo] = useState(false);
   const hop = useRef<HTMLDivElement | null>(null);
@@ -46,6 +46,8 @@ export function ChatLauncher() {
 
   if (!CHAT_V1_ENABLED) return null;
   if (!profile) return null;
+  // May chu chua mo chat cho tai khoan nay (canary) / dang hoi: khong ve nut.
+  if (available !== true) return null;
 
   const bam = () => {
     if (window.matchMedia(MAN_HINH_CHAT_NHO).matches) {

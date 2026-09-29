@@ -76,8 +76,9 @@ function NganTran({ items }: { items: DockWindow[] }) {
 }
 
 export function ChatDock() {
-  const { dock, maxVisible } = useChat();
-  if (!CHAT_V1_ENABLED || maxVisible === 0 || dock.length === 0) return null;
+  const { dock, maxVisible, available } = useChat();
+  // Canary: tai khoan chua duoc mo (hoac dang hoi) -> khong cua so nao, ke ca cua so phuc hoi tu tab.
+  if (!CHAT_V1_ENABLED || available !== true || maxVisible === 0 || dock.length === 0) return null;
   const { hien, tran } = chiaCuaSo(dock, maxVisible);
   return (
     <div className="chat-dock" role="region" aria-label="Cửa sổ tin nhắn">

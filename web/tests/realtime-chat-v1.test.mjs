@@ -122,7 +122,9 @@ test("1c. dang nhap Fanfic KHONG mo chat: phien Fanfic va cai dat nut khong goi 
   assert.match(nhanTin, /await moChat\("profile-dm"\)/);
   // Tu mo lai CHI khi tab nay DA bat chat (co sessionStorage) — kem phuc hoi cua so + nhap.
   assert.match(p, /if \(id && !cu\) \{\s*const moLai = docCo\(\);/);
-  assert.match(p, /if \(moLai\) void moChat\("resume"\);/);
+  // ...va CHI sau khi may chu xac nhan tai khoan nay duoc dung chat (canary).
+  assert.match(p, /if \(moLai\) canMoLaiRef\.current = true;/);
+  assert.match(p, /if \(duocDung !== true \|\| !canMoLaiRef\.current\) return;\s*canMoLaiRef\.current = false;\s*void moChat\("resume"\);/);
   // chatApi.session CHI trong xinPhien.
   assert.equal((p.match(/chatApi\s*\.session\(/g) ?? []).length, 1);
   const launcher = codeOnly(read("components/chat/ChatLauncher.tsx"));
@@ -133,7 +135,7 @@ test("1c. dang nhap Fanfic KHONG mo chat: phien Fanfic va cai dat nut khong goi 
 
 test("2. mo /messages khoi tao chat MOT lan (co khoa), moChat idempotent", () => {
   const trang = codeOnly(read("app/messages/page.tsx"));
-  assert.match(trang, /if \(!profile \|\| daMoRef\.current\) return;\s*daMoRef\.current = true;\s*void moChat\("messages-page"\)/);
+  assert.match(trang, /if \(!profile \|\| available !== true \|\| daMoRef\.current\) return;\s*daMoRef\.current = true;\s*void moChat\("messages-page"\)/);
   const p = provider();
   assert.match(p, /if \(status === "ready" \|\| status === "reconnecting" \|\| status === "offline"\) return true;/);
   assert.match(p, /if \(dangMoRef\.current\) return dangMoRef\.current;/, "hai lần bấm liền nhau phải dùng CHUNG một lần mở");
@@ -143,7 +145,7 @@ test("2. mo /messages khoi tao chat MOT lan (co khoa), moChat idempotent", () =>
     vao thang /messages. `moChat` phai doc phien tu closure.
   */
   const moChat = p.slice(p.indexOf("const moChat = useCallback"), p.indexOf("const dungOTabNay"));
-  assert.match(moChat, /if \(!CHAT_V1_ENABLED \|\| !coPhienFanfic\) return false;/);
+  assert.match(moChat, /if \(!CHAT_V1_ENABLED \|\| !coPhienFanfic \|\| duocDung !== true\) return false;/);
   assert.ok(!/profileIdRef/.test(moChat), "moChat không được dựa vào ref do effect của provider gán");
 });
 
@@ -473,7 +475,28 @@ test("co web CHAT_V1_ENABLED TAT mac dinh: khong nut, khong khung, khong request
   const trang = codeOnly(read("app/messages/page.tsx"));
   assert.match(trang, /if \(!CHAT_V1_ENABLED\) \{\s*return \(/);
   // Moi duong mo chat (nut, /messages, ho so, tu mo lai sau khi tai trang) deu qua `moChat`.
-  assert.match(provider(), /if \(!CHAT_V1_ENABLED \|\| !coPhienFanfic\) return false;/);
+  assert.match(provider(), /if \(!CHAT_V1_ENABLED \|\| !coPhienFanfic \|\| duocDung !== true\) return false;/);
+});
+
+test("canary: web hoi may chu /api/chat/availability; CHI hien chat khi available === true; fail-closed", () => {
+  const p = provider();
+  // Chi hoi khi build co co VA da dang nhap; loi -> thu lai MOT lan roi coi la tat.
+  assert.match(p, /if \(!CHAT_V1_ENABLED \|\| !id\) return;[\s\S]*?chatApi\s*\.availability\(\)/);
+  assert.match(p, /if \(lan === 0\) window\.setTimeout\(\(\) => !huy && hoi\(1\), 3000\);\s*else setDuocDung\(false\);/);
+  assert.match(p, /available: CHAT_V1_ENABLED \? duocDung : false,/);
+  // Dang xuat / doi tai khoan: quen ket qua cua nguoi truoc.
+  assert.match(p, /setDaTaiChan\(false\);\s*setDuocDung\(null\);/);
+  for (const [f, re] of [
+    ["components/chat/ChatLauncher.tsx", /if \(available !== true\) return null;/],
+    ["components/chat/StartChatButton.tsx", /if \(available !== true\) return null;/],
+    ["components/chat/ChatDock.tsx", /if \(!CHAT_V1_ENABLED \|\| available !== true \|\| maxVisible === 0/],
+  ]) assert.match(codeOnly(read(f)), re, f);
+  const trang = codeOnly(read("app/messages/page.tsx"));
+  assert.match(trang, /if \(available === null\) return <div className="page"><Loading \/><\/div>;/);
+  assert.match(trang, /Tin nhắn chưa mở cho tài khoản này/);
+  // Nguoi KIA ngoai canary: khong o soan (may chu se 403) — noi that.
+  assert.match(codeOnly(read("components/chat/ChatComposer.tsx")), /if \(it\?\.found && it\.chat_enabled === false\) return <ChuaMo/);
+  assert.match(codeOnly(read("lib/api.ts")), /availability: \(\) => request<ChatAvailability>\("\/api\/chat\/availability"\)/);
 });
 
 test("nut Nhan tin o ho so: khong cho khach, khong cho chinh minh, khong khi dang chan", () => {

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -1844,9 +1844,39 @@ COLLECTION_PERMISSIONS: List[str] = []
 _MUC_TUNG_CAI = re.compile(r"/(?:attributes|indexes)/([^/?]+)$")
 
 
+def _mo_ta_cot(kind: str, extra: Any) -> str:
+    if kind == "string":
+        return f"string({extra})"
+    if kind == "enum":
+        return f"enum{list(extra)}"
+    return kind
+
+
+def _lech_cot(a: Dict[str, Any], kind: str, required: bool, extra: Any) -> List[str]:
+    """So mot thuoc tinh DANG CO (JSON cua Appwrite) voi dac ta — tra danh sach khac biet (rong = khop)."""
+    lech: List[str] = []
+    loai, dang = a.get("type"), a.get("format") or ""
+    mong = {"string": ("string", ""), "enum": ("string", "enum"), "email": ("string", "email"),
+            "integer": ("integer", ""), "boolean": ("boolean", ""), "datetime": ("datetime", ""),
+            "double": ("double", "")}.get(kind, (kind, ""))
+    if loai != mong[0] or (mong[1] and dang != mong[1]):
+        lech.append(f"kiểu {loai}{'/' + dang if dang else ''} ≠ {kind}")
+    if kind == "string" and a.get("size") != extra:
+        lech.append(f"size {a.get('size')} ≠ {extra}")
+    if kind == "enum":
+        thieu = [e for e in extra if e not in (a.get("elements") or [])]
+        if thieu:
+            lech.append(f"enum thiếu {thieu}")
+    if bool(a.get("required")) != bool(required):
+        lech.append(f"required {bool(a.get('required'))} ≠ {bool(required)}")
+    return lech
+
+
 class Setup:
-    def __init__(self, dry_run: bool = False):
+    def __init__(self, dry_run: bool = False, plan: bool = False):
         settings = load_settings()
+        #: `--plan`: CHI DOC — `_call` tu choi moi phuong thuc khac GET (rao cung, truoc khi gui).
+        self.plan_only = plan
         # Che do thu chi in ke hoach nen khong can credential
         if not settings.appwrite.configured and not dry_run:
             raise SystemExit(
@@ -1902,6 +1932,9 @@ class Setup:
             co nay thi moi lan chay lai, moi enum da ton tai lam "tạo mới" tang
             mot don vi, va dong tong ket idempotent noi doi.
         """
+        if self.plan_only and method != "GET":
+            # Rao CUNG cua `--plan`: khong mot request ghi nao roi khoi may, ke ca do loi logic o noi khac.
+            raise SystemExit(f"--plan là chế độ CHỈ ĐỌC: chặn {method} {path} trước khi gửi.")
         if self.dry_run:
             if not doc_thoi:
                 print(f"    [dry-run] {method} {path}")
@@ -2304,6 +2337,83 @@ class Setup:
                    doc_thoi=True)
         print(f"    (làm mới cache collection {base.rsplit('/', 1)[-1]} — không đổi thiết lập nào)")
 
+    # ------------------------------------------------------------------ --plan (CHI DOC)
+    def _doc(self, path: str) -> Tuple[int, Dict[str, Any]]:
+        """GET — phep DUY NHAT cua `--plan`. Tra (status, JSON); 404 la du lieu (chua co), khong phai loi."""
+        with httpx.Client(timeout=TIMEOUT) as client:
+            r = client.get(f"{self.endpoint}{path}", headers=self._headers())
+        try:
+            return r.status_code, (r.json() if r.content else {})
+        except ValueError:
+            return r.status_code, {}
+
+    def plan(self, danh_sach: List[str]) -> Dict[str, int]:
+        """In KE HOACH day du (bang, cot, index, quyen) + phat hien tai nguyen DA CO. KHONG ghi gi."""
+        db = self.cfg.database_id
+        print(f"KẾ HOẠCH (chỉ đọc) — {self.endpoint} · project {self.cfg.project_id} · db {db}")
+        st, _ = self._doc(f"/v1/databases/{db}")
+        if st in (401, 403):
+            raise SystemExit(f"Khoá không đủ quyền đọc schema (HTTP {st}). Cần scope databases.read, "
+                             "collections.read, attributes.read, indexes.read (khoá APPWRITE_SCHEMA_API_KEY).")
+        if st not in (200, 404):
+            raise SystemExit(f"GET database trả HTTP {st} — dừng.")
+        print("  database:", "đã có" if st == 200 else "CHƯA CÓ (sẽ tạo)")
+        tong = {"tao_bang": 0, "tao_cot": 0, "tao_index": 0, "khac": 0, "da_co_bang": 0}
+        for cid in danh_sach:
+            spec = SCHEMA[cid]
+            base = f"/v1/databases/{db}/collections/{cid}"
+            st, col = self._doc(base)
+            print(f"\nCollection {cid} — \"{spec['name']}\"")
+            if st == 404:
+                tong["tao_bang"] += 1
+                print(f"  SẼ TẠO · permissions={COLLECTION_PERMISSIONS} · documentSecurity=true")
+                for key, kind, req, extra in spec["attributes"]:
+                    tong["tao_cot"] += 1
+                    print(f"    + {key}: {_mo_ta_cot(kind, extra)}{' · bắt buộc' if req else ''}")
+                for name, kind, keys in spec["indexes"]:
+                    tong["tao_index"] += 1
+                    print(f"    + index {name} [{kind}] {keys}")
+                continue
+            if st != 200:
+                raise SystemExit(f"GET {cid} trả HTTP {st} — dừng.")
+            tong["da_co_bang"] += 1
+            quyen, ds = col.get("$permissions"), col.get("documentSecurity")
+            dung = quyen == COLLECTION_PERMISSIONS and ds is True
+            if not dung:
+                tong["khac"] += 1
+            print(f"  ĐÃ CÓ · permissions={quyen} · documentSecurity={ds}" + ("" if dung else "  ⚠ KHÁC thiết kế"))
+            _, ds_cot = self._doc(f"{base}/attributes")
+            co = {a.get("key"): a for a in ds_cot.get("attributes") or []}
+            for key, kind, req, extra in spec["attributes"]:
+                a = co.get(key)
+                if a is None:
+                    tong["tao_cot"] += 1
+                    print(f"    + {key}: {_mo_ta_cot(kind, extra)}{' · bắt buộc' if req else ''}  (SẼ TẠO)")
+                    continue
+                lech = _lech_cot(a, kind, req, extra)
+                if lech:
+                    tong["khac"] += 1
+                print(f"    = {key}: đã có ({a.get('status')})" + (f"  ⚠ {'; '.join(lech)}" if lech else ""))
+            thua = sorted(k for k in co if k not in {x[0] for x in spec["attributes"]})
+            if thua:
+                print(f"    (trên máy chủ, không có trong SCHEMA — không đụng: {thua})")
+            _, ds_idx = self._doc(f"{base}/indexes")
+            coi = {i.get("key"): i for i in ds_idx.get("indexes") or []}
+            for name, kind, keys in spec["indexes"]:
+                i = coi.get(name)
+                if i is None:
+                    tong["tao_index"] += 1
+                    print(f"    + index {name} [{kind}] {keys}  (SẼ TẠO)")
+                    continue
+                lech = ([f"type {i.get('type')} ≠ {kind}"] if i.get("type") != kind else []) + \
+                       ([f"cột {i.get('attributes')} ≠ {keys}"] if list(i.get("attributes") or []) != list(keys) else [])
+                if lech:
+                    tong["khac"] += 1
+                print(f"    = index {name}: đã có ({i.get('status')})" + (f"  ⚠ {'; '.join(lech)}" if lech else ""))
+        print(f"\nTổng: {tong['da_co_bang']} bảng đã có · SẼ TẠO {tong['tao_bang']} bảng, {tong['tao_cot']} cột, "
+              f"{tong['tao_index']} index · {tong['khac']} mục KHÁC thiết kế (cần người xem). KHÔNG ghi gì.")
+        return tong
+
     def run(self, only: str = "") -> None:
         """
         :param only: chi cham DUNG mot collection. Bo trong = tat ca.
@@ -2349,6 +2459,15 @@ def main(argv: List[str]) -> int:
             if not only:
                 raise SystemExit("--only= cần một tên collection. "
                                  f"Chọn một trong: {', '.join(SCHEMA)}")
+    if "--plan" in argv:
+        # CHI DOC: phat hien tai nguyen da co + in ke hoach. `--only` nhan danh sach cach nhau bang dau phay;
+        # bo trong = moi collection trong SCHEMA.
+        ds = [x.strip() for x in only.split(",") if x.strip()] if only else list(SCHEMA)
+        la = [x for x in ds if x not in SCHEMA]
+        if la:
+            raise SystemExit(f"Không có collection {la} trong SCHEMA.")
+        Setup(plan=True).plan(ds)
+        return 0
     if only:
         print(f"Chỉ chạm collection: {only}")
     Setup(dry_run=dry_run).run(only=only)

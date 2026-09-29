@@ -11,8 +11,11 @@ Route nhan tin — `/api/chat/*`. Moi route CHI cho nguoi da dang nhap, moi rout
     POST /api/chat/dm/{peer}/block                 {blocked}
     GET  /api/chat/blocks
     GET  /api/chat/stream                          SSE qua fetch (Authorization), xem `realtime.py`
+    GET  /api/chat/availability                    {enabled, reason} CUA NGUOI XEM — web quyet hien chat (luon 200)
 
-Tat (`FAS_CHAT_V1`) -> 503 `chat_not_configured`. Loi nghiep vu -> `{code, message}` on dinh.
+Tat (`FAS_CHAT_V1`) -> 503 `chat_not_configured`. Bat nhung nguoi goi KHONG thuoc khan gia (canary, xem
+`runtime.py`) -> 403 `chat_not_enabled`; nguoi KIA khong thuoc khan gia -> 403 `chat_peer_not_enabled` (canary chi
+nhan tin voi canary). Loi nghiep vu -> `{code, message}` on dinh.
 """
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from typing_extensions import Annotated
 
 from server.messaging.domain import ChatError
+from server.messaging.ids import fanfic_user_id_from_chat
 from server.messaging.runtime import MessagingRuntime
 from server.rate_limit import SlidingWindowRateLimiter
 
@@ -85,6 +89,24 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
                                 {"code": "chat_not_configured", "message": "Tin nhắn chưa được bật trên máy chủ."})
         return rt.service
 
+    def _nguoi(authorization: Optional[str]) -> Any:
+        """Xac thuc + khan gia: may chu bat nhung nguoi nay khong trong canary -> 403 (kiem o MOI request, nen go
+        ai khoi danh sach la co hieu luc ngay, khong can xoa gi)."""
+        p = resolve_profile(authorization)
+        if not rt.allows(p.user_id):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                {"code": "chat_not_enabled", "message": "Tin nhắn chưa mở cho tài khoản này."})
+        return p
+
+    def _ban(peer: str) -> None:
+        """Canary: chi nhan tin voi nguoi CUNG trong khan gia — khong de tin cho nguoi chua thay giao dien chat."""
+        if rt.audience == "all":
+            return
+        uid = fanfic_user_id_from_chat(peer)
+        if not uid or not rt.peer_allowed(uid):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                {"code": "chat_peer_not_enabled", "message": "Người này chưa dùng được Tin nhắn."})
+
     def _han_muc(loai: str, uid: str) -> None:
         toi_da, cua_so = HAN_MUC[loai]
         ok, _, cho = lim.check(f"chat_{loai}:{uid}", toi_da, cua_so)
@@ -99,10 +121,22 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
         except ChatError as exc:
             raise HTTPException(exc.http_status, {"code": exc.code, "message": str(exc)}) from exc
 
+    @r.get("/api/chat/availability")
+    def availability(response: Response, authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+        """Web (build co co) hoi MOT lan moi lan tai trang: co hien giao dien chat cho nguoi NAY khong. Luon 200 cho
+        nguoi da dang nhap — "chua mo" khong phai loi. Chi noi ve CHINH nguoi goi, khong liet ke ai trong canary."""
+        p = resolve_profile(authorization)
+        response.headers["Cache-Control"] = "no-store"
+        if not rt.enabled or rt.service is None:
+            return {"enabled": False, "reason": "off"}
+        if not rt.allows(p.user_id):
+            return {"enabled": False, "reason": "not_in_canary"}
+        return {"enabled": True, "reason": None}
+
     @r.get("/api/chat/conversations")
     def conversations(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         sv = _bat()
-        p = resolve_profile(authorization)
+        p = _nguoi(authorization)
         _han_muc("read", p.user_id)
         ds, tong = _chay(lambda: sv.conversations(p.user_id))
         return {"items": [sv.member_dto(m) for m in ds], "unread_total": tong}
@@ -111,7 +145,8 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
     def history(peer: PeerId, before: Optional[MsgId] = None, after: Optional[MsgId] = None, limit: int = 30,
                 authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         sv = _bat()
-        p = resolve_profile(authorization)
+        p = _nguoi(authorization)
+        _ban(peer)
         _han_muc("read", p.user_id)
         if before and after:
             raise HTTPException(400, {"code": "chat_invalid", "message": "Chỉ dùng một trong before/after."})
@@ -123,7 +158,8 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
              authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         sv = _bat()
         t0 = time.perf_counter()
-        p = resolve_profile(authorization)
+        p = _nguoi(authorization)
+        _ban(peer)
         do: Dict[str, float] = {"xac_thuc": round((time.perf_counter() - t0) * 1000, 1)}
         _han_muc("send", p.user_id)
         # Ban xem truoc hop thu cap nhat SAU khi tra loi (idempotent, tu sua) — nguoi gui khong phai cho.
@@ -140,7 +176,8 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
     @r.post("/api/chat/dm/{peer}/read")
     def read(peer: PeerId, payload: ReadIn, authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         sv = _bat()
-        p = resolve_profile(authorization)
+        p = _nguoi(authorization)
+        _ban(peer)
         _han_muc("write", p.user_id)
         m = _chay(lambda: sv.mark_read(p.user_id, peer, payload.up_to))
         return {"conversation": sv.member_dto(m) if m and m.last_message_id else None}
@@ -148,7 +185,8 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
     @r.post("/api/chat/dm/{peer}/mute")
     def mute(peer: PeerId, payload: MuteIn, authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         sv = _bat()
-        p = resolve_profile(authorization)
+        p = _nguoi(authorization)
+        _ban(peer)
         _han_muc("write", p.user_id)
         m = _chay(lambda: sv.set_muted(p.user_id, peer, payload.muted))
         return {"muted": m.muted}
@@ -156,14 +194,15 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
     @r.post("/api/chat/dm/{peer}/block")
     def block(peer: PeerId, payload: BlockIn, authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         sv = _bat()
-        p = resolve_profile(authorization)
+        # Chan la muc TAI KHOAN (#229, cung nut Chan o trang ca nhan) — khong gioi han theo khan gia cua nguoi kia.
+        p = _nguoi(authorization)
         _han_muc("write", p.user_id)
         return {"blocked": _chay(lambda: sv.set_blocked(p.user_id, peer, payload.blocked))}
 
     @r.get("/api/chat/blocks")
     def blocks(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         sv = _bat()
-        p = resolve_profile(authorization)
+        p = _nguoi(authorization)
         _han_muc("read", p.user_id)
         return {"items": _chay(lambda: sv.blocked_chat_ids(p.user_id))}
 
@@ -171,7 +210,7 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
     def stickers(response: Response, authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         """Bo chon nhan dan: moi goi + trang thai khoa CUA NGUOI XEM (may chu quyet, trinh duyet chi hien)."""
         sv = _bat()
-        p = resolve_profile(authorization)
+        p = _nguoi(authorization)
         _han_muc("read", p.user_id)
         # Rieng tung nguoi (khoa theo cap) — khong cache chung; cho phep trinh duyet giu ngan.
         response.headers["Cache-Control"] = "private, max-age=300"
@@ -180,7 +219,7 @@ def build_messaging_router(rt: MessagingRuntime, *, resolve_profile: Callable[[O
     @r.get("/api/chat/stream")
     async def stream(request: Request, authorization: Optional[str] = Header(default=None)):
         sv = _bat()
-        p = await run_in_threadpool(resolve_profile, authorization)
+        p = await run_in_threadpool(_nguoi, authorization)
         # Tach credential PHONG THU (khong dua vao viec resolve_profile da kiem dinh dang).
         phan = (authorization or "").split(" ", 1)
         credential = phan[1].strip() if len(phan) == 2 and phan[0].lower() == "bearer" else ""

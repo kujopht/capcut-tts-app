@@ -1024,6 +1024,98 @@ class RuntimeTest(unittest.TestCase):
         self.assertFalse(build_runtime(SimpleNamespace(data_backend="mock"), user_exists=lambda u: True,
                                        env={"FAS_CHAT_V1": "0"}).enabled)
 
+    def test_khan_gia_canary_fail_closed_tren_appwrite(self):
+        from types import SimpleNamespace
+
+        from server.messaging.runtime import doc_canary
+
+        cau_hinh = SimpleNamespace(endpoint="https://aw.example/v1", project_id="p1", api_key="k", database_id="db1",
+                                   api_base="https://aw.example")
+        aw = SimpleNamespace(data_backend="appwrite", appwrite=cau_hinh)
+        # Bat FAS_CHAT_V1 tren Appwrite ma QUEN danh sach -> canary rong -> KHONG ai (khong mo cho ca production).
+        r = build_runtime(aw, user_exists=lambda u: True, env={"FAS_CHAT_V1": "1"})
+        self.assertEqual((r.audience, r.canary_users), ("canary", frozenset()))
+        self.assertFalse(r.allows("u_bat_ky"))
+        r = build_runtime(aw, user_exists=lambda u: True,
+                          env={"FAS_CHAT_V1": "1", "FAS_CHAT_V1_CANARY_USERS": " u_a, u_b;u_c  ban@example.com ../x "})
+        self.assertEqual(r.canary_users, frozenset({"u_a", "u_b", "u_c"}), "chỉ nhận user ID — email/đường dẫn bị bỏ")
+        self.assertTrue(r.allows("u_b"))
+        self.assertFalse(r.allows("u_d"))
+        mo_ta = json.dumps(r.describe())
+        self.assertIn('"canary_users": 3', mo_ta)
+        self.assertNotIn("u_a", mo_ta, "describe() chỉ đếm, không liệt kê ID")
+        r = build_runtime(aw, user_exists=lambda u: True, env={"FAS_CHAT_V1": "1", "FAS_CHAT_V1_AUDIENCE": "all"})
+        self.assertTrue(r.allows("u_bat_ky"))
+        r = build_runtime(aw, user_exists=lambda u: True, env={"FAS_CHAT_V1": "1", "FAS_CHAT_V1_AUDIENCE": "moi-nguoi"})
+        self.assertFalse(r.enabled)
+        self.assertIn("moi-nguoi", r.reason)
+        # FAS_CHAT_V1 tat thi danh sach khong mo duoc gi.
+        r = build_runtime(aw, user_exists=lambda u: True, env={"FAS_CHAT_V1": "0", "FAS_CHAT_V1_CANARY_USERS": "u_a"})
+        self.assertFalse(r.allows("u_a"))
+        # Kho bo nho (dev/test): mac dinh "all".
+        self.assertEqual(build_runtime(SimpleNamespace(data_backend="mock"), user_exists=lambda u: True, env={}).audience,
+                         "all")
+        self.assertEqual(doc_canary(""), (frozenset(), 0))
+        self.assertEqual(doc_canary("a,,b ; c"), (frozenset({"a", "b", "c"}), 0))
+
+
+class CanaryRouteTest(MessagingCase):
+    """Canary tren route THAT: ngoai danh sach -> 403 o moi route chat (ke ca session/identities/stream), canary chi
+    nhan tin voi canary, go khoi danh sach co hieu luc NGAY, `/api/chat/availability` luon 200."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._kg_cu = (self.rt.audience, self.rt.canary_users)
+        self.ua, self.a, self.ha = self.nguoi("cn1")
+        self.ub, self.b, self.hb = self.nguoi("cn2")
+        self.uc, self.c, self.hc = self.nguoi("cn3")
+        self.rt.audience, self.rt.canary_users = "canary", frozenset({self.ua, self.ub})
+
+    def tearDown(self) -> None:
+        self.rt.audience, self.rt.canary_users = self._kg_cu
+        super().tearDown()
+
+    def _ma(self, r):
+        return (r.status_code, (r.json().get("detail") or {}).get("code") if r.status_code >= 400 else None)
+
+    def test_ngoai_danh_sach_bi_403_o_moi_route(self):
+        for m, url, body in (("GET", "/api/chat/conversations", None), ("GET", f"/api/chat/dm/{self.a}/messages", None),
+                             ("POST", f"/api/chat/dm/{self.a}/messages", {"client_id": cid(1), "text": "x"}),
+                             ("POST", f"/api/chat/dm/{self.a}/read", {}), ("GET", "/api/chat/blocks", None),
+                             ("GET", "/api/chat/stickers", None), ("POST", "/api/chat/session", None),
+                             ("POST", "/api/chat/identities", {"chat_user_ids": [self.a]}),
+                             ("GET", "/api/chat/stream", None)):
+            r = self.client.request(m, url, headers=self.hc, json=body)
+            self.assertEqual(self._ma(r), (403, "chat_not_enabled"), f"{m} {url}")
+        r = self.client.get("/api/chat/availability", headers=self.hc)
+        self.assertEqual((r.status_code, r.json()), (200, {"enabled": False, "reason": "not_in_canary"}))
+        self.assertNotIn(self.ua, r.text, "không lộ ai khác trong canary")
+
+    def test_canary_dung_day_du_nhung_chi_voi_canary(self):
+        self.assertEqual(self.client.get("/api/chat/availability", headers=self.ha).json(), {"enabled": True, "reason": None})
+        self.assertEqual(self.client.post("/api/chat/session", headers=self.ha).status_code, 200)
+        self.assertEqual(self.gui(self.ha, self.b, 1, "chào B").status_code, 200)
+        self.assertEqual(self.hop_thu(self.hb)["items"][0]["unread"], 1)
+        r = self.gui(self.ha, self.c, 2, "chào C")
+        self.assertEqual(self._ma(r), (403, "chat_peer_not_enabled"))
+        ds = self.client.post("/api/chat/identities", headers=self.ha,
+                              json={"chat_user_ids": [self.b, self.c]}).json()["items"]
+        self.assertEqual([it["chat_enabled"] for it in ds], [True, False])
+        # Chan la muc TAI KHOAN: van chan duoc nguoi ngoai canary.
+        self.assertEqual(self.client.post(f"/api/chat/dm/{self.c}/block", headers=self.ha,
+                                          json={"blocked": True}).status_code, 200)
+
+    def test_go_khoi_danh_sach_co_hieu_luc_ngay_va_tat_co_la_503(self):
+        self.assertEqual(self.client.get("/api/chat/conversations", headers=self.hb).status_code, 200)
+        self.rt.canary_users = frozenset({self.ua})
+        self.assertEqual(self._ma(self.client.get("/api/chat/conversations", headers=self.hb)), (403, "chat_not_enabled"))
+        self.rt.audience = "all"
+        self.assertEqual(self.client.get("/api/chat/conversations", headers=self.hc).status_code, 200)
+        self.rt.enabled = False
+        self.assertEqual(self.client.get("/api/chat/availability", headers=self.ha).json(),
+                         {"enabled": False, "reason": "off"})
+        self.assertEqual(self._ma(self.client.post("/api/chat/session", headers=self.ha)), (503, "chat_not_configured"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4645,9 +4645,18 @@ export interface ChatIdentity {
   level?: number;
   equipped_title?: string;
   avatar_frame?: CosmeticItem | null;
+  /** Nguoi nay co trong khan gia chat khong (canary). `false` = chua nhan tin duoc voi ho. */
+  chat_enabled?: boolean;
+}
+
+/** Nguoi XEM co duoc dung chat khong — may chu quyet (canary, `FAS_CHAT_V1_AUDIENCE`). Luon 200 khi da dang nhap. */
+export interface ChatAvailability {
+  enabled: boolean;
+  reason: "off" | "not_in_canary" | null;
 }
 
 export const chatApi = {
+  availability: () => request<ChatAvailability>("/api/chat/availability"),
   session: () => request<ChatSessionResponse>("/api/chat/session", { method: "POST" }),
   identities: (body: { chat_user_ids?: string[]; usernames?: string[] }) =>
     request<{ items: ChatIdentity[]; you: string }>("/api/chat/identities", {

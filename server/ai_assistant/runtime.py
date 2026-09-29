@@ -6,6 +6,7 @@ storage backend + provider set for the environment actually running.
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -61,7 +62,13 @@ def _build_provider(name: str, settings: Any) -> Optional[ChatProvider]:
     ai = settings.ai_assistant
     try:
         if name == "mock":
-            return MockChatProvider()
+            # Do tre moi tu (ms) CHI cho provider mock — de dev/QA thu duoc nut Dung giua stream. Khong
+            # anh huong provider that; gia tri hong/am -> 0.
+            try:
+                tre_ms = max(0.0, float(os.environ.get("FAS_AI_MOCK_DELAY_MS", "0") or 0))
+            except ValueError:
+                tre_ms = 0.0
+            return MockChatProvider(delay_s=tre_ms / 1000.0)
         if name == "qwen":
             return QwenDashScopeProvider(
                 api_key=ai.qwen_api_key, base_url=ai.qwen_base_url, model=ai.qwen_model)

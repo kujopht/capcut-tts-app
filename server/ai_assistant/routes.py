@@ -35,11 +35,12 @@ from server.ai_assistant.limits import (
 )
 from server.ai_assistant.memory import (
     AiConversation, AiEscalation, AiMessage, AiPreferences, AiProject, AiUnavailable, RepoConflict,
-    now_iso,
+    now_iso, redact,
 )
 from server.ai_assistant.runtime import AiRuntime
 from server.ai_assistant.tools import (
-    citations_for, format_web_results_for_prompt, retrieve_story_chunks, search_library, web_search,
+    UNTRUSTED_DATA_PREAMBLE, citations_for, format_web_results_for_prompt,
+    retrieve_story_chunks, search_library, web_search,
 )
 from server.llm_gateway.chat_provider import Delta, Done, UsageEvent
 
@@ -156,9 +157,19 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         except AiBusy as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 {"code": "ai_busy", "message": str(exc)}) from exc
+        except AiUnavailable as exc:
+            # H5/L12 (review finding): the repo layer (Appwrite down, a
+            # bounded field rejected with a 400 the caller never validated,
+            # ...) raises `AiUnavailable` — previously uncaught here, so it
+            # fell through to FastAPI's default handler as an opaque 500.
+            # Every `rt.repo.*`/`rt.ephemeral.*` call site in this router
+            # now goes through `_run()` specifically so this is the ONE
+            # place that maps it to a stable 503.
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                {"code": "ai_storage_unavailable", "message": str(exc)}) from exc
 
     def _memory_enabled(user_id: str) -> bool:
-        prefs = rt.repo.get_preferences(user_id)
+        prefs = _run(lambda: rt.repo.get_preferences(user_id))
         return prefs.memory_enabled if prefs else True
 
     def _find_conversation(conversation_id: str):
@@ -166,7 +177,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         =false`) store — a conversation lives in exactly one of the two at
         any moment, decided at `create_conversation` time. Returns
         `(conversation, is_ephemeral)`."""
-        conv = rt.repo.get_conversation(conversation_id)
+        conv = _run(lambda: rt.repo.get_conversation(conversation_id))
         if conv is not None:
             return conv, False
         conv = rt.ephemeral.get_conversation(conversation_id)
@@ -193,7 +204,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         alone (no secondary key) preserves that relative order for any
         same-second tie, which a secondary key like `message_id` (a random
         hex, unrelated to time) would scramble."""
-        durable = rt.repo.list_messages(conversation_id, limit=limit)
+        durable = _run(lambda: rt.repo.list_messages(conversation_id, limit=limit))
         ephemeral = rt.ephemeral.list_messages(conversation_id, limit=limit)
         by_id = {m.message_id: m for m in durable}
         for m in ephemeral:
@@ -202,7 +213,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         return merged[-limit:]
 
     def _own_project(user_id: str, project_id: str) -> AiProject:
-        proj = rt.repo.get_project(project_id)
+        proj = _run(lambda: rt.repo.get_project(project_id))
         if proj is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND,
                                 {"code": "ai_not_found", "message": "Không tìm thấy dự án."})
@@ -257,16 +268,28 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                             authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = resolve_profile(authorization)
+        # M11 (review finding): creating a conversation previously had NO
+        # rate limit at all (every other write route enforces `rt.rpm`)
+        # and only counted DURABLE conversations against
+        # `MAX_CONVERSATIONS_PER_USER` — a memory-off user could open
+        # unlimited ephemeral conversations (bounded only by the
+        # ephemeral store's own GLOBAL, cross-user cap, see
+        # `ephemeral.py`), which also meant one heavy memory-off user
+        # could crowd out another user's ephemeral history.
+        _run(lambda: rt.rpm_limiter.check(profile.user_id, rpm=rt.rpm))
         mode = payload.mode if payload.mode in MODES else "general"
-        if rt.repo.count_conversations(profile.user_id) >= MAX_CONVERSATIONS_PER_USER:
+        durable_count = _run(lambda: rt.repo.count_conversations(profile.user_id))
+        ephemeral_count = len(rt.ephemeral.list_conversations(profile.user_id))
+        if durable_count + ephemeral_count >= MAX_CONVERSATIONS_PER_USER:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 {"code": "ai_context_too_large",
                                  "message": f"Đã đạt tối đa {MAX_CONVERSATIONS_PER_USER} hội thoại."})
         ctx = payload.context or ContextIn()
         conv = AiConversation(
             conversation_id=_new_id(), user_id=profile.user_id, mode=mode,
-            title=payload.title or "", context_novel_id=ctx.novel_id or "",
-            context_chapter_id=ctx.chapter_id or "", context_project_id=ctx.project_id or "")
+            title=(payload.title or "")[:120], context_novel_id=(ctx.novel_id or "")[:64],
+            context_chapter_id=(ctx.chapter_id or "")[:64], context_project_id=(ctx.project_id or "")[:64],
+            context_chapter_index=max(1, int(ctx.current_chapter_index or 1)))
         memory_enabled = _memory_enabled(profile.user_id)
         if memory_enabled:
             conv = _run(lambda: rt.repo.create_conversation(conv))
@@ -334,16 +357,30 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         def _prepare():
             memory_enabled = _memory_enabled(profile.user_id)
 
+            # M7 (review finding): secrets must be redacted BEFORE anything
+            # reaches a provider — the ONLY existing redaction
+            # (`AppwriteAiRepo.create_message`) ran on write for the
+            # DURABLE repo alone, so `InMemoryAiRepo`, the ephemeral
+            # (memory-off) store, AND every retrieval/web-search QUERY
+            # built from the raw `payload.content` all carried secret-
+            # shaped substrings straight through to the model. Redacting
+            # ONCE here, before it's used for anything, fixes persistence
+            # (both stores) and every downstream use in one place — the
+            # redacted copy is also what a LATER turn's context/history
+            # reads back (`_recent_messages_combined` -> `build_context`),
+            # since it's the exact object stored below.
+            redacted_content = redact(payload.content)
+
             user_message = AiMessage(
                 message_id=_new_id(), conversation_id=conversation_id, user_id=profile.user_id,
-                role="user", content=payload.content, client_id=payload.client_id)
+                role="user", content=redacted_content, client_id=payload.client_id)
             # contract §5: while memory is OFF, this write goes ONLY to the
             # in-process TTL cache — NEVER to `rt.repo`/Appwrite. Toggling
             # memory back ON immediately resumes durable writes for any
             # NEW message (this decision is re-evaluated on every call,
             # not cached for the conversation's lifetime).
             if memory_enabled:
-                rt.repo.create_message(user_message)
+                _run(lambda: rt.repo.create_message(user_message))
             else:
                 # The conversation itself may have been created DURABLY
                 # (memory was on at the time) and only turned off later
@@ -357,25 +394,36 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             retrieval_block = ""
             citations: List[Any] = []
             if conv.mode == "story" and conv.context_novel_id:
+                # L12/M10 (review finding): honor the conversation's ACTUAL
+                # `current_chapter_index` (was hard-coded to `1` regardless
+                # of what the client sent, defeating spoiler protection past
+                # chapter 1) — read permission on `context_novel_id` is
+                # enforced INSIDE `retrieve_story_chunks` itself (fails
+                # closed when unwired; see `ToolContext.may_read_novel_fn`).
                 results = retrieve_story_chunks(
-                    rt.tool_ctx, payload.content, novel_id=conv.context_novel_id,
-                    current_chapter_index=int((conv.context_chapter_id and 1) or 1),
+                    rt.tool_ctx, redacted_content, novel_id=conv.context_novel_id,
+                    current_chapter_index=conv.context_chapter_index,
                     user_id=profile.user_id)
                 if results:
                     citations = citations_for(results)
-                    retrieval_block = "DỮ LIỆU TRUYỆN TRUY XUẤT ĐƯỢC:\n" + "\n---\n".join(
-                        r.chunk_text for r in results)
+                    # M10 (review finding): retrieved story text is
+                    # UNTRUSTED (chapter content a THIRD PARTY may have
+                    # authored, not the operator) — wrap with the same
+                    # preamble already used for web results (contract §8),
+                    # and redact it too (M7) before it ever reaches a turn.
+                    retrieval_block = UNTRUSTED_DATA_PREAMBLE + "\nDỮ LIỆU TRUYỆN TRUY XUẤT ĐƯỢC:\n" + \
+                        "\n---\n".join(redact(r.chunk_text) for r in results)
             if payload.use_library:
-                hits = search_library(rt.tool_ctx, payload.content)
+                hits = search_library(rt.tool_ctx, redacted_content)
                 if hits:
-                    retrieval_block_extra = "\n\nKẾT QUẢ THƯ VIỆN:\n" + "\n".join(
-                        f"- {h.title} ({h.author})" for h in hits)
+                    retrieval_block_extra = "\n\n" + UNTRUSTED_DATA_PREAMBLE + "\nKẾT QUẢ THƯ VIỆN:\n" + \
+                        "\n".join(redact(f"- {h.title} ({h.author})") for h in hits)
                     retrieval_block = retrieval_block + retrieval_block_extra
             if payload.use_web_search and rt.web_search_enabled:
-                web_hits = web_search(rt.tool_ctx, payload.content)
-                block = format_web_results_for_prompt(web_hits)
+                web_hits = web_search(rt.tool_ctx, redacted_content)
+                block = format_web_results_for_prompt(web_hits)  # already carries its own preamble
                 if block:
-                    retrieval_block = retrieval_block + "\n\n" + block
+                    retrieval_block = retrieval_block + "\n\n" + redact(block)
 
             # Always pass the COMBINED (durable + ephemeral) recent-message
             # list explicitly — this is what makes the CURRENT user turn

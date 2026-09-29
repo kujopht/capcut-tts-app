@@ -1818,6 +1818,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("context_novel_id", "string", False, 64),
             ("context_chapter_id", "string", False, 64),
             ("context_project_id", "string", False, 64),
+            # L12 (review finding): `ContextIn.current_chapter_index` was
+            # accepted by the API but never persisted/read back — spoiler
+            # gating in `retrieve_story_chunks` always saw chapter 1.
+            ("context_chapter_index", "integer", False, None),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
             ("message_count", "integer", False, None),

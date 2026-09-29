@@ -65,6 +65,12 @@ class AiConversation:
     context_novel_id: str = ""
     context_chapter_id: str = ""
     context_project_id: str = ""
+    #: L12 (review finding): `ContextIn.current_chapter_index` was silently
+    #: ignored (retrieval was always called with a hard-coded `1`,
+    #: defeating the spoiler-protection chapter cutoff for anyone reading
+    #: past chapter 1) — the value now actually reaches `AiConversation` at
+    #: creation time and is read back by `retrieve_story_chunks`.
+    context_chapter_index: int = 1
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
     message_count: int = 0
@@ -503,9 +509,18 @@ class AppwriteAiRepo(AiRepo):
     # ------------------------------------------------------------- mapping
     @staticmethod
     def _conv_to_row(c: AiConversation) -> Dict[str, Any]:
+        # H5 (review finding): `context_novel_id`/`context_chapter_id`/
+        # `context_project_id` are `size=64` Appwrite attributes
+        # (`scripts/setup_appwrite.py`) — truncated HERE too (routes.py
+        # already bounds them at the API boundary) so this repo can never
+        # hand Appwrite an over-length value and turn a would-be 400 into
+        # an uncaught `AiUnavailable` -> 500 for ANY caller that builds an
+        # `AiConversation` directly (tests, future callers).
         return {"user_id": c.user_id, "mode": c.mode, "title": redact(c.title)[:120],
-                "context_novel_id": c.context_novel_id, "context_chapter_id": c.context_chapter_id,
-                "context_project_id": c.context_project_id, "created_at": c.created_at,
+                "context_novel_id": c.context_novel_id[:64], "context_chapter_id": c.context_chapter_id[:64],
+                "context_project_id": c.context_project_id[:64],
+                "context_chapter_index": int(c.context_chapter_index or 1),
+                "created_at": c.created_at,
                 "updated_at": c.updated_at, "message_count": c.message_count, "archived": c.archived}
 
     @staticmethod
@@ -516,6 +531,7 @@ class AppwriteAiRepo(AiRepo):
             context_novel_id=str(r.get("context_novel_id") or ""),
             context_chapter_id=str(r.get("context_chapter_id") or ""),
             context_project_id=str(r.get("context_project_id") or ""),
+            context_chapter_index=int(r.get("context_chapter_index") or 1),
             created_at=str(r.get("created_at") or ""), updated_at=str(r.get("updated_at") or ""),
             message_count=int(r.get("message_count") or 0), archived=bool(r.get("archived")))
 
@@ -576,11 +592,22 @@ class AppwriteAiRepo(AiRepo):
 
     def list_messages(self, conversation_id: str, *, before_id: Optional[str] = None,
                       limit: int = 30) -> List[AiMessage]:
+        # H4 (review finding): `orderAsc` + `limit` returned the OLDEST N
+        # messages of the conversation — for any conversation with more
+        # than `limit` messages, every caller (context building, the
+        # conversation-detail route) got the very START of the
+        # conversation instead of its most RECENT turns. `orderDesc` gets
+        # the newest N as Appwrite sees them; `.reverse()` below restores
+        # chronological (oldest-first) order for the return value, which
+        # every existing caller already assumes (context builder's own
+        # "walk from most recent backwards" logic,
+        # `InMemoryAiRepo.list_messages`'s own `items[-limit:]`).
         qs = [self._q("equal", "conversation_id", [conversation_id]),
-              self._q("orderAsc", "created_at"), self._q("limit", values=[int(limit)])]
+              self._q("orderDesc", "created_at"), self._q("limit", values=[int(limit)])]
         if before_id:
             qs.append(self._q("cursorAfter", values=[before_id]))
         rows = self._list(T_MSG, qs)
+        rows.reverse()
         return [AiMessage(
             message_id=str(r.get("$id") or ""), conversation_id=str(r.get("conversation_id") or ""),
             user_id=str(r.get("user_id") or ""), role=str(r.get("role") or "user"),

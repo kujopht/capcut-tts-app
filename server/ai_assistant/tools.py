@@ -63,6 +63,17 @@ class ToolContext:
     #: callable alone.
     diagnostics_fn: Optional[Callable[[str], Dict[str, Any]]] = None
     web_search: Optional[WebSearchTool] = None
+    #: M10 (review finding): `(novel_id, user_id) -> bool`, same contract as
+    #: `server/main.py::_may_read` (published novels readable by anyone,
+    #: unpublished/draft ones only by their owner) — injected rather than
+    #: imported directly because `server/main.py` imports THIS package at
+    #: module scope (`server/main.py` builds `app`, THEN does
+    #: `from server.ai_assistant.routes import build_ai_router` near the
+    #: bottom of the file), so importing `server.main` from here would be
+    #: circular. `None` (unwired) fails CLOSED: `retrieve_story_chunks`
+    #: skips retrieval entirely rather than risk leaking another user's
+    #: unpublished draft into a prompt.
+    may_read_novel_fn: Optional[Callable[[str, str], bool]] = None
 
 
 def search_library(ctx: ToolContext, query: str, *, max_results: int = 5) -> List[LibraryHit]:
@@ -76,8 +87,19 @@ def retrieve_story_chunks(
         spoiler_protection_enabled: bool = True,
         user_id: str = "") -> List[RetrievalResult]:
     """Reuses `server.chat.retrieval.retrieve` verbatim (spoiler gate
-    included) — never a second, parallel retrieval implementation."""
+    included) — never a second, parallel retrieval implementation.
+
+    M10 (review finding): retrieval used to run against ANY `novel_id` a
+    conversation's `context` claimed, with no check that its OWNER (this
+    conversation's user) is actually allowed to read that novel — an
+    unpublished/draft novel belonging to someone else would happily be
+    retrieved into the prompt. `ctx.may_read_novel_fn`, when wired, is
+    consulted first; when NOT wired this fails closed (no retrieval) —
+    see `ToolContext.may_read_novel_fn`'s own docstring for why this is a
+    DI hook rather than a direct import."""
     if ctx.vector_store is None or ctx.embedding_provider is None or not novel_id:
+        return []
+    if ctx.may_read_novel_fn is not None and not ctx.may_read_novel_fn(novel_id, user_id):
         return []
     reading = UserReadingContext(
         user_id=user_id, novel_id=novel_id, current_chapter_index=current_chapter_index,

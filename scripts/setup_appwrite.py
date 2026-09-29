@@ -1805,6 +1805,116 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("user_idx", "unique", ["user_id"]),
         ],
     },
+    # --- Fanfic AI Assistant V1 (docs/ai/AI_ASSISTANT_V1.md §5) ---------------
+    # Sau collection nay CHUA duoc ap len production — cong `FAS_AI_ASSISTANT_V1`
+    # mac dinh TAT. `documentSecurity=True` + `permissions=[]` cap collection
+    # (COLLECTION_PERMISSIONS) — CHI backend (API key) doc/ghi duoc.
+    "ai_conversations": {
+        "name": "AI Conversations",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("mode", "enum", True, ["general", "story", "support", "writer"]),
+            ("title", "string", False, 120),
+            ("context_novel_id", "string", False, 64),
+            ("context_chapter_id", "string", False, 64),
+            ("context_project_id", "string", False, 64),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+            ("message_count", "integer", False, None),
+            ("archived", "boolean", False, None),
+        ],
+        "indexes": [
+            ("user_updated_idx", "key", ["user_id", "updated_at"]),
+        ],
+    },
+    "ai_messages": {
+        "name": "AI Messages",
+        "attributes": [
+            ("conversation_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            ("role", "enum", True, ["user", "assistant"]),
+            ("content", "string", True, 8000),
+            ("status", "enum", False, ["complete", "stopped", "error"]),
+            ("citations_json", "string", False, 4000),
+            ("provider_name", "string", False, 40),
+            ("model", "string", False, 80),
+            ("input_tokens", "integer", False, None),
+            ("output_tokens", "integer", False, None),
+            ("created_at", "datetime", True, None),
+            ("client_id", "string", False, 32),
+        ],
+        "indexes": [
+            ("conversation_created_idx", "key", ["conversation_id", "created_at"]),
+        ],
+    },
+    "ai_summaries": {
+        # `rowId` la `conversation_id` — mot ban tom tat moi hoi thoai.
+        "name": "AI Summaries",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("summary", "string", False, 4000),
+            ("covers_until_message_id", "string", False, 64),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
+    "ai_preferences": {
+        # `rowId` la `user_id` — mot ban ghi so thich moi nguoi dung.
+        "name": "AI Preferences",
+        "attributes": [
+            ("memory_enabled", "boolean", False, None),
+            ("preferences_json", "string", False, 2000),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
+    "ai_projects": {
+        "name": "AI Writer Projects",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("title", "string", False, 120),
+            ("premise", "string", False, 4000),
+            ("outline_json", "string", False, 8000),
+            ("characters_json", "string", False, 8000),
+            ("world_json", "string", False, 8000),
+            ("notes", "string", False, 4000),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_updated_idx", "key", ["user_id", "updated_at"]),
+        ],
+    },
+    "ai_usage_daily": {
+        # `rowId` la `{user_id}_{yyyymmdd}` — mot ban tong hop moi nguoi/ngay.
+        "name": "AI Usage Daily",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("day", "string", True, 8),
+            ("requests", "integer", False, None),
+            ("input_tokens", "integer", False, None),
+            ("output_tokens", "integer", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    "ai_support_escalations": {
+        "name": "AI Support Escalations",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("conversation_id", "string", False, 64),
+            ("summary", "string", True, 2000),
+            # DA LOC — khong bao gio gia tri env/log/token, xem
+            # `server/ai_assistant/tools.py::ALLOWED_DIAGNOSTIC_KEYS`.
+            ("diagnostics_json", "string", False, 4000),
+            ("status", "enum", True, ["open", "closed"]),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("status_created_idx", "key", ["status", "created_at"]),
+        ],
+    },
 }
 
 #: Cac thuoc tinh la MANG. Appwrite doi co `array: true` luc tao; thieu no thi

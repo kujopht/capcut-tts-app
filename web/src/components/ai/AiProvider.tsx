@@ -36,6 +36,7 @@ import type {
   AiErrorInfo,
   AiMessage,
   AiMode,
+  AiPreferences,
 } from "@/lib/ai/types";
 
 const CO_MO = "fas.ai.open";
@@ -81,6 +82,9 @@ interface AiState {
   historyOpen: boolean;
   error: AiErrorInfo | null;
   loadingConversation: boolean;
+  /** `true` khi hội thoại ĐANG MỞ không được lưu quá phiên (`memory_enabled=false` lúc tạo, §5). */
+  ephemeral: boolean;
+  preferences: AiPreferences | null;
 }
 
 interface AiContextValue extends AiState {
@@ -93,6 +97,9 @@ interface AiContextValue extends AiState {
   deleteConversationById: (id: string) => Promise<void>;
   setMode: (mode: AiMode) => void;
   sendMessage: (text: string) => Promise<void>;
+  loadPreferences: () => Promise<void>;
+  setMemoryEnabled: (value: boolean) => Promise<void>;
+  deleteAllMemory: (includeProjects?: boolean) => Promise<void>;
   stopStreaming: () => void;
   regenerate: () => Promise<void>;
 }
@@ -125,6 +132,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     historyOpen: false,
     error: null,
     loadingConversation: false,
+    ephemeral: false,
+    preferences: null,
   });
   const ctrlRef = useRef<AbortController | null>(null);
   const assistantIdRef = useRef<string | null>(null);
@@ -158,7 +167,14 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, loadingConversation: true, error: null }));
     try {
       const detail = await aiApi.getConversation(id);
-      setState((s) => ({ ...s, conversationId: id, messages: detail.messages, mode: detail.mode, loadingConversation: false }));
+      setState((s) => ({
+        ...s,
+        conversationId: id,
+        messages: detail.messages,
+        mode: detail.mode,
+        ephemeral: Boolean(detail.ephemeral),
+        loadingConversation: false,
+      }));
       ghiPhien(CO_HOI_THOAI, id);
     } catch (e) {
       setState((s) => ({ ...s, loadingConversation: false, error: loiTuApiError(e) }));
@@ -223,7 +239,14 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       setState((s) => ({ ...s, error: null }));
       try {
         const conv = await aiApi.createConversation(mode ?? state.mode);
-        setState((s) => ({ ...s, conversationId: conv.conversation_id, messages: [], mode: conv.mode, historyOpen: false }));
+        setState((s) => ({
+          ...s,
+          conversationId: conv.conversation_id,
+          messages: [],
+          mode: conv.mode,
+          historyOpen: false,
+          ephemeral: s.preferences ? !s.preferences.memory_enabled : false,
+        }));
         ghiPhien(CO_HOI_THOAI, conv.conversation_id);
         void taiLichSu();
       } catch (e) {
@@ -366,6 +389,40 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     await guiVanBan(lastUserTextRef.current, lastAssistant.message_id);
   }, [state.messages, guiVanBan]);
 
+  /** Tải sở thích (bật/tắt ghi nhớ) — gọi khi mở popover cài đặt, KHÔNG lúc mount (idle gần như zero mạng). */
+  const loadPreferences = useCallback(async () => {
+    try {
+      const prefs = await aiApi.getPreferences();
+      setState((s) => ({ ...s, preferences: prefs }));
+    } catch (e) {
+      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+    }
+  }, []);
+
+  const setMemoryEnabled = useCallback(async (value: boolean) => {
+    setState((s) => ({
+      ...s,
+      preferences: s.preferences ? { ...s.preferences, memory_enabled: value } : { memory_enabled: value, preferences: {} },
+    }));
+    try {
+      const prefs = await aiApi.putPreferences({ memory_enabled: value, preferences: {} });
+      setState((s) => ({ ...s, preferences: prefs }));
+    } catch (e) {
+      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+    }
+  }, []);
+
+  /** "Xoá toàn bộ ký ức AI" (§5) — hội thoại + tóm tắt + sở thích; KHÔNG xoá dự án viết trừ khi `includeProjects`. */
+  const deleteAllMemory = useCallback(async (includeProjects = false) => {
+    try {
+      await aiApi.deleteMemory(includeProjects);
+      setState((s) => ({ ...s, conversations: [], conversationId: null, messages: [] }));
+      ghiPhien(CO_HOI_THOAI, null);
+    } catch (e) {
+      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+    }
+  }, []);
+
   const value = useMemo<AiContextValue>(
     () => ({
       ...state,
@@ -380,6 +437,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       sendMessage,
       stopStreaming,
       regenerate,
+      loadPreferences,
+      setMemoryEnabled,
+      deleteAllMemory,
     }),
     [
       state,
@@ -393,6 +453,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       sendMessage,
       stopStreaming,
       regenerate,
+      loadPreferences,
+      setMemoryEnabled,
+      deleteAllMemory,
     ],
   );
 

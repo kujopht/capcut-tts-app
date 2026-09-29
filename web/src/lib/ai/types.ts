@@ -39,6 +39,8 @@ export interface AiConversationSummary {
   created_at: string;
   updated_at: string;
   message_count: number;
+  /** `true` khi hội thoại được tạo lúc `memory_enabled=false` — không được lưu lại quá phiên (§5). */
+  ephemeral?: boolean;
 }
 
 export type AiMessageStatus = "complete" | "stopped" | "error";
@@ -64,6 +66,8 @@ export interface AiConversationDetail {
   mode: AiMode;
   title: string;
   messages: AiMessage[];
+  /** `true` = hội thoại này KHÔNG lưu quá phiên (`memory_enabled=false` lúc tạo). */
+  ephemeral?: boolean;
 }
 
 export interface AiConversationContext {

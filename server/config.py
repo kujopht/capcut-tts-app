@@ -258,6 +258,61 @@ class LlmGatewaySettings:
 
 
 @dataclass(frozen=True)
+class AiAssistantSettings:
+    """Fanfic AI Assistant V1 (`docs/ai/AI_ASSISTANT_V1.md`) — a SEPARATE
+    feature from `LlmGatewaySettings` (the reader-AI `/api/chat/ask`
+    gateway): different flag, different provider set, different limits.
+    MAC DINH TAT (`enabled=False`) — every `/api/ai/*` route except
+    availability returns 503 `ai_not_enabled` while off, per the design
+    contract §1/§9. Keys missing here never crash startup: a provider
+    without its key is simply excluded from the fallback chain (see
+    `server/ai_assistant/config.py::resolve_provider_chain`).
+    """
+
+    enabled: bool = False
+    assistant_name: str = "Fanfic AI"
+    #: Ordered fallback chain of provider NAMES, e.g. "qwen,azure_openai,mock".
+    providers: Tuple[str, ...] = ("mock",)
+
+    qwen_api_key: str = ""
+    qwen_base_url: str = ""
+    qwen_model: str = "qwen-plus"
+
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_deployment: str = ""
+    azure_openai_api_version: str = "2024-06-01"
+
+    tencent_api_key: str = ""
+    tencent_base_url: str = ""
+    tencent_model: str = "hunyuan-turbo"
+
+    web_search_provider: str = "off"
+    web_search_api_key: str = ""
+
+    daily_tokens_free: int = 30000
+    daily_tokens_premium: int = 200000
+    rpm: int = 8
+    max_streams: int = 4
+
+    def describe(self) -> dict:
+        """KHONG BAO GIO chua API key that — cung quy uoc voi
+        `LlmGatewaySettings.describe`/`AppwriteSettings.configured`."""
+        return {
+            "enabled": self.enabled,
+            "assistant_name": self.assistant_name,
+            "providers": list(self.providers),
+            "qwen_configured": bool(self.qwen_api_key),
+            "azure_openai_configured": bool(
+                self.azure_openai_endpoint and self.azure_openai_api_key
+                and self.azure_openai_deployment),
+            "tencent_configured": bool(self.tencent_api_key and self.tencent_base_url),
+            "web_search_provider": self.web_search_provider,
+            "web_search_configured": bool(self.web_search_api_key),
+        }
+
+
+@dataclass(frozen=True)
 class Settings:
     """Toan bo cau hinh backend."""
 
@@ -453,6 +508,7 @@ class Settings:
     r2: R2Settings = field(default_factory=R2Settings)
     image_studio: ImageStudioSettings = field(default_factory=ImageStudioSettings)
     llm_gateway: LlmGatewaySettings = field(default_factory=LlmGatewaySettings)
+    ai_assistant: AiAssistantSettings = field(default_factory=AiAssistantSettings)
 
     #: KHONG con la cong chan cho giong cuc bo — xem `local_voices` ngay duoi.
     #:
@@ -924,6 +980,7 @@ def load_settings() -> Settings:
         youtube_websub_callback_base_url=_env("YOUTUBE_WEBSUB_CALLBACK_BASE_URL"),
         image_studio=_image_studio_settings(),
         llm_gateway=_llm_gateway_settings(),
+        ai_assistant=_ai_assistant_settings(),
     )
 
 
@@ -965,6 +1022,39 @@ def _image_studio_settings() -> ImageStudioSettings:
         pollinations_client_id=_env("POLLINATIONS_CLIENT_ID"),
         byop_master_key=_env("IMAGE_BYOP_MASTER_KEY"),
         byop_redirect_uri=_env("IMAGE_BYOP_REDIRECT_URI"),
+    )
+
+
+def _ai_assistant_settings() -> AiAssistantSettings:
+    def _int(name: str, default: int) -> int:
+        raw = _env(name, "").strip()
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            raise ConfigError(f"{name} phải là số nguyên, nhận được {raw!r}.")
+
+    return AiAssistantSettings(
+        enabled=_env_bool("FAS_AI_ASSISTANT_V1", False),
+        assistant_name=_env("FAS_AI_ASSISTANT_NAME", "Fanfic AI") or "Fanfic AI",
+        providers=tuple(_env_list("FAS_AI_PROVIDERS", "mock")) or ("mock",),
+        qwen_api_key=_env("AI_QWEN_API_KEY"),
+        qwen_base_url=_env("AI_QWEN_BASE_URL"),
+        qwen_model=_env("AI_QWEN_MODEL", "qwen-plus") or "qwen-plus",
+        azure_openai_endpoint=_env("AI_AZURE_OPENAI_ENDPOINT"),
+        azure_openai_api_key=_env("AI_AZURE_OPENAI_API_KEY"),
+        azure_openai_deployment=_env("AI_AZURE_OPENAI_DEPLOYMENT"),
+        azure_openai_api_version=_env("AI_AZURE_OPENAI_API_VERSION", "2024-06-01") or "2024-06-01",
+        tencent_api_key=_env("AI_TENCENT_API_KEY"),
+        tencent_base_url=_env("AI_TENCENT_BASE_URL"),
+        tencent_model=_env("AI_TENCENT_MODEL", "hunyuan-turbo") or "hunyuan-turbo",
+        web_search_provider=_env("FAS_AI_WEB_SEARCH", "off") or "off",
+        web_search_api_key=_env("AI_WEB_SEARCH_API_KEY"),
+        daily_tokens_free=_int("FAS_AI_DAILY_TOKENS_FREE", 30000),
+        daily_tokens_premium=_int("FAS_AI_DAILY_TOKENS_PREMIUM", 200000),
+        rpm=_int("FAS_AI_RPM", 8),
+        max_streams=_int("FAS_AI_MAX_STREAMS", 4),
     )
 
 

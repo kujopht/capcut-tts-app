@@ -99,7 +99,17 @@ def _sse(event: str, data: Dict[str, Any]) -> str:
 
 
 def _tier_of(profile: Any) -> str:
-    tier = str(getattr(profile, "tier", "free") or "free").lower()
+    raw = getattr(profile, "tier", "free") or "free"
+    # `raw` may be a `str`-mixin `Enum` member (e.g. `server.domain.Tier`) —
+    # `str(Tier.FREE)` is `"Tier.FREE"` on Python < 3.13 (the mixin's
+    # `__str__` is NOT used for `str()`/f-strings until 3.12's Enum
+    # rewrite, and even 3.12 only fixes `format()`/f-strings, not the
+    # plain `str()` call — see bpo-40066), so a bare `str(...)` here
+    # silently classified every FREE-tier user as "premium" (wrong,
+    # higher budget). `.value` is the actual member value ("free",
+    # "listener_pro", ...); non-Enum inputs (plain strings, tests) fall
+    # back to the value itself unchanged.
+    tier = str(getattr(raw, "value", raw) or "free").lower()
     return "free" if tier in ("free", "") else "premium"
 
 

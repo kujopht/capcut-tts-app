@@ -1841,7 +1841,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("input_tokens", "integer", False, None),
             ("output_tokens", "integer", False, None),
             ("created_at", "datetime", True, None),
-            ("client_id", "string", False, 32),
+            # H5 (review finding): the web client sends a UUID (36 chars) as
+            # `client_id` — a 32-char Appwrite attribute silently truncated
+            # every write's `data["client_id"]` value below this limit,
+            # which Appwrite then rejects with a 400 (attribute too long),
+            # which `AppwriteAiRepo._create` maps to `AiUnavailable` — a
+            # dedup key that can never actually persist. 64 matches
+            # `routes.py::MessageIn.client_id`'s own `max_length=64`.
+            ("client_id", "string", False, 64),
         ],
         "indexes": [
             ("conversation_created_idx", "key", ["conversation_id", "created_at"]),

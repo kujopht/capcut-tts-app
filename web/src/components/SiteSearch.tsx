@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from "react";
 import { SearchOverlay } from "@/components/SearchOverlay";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 /**
  * O tim o header gio la mot NUT MO overlay, khong con la mot form rieng.
@@ -63,21 +64,7 @@ export function SiteSearch() {
         aria-haspopup="dialog"
         aria-label="Tìm truyện, tác giả, fandom"
       >
-        <svg
-          className="tim-nut-icon"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
+        <FanficIcon name="search" size={14} className="tim-nut-icon" />
         {/* Sprint 2: "fandom" thay "Animation" — nguoi doc tim theo vu tru
             truyen nhieu hon; Animation van tim duoc (danh muc trong hop tim). */}
         <span className="tim-nut-chu">Tìm truyện, tác giả, fandom…</span>

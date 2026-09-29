@@ -16,6 +16,7 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { hoSoHref } from "@/lib/communityFeed";
 import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
 import { MUSIC_ENABLED } from "@/lib/features";
+import { FanficIcon, type IconName } from "@/components/icons/FanficIcon";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -56,6 +57,14 @@ const LINKS: NavItem[] = [
   { href: "/library", label: "Thư viện" },
   { href: "/entertainment", label: "Giải trí" },
 ];
+
+/** Icon dat CANH nhan chu — nhan chu VAN giu nguyen, chi them hinh. */
+const BIEU_TUONG_MUC: Record<string, IconName> = {
+  "/": "home",
+  "/community": "community",
+  "/library": "library",
+  "/entertainment": "game",
+};
 
 export function NavLinks() {
   const pathname = usePathname();
@@ -134,7 +143,8 @@ export function NavLinks() {
                 : undefined
             }
           >
-            <span style={{ display: "inline-flex", alignItems: "center" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <FanficIcon name={BIEU_TUONG_MUC[link.href]} size={18} />
               {link.label}
               {MUSIC_ENABLED && link.href === "/entertainment" ? <SoundwaveMini /> : null}
             </span>

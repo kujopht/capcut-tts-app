@@ -252,6 +252,7 @@ Dạng bảng chính xác (từ `SCHEMA`, quyền cấp bảng `[]`, `documentSe
 - Canary chỉ nhắn tin được với canary (403 `chat_peer_not_enabled`); `identities` có cờ `chat_enabled` để giao diện hiện "… chưa dùng được Tin nhắn trong giai đoạn thử" thay vì ô soạn. Chặn tài khoản vẫn dùng được (mức tài khoản, #229).
 - `GET /api/chat/availability` → `{enabled, reason}` của **chính** người gọi, luôn 200. Web (khi build có cờ) hỏi **một lần mỗi lần tải trang**; chỉ `enabled:true` mới hiện nút Tin nhắn, nút Nhắn tin, dock, `/messages`; lỗi thì thử lại một lần rồi coi như TẮT. Người ngoài canary thấy y như hôm nay (chi phí: 1 request/lần tải trang cho người đã đăng nhập).
 - Vì vậy **thứ tự bật không quan trọng**: web có cờ + máy chủ tắt → không ai thấy gì.
+- Hai điều cố ý (review độc lập ghi nhận, chấp nhận): (1) chặn tạo trong giai đoạn canary là **chặn tài khoản thật** (cùng hàng `user_blocks` với nút Chặn ở trang cá nhân) nên vẫn còn sau khi mở rộng; (2) cờ `chat_enabled` trong `identities` cho người trong canary biết một người khác có trong canary hay không (chỉ boolean, chỉ người trong canary hỏi được; ID tài khoản vốn công khai).
 
 ### Bước 1 — bật máy chủ cho CANARY
 

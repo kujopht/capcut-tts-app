@@ -128,6 +128,24 @@ class OpenAICompatChatProvider(ChatProvider):
         return payload
 
     def generate(self, req: GenerateRequest) -> GenerateResult:
+        # R1 (review finding, docs/ai/AI_ASSISTANT_V1.md "Implementation
+        # notes"): NOTHING but `ProviderError` may escape this method — an
+        # unhandled httpx/ValueError/etc reaching the gateway would bypass
+        # its circuit-breaker/fallback bookkeeping AND could leak raw
+        # exception internals to an HTTP client. The outer try/except below
+        # is a catch-all safety net on TOP of the specific handlers already
+        # inside it (which give better error codes/messages when possible).
+        try:
+            return self._generate_inner(req)
+        except ProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — intentional catch-all, see above
+            self._counters.errors += 1
+            raise ProviderError(
+                f"'{self.name}' gặp lỗi không mong đợi.", transient=False,
+                code="provider_unexpected_error") from exc
+
+    def _generate_inner(self, req: GenerateRequest) -> GenerateResult:
         self._counters.requests += 1
         try:
             resp = self._client.post(
@@ -169,8 +187,28 @@ class OpenAICompatChatProvider(ChatProvider):
             input_tokens=in_tok, output_tokens=out_tok, finish_reason=finish_reason)
 
     def stream(self, req: GenerateRequest) -> Iterator[StreamEvent]:
-        self._counters.requests += 1
+        # Same catch-all discipline as `generate()` above (R1) — a
+        # generator's `except Exception` around its whole body still works
+        # normally across `yield` suspension points (it is one function
+        # frame), so this also converts an unexpected failure raised while
+        # resuming after a `yield` (mid-stream) into a `ProviderError`,
+        # never a raw exception reaching the gateway/route layer.
         got_any_delta = False
+        try:
+            for ev in self._stream_inner(req):
+                if isinstance(ev, Delta):
+                    got_any_delta = True
+                yield ev
+        except ProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — intentional catch-all, see above
+            self._counters.errors += 1
+            raise ProviderError(
+                f"'{self.name}' gặp lỗi không mong đợi.", transient=not got_any_delta,
+                code="provider_unexpected_error") from exc
+
+    def _stream_inner(self, req: GenerateRequest) -> Iterator[StreamEvent]:
+        self._counters.requests += 1
         try:
             with self._client.stream(
                     "POST", self._completions_path, json=self._payload(req, stream=True),
@@ -208,7 +246,6 @@ class OpenAICompatChatProvider(ChatProvider):
                     delta = choice.get("delta") or {}
                     text = delta.get("content")
                     if text:
-                        got_any_delta = True
                         yield Delta(text=text)
                     fr = choice.get("finish_reason")
                     if fr:

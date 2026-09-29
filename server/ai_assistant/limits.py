@@ -121,8 +121,15 @@ def enforce_budget(repo: AiRepo, *, user_id: str, daily_limit: int) -> BudgetSta
     return status
 
 
-def record_usage(repo: AiRepo, *, user_id: str, input_tokens: int, output_tokens: int) -> BudgetStatus:
+def record_usage(repo: AiRepo, *, user_id: str, input_tokens: int, output_tokens: int,
+                 daily_limit: int) -> BudgetStatus:
+    """`daily_limit` is REQUIRED (not optional/defaulted to 0) — a previous
+    version of this function hard-coded `limit_today=0` in its return
+    value, which meant the `usage` SSE event and any caller relying on
+    THIS return value (rather than a separate `budget_status` call) always
+    reported a bogus, always-exhausted-looking limit. Fixed per review
+    finding R2 (`docs/ai/AI_ASSISTANT_V1.md` "Implementation notes")."""
     day = _today()
     u = repo.increment_usage(user_id, day, input_tokens=input_tokens, output_tokens=output_tokens)
-    return BudgetStatus(used_today=u.input_tokens + u.output_tokens, limit_today=0,
+    return BudgetStatus(used_today=u.input_tokens + u.output_tokens, limit_today=daily_limit,
                         reset_at=_reset_at_iso())

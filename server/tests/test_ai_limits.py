@@ -50,7 +50,7 @@ class TestStreamGuard(unittest.TestCase):
 class TestDailyBudget(unittest.TestCase):
     def test_enforce_raises_when_exhausted(self) -> None:
         repo = InMemoryAiRepo()
-        record_usage(repo, user_id="u1", input_tokens=90, output_tokens=20)
+        record_usage(repo, user_id="u1", input_tokens=90, output_tokens=20, daily_limit=100)
         with self.assertRaises(AiBudgetExceeded) as ctx:
             enforce_budget(repo, user_id="u1", daily_limit=100)
         self.assertTrue(ctx.exception.reset_at)
@@ -63,16 +63,21 @@ class TestDailyBudget(unittest.TestCase):
 
     def test_budget_status_reports_used_today(self) -> None:
         repo = InMemoryAiRepo()
-        record_usage(repo, user_id="u1", input_tokens=10, output_tokens=5)
+        record_usage(repo, user_id="u1", input_tokens=10, output_tokens=5, daily_limit=100)
         status = budget_status(repo, user_id="u1", daily_limit=100)
         self.assertEqual(status.used_today, 15)
 
     def test_record_usage_accumulates(self) -> None:
         repo = InMemoryAiRepo()
-        record_usage(repo, user_id="u1", input_tokens=10, output_tokens=5)
-        record_usage(repo, user_id="u1", input_tokens=3, output_tokens=2)
+        record_usage(repo, user_id="u1", input_tokens=10, output_tokens=5, daily_limit=100)
+        record_usage(repo, user_id="u1", input_tokens=3, output_tokens=2, daily_limit=100)
         status = budget_status(repo, user_id="u1", daily_limit=100)
         self.assertEqual(status.used_today, 20)
+
+    def test_record_usage_reports_the_real_limit_not_zero(self) -> None:
+        repo = InMemoryAiRepo()
+        status = record_usage(repo, user_id="u1", input_tokens=1, output_tokens=1, daily_limit=12345)
+        self.assertEqual(status.limit_today, 12345)
 
 
 if __name__ == "__main__":

@@ -10,18 +10,21 @@ the threadpool, not on the asyncio loop (contract §0.2's explicit lesson:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
-from fastapi.concurrency import iterate_in_threadpool
+from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from typing_extensions import Annotated
 
-from server.ai_assistant.config import MAX_CONVERSATIONS_PER_USER, MAX_USER_MESSAGE_CHARS, MODES
+from server.ai_assistant.config import (
+    MAX_CONVERSATIONS_PER_USER, MAX_USER_MESSAGE_CHARS, MODES, estimate_tokens,
+)
 from server.ai_assistant.context_builder import build_context
 from server.ai_assistant.gateway import ErrorEvent
 from server.ai_assistant.limits import (
@@ -227,48 +230,65 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         conv = _own_conversation(profile.user_id, conversation_id)
         _run(lambda: rt.rpm_limiter.check(profile.user_id, rpm=rt.rpm))
         tier = _tier_of(profile)
-        _run(lambda: enforce_budget(rt.repo, user_id=profile.user_id, daily_limit=_daily_limit(rt, tier)))
+        daily_limit = _daily_limit(rt, tier)
+        # R4 (review finding): `enforce_budget`/`get_preferences`/`create_message`/
+        # `build_context` all touch `rt.repo`, which for `AppwriteAiRepo` means
+        # real HTTP calls — every one of them runs via `run_in_threadpool`
+        # below so a slow Appwrite round-trip never blocks the asyncio loop
+        # (same lesson as the streaming path itself, contract §0.2).
+        await run_in_threadpool(
+            lambda: _run(lambda: enforce_budget(rt.repo, user_id=profile.user_id, daily_limit=daily_limit)))
         _run(lambda: rt.stream_guard.acquire(profile.user_id))
 
-        prefs = rt.repo.get_preferences(profile.user_id)
-        memory_enabled = prefs.memory_enabled if prefs else True
+        def _prepare():
+            prefs = rt.repo.get_preferences(profile.user_id)
+            memory_enabled = prefs.memory_enabled if prefs else True
 
-        user_message = AiMessage(
-            message_id=_new_id(), conversation_id=conversation_id, user_id=profile.user_id,
-            role="user", content=payload.content, client_id=payload.client_id)
-        if memory_enabled:
-            rt.repo.create_message(user_message)
+            user_message = AiMessage(
+                message_id=_new_id(), conversation_id=conversation_id, user_id=profile.user_id,
+                role="user", content=payload.content, client_id=payload.client_id)
+            if memory_enabled:
+                rt.repo.create_message(user_message)
 
-        retrieval_block = ""
-        citations: List[Any] = []
-        if conv.mode == "story" and conv.context_novel_id:
-            results = retrieve_story_chunks(
-                rt.tool_ctx, payload.content, novel_id=conv.context_novel_id,
-                current_chapter_index=int((conv.context_chapter_id and 1) or 1),
-                user_id=profile.user_id)
-            if results:
-                citations = citations_for(results)
-                retrieval_block = "DỮ LIỆU TRUYỆN TRUY XUẤT ĐƯỢC:\n" + "\n---\n".join(
-                    r.chunk_text for r in results)
-        if payload.use_library:
-            hits = search_library(rt.tool_ctx, payload.content)
-            if hits:
-                retrieval_block += "\n\nKẾT QUẢ THƯ VIỆN:\n" + "\n".join(
-                    f"- {h.title} ({h.author})" for h in hits)
-        if payload.use_web_search and rt.web_search_enabled:
-            web_hits = web_search(rt.tool_ctx, payload.content)
-            block = format_web_results_for_prompt(web_hits)
-            if block:
-                retrieval_block += "\n\n" + block
+            retrieval_block = ""
+            citations: List[Any] = []
+            if conv.mode == "story" and conv.context_novel_id:
+                results = retrieve_story_chunks(
+                    rt.tool_ctx, payload.content, novel_id=conv.context_novel_id,
+                    current_chapter_index=int((conv.context_chapter_id and 1) or 1),
+                    user_id=profile.user_id)
+                if results:
+                    citations = citations_for(results)
+                    retrieval_block = "DỮ LIỆU TRUYỆN TRUY XUẤT ĐƯỢC:\n" + "\n---\n".join(
+                        r.chunk_text for r in results)
+            if payload.use_library:
+                hits = search_library(rt.tool_ctx, payload.content)
+                if hits:
+                    retrieval_block_extra = "\n\nKẾT QUẢ THƯ VIỆN:\n" + "\n".join(
+                        f"- {h.title} ({h.author})" for h in hits)
+                    retrieval_block = retrieval_block + retrieval_block_extra
+            if payload.use_web_search and rt.web_search_enabled:
+                web_hits = web_search(rt.tool_ctx, payload.content)
+                block = format_web_results_for_prompt(web_hits)
+                if block:
+                    retrieval_block = retrieval_block + "\n\n" + block
 
-        turns = build_context(
-            mode=conv.mode, assistant_name=rt.assistant_name, repo=rt.repo,
-            user_id=profile.user_id, conversation_id=conversation_id,
-            memory_enabled=memory_enabled,
-            max_context_tokens=8000 if conv.mode == "writer" else 6000,
-            retrieval_block_text=retrieval_block)
+            turns = build_context(
+                mode=conv.mode, assistant_name=rt.assistant_name, repo=rt.repo,
+                user_id=profile.user_id, conversation_id=conversation_id,
+                memory_enabled=memory_enabled,
+                max_context_tokens=8000 if conv.mode == "writer" else 6000,
+                retrieval_block_text=retrieval_block)
+            return turns, citations, memory_enabled
+
+        try:
+            turns, citations, memory_enabled = await run_in_threadpool(_prepare)
+        except Exception:
+            rt.stream_guard.release(profile.user_id)
+            raise
 
         assistant_message_id = _new_id()
+        prompt_text = "\n".join(t.content for t in turns)
 
         async def _generate():
             text_parts: List[str] = []
@@ -276,24 +296,30 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             final_status = "complete"
             error_payload: Optional[Dict[str, Any]] = None
             yield _sse("meta", {"message_id": assistant_message_id, "conversation_id": conversation_id})
-            gen = rt.gateway.stream(turns, mode=conv.mode, user_ref=profile.user_id)
             try:
-                async for ev in iterate_in_threadpool(gen):
-                    if await request.is_disconnected():
-                        final_status = "stopped"
-                        gen.close()
-                        break
-                    if isinstance(ev, Delta):
-                        text_parts.append(ev.text)
-                        yield _sse("delta", {"text": ev.text})
-                    elif isinstance(ev, UsageEvent):
-                        in_tok, out_tok = ev.input_tokens, ev.output_tokens
-                    elif isinstance(ev, ErrorEvent):
-                        final_status = "error"
-                        error_payload = {"code": ev.code, "message": ev.message}
-                        break
-                    elif isinstance(ev, Done):
-                        pass
+                gen = rt.gateway.stream(turns, mode=conv.mode, user_ref=profile.user_id)
+                # R3 (review finding): `contextlib.closing` guarantees the
+                # provider's underlying generator (which holds the httpx
+                # streaming context manager / upstream connection open) is
+                # closed DETERMINISTICALLY the moment we stop iterating —
+                # on a client disconnect (`break` below) or on any
+                # exception — rather than relying on eventual GC.
+                with contextlib.closing(gen):
+                    async for ev in iterate_in_threadpool(gen):
+                        if await request.is_disconnected():
+                            final_status = "stopped"
+                            break
+                        if isinstance(ev, Delta):
+                            text_parts.append(ev.text)
+                            yield _sse("delta", {"text": ev.text})
+                        elif isinstance(ev, UsageEvent):
+                            in_tok, out_tok = ev.input_tokens, ev.output_tokens
+                        elif isinstance(ev, ErrorEvent):
+                            final_status = "error"
+                            error_payload = {"code": ev.code, "message": ev.message}
+                            break
+                        elif isinstance(ev, Done):
+                            pass
             finally:
                 rt.stream_guard.release(profile.user_id)
 
@@ -303,20 +329,43 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                     {"novel_id": c.novel_id, "chapter_id": c.chapter_id,
                      "chapter_title": c.chapter_title, "excerpt": c.excerpt}
                     for c in citations]})
-            budget = record_usage(rt.repo, user_id=profile.user_id, input_tokens=in_tok,
-                                  output_tokens=out_tok) if (in_tok or out_tok) else None
-            yield _sse("usage", {"input_tokens": in_tok, "output_tokens": out_tok,
-                                 "used_today": budget.used_today if budget else None})
+
+            # R2 (review finding): budget must never be bypassed just
+            # because a provider omitted/zeroed its own usage report — an
+            # interrupted/stopped/error stream that still produced text is
+            # billed on an ESTIMATE (contract §3's own conservative
+            # chars/3.5 estimator) covering the prompt actually sent plus
+            # whatever text was actually generated. Nothing is charged for
+            # a turn that produced NEITHER real usage NOR any text (a pure
+            # before-first-delta failure) — see docs/ai/AI_ASSISTANT_V1.md
+            # "Implementation notes".
+            estimated_in = estimate_tokens(prompt_text)
+            estimated_out = estimate_tokens(final_text)
+            counted_in = in_tok or estimated_in
+            counted_out = out_tok or estimated_out
+            if final_text or in_tok or out_tok:
+                budget = await run_in_threadpool(
+                    lambda: record_usage(
+                        rt.repo, user_id=profile.user_id, input_tokens=counted_in,
+                        output_tokens=counted_out, daily_limit=daily_limit))
+            else:
+                counted_in = counted_out = 0
+                budget = await run_in_threadpool(
+                    lambda: budget_status(rt.repo, user_id=profile.user_id, daily_limit=daily_limit))
+            yield _sse("usage", {"input_tokens": counted_in, "output_tokens": counted_out,
+                                 "used_today": budget.used_today, "limit_today": budget.limit_today})
 
             if memory_enabled and final_text:
                 citations_json = json.dumps([
                     {"novel_id": c.novel_id, "chapter_id": c.chapter_id} for c in citations],
                     ensure_ascii=False)
-                rt.repo.create_message(AiMessage(
-                    message_id=assistant_message_id, conversation_id=conversation_id,
-                    user_id=profile.user_id, role="assistant", content=final_text,
-                    status=final_status, citations_json=citations_json,
-                    provider_name="", model="", input_tokens=in_tok, output_tokens=out_tok))
+                await run_in_threadpool(
+                    lambda: rt.repo.create_message(AiMessage(
+                        message_id=assistant_message_id, conversation_id=conversation_id,
+                        user_id=profile.user_id, role="assistant", content=final_text,
+                        status=final_status, citations_json=citations_json,
+                        provider_name="", model="", input_tokens=counted_in,
+                        output_tokens=counted_out)))
 
             if error_payload is not None:
                 yield _sse("error", error_payload)

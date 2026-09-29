@@ -17,6 +17,10 @@ import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
 import { ChatProvider } from "@/components/chat/ChatProvider";
 import { ChatDock } from "@/components/chat/ChatDock";
+import { AiProvider } from "@/components/ai/AiProvider";
+import { AiLauncher } from "@/components/ai/AiLauncher";
+import { AiPanel } from "@/components/ai/AiPanel";
+import "@/components/ai/ai.css";
 
 // Mo ta cu noi ve viec tao audio truoc tien. San pham nay la nen tang doc va
 // nghe fanfic; Audio Studio la cong cu phu. Mo ta cung phai noi theo thu tu do.
@@ -81,6 +85,7 @@ export default function RootLayout({
             `components/chat/ChatProvider.tsx`).
           */}
           <ChatProvider>
+          <AiProvider>
           {/*
             Dong co phat TOAN CUC — bao NGOAI `{children}`, nen dieu huong
             giua cac trang (chi thay `{children}`) khong lam no unmount. Day
@@ -211,7 +216,13 @@ export default function RootLayout({
             {/* Chat Dock: cua so chat noi goc duoi-phai (desktop/may tinh bang) — tu an khi chua mo cuoc
                 nao, o /messages va tren di dong. */}
             <ChatDock />
+            {/* Trợ lý AI (flag-gated, xem lib/features.ts) — nút nổi desktop
+                + cửa sổ neo phải; tự tắt hoàn toàn khi cờ tắt hoặc máy chủ
+                báo chưa mở (`AiLauncher`/`AiPanel` tự trả `null`). */}
+            <AiLauncher />
+            <AiPanel />
           </AudioEngineProvider>
+          </AiProvider>
           </ChatProvider>
           </ToastProvider>
         </SessionProvider>

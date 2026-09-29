@@ -308,8 +308,17 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     async def post_message(conversation_id: ConvId, payload: MessageIn, request: Request,
                            authorization: Optional[str] = Header(default=None)):
         _bat()
-        profile = resolve_profile(authorization)
-        conv, _ = _own_conversation(profile.user_id, conversation_id)
+        # H3 (review finding): `resolve_profile` and `_own_conversation` can
+        # each make a real Appwrite HTTP call (session lookup, conversation
+        # read) — calling them directly on THIS coroutine (the only truly
+        # `async def` route in this router; every `def` route is already
+        # offloaded to a threadpool by Starlette itself) blocks the asyncio
+        # event loop for the duration of that round-trip, stalling every
+        # OTHER concurrent request this worker is serving (same lesson as
+        # the streaming path itself, contract §0.2). `run_in_threadpool`
+        # moves both off the loop.
+        profile = await run_in_threadpool(resolve_profile, authorization)
+        conv, _ = await run_in_threadpool(_own_conversation, profile.user_id, conversation_id)
         _run(lambda: rt.rpm_limiter.check(profile.user_id, rpm=rt.rpm))
         tier = _tier_of(profile)
         daily_limit = _daily_limit(rt, tier)

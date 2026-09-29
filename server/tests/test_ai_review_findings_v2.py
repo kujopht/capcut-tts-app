@@ -150,5 +150,68 @@ class TestB2DisconnectStillRecordsUsageAndPersists(unittest.TestCase):
         self.assertGreater(usage.input_tokens + usage.output_tokens, 0)
 
 
+# =============================================================================== H3
+
+
+class _RecordingRpmLimiter:
+    """Stands in for `RpmLimiter` — `.check()` is called directly on
+    `post_message`'s own coroutine body (never offloaded, by design: it's
+    an in-memory, no-I/O check), so recording which thread runs it gives a
+    reliable fingerprint of "the asyncio loop thread this request is
+    running on", independent of wall-clock timing (real elapsed-time
+    measurements proved unreliable in this dev environment's own
+    uvicorn+ProactorEventLoop combination — a `run_in_threadpool` call was
+    empirically confirmed, via thread-name logging, to run promptly and
+    concurrently even though end-to-end response latency still varied by
+    machine)."""
+
+    def __init__(self) -> None:
+        self.threads: List[threading.Thread] = []
+
+    def check(self, user_id: str, *, rpm: int) -> None:
+        self.threads.append(threading.current_thread())
+
+
+class TestH3ProfileAndOwnershipOffLoop(unittest.TestCase):
+    """`resolve_profile`/`_own_conversation` can each make a real Appwrite
+    HTTP call — `post_message` is the only `async def` route in this router
+    (every `def` route is already offloaded to a threadpool by Starlette
+    itself), so calling them directly blocks whatever thread is running
+    THIS request's asyncio event loop. Fingerprint: `resolve_profile`'s own
+    thread must differ from the thread that runs the very next, definitely
+    on-loop, synchronous call (`rt.rpm_limiter.check`, right after it in
+    `post_message`)."""
+
+    def test_resolve_profile_and_ownership_check_run_off_the_calling_thread(self) -> None:
+        resolve_threads: List[threading.Thread] = []
+
+        def recording_resolve(authorization: Optional[str]):
+            resolve_threads.append(threading.current_thread())
+            return _resolve_profile(authorization)
+
+        rt = _enabled_runtime()
+        rpm_limiter = _RecordingRpmLimiter()
+        rt.rpm_limiter = rpm_limiter  # type: ignore[assignment]
+
+        app = FastAPI()
+        app.include_router(build_ai_router(rt, resolve_profile=recording_resolve))
+        client = TestClient(app)
+        created = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
+        cid = created.json()["conversation_id"]
+        resolve_threads.clear()
+
+        with client.stream(
+                "POST", f"/api/ai/conversations/{cid}/messages", headers=_auth("alice"),
+                json={"content": "hi", "client_id": "c1"}) as resp:
+            list(resp.iter_text())
+
+        self.assertTrue(resolve_threads, "resolve_profile was never called during post_message")
+        self.assertTrue(rpm_limiter.threads, "rpm_limiter.check was never called during post_message")
+        self.assertNotEqual(
+            resolve_threads[0], rpm_limiter.threads[0],
+            "resolve_profile() ran on the SAME thread as an always-on-loop call "
+            "(rt.rpm_limiter.check) — it was not actually offloaded via run_in_threadpool")
+
+
 if __name__ == "__main__":
     unittest.main()

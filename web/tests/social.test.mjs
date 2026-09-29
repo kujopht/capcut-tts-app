@@ -221,7 +221,9 @@ test("menu bai: cua minh Sua/Xoa, cua nguoi khac Bao cao — khong lan nhau", ()
   assert.match(src, /\{cuaToi \? \(/);
   assert.match(src, /Sửa bài viết/);
   assert.match(src, /Xóa bài viết/);
-  assert.match(src, /🚩 Báo cáo/);
+  // V4 (FanficIcon): nhan chu con "Báo cáo bài viết", chi doi tu tien to emoji
+  // 🚩 sang <FanficIcon name="report" /> — xem web/tests/fanfic-icon.test.mjs.
+  assert.match(src, /"bao-cao", "Báo cáo bài viết", "report"/);
 });
 
 test("chia se V1 = chep lien ket ben /posts/{id}, co duong lui khi clipboard bi chan", () => {

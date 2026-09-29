@@ -21,11 +21,26 @@ trang thai. Nho vay no kiem thu duoc ma khong can dung mot may chu nao.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+
+import base64
+import binascii
 
 from server.adapters import NotFoundError, PermissionDenied
 from server.creator import public_author_card, rank_progress
-from server.gamification_service import cong_khai_vat_pham_dang_trang_bi_hang_loat
+from server.gamification_service import (
+    GamificationError,
+    cong_khai_vat_pham_dang_trang_bi,
+    cong_khai_vat_pham_dang_trang_bi_hang_loat,
+    cosmetic_slot_of,
+    equip_cosmetic,
+    unequip_slot,
+)
+from server.image_normalize import (
+    ImageValidationError,
+    normalize_avatar,
+    normalize_banner,
+)
 from server.domain import (
     Comment,
     ContentReport,
@@ -39,6 +54,7 @@ from server.domain import (
     ReportReason,
     ReportStatus,
     StoryFollow,
+    UserBlock,
     UserFollow,
     AuthorStatus,
     Profile,
@@ -46,8 +62,20 @@ from server.domain import (
     now_iso_us,
 )
 from server.social import (
+    ACCENT_PRESETS,
+    CAPABILITY_KEYS,
+    CLIENT_KEY_RE,
     COMMENT_MAX_CHARS,
+    FEED_MAX_DEPTH,
+    PROFILE_MAX_FANDOMS,
     POST_MAX_IMAGES,
+    CapabilityDisabled,
+    block_key,
+    comment_key,
+    community_fandom_label,
+    content_addressed_key,
+    decode_feed_cursor,
+    encode_feed_cursor,
     kiem_bo_anh,
     kiem_timestamp,
     HAN_MUC_MAC_DINH,
@@ -65,11 +93,13 @@ from server.social import (
     notification_key,
     object_key,
     parent_hop_le,
+    post_key,
     post_like_key,
     report_key,
     story_follow_key,
     tron_bang_tin,
     user_follow_key,
+    validate_fandom_id,
     NGUOI_THEO_DOI_TOI_DA,
 )
 
@@ -114,7 +144,8 @@ class SocialService:
     def __init__(self, identity: Any, store: Any, storage: Any = None,
                  han_muc: Optional[Dict[str, HanMuc]] = None,
                  animation_store: Any = None,
-                 gamification_store: Any = None):
+                 gamification_store: Any = None,
+                 capabilities: Optional[Dict[str, bool]] = None):
         self._identity = identity
         self._store = store
         self._storage = storage
@@ -130,6 +161,28 @@ class SocialService:
         #: test khong quan tam khung/huy hieu (the tac gia chi thieu truong
         #: `equipped_cosmetics`, khong loi gi).
         self._gamification_store = gamification_store
+        #: Nang luc Social Play V1 (spoiler/fandom/edited-label/user report/
+        #: blocks/profile banner-accent-fandoms) — xem `social.capabilities_for`.
+        #: `None` (mac dinh, TUONG THICH NGUOC voi moi test/route da co truoc
+        #: dot nay) nghia la BAT HET: cac test cu khoi tao `SocialService()`
+        #: truc tiep tren kho mock, khong biet gi ve co nay, va hanh vi cua
+        #: chung KHONG duoc phep doi.
+        #: Da truyen `capabilities` (production luon truyen) thi khoa nao THIEU
+        #: la TAT — thieu khoa khong duoc thanh "bat" roi doc mot collection chua
+        #: ton tai (review bao mat Social & Play V1).
+        self._cap: Dict[str, bool] = (
+            {k: bool(capabilities.get(k, False)) for k in CAPABILITY_KEYS}
+            if capabilities is not None
+            else {k: True for k in CAPABILITY_KEYS})
+
+    def _doi_hoi(self, khoa: str) -> None:
+        """Nem `CapabilityDisabled` (409) neu nang luc `khoa` dang TAT.
+
+        MOT cho duy nhat cho phep goi nay — moi noi dung tinh nang Social
+        Play V1 deu goi qua day, khong tu kiem `self._cap` rieng le."""
+        if not self._cap.get(khoa, True):
+            raise CapabilityDisabled(
+                "Tính năng này chưa được bật trên máy chủ.")
 
     # ==================================================================== THEO DOI
 
@@ -146,6 +199,7 @@ class SocialService:
         if target_id == actor.user_id:
             raise SocialError("Bạn không thể theo dõi chính mình.")
         self._nguoi_phai_ton_tai(target_id)
+        self._kiem_khong_bi_chan(actor.user_id, target_id)
         self._kiem_han_muc("follow", actor.user_id)
 
         khoa = user_follow_key(actor.user_id, target_id)
@@ -261,12 +315,79 @@ class SocialService:
             "follower_count": int(dem.get(novel_id, 0)),
         }
 
+    # ============================================================ CHAN / TAT TIENG
+
+    def block_user(self, actor: Profile, target_id: str) -> Dict[str, Any]:
+        """
+        Chan mot nguoi — HAI CHIEU: tu choi tuong tac + an noi dung cua nhau
+        (xem `_kiem_khong_bi_chan`/`hidden_authors_for_viewer`).
+
+        Tao mot canh chan XOA LUON canh THEO DOI giua hai nguoi, CA HAI
+        CHIEU: tiep tuc theo doi mot nguoi vua chan (hoac bi nguoi do chan) la
+        mot trang thai khong ai muon.
+        """
+        return self._chan_hoac_tat(actor, target_id, kind="block")
+
+    def mute_user(self, actor: Profile, target_id: str) -> Dict[str, Any]:
+        """Tat tieng — MOT CHIEU: chi an noi dung cua `target_id` khoi CHINH
+        `actor`, khong bao gio chan tuong tac (xem `domain.UserBlock`)."""
+        return self._chan_hoac_tat(actor, target_id, kind="mute")
+
+    def _chan_hoac_tat(self, actor: Profile, target_id: str, *,
+                       kind: str) -> Dict[str, Any]:
+        self._doi_hoi("blocks")
+        if not target_id:
+            raise SocialError("Thiếu người dùng.")
+        if target_id == actor.user_id:
+            raise SocialError("Bạn không thể tự chặn hoặc tắt tiếng chính mình.")
+        self._nguoi_phai_ton_tai(target_id)
+        khoa = block_key(actor.user_id, target_id, kind)
+        self._store.add_user_block(UserBlock(
+            blocker_id=actor.user_id, blocked_id=target_id, kind=kind,
+            block_id=khoa))
+        if kind == "block":
+            self._store.unfollow_user(user_follow_key(actor.user_id, target_id))
+            self._store.unfollow_user(user_follow_key(target_id, actor.user_id))
+        return self._trang_thai_chan(actor.user_id, target_id)
+
+    def unblock_user(self, actor: Profile, target_id: str) -> Dict[str, Any]:
+        self._doi_hoi("blocks")
+        self._store.remove_user_block(block_key(actor.user_id, target_id, "block"))
+        return self._trang_thai_chan(actor.user_id, target_id)
+
+    def unmute_user(self, actor: Profile, target_id: str) -> Dict[str, Any]:
+        self._doi_hoi("blocks")
+        self._store.remove_user_block(block_key(actor.user_id, target_id, "mute"))
+        return self._trang_thai_chan(actor.user_id, target_id)
+
+    def _trang_thai_chan(self, actor_id: str, target_id: str) -> Dict[str, Any]:
+        loai = {b.kind for b in self._store.list_user_blocks(actor_id)
+                if b.blocked_id == target_id}
+        return {"user_id": target_id, "blocked": "block" in loai,
+                "muted": "mute" in loai}
+
+    def my_blocks(self, actor: Profile) -> Dict[str, Any]:
+        """`{blocked: [the tac gia...], muted: [the tac gia...]}` — CHI the
+        CONG KHAI (`public_author_card`, xem `_the_nguoi`), khong bao gio ban
+        rieng tu cua nguoi bi chan/tat tieng."""
+        self._doi_hoi("blocks")
+        rows = self._store.list_user_blocks(actor.user_id)
+        blocked_ids = [b.blocked_id for b in rows if b.kind == "block"]
+        muted_ids = [b.blocked_id for b in rows if b.kind == "mute"]
+        the = self._the_nguoi(blocked_ids + muted_ids)
+        return {
+            "blocked": [the[uid] for uid in blocked_ids if uid in the],
+            "muted": [the[uid] for uid in muted_ids if uid in the],
+        }
+
     # ==================================================================== BAI DANG
 
     def create_post(self, actor: Profile, *, text: str,
                     kind: str = "post", novel_id: str = "",
                     image: Optional[Dict[str, Any]] = None,
-                    images: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+                    images: Optional[List[Dict[str, Any]]] = None,
+                    client_key: str = "", spoiler: bool = False,
+                    fandom_id: str = "") -> Dict[str, Any]:
         """
         Dang mot bai.
 
@@ -277,13 +398,35 @@ class SocialService:
         can mot thu vien anh, va moi thu vien anh la mot be mat tan cong. Chung
         ta chi kiem MIME, so byte va tran so — nhung thu doc duoc ma khong phai
         phan tich noi dung tep.
+
+        `client_key` (Social Play V1) bien lan goi nay thanh IDEMPOTENT:
+        `post_id = social.post_key(actor.user_id, client_key)` la TAT DINH, nen
+        goi lai VOI CUNG client_key (mang chap chon, nguoi dung bam nut hai
+        lan) tra ve DUNG bai da tao — kem `"replayed": True` — thay vi tao bai
+        thu hai va chay lai hieu ung phu (thuong nhiem vu, thong bao, han muc).
+        Kiem tra nay xay ra TRUOC BAT KY buoc nao khac trong ham, co chu y.
         """
+        client_key = (client_key or "").strip()
+        post_id = ""
+        if client_key:
+            if not CLIENT_KEY_RE.match(client_key):
+                raise SocialError("client_key không hợp lệ.")
+            post_id = post_key(actor.user_id, client_key)
+            da_co = self._store.get_post(post_id)
+            if da_co is not None and da_co.author_user_id == actor.user_id:
+                return {**self._mot_bai(da_co, actor), "replayed": True}
+
         loai = self._loai_bai(kind)
         bo_anh = list(images or [])
         if image:
             bo_anh.insert(0, image)
         noi_dung = clean_text(text, toi_da=POST_MAX_CHARS, ten="Nội dung bài",
                               bat_buoc=not bo_anh)
+        if spoiler:
+            self._doi_hoi("post_spoiler")
+        fandom_id = validate_fandom_id(fandom_id)
+        if fandom_id:
+            self._doi_hoi("post_fandom")
         truyen = None
         if loai is PostKind.STORY_UPDATE:
             if actor.author_status is not AuthorStatus.APPROVED:
@@ -302,17 +445,39 @@ class SocialService:
             text=noi_dung,
             kind=loai,
             novel_id=truyen.novel_id if truyen else "",
+            spoiler=bool(spoiler),
+            fandom_id=fandom_id,
         )
+        if post_id:
+            bai.post_id = post_id
         if bo_anh:
             self._gan_bo_anh(bai, bo_anh)
-        self._store.create_post(bai)
-        return self._mot_bai(bai, actor)
+        if post_id:
+            luu, moi = self._store.create_post_once(bai)
+            if not moi:
+                # Cuoc dua that: mot request khac da thang giua luc ta kiem
+                # tra o dau ham va luc ta ghi o day.
+                return {**self._mot_bai(luu, actor), "replayed": True}
+            bai = luu
+        else:
+            self._store.create_post(bai)
+        return {**self._mot_bai(bai, actor), "replayed": False}
 
     def edit_post(self, actor: Profile, post_id: str, *,
                   text: str) -> Dict[str, Any]:
+        """
+        Sua noi dung bai — DUONG DUY NHAT dat `edited_at` (Social Play V1,
+        capability `edited_label`). Khi nang luc TAT: van cho sua binh
+        thuong, chi don gian KHONG gan nhan "đã chỉnh sửa" — day KHONG phai
+        mot truong nguoi dung yeu cau (`edited_at` la METADATA HE THONG, khong
+        phai mot tham so cua request), nen tat nang luc nay khong nem
+        `CapabilityDisabled`.
+        """
         bai = self._bai_cua_minh(actor, post_id)
         bai.text = clean_text(text, toi_da=POST_MAX_CHARS, ten="Nội dung bài",
                               bat_buoc=not bai.has_image)
+        if self._cap.get("edited_label", True):
+            bai.edited_at = now_iso_us()
         self._store.save_post(bai)
         return self._mot_bai(bai, actor)
 
@@ -401,6 +566,7 @@ class SocialService:
 
     def like_post(self, actor: Profile, post_id: str) -> Dict[str, Any]:
         bai = self._bai_hien(post_id)
+        self._kiem_khong_bi_chan(actor.user_id, bai.author_user_id)
         khoa = post_like_key(actor.user_id, post_id)
         if self._store.like_post(PostLike(post_id=post_id,
                                           user_id=actor.user_id, like_id=khoa)):
@@ -445,21 +611,39 @@ class SocialService:
     # ===================================================================== BINH LUAN
 
     def create_comment(self, actor: Profile, post_id: str, *, text: str,
-                       parent_id: str = "") -> Dict[str, Any]:
+                       parent_id: str = "", client_key: str = "",
+                       spoiler: bool = False) -> Dict[str, Any]:
         """
         Binh luan mot BAI DANG, hoac tra loi mot binh luan goc.
 
         DUNG mot cap tra loi — `parent_hop_le` tu choi tra loi mot tra loi ngay
         tai day thay vi am tham gan no vao dau do. Xem `social.REPLY_MAX_DEPTH`.
+
+        `client_key`/`spoiler` (Social Play V1) — xem docstring `create_post`
+        ve idempotency; `spoiler` tren binh luan BAI DANG doi hoi nang luc
+        `post_spoiler` (binh luan CHUONG da co spoiler tu truoc, khong gate).
         """
+        cid, da_co = self._id_binh_luan_idempotent(actor, post_id, client_key)
+        if da_co is not None:
+            return {**self._mot_binh_luan(da_co, actor), "replayed": True}
+
         bai = self._bai_hien(post_id)
         noi_dung = clean_text(text, toi_da=COMMENT_MAX_CHARS, ten="Bình luận")
+        if spoiler:
+            self._doi_hoi("post_spoiler")
         self._kiem_han_muc("comment", actor.user_id)
 
         cha = self._cha_hop_le(post_id, parent_id)
+        self._kiem_khong_bi_chan(actor.user_id, bai.author_user_id)
+        if cha is not None:
+            self._kiem_khong_bi_chan(actor.user_id, cha.author_user_id)
         bl = Comment(post_id=post_id, author_user_id=actor.user_id,
-                     text=noi_dung, parent_id=parent_id)
-        self._store.create_comment(bl)
+                     text=noi_dung, parent_id=parent_id, spoiler=bool(spoiler))
+        bl = self._luu_binh_luan_idempotent(bl, cid)
+        if bl is None:
+            # Cuoc dua that — xem `create_post`.
+            luu = self._store.get_comment(cid)
+            return {**self._mot_binh_luan(luu, actor), "replayed": True}
         self._store.bump_post_counter(post_id, "comment_count", 1)
         if cha is not None:
             self._store.bump_comment_counter(cha.comment_id, "reply_count", 1)
@@ -476,7 +660,7 @@ class SocialService:
             self._bao(bai.author_user_id, NotificationKind.POST_COMMENT,
                       actor_id=actor.user_id, subject_id=bl.comment_id,
                       subject_kind="comment", preview=_cat(noi_dung))
-        return self._mot_binh_luan(bl, actor)
+        return {**self._mot_binh_luan(bl, actor), "replayed": False}
 
     def _cha_hop_le(self, target_id: str,
                     parent_id: str) -> Optional[Comment]:
@@ -488,6 +672,44 @@ class SocialService:
             raise NotFoundError("Không tìm thấy bình luận cha.")
         parent_hop_le(parent_id, cha.parent_id)
         return cha
+
+    def _id_binh_luan_idempotent(
+            self, actor: Profile, target_id: str,
+            client_key: str) -> Tuple[str, Optional[Comment]]:
+        """
+        `(comment_id, binh_luan_da_co)` cho mot lan tao binh luan IDEMPOTENT.
+
+        `comment_id` la `""` khi khong co `client_key` (duong cu, khong doi
+        hanh vi). `binh_luan_da_co` khac `None` nghia la client_key nay DA
+        tung tao mot binh luan cho DUNG (tac gia, dich) nay — nguoi goi tra
+        no ve NGUYEN VEN, kem `"replayed": True`, khong chay lai hieu ung phu.
+        """
+        client_key = (client_key or "").strip()
+        if not client_key:
+            return "", None
+        if not CLIENT_KEY_RE.match(client_key):
+            raise SocialError("client_key không hợp lệ.")
+        cid = comment_key(actor.user_id, target_id, client_key)
+        da_co = self._store.get_comment(cid)
+        if da_co is not None and da_co.author_user_id == actor.user_id:
+            return cid, da_co
+        return cid, None
+
+    def _luu_binh_luan_idempotent(self, bl: Comment,
+                                  comment_id: str) -> Optional[Comment]:
+        """
+        Ghi mot binh luan MOI, TON TRONG `comment_id` tat dinh khi co.
+
+        Tra ve `None` khi thua mot cuoc dua that (mot request khac da tao
+        DUNG `comment_id` nay giua luc kiem tra o dau ham va luc ghi o day) —
+        nguoi goi phai doc lai va tra ve kem `"replayed": True`.
+        """
+        if not comment_id:
+            self._store.create_comment(bl)
+            return bl
+        bl.comment_id = comment_id
+        luu, moi = self._store.create_comment_once(bl)
+        return luu if moi else None
 
     # ======================================================== BINH LUAN CHUONG
 
@@ -546,14 +768,21 @@ class SocialService:
     def create_chapter_comment(self, actor: Profile, chapter_id: str, *,
                                text: str, parent_id: str = "",
                                timestamp_ms: Optional[int] = None,
-                               spoiler: bool = False) -> Dict[str, Any]:
+                               spoiler: bool = False,
+                               client_key: str = "") -> Dict[str, Any]:
         """
         Binh luan mot CHUONG — dich la `chapter_id`, KHONG phai file MP3.
 
         Tac gia tao lai audio thi `chapter_id` khong doi, nen chuoi binh luan
         song sot qua moi lan tao lai. Moc thoi gian duoc kiem theo thoi luong
         THAT cua track hien tai neu biet — xem `social.kiem_timestamp`.
+        `spoiler` o day KHONG gate boi nang luc nao — binh luan chuong da co
+        truong nay TU TRUOC dot Social Play V1.
         """
+        cid, da_co = self._id_binh_luan_idempotent(actor, chapter_id, client_key)
+        if da_co is not None:
+            return {**self._mot_binh_luan(da_co, actor), "replayed": True}
+
         chuong, truyen = self._chuong_cong_khai(chapter_id)
         noi_dung = clean_text(text, toi_da=COMMENT_MAX_CHARS, ten="Bình luận")
         self._kiem_han_muc("comment", actor.user_id)
@@ -568,7 +797,10 @@ class SocialService:
                      text=noi_dung, parent_id=parent_id,
                      target_kind="chapter", timestamp_ms=moc,
                      spoiler=bool(spoiler))
-        self._store.create_comment(bl)
+        bl = self._luu_binh_luan_idempotent(bl, cid)
+        if bl is None:
+            luu = self._store.get_comment(cid)
+            return {**self._mot_binh_luan(luu, actor), "replayed": True}
         if cha is not None:
             self._store.bump_comment_counter(cha.comment_id, "reply_count", 1)
 
@@ -586,7 +818,7 @@ class SocialService:
                       actor_id=actor.user_id, subject_id=chapter_id,
                       subject_kind="chapter",
                       preview=_cat(f"{chuong.title} — {noi_dung}"))
-        return self._mot_binh_luan(bl, actor)
+        return {**self._mot_binh_luan(bl, actor), "replayed": False}
 
     # ======================================================== BINH LUAN TAP ANIMATION
 
@@ -645,12 +877,17 @@ class SocialService:
         }
 
     def create_episode_comment(self, actor: Profile, episode_id: str, *,
-                               text: str, parent_id: str = "") -> Dict[str, Any]:
+                               text: str, parent_id: str = "",
+                               client_key: str = "") -> Dict[str, Any]:
         """
         Binh luan mot TAP — dich la `episode_id`. Khong co moc thoi gian audio
         (`kiem_timestamp`) nhu binh luan chuong: mot tap la video YouTube, va
         thoi diem trong video do nam ngoai kien truc `AudioTrack`.
         """
+        cid, da_co = self._id_binh_luan_idempotent(actor, episode_id, client_key)
+        if da_co is not None:
+            return {**self._mot_binh_luan(da_co, actor), "replayed": True}
+
         tap, series = self._tap_cong_khai(episode_id)
         noi_dung = clean_text(text, toi_da=COMMENT_MAX_CHARS, ten="Bình luận")
         self._kiem_han_muc("comment", actor.user_id)
@@ -659,7 +896,10 @@ class SocialService:
         bl = Comment(post_id=episode_id, author_user_id=actor.user_id,
                      text=noi_dung, parent_id=parent_id,
                      target_kind="animation_episode")
-        self._store.create_comment(bl)
+        bl = self._luu_binh_luan_idempotent(bl, cid)
+        if bl is None:
+            luu = self._store.get_comment(cid)
+            return {**self._mot_binh_luan(luu, actor), "replayed": True}
         if cha is not None:
             self._store.bump_comment_counter(cha.comment_id, "reply_count", 1)
 
@@ -673,12 +913,16 @@ class SocialService:
                       actor_id=actor.user_id, subject_id=episode_id,
                       subject_kind="animation_episode",
                       preview=_cat(f"{tap.title} — {noi_dung}"))
-        return self._mot_binh_luan(bl, actor)
+        return {**self._mot_binh_luan(bl, actor), "replayed": False}
 
     def edit_comment(self, actor: Profile, comment_id: str, *,
                      text: str) -> Dict[str, Any]:
+        """DUONG DUY NHAT dat `edited_at` cua binh luan — xem docstring
+        `edit_post` ve ly do khong gate boi `CapabilityDisabled`."""
         bl = self._binh_luan_cua_minh(actor, comment_id)
         bl.text = clean_text(text, toi_da=COMMENT_MAX_CHARS, ten="Bình luận")
+        if self._cap.get("edited_label", True):
+            bl.edited_at = now_iso_us()
         self._store.save_comment(bl)
         return self._mot_binh_luan(bl, actor)
 
@@ -713,6 +957,7 @@ class SocialService:
         tra_loi = self._store.replies_for([c.comment_id for c in goc])
         moi = list(goc) + [c for ds in tra_loi.values() for c in ds]
         the = self._the_nguoi([c.author_user_id for c in moi])
+        an = self._tap_an(viewer)
         return {
             "items": [
                 {
@@ -721,23 +966,28 @@ class SocialService:
                     "replies": [
                         {**r.to_public_dict(), "author": the.get(r.author_user_id)}
                         for r in tra_loi.get(c.comment_id, [])
+                        if r.author_user_id not in an
                     ],
                 }
                 for c in goc
+                if c.author_user_id not in an
             ],
             "total": tong,
             "limit": limit,
             "offset": offset,
         }
 
-    def replies(self, comment_id: str, *, limit: int = 20,
-                offset: int = 0) -> Dict[str, Any]:
+    def replies(self, comment_id: str, *, limit: int = 20, offset: int = 0,
+                viewer: Optional[Profile] = None) -> Dict[str, Any]:
         """Toan bo tra loi cua MOT binh luan goc — duong "Xem thêm"."""
         cha = self._store.get_comment(comment_id)
         if cha is None:
             raise NotFoundError("Không tìm thấy bình luận.")
         ds, tong = self._store.list_comments(
             cha.post_id, parent_id=comment_id, limit=limit, offset=offset)
+        an = self._tap_an(viewer)
+        if an:
+            ds = [c for c in ds if c.author_user_id not in an]
         the = self._the_nguoi([c.author_user_id for c in ds])
         return {
             "items": [{**c.to_public_dict(), "author": the.get(c.author_user_id)}
@@ -787,6 +1037,14 @@ class SocialService:
         )
         theo_id = {p.post_id: p for p in list(tu_theo_doi) + list(kham_pha)}
         bai = [theo_id[str(x["post_id"])] for x in gop if x["post_id"] in theo_id]
+        # Chan/tat tieng (Social Play V1) — loc SAU khi da tron, truoc khi
+        # lam giau. Loc hau nhu the nay co the tra ve IT HON `so` muc khi
+        # nguoi xem dang chan/tat tieng nhieu nguoi — chap nhan duoc cho bang
+        # tin CU (khong cursor de "keo them" bu vao); duong CO cursor
+        # (`feed_v2`) bu lai day du bang vong lap co tran do sau.
+        an = self._tap_an(viewer)
+        if an:
+            bai = [p for p in bai if p.author_user_id not in an]
         return {
             "items": self._lam_giau_bai(bai, viewer, kem_xem_truoc=True),
             "total": tong,
@@ -795,6 +1053,107 @@ class SocialService:
             "personalized": bool(theo_doi_ids),
             # Noi ro khi danh sach theo doi bi cat, thay vi im lang bo bot.
             "following_truncated": len(theo_doi_ids) >= NGUOI_THEO_DOI_TOI_DA,
+        }
+
+    #: So bai hoi MOI LUOT tu kho trong `feed_v2`, doc lap voi `limit` cua
+    #: trang — mot LO du lon de it vong lap trong truong hop pho bien
+    #: (khong bi chan/tat tieng ai), nhung van BI CHAN boi `FEED_MAX_DEPTH`
+    #: cho truong hop xau (chan rat nhieu nguoi).
+    _FEED_V2_BATCH = 50
+
+    def feed_v2(self, viewer: Optional[Profile], *, scope: str,
+               limit: Optional[int] = None, cursor: Optional[str] = None,
+               fandom: str = "") -> Dict[str, Any]:
+        """
+        Bang tin CO PHAM VI (Social Play V1) — `scope=latest` (moi bai VISIBLE)
+        hoac `scope=following` (chi nguoi `viewer` dang theo doi, bat buoc
+        dang nhap). KHONG thay the `feed()` — route legacy
+        (`GET /api/feed` khong `scope`) giu NGUYEN, xem docstring do.
+
+        `cursor`: xem `social.decode_feed_cursor`. `fandom`: mot slug trong
+        `social.COMMUNITY_FANDOMS` — bai co `fandom_id` trung, HOAC bai
+        `story_update` cua mot truyen thuoc fandom do (mot truy van BI CHAN
+        qua `find_novels`, cung phep khop voi bo loc fandom cua thu vien).
+
+        VONG LAP CO TRAN (`social.FEED_MAX_DEPTH`): kho tra ve MOT LO, ta xet
+        TUNG MUC MOT — luon DAY cursor toi MUC VUA XET (du no bi loc bo vi
+        chan/tat tieng hay khong), nen trang sau khong bao gio lap lai hay bo
+        sot mot muc DA TUNG duoc xet. Dat tran thi dung ngay, tra
+        `next_cursor: null` va `depth_capped: True` — KHONG doan "trang ngan
+        nghia la het du lieu": chi mot lan doc kho tra ve RONG moi duoc coi la
+        het.
+        """
+        so = kich_thuoc_trang(limit)
+        if scope not in ("latest", "following"):
+            raise SocialError("Phạm vi bảng tin không hợp lệ.")
+        if scope == "following" and viewer is None:
+            raise PermissionDenied("Cần đăng nhập.")
+
+        author_ids: Optional[Sequence[str]] = None
+        following_truncated = False
+        if scope == "following":
+            author_ids = self._store.following_user_ids(
+                viewer.user_id, limit=NGUOI_THEO_DOI_TOI_DA)
+            following_truncated = len(author_ids) >= NGUOI_THEO_DOI_TOI_DA
+
+        fandom_slug = validate_fandom_id(fandom)
+        fandom_novel_ids: List[str] = []
+        if fandom_slug:
+            nhan = community_fandom_label(fandom_slug)
+            truyen, _ = self._store.find_novels(
+                fandom=nhan, published_only=True, limit=200)
+            fandom_novel_ids = [n.novel_id for n in truyen]
+
+        con_cu: Optional[Tuple[str, str]] = (
+            decode_feed_cursor(cursor) if cursor else None)
+        an = self._tap_an(viewer)
+
+        ket_qua: List[Post] = []
+        da_xet = 0
+        depth_capped = False
+        het_kho = False
+        if author_ids is not None and not author_ids:
+            het_kho = True  # Chua theo doi ai — khong co gi de doi.
+
+        while len(ket_qua) < so and not depth_capped and not het_kho:
+            con_lai = FEED_MAX_DEPTH - da_xet
+            if con_lai <= 0:
+                depth_capped = True
+                break
+            trang = self._store.list_feed_posts(
+                author_ids=author_ids,
+                # `post_fandom` TAT (chua migrate): thuoc tinh `fandom_id` chua co
+                # tren Appwrite — chi loc theo TRUYEN cua fandom, khong hoi cot do.
+                fandom_id=fandom_slug if self._cap.get("post_fandom", True) else "",
+                fandom_novel_ids=fandom_novel_ids, loc_fandom=bool(fandom_slug),
+                cursor=con_cu, limit=min(self._FEED_V2_BATCH, con_lai))
+            if not trang:
+                het_kho = True
+                break
+            for p in trang:
+                if da_xet >= FEED_MAX_DEPTH:
+                    depth_capped = True
+                    break
+                da_xet += 1
+                con_cu = (p.created_at, p.post_id)
+                if p.author_user_id in an:
+                    continue
+                ket_qua.append(p)
+                if len(ket_qua) >= so:
+                    break
+
+        next_cursor = None
+        if not depth_capped and not het_kho and con_cu is not None:
+            next_cursor = encode_feed_cursor(*con_cu)
+
+        return {
+            "items": self._lam_giau_bai(ket_qua, viewer, kem_xem_truoc=True),
+            "next_cursor": next_cursor,
+            "scope": scope,
+            "fandom": fandom_slug,
+            "limit": so,
+            "depth_capped": depth_capped,
+            "following_truncated": following_truncated,
         }
 
     def posts_by_user(self, author_id: str, *,
@@ -820,7 +1179,23 @@ class SocialService:
         if len(can) < 2:
             return {"items": [], "total": 0}
         ds, tong = self._store.list_posts(query=can, limit=limit)
+        an = self._tap_an(viewer)
+        if an:
+            ds = [p for p in ds if p.author_user_id not in an]
         return {"items": self._lam_giau_bai(ds, viewer), "total": tong}
+
+    def _tap_an(self, viewer: Optional[Profile]) -> Set[str]:
+        """Tac gia ma noi dung phai bi AN khoi `viewer` — xem
+        `AppwriteSocialStore.hidden_authors_for_viewer`. Tap RONG cho khach
+        vang lai (khong co gi de chan).
+
+        Nang luc `blocks` TAT (production CHUA migrate) -> tap RONG, KHONG doc
+        kho: collection `user_blocks` chua ton tai, doc no la lam hong MOI bang
+        tin (ca bang tin cu) cua moi nguoi da dang nhap ngay khi ma nay len
+        production — truoc khi migration duoc duyet."""
+        if viewer is None or not self._cap.get("blocks", True):
+            return set()
+        return self._store.hidden_authors_for_viewer(viewer.user_id)
 
     def _bai_hien(self, post_id: str) -> Post:
         bai = self._store.get_post(post_id)
@@ -858,6 +1233,7 @@ class SocialService:
                 viewer.user_id, [p.post_id for p in bai])
         truyen_ids = [p.novel_id for p in bai if p.novel_id]
         truyen = self._store.novels_by_ids(truyen_ids) if truyen_ids else {}
+        an = self._tap_an(viewer)
 
         ra: List[Dict[str, Any]] = []
         for p in bai:
@@ -884,6 +1260,7 @@ class SocialService:
                 muc["comments_preview"] = [
                     {**c.to_public_dict(), "author": the.get(c.author_user_id)}
                     for c in xem_truoc.get(p.post_id, [])
+                    if c.author_user_id not in an
                 ]
             ra.append(muc)
         return ra
@@ -960,9 +1337,13 @@ class SocialService:
 
     def profile_social(self, profile: Profile,
                        viewer: Optional[Profile] = None) -> Dict[str, Any]:
-        """Phan xa hoi cua mot trang ca nhan: so lieu + minh co dang theo doi."""
+        """Phan xa hoi cua mot trang ca nhan: so lieu + minh co dang theo doi.
+
+        `viewer_relation` (Social Play V1) CHI xuat hien khi co nguoi xem DA
+        DANG NHAP dang xem trang cua NGUOI KHAC — khong bao gio lo cho khach
+        vang lai hay cho chinh chu (ho biet ho khong tu chan minh)."""
         uid = profile.user_id
-        return {
+        goi: Dict[str, Any] = {
             "follower_count": int(self._store.follower_counts([uid]).get(uid, 0)),
             "following_count": int(self._store.following_counts([uid]).get(uid, 0)),
             "post_count": int(self._store.post_counts([uid]).get(uid, 0)),
@@ -973,6 +1354,11 @@ class SocialService:
             ),
             "is_self": viewer is not None and viewer.user_id == uid,
         }
+        if viewer is not None and viewer.user_id != uid and self._cap.get("blocks", True):
+            loai = {b.kind for b in self._store.list_user_blocks(viewer.user_id)
+                    if b.blocked_id == uid}
+            goi["viewer_relation"] = {"blocked": "block" in loai, "muted": "mute" in loai}
+        return goi
 
     def account_summary(self, profile: Profile) -> Dict[str, Any]:
         """
@@ -997,6 +1383,191 @@ class SocialService:
             ra["published_novels"] = len(self._store.list_novels(
                 owner_id=uid, published_only=True))
         return ra
+
+    #: Do dai toi da cua bio qua `update_profile` — CUNG con so voi
+    #: `CreatorService.MAX_BIO` (duong cu, `PUT /api/creator/bio`). Lap lai o
+    #: day (khong import tu `creator_service`) vi day la HANG SO CHINH SACH,
+    #: khong phai chi tiet trien khai cua mot service khac.
+    _PROFILE_BIO_MAX = 400
+
+    #: Sentinel: truong KHONG DUOC GOI LEN trong request (khac `None`, nghia
+    #: la nguoi dung MUON xoa/bo gia tri). Moi tham so cua `update_profile`
+    #: mac dinh bang sentinel nay, nen "khong nhac den" va "dat lai rong" la
+    #: hai duong hoan toan khac nhau.
+    _KHONG_DAT = object()
+
+    def update_profile(self, actor: Profile, *,
+                       bio: Any = _KHONG_DAT,
+                       fandom_ids: Any = _KHONG_DAT,
+                       accent: Any = _KHONG_DAT,
+                       avatar: Any = _KHONG_DAT,
+                       banner: Any = _KHONG_DAT,
+                       frame: Any = _KHONG_DAT) -> Profile:
+        """
+        Sua ho so ca nhan (Social Play V1) — TAT CA hoac KHONG GI, theo dung
+        thu tu: (1) KIEM HET truoc, (2) ghi anh MOI (neu co), (3) ghi ban ghi
+        ho so, (4) CHI SAU KHI (3) thanh cong moi xoa anh CU. That bai o (3)
+        thi don anh MOI vua ghi o (2) — khong bao gio de mo coi.
+
+        Moi tham so mac dinh la `_KHONG_DAT` (sentinel): KHONG nhac den nghia
+        la GIU NGUYEN; `None`/rong nghia la XOA — hai y khac nhau, va gop lam
+        mot se khong bao gio "giu nguyen" duoc mot truong nua khi client gui
+        request KHONG kem no.
+
+        `avatar`/`banner`: `{"data": base64, "mime": str}` de tai/doi, hoac
+        `{"remove": True}` de xoa. `frame`: khoa vat pham (`avatar_frame`) de
+        trang bi, hoac `None` de bo trang bi.
+        """
+        # -------------------------------------------------- (1) KIEM HET TRUOC
+        moi_bio = actor.bio
+        if bio is not self._KHONG_DAT:
+            moi_bio = clean_text(bio, toi_da=self._PROFILE_BIO_MAX, ten="Giới thiệu",
+                                 bat_buoc=False)
+
+        moi_fandom_ids = actor.fandom_ids
+        if fandom_ids is not self._KHONG_DAT:
+            ds = list(fandom_ids or [])
+            if len(ds) > PROFILE_MAX_FANDOMS:
+                raise SocialError(f"Tối đa {PROFILE_MAX_FANDOMS} fandom.")
+            moi_fandom_ids = [validate_fandom_id(f, bat_buoc=True) for f in ds]
+            if moi_fandom_ids:
+                self._doi_hoi("profile_fandoms")
+
+        moi_accent = actor.accent
+        if accent is not self._KHONG_DAT:
+            sach = (accent or "").strip().lower()
+            if sach:
+                if sach not in ACCENT_PRESETS:
+                    raise SocialError("Màu nhận diện không hợp lệ.")
+                self._doi_hoi("profile_accent")
+            moi_accent = sach
+
+        moi_frame_key: Optional[str] = None
+        frame_thay_doi = frame is not self._KHONG_DAT
+        if frame_thay_doi and frame:
+            if self._gamification_store is None:
+                raise SocialError("Máy chủ chưa cấu hình vật phẩm.")
+            muc = self._gamification_store.get_cosmetic(actor.user_id, frame)
+            if muc is None:
+                raise SocialError("Bạn chưa sở hữu vật phẩm này.")
+            if cosmetic_slot_of(frame) != "avatar_frame":
+                raise SocialError("Vật phẩm này không phải khung avatar.")
+            moi_frame_key = frame
+
+        anh_avatar = None   # NormalizedImage | "REMOVE" | None (khong doi)
+        if avatar is not self._KHONG_DAT and avatar is not None:
+            if avatar.get("remove"):
+                anh_avatar = "REMOVE"
+            else:
+                anh_avatar = self._giai_ma_va_chuan_hoa(
+                    avatar, normalize_avatar, ten="Ảnh đại diện")
+
+        anh_banner = None
+        if banner is not self._KHONG_DAT and banner is not None:
+            if banner.get("remove"):
+                anh_banner = "REMOVE"
+            else:
+                self._doi_hoi("profile_banner")
+                anh_banner = self._giai_ma_va_chuan_hoa(
+                    banner, normalize_banner, ten="Ảnh bìa")
+
+        # -------------------------------------- (2) GHI ANH MOI (neu co) TRUOC
+        khoa_avatar_cu = actor.avatar_key
+        khoa_banner_cu = actor.banner_key
+        khoa_avatar_moi: Optional[str] = None
+        khoa_banner_moi: Optional[str] = None
+        da_ghi: List[str] = []
+        # Anh chup de HOAN TAC doi tuong Profile trong bo nho neu ghi hong — khong
+        # de mot doi tuong tro toi anh vua bi don (review bao mat).
+        chup = (actor.bio, list(actor.fandom_ids or []), actor.accent,
+                actor.avatar_key, actor.banner_key)
+        try:
+            if anh_avatar == "REMOVE":
+                khoa_avatar_moi = ""
+            elif anh_avatar is not None:
+                khoa_avatar_moi = content_addressed_key(
+                    "avatars", user_id=actor.user_id, data=anh_avatar.data)
+                self._storage.put(khoa_avatar_moi, anh_avatar.data,
+                                  content_type=anh_avatar.mime)
+                da_ghi.append(khoa_avatar_moi)
+
+            if anh_banner == "REMOVE":
+                khoa_banner_moi = ""
+            elif anh_banner is not None:
+                khoa_banner_moi = content_addressed_key(
+                    "banners", user_id=actor.user_id, data=anh_banner.data)
+                self._storage.put(khoa_banner_moi, anh_banner.data,
+                                  content_type=anh_banner.mime)
+                da_ghi.append(khoa_banner_moi)
+
+            # -------------------------------------------- (3) GHI BAN GHI HO SO
+            actor.bio = moi_bio
+            actor.fandom_ids = moi_fandom_ids
+            actor.accent = moi_accent
+            if khoa_avatar_moi is not None:
+                actor.avatar_key = khoa_avatar_moi
+            if khoa_banner_moi is not None:
+                actor.banner_key = khoa_banner_moi
+            self._identity.save_profile(actor)
+        except Exception:
+            # That bai TU BUOC (3) tro ve truoc — don MOI anh vua ghi o (2),
+            # khong de mo coi. Loi mang khi xoa KHONG duoc lam hong duong bao
+            # loi that su (cung nguyen tac voi `_xoa_anh`).
+            (actor.bio, actor.fandom_ids, actor.accent,
+             actor.avatar_key, actor.banner_key) = chup
+            for khoa in da_ghi:
+                try:
+                    self._storage.delete(khoa)
+                except Exception:
+                    pass
+            raise
+
+        # ---------------------------- (4) XOA ANH CU — CHI SAU KHI (3) THANH CONG
+        if (khoa_avatar_moi is not None and khoa_avatar_cu
+                and khoa_avatar_cu != khoa_avatar_moi):
+            try:
+                self._storage.delete(khoa_avatar_cu)
+            except Exception:
+                pass
+        if (khoa_banner_moi is not None and khoa_banner_cu
+                and khoa_banner_cu != khoa_banner_moi):
+            try:
+                self._storage.delete(khoa_banner_cu)
+            except Exception:
+                pass
+
+        # Vat pham: ghi SAU CUNG — khong co gi de don neu buoc nay hong (chi
+        # doi mot co `equipped`, khong tao du lieu moi).
+        if frame_thay_doi:
+            if moi_frame_key:
+                try:
+                    equip_cosmetic(self._gamification_store, actor.user_id,
+                                   moi_frame_key)
+                except GamificationError as exc:
+                    raise SocialError(str(exc)) from exc
+            else:
+                unequip_slot(self._gamification_store, actor.user_id,
+                            "avatar_frame")
+
+        # Tra ve CHINH doi tuong Profile (da luu) — `server/main.py` ghep
+        # thanh hinh dang GIONG HET `GET /api/auth/me`
+        # (`_ho_so_tra_ve`, gom `is_admin`/`avatar_url`/`equipped_cosmetics`)
+        # o DUNG MOT CHO, thay vi lap lai logic ghep o day.
+        return actor
+
+    def _giai_ma_va_chuan_hoa(self, muc: Dict[str, Any], ham_chuan_hoa: Any,
+                             *, ten: str) -> Any:
+        if self._storage is None:
+            raise SocialError("Máy chủ chưa cấu hình kho ảnh.")
+        raw_b64 = str(muc.get("data") or "")
+        try:
+            data = base64.b64decode(raw_b64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise SocialError(f"{ten} không hợp lệ.") from exc
+        try:
+            return ham_chuan_hoa(data)
+        except ImageValidationError as exc:
+            raise SocialError(f"{ten}: {exc}") from exc
 
     # ================================================================ THONG BAO
 
@@ -1101,8 +1672,10 @@ class SocialService:
         qua nguoc hoan toan voi muc dich cua nut do.
         """
         loai = (target_kind or "").strip().lower()
-        if loai not in ("post", "comment"):
+        if loai not in ("post", "comment", "user"):
             raise SocialError("Loại nội dung báo cáo không hợp lệ.")
+        if loai == "user":
+            self._doi_hoi("user_reports")
         try:
             ly_do = ReportReason(str(reason or "").strip().lower())
         except ValueError:
@@ -1126,6 +1699,9 @@ class SocialService:
     def _chu_so_huu(self, target_kind: str, target_id: str) -> str:
         if target_kind == "post":
             return self._bai_hien(target_id).author_user_id
+        if target_kind == "user":
+            # `target_owner_id` == `target_id`: nguoi BI bao cao la chinh no.
+            return self._nguoi_phai_ton_tai(target_id).user_id
         bl = self._store.get_comment(target_id)
         if bl is None or bl.state is not ContentState.VISIBLE:
             raise NotFoundError("Không tìm thấy bình luận.")
@@ -1518,6 +2094,23 @@ class SocialService:
         if ho_so is None:
             raise NotFoundError("Không tìm thấy người dùng.")
         return ho_so
+
+    def _kiem_khong_bi_chan(self, a: str, b: str) -> None:
+        """
+        Tu choi tuong tac (theo doi/thich/binh luan) khi co mot canh CHAN o
+        BAT KY chieu nao giua hai nguoi nay — TAT TIENG khong cham toi day
+        (mot chieu, chi an noi dung, khong bao gio chan tuong tac — xem
+        docstring `domain.UserBlock`).
+
+        Thong bao TRUNG LAP co y: khong noi ai la nguoi da chan — chi mot cau
+        trung lap, de KHONG BAO GIO lo cho mot ben biet minh bi ben kia chan.
+        """
+        # `blocks` TAT: khong the co canh chan nao — va KHONG doc kho (collection
+        # `user_blocks` co the chua ton tai; xem `_tap_an`).
+        if a == b or not self._cap.get("blocks", True):
+            return
+        if self._store.is_blocked_either_direction(a, b):
+            raise PermissionDenied("Không thể tương tác với người dùng này.")
 
     def _truyen(self, novel_id: str) -> Any:
         if not novel_id:

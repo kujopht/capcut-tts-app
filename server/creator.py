@@ -453,6 +453,11 @@ def public_profile(
         # CHI mot bit lo ra: co phai tac gia da duyet hay khong. `pending`,
         # `rejected`, `suspended` deu ra `false` va khong phan biet duoc.
         "is_author": status is AuthorStatus.APPROVED,
+        # Social Play V1 — `banner_url` (URL DA KY) do NGUOI GOI ghep vao sau,
+        # cung mau voi `avatar_url` (xem `CreatorService._public_bundle`):
+        # ham nay la HAM THUAN, khong tu goi kho doi tuong duoc.
+        "accent": profile_dict.get("accent") or None,
+        "fandom_ids": list(profile_dict.get("fandom_ids") or []),
     }
     if ra["is_author"] and stats is not None:
         nghe = int(stats.get("qualified_listens") or 0)

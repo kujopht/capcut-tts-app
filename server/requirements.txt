@@ -92,5 +92,14 @@ scrapling>=0.4,<0.5
 # chung minh duoc gi ve moi truong production.
 google-cloud-tasks>=2.16,<3
 
+# --- Bat buoc: giai ma + ma hoa lai anh ho so o PHIA MAY CHU (Social & Play V1) ---
+# `server/image_normalize.py` quyet dinh LOAI ANH bang cach GIAI MA that (khong tin
+# duoi tep/MIME client khai), chan anh dong/bom giai nen, bo EXIF/GPS roi ma hoa
+# lai WebP truoc khi luu avatar/banner. Duoc import LUC KHOI DONG (qua
+# `social_service`), nen thieu goi nay la ca backend khong len duoc. Cung ly do
+# "ghim o day chu khong 'co thi dung'" nhu google-cloud-tasks o tren.
+# Rang buoc theo major de khong bi vo API giua chung.
+Pillow>=10.3,<13
+
 # --- Ngoai Python ---
 # ffmpeg phai co trong PATH de ghep cac doan MP3 (server/tts_bridge.py).

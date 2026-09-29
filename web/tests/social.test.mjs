@@ -128,13 +128,24 @@ test("gioi han lay tu MAY CHU qua /api/limits, khong chep tay", () => {
 /* ============================================================== bang tin */
 
 test("bang tin khong doi dang nhap, va noi ro khi chua ca nhan hoa", () => {
+  // Social & Play V1: tab "Mới nhất" mo cho moi nguoi; "Đang theo dõi" la tab
+  // RIENG (thay co `personalized` cu) va chi co khi da dang nhap.
   const src = feed();
-  // Khong co cong chan dang nhap quanh phan doc
-  assert.match(src, /social\s*\.feed\(\)/);
-  assert.match(src, /personalized/);
+  // Khong co cong chan dang nhap quanh phan doc: tai bang tin ngay ca khi khach.
+  assert.match(src, /social\.feedV2\(\{ scope: q\.scope, fandom: q\.fandom, limit: CO_TRANG \}\)/);
   assert.match(src, /Bài mới nhất từ khắp Fanfic World/);
-  // Nguoi chua dang nhap thay loi moi, khong thay loi
-  assert.match(src, /Đăng nhập<\/Link> để đăng bài/);
+  assert.match(src, /Bài mới từ những người bạn theo dõi/);
+  // Tab theo doi chi hien khi co profile VA may chu biet `scope`; khach mo URL tab
+  // do thay loi moi, khong thay loi.
+  assert.match(src, /\{profile && !mayChuCu \? \(\s*<button[\s\S]*?Đang theo dõi/);
+  // Web len TRUOC API (Render tat autoDeploy): nhan ra phan hoi dang cu va lui ve
+  // offset, khong dan nhan "Đang theo dõi" cho mot bang tin tron.
+  assert.match(src, /function laMayChuCu\(ra: FeedPageV2 \| FeedPage\): ra is FeedPage \{\s*return !\("scope" in ra\);/);
+  assert.match(src, /const locDuoc = q\.scope === "latest" && !q\.fandom;/);
+  assert.match(src, /Máy chủ chưa hỗ trợ bộ lọc này/);
+  assert.match(src, /Đăng nhập để xem bài từ người bạn theo dõi/);
+  // Nguoi chua dang nhap thay loi moi tham gia.
+  assert.match(src, /Đăng nhập để tham gia/);
 });
 
 test("bang tin noi ro khi danh sach theo doi bi cat", () => {
@@ -144,10 +155,16 @@ test("bang tin noi ro khi danh sach theo doi bi cat", () => {
   assert.match(feed(), /bạn theo dõi gần nhất/);
 });
 
-test("phan trang bang offset that, khong tai het", () => {
+test("phan trang that, khong tai het: cursor tat dinh, gop khong trung, co tran do sau", () => {
+  // Social & Play V1: offset -> CURSOR cua may chu (thu tu tat dinh, khong dem
+  // ca kho). Van MOI LAN mot trang; "Xem thêm" chi khi may chu con cursor.
   const src = feed();
-  assert.match(src, /social\.feed\(trang\.limit, trang\.items\.length\)/);
-  assert.match(src, /trang\.items\.length < trang\.total/);
+  assert.match(src, /cursor: s\.nextCursor, limit: CO_TRANG/);
+  assert.match(src, /items: gopTrang\(cu\.items, ra\.items\)/);
+  assert.match(src, /tt\.nextCursor \? \(/);
+  // Cham tran do sau thi NOI RO, khong im lang dung lai.
+  assert.match(src, /tt\.depthCapped/);
+  assert.match(src, /giới hạn của bảng tin/);
 });
 
 test("chi tac gia da duyet moi bi hoi danh sach truyen cua minh", () => {
@@ -175,11 +192,14 @@ test("thich la aria-pressed + cap nhat lac quan + hoan lai khi loi", () => {
   const src = postCard();
   assert.match(src, /aria-pressed=\{bai\.liked\}/);
   // Lac quan: doi truoc...
-  assert.match(src, /liked: !truoc/);
-  // ...va hoan lai bang trang thai cu khi may chu tu choi.
-  assert.match(src, /capNhat\(bai\);/);
+  assert.match(src, /liked: !truoc\.liked/);
+  // ...va hoan lai bang trang thai cu khi may chu tu choi, NOI RO loi.
+  assert.match(src, /capNhat\(truoc\);/);
+  assert.match(src, /Lượt thích chưa được ghi nhận/);
   // Con so cua MAY CHU thang phep doan.
   assert.match(src, /like_count: ra\.like_count/);
+  // Social & Play V1: khoa trong luc cho — bam dup khong gui hai yeu cau chong nhau.
+  assert.match(src, /if \(!profile \|\| dangThich\.current\) return;/);
 });
 
 test("trang mot bai le khong hien HAI khoi binh luan", () => {
@@ -391,8 +411,14 @@ test("trang truyen: nut theo doi khong hien voi chu so huu va ban nhap", () => {
 });
 
 test("trang ca nhan: khong co nut theo doi tro vao chinh minh", () => {
+  // Social & Play V1: chu ho so thay "Sửa hồ sơ"; nut Theo doi CHI nam o nhanh
+  // "khong phai minh" (va an khi minh dang chan nguoi do).
   const trang = read("../src/app/u/[username]/page.tsx");
-  assert.match(trang, /\{xh\.is_self \? null : \(/);
+  assert.match(trang, /const laToi = Boolean\(xh\?\.is_self \|\| \(toi && toi\.user_id === p\.user_id\)\);/);
+  assert.match(
+    trang,
+    /\{laToi \? \([\s\S]*?Sửa hồ sơ[\s\S]*?\) : \(\s*<>\s*\{xh && !p\.viewer_relation\?\.blocked \? \(\s*<FollowButton/,
+  );
 });
 
 /* ================================================================= bao cao */
@@ -609,9 +635,16 @@ test("trang doc chuong luon gan khoi binh luan, khong phu thuoc audio", () => {
 });
 
 test("composer bang tin: hang kich hoat quen thuoc, mo roi focus", () => {
+  // Social & Play V1: hang kich hoat mo mot HOP THOAI; o chu mang
+  // `data-autofocus` va `useDialogFocus` dua tieu diem vao dung no.
   const src = composer();
   assert.match(src, /Bạn đang nghĩ gì\?/);
-  assert.match(src, /queueMicrotask\(\(\) => oChu\.current\?\.focus\(\)\)/);
+  assert.match(src, /aria-haspopup="dialog"/);
+  assert.match(src, /<textarea\s+data-autofocus/);
+  assert.match(src, /useDialogFocus\(hop, dongHop, mo\)/);
+  const hook = read("../src/lib/useDialogFocus.ts");
+  assert.match(hook, /querySelector<HTMLElement>\("\[data-autofocus\]"\)/);
+  assert.match(hook, /opener\?\.focus\?\.\(\)/);
 });
 
 test("xem truoc binh luan trong the bai: khong hien khi khoi day du dang mo", () => {

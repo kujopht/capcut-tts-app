@@ -983,6 +983,9 @@ def health() -> Dict[str, Any]:
         # chua he thu gi. Ca hai deu khien mot lan kiem `/api/health` ngay sau
         # deploy tra loi sai — da xay ra that.
         "job_lock_ready": getattr(store, "_job_lock_ready", None),
+        # Tin nhan Chat V1: bat/tat, kho, khan gia (canary | all) va SO LUONG canary — KHONG BAO GIO liet ke ID.
+        # De kiem tra mot lan bat canary ma khong can dang nhap (xem `docs/messaging/CHAT_APPWRITE.md`).
+        "messaging": messaging_runtime.describe(),
     }
 
 
@@ -4429,6 +4432,18 @@ messaging_runtime = _build_messaging_runtime(settings, user_exists=_nguoi_chat_t
 app.include_router(build_messaging_router(messaging_runtime, resolve_profile=_nguoi_xem_chat))
 
 
+def _chat_cho_phep(user_id: str) -> None:
+    """Cung luat voi `server/messaging/routes.py`: may chu tat -> 503; bat nhung nguoi nay ngoai khan gia (canary)
+    -> 403 `chat_not_enabled`. Kiem o MOI request — go ai khoi FAS_CHAT_V1_CANARY_USERS la co hieu luc ngay."""
+    if not messaging_runtime.enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            {"code": "chat_not_configured",
+                             "message": "Tin nhắn chưa được bật trên máy chủ."})
+    if not messaging_runtime.allows(user_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            {"code": "chat_not_enabled", "message": "Tin nhắn chưa mở cho tài khoản này."})
+
+
 @app.post("/api/chat/session")
 def chat_session(response: Response,
                  profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
@@ -4449,10 +4464,7 @@ def chat_session(response: Response,
             {"code": "chat_rate_limited",
              "message": "Bạn mở tin nhắn quá nhiều lần. Thử lại sau ít phút."},
             headers={"Retry-After": str(max(1, int(cho)))})
-    if not messaging_runtime.enabled:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
-                            {"code": "chat_not_configured",
-                             "message": "Tin nhắn chưa được bật trên máy chủ."})
+    _chat_cho_phep(profile.user_id)
     response.headers["Cache-Control"] = "no-store"
     return {"provider": "fanfic", "userId": chat_user_id(profile.user_id),
             "expiresAt": int((time.time() + CHAT_PHIEN_TTL_GIAY) * 1000),
@@ -4503,6 +4515,7 @@ def chat_identities(payload: ChatIdentitiesIn,
     kia. `AppwriteUnavailableError` (lop con cua `AuthError`) thi DE DI TIEP:
     ha tang sap la 503 cho ca request, khong phai "khong tim thay".
     """
+    _chat_cho_phep(profile.user_id)
 
     def doc(f: Any, mac_dinh: Any) -> Any:
         try:
@@ -4525,7 +4538,10 @@ def chat_identities(payload: ChatIdentitiesIn,
     def the(p: Profile) -> Dict[str, Any]:
         # Nguoi chua co tien do nao vang mat khoi lo -> doc ban mac dinh (bac 1).
         prog = tien_do.get(p.user_id) or gamification_store.get_progress(p.user_id)
-        return _the_chat(p, prog, vat_pham.get(p.user_id, []))
+        # `chat_enabled`: nguoi nay co trong khan gia khong (canary) — giao dien bao "chua dung duoc" thay vi mo
+        # mot cuoc ma may chu se tu choi. Chi mot co boolean, khong lo danh sach canary.
+        return {**_the_chat(p, prog, vat_pham.get(p.user_id, [])),
+                "chat_enabled": messaging_runtime.peer_allowed(p.user_id)}
 
     items: List[Dict[str, Any]] = [
         the(ho_so[uid]) if uid and uid in ho_so else {"found": False, "chat_user_id": cid}

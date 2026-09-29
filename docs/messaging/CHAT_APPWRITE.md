@@ -211,12 +211,16 @@ Rào `guard.py` (fail-closed): chỉ **IP loopback** (không tên miền nào, k
 
 ### Bước 0 — schema (chỉ THÊM bảng; cờ vẫn TẮT)
 
-Trên máy của chủ dự án, env production + khoá schema `APPWRITE_SCHEMA_API_KEY`. Xem trước từng bảng, rồi tạo **từng bảng một** (thứ tự không quan trọng; `user_blocks` trước vì chặn dùng nó):
+Trên máy của chủ dự án, env production + khoá schema `APPWRITE_SCHEMA_API_KEY`. **Trước hết xem kế hoạch CHỈ ĐỌC** — `--plan` gọi đúng các GET của Appwrite, phát hiện bảng/cột/index/quyền đã có và mọi chỗ KHÁC thiết kế; `_call` từ chối mọi phương thức khác GET trước khi gửi (đã chạy thật trên staging: 5/5 bảng, 0 lệch):
 
 ```bash
-for c in user_blocks chat_conversations chat_members chat_messages chat_fanouts; do
-  python -m scripts.setup_appwrite --dry-run --only "$c"
-done
+FAS_ENV_FILE=<tệp env production> python -m scripts.setup_appwrite --plan \
+  --only user_blocks,chat_conversations,chat_members,chat_messages,chat_fanouts
+```
+
+Sau khi duyệt kế hoạch, tạo **từng bảng một** (thứ tự không quan trọng; `user_blocks` trước vì chặn dùng nó):
+
+```bash
 python -m scripts.setup_appwrite --only user_blocks          # đã có (do #229) -> "đã có", không đổi gì
 python -m scripts.setup_appwrite --only chat_conversations
 python -m scripts.setup_appwrite --only chat_members
@@ -236,26 +240,46 @@ Dạng bảng chính xác (từ `SCHEMA`, quyền cấp bảng `[]`, `documentSe
 | `chat_messages` | `conversation_id` s40 R · `sender_id` s36 R · `recipient_id` s36 R · `client_id` s32 R · `text` s2000 R · `created_at` dt R · `kind` s16 · `sticker_id` s64 | `conv_created_idx` (conversation_id, created_at) · `conv_recipient_created_idx` (conversation_id, recipient_id, created_at) |
 | `chat_fanouts` | `message_id` s40 R · `created_at` dt R | — |
 
-### Bước 1 — bật máy chủ, CHƯA có giao diện ("dark launch")
+### Canary theo danh sách (máy chủ quyết, fail-closed)
+
+| Biến (API) | Giá trị | Hiệu lực |
+|---|---|---|
+| `FAS_CHAT_V1` | `1` / trống | trống/`0` = không ai có chat (503) |
+| `FAS_CHAT_V1_AUDIENCE` | `canary` (**mặc định trên Appwrite**) · `all` | giá trị khác = chat TẮT, có lý do |
+| `FAS_CHAT_V1_CANARY_USERS` | user ID Fanfic, cách nhau dấu phẩy | **rỗng ở chế độ canary = KHÔNG AI**; chỉ nhận ID (email/đường dẫn bị bỏ, chỉ đếm); `describe()`/health chỉ in SỐ LƯỢNG |
+
+- Mọi route chat (REST, SSE, `/api/chat/session`, `/api/chat/identities`) kiểm **mỗi request**: ngoài danh sách → 403 `chat_not_enabled`. Gỡ một ID = hết quyền ngay ở request kế tiếp, không xoá gì.
+- Canary chỉ nhắn tin được với canary (403 `chat_peer_not_enabled`); `identities` có cờ `chat_enabled` để giao diện hiện "… chưa dùng được Tin nhắn trong giai đoạn thử" thay vì ô soạn. Chặn tài khoản vẫn dùng được (mức tài khoản, #229).
+- `GET /api/chat/availability` → `{enabled, reason}` của **chính** người gọi, luôn 200. Web (khi build có cờ) hỏi **một lần mỗi lần tải trang**; chỉ `enabled:true` mới hiện nút Tin nhắn, nút Nhắn tin, dock, `/messages`; lỗi thì thử lại một lần rồi coi như TẮT. Người ngoài canary thấy y như hôm nay (chi phí: 1 request/lần tải trang cho người đã đăng nhập).
+- Vì vậy **thứ tự bật không quan trọng**: web có cờ + máy chủ tắt → không ai thấy gì.
+- Hai điều cố ý (review độc lập ghi nhận, chấp nhận): (1) chặn tạo trong giai đoạn canary là **chặn tài khoản thật** (cùng hàng `user_blocks` với nút Chặn ở trang cá nhân) nên vẫn còn sau khi mở rộng; (2) cờ `chat_enabled` trong `identities` cho người trong canary biết một người khác có trong canary hay không (chỉ boolean, chỉ người trong canary hỏi được; ID tài khoản vốn công khai).
+
+### Bước 1 — bật máy chủ cho CANARY
 
 1. Chạy lại máy kiểm 1.9.6 với **đúng commit sẽ deploy**: `bash parity_run.sh dunglai && bash parity_run.sh test legacy && bash parity_run.sh test tablesdb` (mong đợi 10/10 + 10/10).
-2. Env API production: `FAS_CHAT_V1=1`; **để trống** `FAS_CHAT_APPWRITE_API` (= legacy, đúng 1.9.6); giữ mặc định `FAS_CHAT_LOCAL_FASTPATH` (bật). Khởi động lại API.
-3. Kiểm chỉ-đọc bằng tài khoản của chủ dự án: `GET /api/chat/conversations` → 200 `{"items": [], ...}`; `GET /api/chat/stickers` → 200. Web vẫn build không cờ → 0 request `/api/chat` từ người dùng.
+2. Env API production (nơi đặt các biến `FAS_*` khác), rồi khởi động lại API:
+   ```
+   FAS_CHAT_V1=1
+   FAS_CHAT_V1_AUDIENCE=canary
+   FAS_CHAT_V1_CANARY_USERS=<uid_chu_du_an>,<uid_2>,<uid_3>      # 2–5 ID chủ dự án duyệt
+   ```
+   Để trống `FAS_CHAT_APPWRITE_API` (= legacy, đúng 1.9.6); giữ mặc định `FAS_CHAT_LOCAL_FASTPATH`.
+3. Kiểm: `GET /api/health` có `messaging.audience = "canary"`, `canary_users = N`; bằng tài khoản canary `GET /api/chat/availability` → `{"enabled": true}`; bằng tài khoản thường → `{"enabled": false, "reason": "not_in_canary"}`.
 
-### Bước 2 — canary (đề xuất; cần một PR nhỏ riêng)
+### Bước 2 — web có cờ (cần một thay đổi workflow nhỏ, duyệt riêng)
 
-Cờ web là cờ **lúc build** (tất cả hoặc không ai), và `production-deploy.yml` **không** truyền `NEXT_PUBLIC_CHAT_V1_ENABLED` — mọi lần deploy tự động giữ chat TẮT (an toàn; đừng deploy tay có cờ vì lần deploy tự động kế tiếp sẽ tắt lại). Canary theo người đúng nghĩa cần:
+`production-deploy.yml` **không** truyền `NEXT_PUBLIC_CHAT_V1_ENABLED` (mọi deploy tự động giữ chat TẮT). Đề xuất một dòng — **chưa làm, cần chủ dự án duyệt**: thêm `NEXT_PUBLIC_CHAT_V1_ENABLED: ${{ vars.PRODUCTION_CHAT_V1_ENABLED }}` vào bước "Cloudflare deploy (frontend)", rồi đặt biến repo `PRODUCTION_CHAT_V1_ENABLED=1` và chạy workflow deploy như thường. Đừng deploy tay có cờ: lần deploy tự động kế tiếp sẽ tắt lại.
 
-1. máy chủ: `FAS_CHAT_V1_CANARY_USERS=<uid,…>` — ngoài danh sách thì `/api/chat/*` trả 403 `chat_not_enabled`; `/api/chat/session` báo `enabled:false`;
-2. web: vẫn build có cờ, nhưng chỉ HIỆN nút Tin nhắn/nút Nhắn tin khi phiên báo `enabled:true` (người ngoài canary thấy y như hôm nay, 0 request tiếp theo);
-3. `production-deploy.yml` thêm `NEXT_PUBLIC_CHAT_V1_ENABLED: ${{ vars.PRODUCTION_CHAT_V1_ENABLED }}` (biến repo, mặc định trống = tắt).
+### Bước 3 — mở rộng
 
-Thứ tự canary: chủ dự án + 2–3 tài khoản tin cậy (48 giờ) → 5% người hoạt động → 25% → 100%, mỗi nấc theo dõi: tỉ lệ 5xx/429 của `/api/chat/*`, `Server-Timing` `tong` (trung vị mục tiêu < 1,5 s; 1.9.6 cùng máy đo 146 ms), số luồng SSE đồng thời, lỗi Sentry `messaging`, báo cáo người dùng.
+Canary 2–5 người (≥ 48 giờ) → thêm ID theo đợt → `FAS_CHAT_V1_AUDIENCE=all`. Mỗi nấc theo dõi: tỉ lệ 5xx/403/429 của `/api/chat/*`, `Server-Timing` `tong` (1.9.6 cùng máy đo 146–154 ms), số luồng SSE đồng thời, lỗi Sentry `messaging`, báo cáo người dùng.
 
 ### Rollback
 
 | Mức | Lệnh / thao tác | Hậu quả |
 |---|---|---|
+| Rút một người khỏi canary | bỏ ID khỏi `FAS_CHAT_V1_CANARY_USERS`, khởi động lại API | người đó 403 ngay; giao diện của họ ẩn ở lần tải trang sau; dữ liệu giữ nguyên |
+| Thu hẹp từ "mọi người" về canary | `FAS_CHAT_V1_AUDIENCE=canary` (+ danh sách), khởi động lại API | ngoài danh sách 403; cuộc trò chuyện cũ với người ngoài danh sách hiện "chưa dùng được" |
 | Tắt đường tắt (nếu nghi luồng SSE) | `FAS_CHAT_LOCAL_FASTPATH=0`, khởi động lại API | chỉ còn Realtime; người nhận chậm thêm ~100 ms |
 | Tắt chat ngay | `FAS_CHAT_V1=0`, khởi động lại API | mọi `/api/chat/*` 503 `chat_not_configured`; giao diện báo lỗi trung thực; không mất dữ liệu |
 | Gỡ giao diện | deploy web **không** cờ (deploy tự động mặc định đã vậy); hoặc `npx wrangler rollback` về version trước trên worker `fanfic-web` (kiểm đích bằng `npx wrangler deployments list --name fanfic-web` trước) | không nút, không request chat |

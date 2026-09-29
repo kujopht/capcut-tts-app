@@ -53,9 +53,22 @@ function DaChan({ peerId, peerName }: { peerId: string; peerName?: string }) {
   );
 }
 
+/** Giai doan thu (canary): nguoi KIA chua trong nhom duoc dung chat — may chu se tu choi (403), nen noi that. */
+function ChuaMo({ peerName }: { peerName?: string }) {
+  return (
+    <div className="chat-soan chat-da-chan" role="status">
+      <span className="chat-da-chan-chu">
+        {peerName ?? "Người này"} chưa dùng được Tin nhắn trong giai đoạn thử — sẽ mở cho mọi người sớm.
+      </span>
+    </div>
+  );
+}
+
 export function ChatComposer(props: { peerId: string; peerName?: string; autoFocus?: boolean }) {
-  const { blocked } = useChat();
+  const { blocked, identityOf } = useChat();
   if (blocked[props.peerId]) return <DaChan peerId={props.peerId} peerName={props.peerName} />;
+  const it = identityOf(props.peerId);
+  if (it?.found && it.chat_enabled === false) return <ChuaMo peerName={props.peerName} />;
   return <OSoan {...props} />;
 }
 

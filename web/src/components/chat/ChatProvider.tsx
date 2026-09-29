@@ -127,6 +127,12 @@ export interface ThreadState {
 }
 
 interface ChatValue {
+  /**
+   * Nguoi NAY duoc dung chat khong — MAY CHU quyet (canary: `FAS_CHAT_V1_AUDIENCE` / `FAS_CHAT_V1_CANARY_USERS`).
+   * `null` = chua biet (dang hoi). Moi giao dien chat (nut Tin nhan, nut Nhan tin, dock, /messages) CHI hien khi
+   * `true`; build khong co co thi khong bao gio hoi.
+   */
+  available: boolean | null;
   status: ChatStatus;
   errorCode: ChatErrorCode | null;
   kickReason: KickReason | null;
@@ -299,6 +305,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [coBaoCao, setCoBaoCao] = useState(false);
   const [daTaiHopThu, setDaTaiHopThu] = useState(false);
   const [daTaiChan, setDaTaiChan] = useState(false);
+  /** Xem `ChatValue.available`. */
+  const [duocDung, setDuocDung] = useState<boolean | null>(null);
+  /** Tab nay da bat chat truoc khi tai lai trang -> mo lai NGAY khi may chu xac nhan `duocDung`. */
+  const canMoLaiRef = useRef(false);
   /** `true` = da den luc render `ChatEngine` (tai chunk SDK). Chi bat trong `moChat`. */
   const [canDongCo, setCanDongCo] = useState(false);
   const choDongCoRef = useRef<{ p: Promise<TaiTransport>; ok: (t: TaiTransport) => void; hong: () => void } | null>(null);
@@ -672,14 +682,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const moChat = useCallback(async (lyDo: string): Promise<boolean> => {
     // Web chua bat Chat V1 (co build o `lib/features.ts`): KHONG xin phien, KHONG mo luong — 0 request.
-    if (!CHAT_V1_ENABLED || !coPhienFanfic) return false;
+    // May chu chua mo cho nguoi nay (canary) / chua biet: cung khong mo.
+    if (!CHAT_V1_ENABLED || !coPhienFanfic || duocDung !== true) return false;
     // Bi day sang noi khac: KHONG tu chiem lai (se day tab/thiet bi kia ra) —
     // de giao dien hien lua chon "Dung o tab nay", nguoi dung tu quyet.
     if (status === "kicked") return false;
     if (status === "ready" || status === "reconnecting" || status === "offline") return true;
     if (dangMoRef.current) return dangMoRef.current;
     return chayMo(lyDo);
-  }, [chayMo, coPhienFanfic, status]);
+  }, [chayMo, coPhienFanfic, status, duocDung]);
 
   const dungOTabNay = useCallback(() => {
     void chayMo("take-over");
@@ -731,9 +742,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setCoBaoCao(false);
         setDaTaiHopThu(false);
         setDaTaiChan(false);
+        setDuocDung(null);
       });
     }
-    // Da bat tin nhan trong tab nay truoc khi tai lai trang -> mo lai, KEM cac cua so + nhap dang do.
+    // Da bat tin nhan trong tab nay truoc khi tai lai trang -> mo lai, KEM cac cua so + nhap dang do. Mo lai
+    // CHO toi khi may chu xac nhan nguoi nay duoc dung chat (effect `duocDung` ben duoi).
     if (id && !cu) {
       const moLai = docCo();
       queueMicrotask(() => {
@@ -742,10 +755,41 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           setDrafts((d) => ({ ...banLuu.nhap, ...d }));
         }
         daPhucHoiRef.current = true;
-        if (moLai) void moChat("resume");
+        if (moLai) canMoLaiRef.current = true;
       });
     }
-  }, [profile?.user_id, doiTrangThai, moChat, banLuu]);
+  }, [profile?.user_id, doiTrangThai, banLuu]);
+
+  /* ------------------------------------------- nguoi nay duoc dung chat khong (canary) */
+  // MOT lan moi lan tai trang (va moi lan doi tai khoan), chi khi build co co. Loi -> thu lai MOT lan sau 3 s,
+  // van loi thi coi la TAT cho lan tai trang nay (fail-closed: khong hien giao dien ma may chu se tu choi).
+  useEffect(() => {
+    const id = profile?.user_id ?? null;
+    if (!CHAT_V1_ENABLED || !id) return;
+    let huy = false;
+    const hoi = (lan: number) => {
+      chatApi
+        .availability()
+        .then((r) => {
+          if (!huy) setDuocDung(!!r.enabled);
+        })
+        .catch(() => {
+          if (huy) return;
+          if (lan === 0) window.setTimeout(() => !huy && hoi(1), 3000);
+          else setDuocDung(false);
+        });
+    };
+    hoi(0);
+    return () => {
+      huy = true;
+    };
+  }, [profile?.user_id]);
+
+  useEffect(() => {
+    if (duocDung !== true || !canMoLaiRef.current) return;
+    canMoLaiRef.current = false;
+    void moChat("resume");
+  }, [duocDung, moChat]);
 
   /* ------------------------------------------------------- mang cua trinh duyet */
   useEffect(() => {
@@ -936,13 +980,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const dockHien = pathname?.startsWith("/messages") ? KHONG_CO_CUA_SO : dock;
 
   const value = useMemo<ChatValue>(() => ({
+    available: CHAT_V1_ENABLED ? duocDung : false,
     status, errorCode, kickReason, me, conversations, unreadTotal, threads, identities,
     dock: dockHien, maxVisible, focusRequest, drafts, moChat, dungOTabNay, thuLai, openThread, ensureThread, setPageThread,
     nhanTinVoi, openChat, minimizeChat, closeChat, send, canSticker: khaNang.sticker, sendSticker,
     stickerPacks: goiNhanDan, loadStickers, retry, loadOlder, markRead, setDraft, identityOf,
     blocked: chan, canMute: khaNang.mute, canBlock: khaNang.block, canReport: coBaoCao, inboxLoaded: daTaiHopThu,
     blocksLoaded: daTaiChan, isMuted, setMuted, setBlocked,
-  }), [coBaoCao,status, errorCode, kickReason, me, conversations, unreadTotal, threads, identities, dockHien, maxVisible,
+  }), [duocDung, coBaoCao, status, errorCode, kickReason, me, conversations, unreadTotal, threads, identities, dockHien, maxVisible,
     focusRequest,
     drafts, moChat, dungOTabNay, thuLai, openThread, ensureThread, setPageThread, nhanTinVoi, openChat,
     minimizeChat, closeChat, send, sendSticker, goiNhanDan, loadStickers, retry, loadOlder, markRead, setDraft,

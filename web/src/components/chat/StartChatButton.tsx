@@ -12,10 +12,12 @@ import { useChat } from "./ChatProvider";
 
 export function StartChatButton({ username, displayName }: { username: string; displayName: string }) {
   const { profile } = useSession();
-  const { nhanTinVoi } = useChat();
+  const { nhanTinVoi, available } = useChat();
   const [dang, setDang] = useState(false);
   if (!CHAT_V1_ENABLED) return null;
   if (!profile) return null;
+  // Chi nguoi may chu cho dung chat (canary) moi thay nut.
+  if (available !== true) return null;
   return (
     <button
       type="button"

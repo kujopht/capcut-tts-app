@@ -345,6 +345,88 @@ class LoiMangThoangQuaTest(unittest.TestCase):
         self.assertIn("mạng", str(ctx.exception))
 
 
+class PlanChiDocTest(unittest.TestCase):
+    """`--plan`: CHI DOC — rao cung chan moi phuong thuc khac GET; phat hien tai nguyen da co; bao muc khac thiet ke."""
+
+    def _setup(self):
+        s = _tao_setup()
+        s.dry_run, s.plan_only = False, True
+        return s
+
+    def test_rao_cung_chan_ghi_truoc_khi_gui(self):
+        s = self._setup()
+        with patch("httpx.Client", side_effect=AssertionError("không được mở kết nối")):
+            for m in ("POST", "PUT", "PATCH", "DELETE"):
+                with self.assertRaises(SystemExit) as ctx:
+                    s._call(m, "/v1/databases/db/collections", {"collectionId": "x"})
+                self.assertIn("CHỈ ĐỌC", str(ctx.exception))
+
+    def test_phat_hien_da_co_va_se_tao_va_lech(self):
+        from scripts.setup_appwrite import SCHEMA
+
+        s = self._setup()
+        dac_ta = SCHEMA["chat_fanouts"]
+        cot_dung = [{"key": k, "type": "string" if kind == "string" else kind, "size": extra, "required": req,
+                     "status": "available"} for k, kind, req, extra in dac_ta["attributes"]]
+        cot_dung[0]["size"] = 999  # lech co y
+
+        def doc(path):
+            if path.endswith("/collections/chat_messages"):
+                return 404, {"message": "Collection not found"}
+            if path.endswith("/collections/chat_fanouts"):
+                return 200, {"$permissions": [], "documentSecurity": True}
+            if path.endswith("/collections/chat_fanouts/attributes"):
+                return 200, {"attributes": cot_dung + [{"key": "cu_thua", "type": "string"}]}
+            if path.endswith("/collections/chat_fanouts/indexes"):
+                return 200, {"indexes": []}
+            return 200, {}
+        with patch.object(s, "_doc", side_effect=doc):
+            tong = s.plan(["chat_messages", "chat_fanouts"])
+        self.assertEqual(tong["tao_bang"], 1)
+        self.assertEqual(tong["da_co_bang"], 1)
+        self.assertEqual(tong["tao_cot"], len(SCHEMA["chat_messages"]["attributes"]))
+        self.assertEqual(tong["tao_index"], len(SCHEMA["chat_messages"]["indexes"]))
+        self.assertEqual(tong["khac"], 1, "size lệch phải được báo")
+
+    def test_dau_cuoi_main_plan_chi_phat_GET_ra_mang(self):
+        """Qua `main(["--plan", ...])` that (cau hinh gia, transport gia): MOI request roi may deu la GET."""
+        import contextlib
+        import io
+
+        from scripts import setup_appwrite as sa
+
+        cac_goi = []
+
+        def xu_ly(req: httpx.Request) -> httpx.Response:
+            cac_goi.append((req.method, req.url.path))
+            if req.url.path.endswith("/databases/db_gia"):
+                return httpx.Response(200, json={"$id": "db_gia"})
+            return httpx.Response(404, json={"message": "not found", "type": "collection_not_found"})
+
+        that = httpx.Client
+
+        def client_gia(*a, **kw):
+            kw.pop("transport", None)
+            return that(*a, transport=httpx.MockTransport(xu_ly), **kw)
+
+        env = {"FAS_ENV_FILE": "", "DATA_BACKEND": "appwrite", "APPWRITE_ENDPOINT": "https://aw.example.test/v1",
+               "APPWRITE_PROJECT_ID": "du-an-gia", "APPWRITE_DATABASE_ID": "db_gia", "APPWRITE_API_KEY": "khoa-gia-khong-in"}
+        ra = io.StringIO()
+        with patch.dict(os.environ, env), patch.object(sa.httpx, "Client", side_effect=client_gia), \
+                contextlib.redirect_stdout(ra):
+            self.assertEqual(sa.main(["--plan", "--only", "chat_messages,chat_fanouts"]), 0)
+        self.assertTrue(cac_goi, "phải có request đọc")
+        self.assertEqual({m for m, _ in cac_goi}, {"GET"}, cac_goi)
+        self.assertIn("SẼ TẠO 2 bảng", ra.getvalue())
+        self.assertNotIn("khoa-gia-khong-in", ra.getvalue(), "không bao giờ in khoá")
+
+    def test_khoa_khong_du_quyen_bao_ro(self):
+        s = self._setup()
+        with patch.object(s, "_doc", return_value=(401, {})), self.assertRaises(SystemExit) as ctx:
+            s.plan(["chat_messages"])
+        self.assertIn("collections.read", str(ctx.exception))
+
+
 class NovelsKhongCanFulltextTest(unittest.TestCase):
     """2026-08-26: PR #56 them title_fulltext_idx + description_fulltext_idx
     vao `novels` dua tren gia dinh sai la `contains()` can chi muc fulltext.

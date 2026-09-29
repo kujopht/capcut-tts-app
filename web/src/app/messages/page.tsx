@@ -37,7 +37,7 @@ export default function MessagesPage() {
 
 function KhongGianTinNhan() {
   const { profile, loading } = useSession();
-  const { moChat, status, openThread, identityOf, setPageThread } = useChat();
+  const { moChat, status, openThread, identityOf, setPageThread, available } = useChat();
   const params = useSearchParams();
   const router = useRouter();
   const peer = params.get("c");
@@ -47,10 +47,11 @@ function KhongGianTinNhan() {
   const coNoiDung = status === "ready" || status === "reconnecting" || status === "offline";
 
   useEffect(() => {
-    if (!profile || daMoRef.current) return;
+    // Cho may chu xac nhan tai khoan nay duoc dung chat (canary) roi moi mo.
+    if (!profile || available !== true || daMoRef.current) return;
     daMoRef.current = true;
     void moChat("messages-page");
-  }, [profile, moChat]);
+  }, [profile, moChat, available]);
 
   useEffect(() => {
     if (!peer || !coNoiDung || daMoPeerRef.current === peer) return;
@@ -83,6 +84,17 @@ function KhongGianTinNhan() {
           hint="Đăng nhập để nhắn tin với bạn đọc và tác giả khác."
           action={<Link href="/login?next=/messages" className="btn btn-primary" prefetch={false}>Đăng nhập</Link>}
         />
+      </div>
+    );
+  }
+  if (available === null) return <div className="page"><Loading /></div>;
+  if (!available) {
+    // Giai doan thu (canary): may chu chi mo cho mot nhom nho — noi that, khong gia vo "dang ket noi".
+    return (
+      <div className="page">
+        <PageHeader title="Tin nhắn" />
+        <EmptyState icon="💬" title="Tin nhắn chưa mở cho tài khoản này"
+          hint="Tin nhắn đang thử với một nhóm nhỏ và sẽ mở cho mọi người sớm." />
       </div>
     );
   }

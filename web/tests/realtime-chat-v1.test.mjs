@@ -332,6 +332,12 @@ test("danh tinh la cua Fanfic: ten/avatar lay tu /api/chat/identities, khong tu 
   assert.match(hoSo, /`\/u\/\$\{identity\.username\}`/, "bấm tên phải mở hồ sơ FANFIC");
 });
 
+test("tin lac quan HIEN NGAY ca khi lich su chua ve (mang cham, do that: tin dau bi khung cho giau ~1 s)", () => {
+  const t = codeOnly(read("components/chat/ChatThread.tsx"));
+  assert.match(t, /if \(!th \|\| \(!th\.loaded && !items\.length\)\) return <KhungCho \/>;/);
+  assert.match(t, /\{!th\.loaded \? <p className="hint chat-tin-cu" role="status">Đang tải tin trước đó…<\/p> : null\}/);
+});
+
 test("hoi thoai mo ra o TIN MOI NHAT ca khi tin truc tiep den truoc lich su (do that tren Chrome QA)", () => {
   const t = codeOnly(read("components/chat/ChatThread.tsx"));
   // Chi dua vao id tin cuoi thi khong du: lich su chen PHIA TRUOC, id cuoi khong doi.

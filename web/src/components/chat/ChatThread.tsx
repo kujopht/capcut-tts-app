@@ -123,12 +123,15 @@ export function ChatThread({ peerId }: { peerId: string }) {
     if (oCuoi.current && coTinMoi) setCoTinMoi(false);
   };
 
-  if (!th || !th.loaded) return <KhungCho />;
+  // Khung cho CHI khi chua co gi de hien. Da co tin (lac quan vua gui / tin den truc tiep) ma lich su chua ve thi
+  // HIEN NGAY — do that tren mang cham (RTT ~1 s): tin dau tien bi khung cho giau ~1 s du da chen tuc thi.
+  if (!th || (!th.loaded && !items.length)) return <KhungCho />;
 
   return (
     <div className="chat-tin-khung">
       <div className={`chat-tin-hop${items.length ? "" : " chat-tin-hop-rong"}`} ref={hop} onScroll={onScroll}
         role="log" aria-live="polite" aria-label="Tin nhắn">
+        {!th.loaded ? <p className="hint chat-tin-cu" role="status">Đang tải tin trước đó…</p> : null}
         {th.cursor ? (
           <div className="chat-tin-cu">
             <button type="button" className="btn btn-ghost btn-sm" onClick={taiCu} disabled={th.loadingOlder}>

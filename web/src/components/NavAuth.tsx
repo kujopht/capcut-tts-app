@@ -15,7 +15,7 @@ import { StreakBadge } from "@/components/StreakBadge";
 import { UserAvatar } from "@/components/UserAvatar";
 import { hoSoHref } from "@/lib/communityFeed";
 import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
-import { MUSIC_ENABLED } from "@/lib/features";
+import { AI_ASSISTANT_ENABLED, MUSIC_ENABLED } from "@/lib/features";
 import { FanficIcon, type IconName } from "@/components/icons/FanficIcon";
 
 /**
@@ -283,6 +283,14 @@ function AccountMenu() {
           <Link href="/leaderboard" className="menu-item" role="menuitem" onClick={close} prefetch={false}>
             <span aria-hidden="true">👑</span> Bảng xếp hạng
           </Link>
+          {/* Trợ lý AI (V1, flag-gated — xem lib/features.ts). Route toàn màn
+              hình `/assistant`: đây là lối vào CHÍNH trên di động (không có
+              nút nổi ở đó, xem AiLauncher.tsx). */}
+          {AI_ASSISTANT_ENABLED ? (
+            <Link href="/assistant" className="menu-item" role="menuitem" onClick={close} prefetch={false}>
+              <FanficIcon name="ai" size={16} /> Trợ lý AI
+            </Link>
+          ) : null}
           {/*
             Chỉ hiện khi MÁY CHỦ xác nhận (`/api/auth/me` → `is_admin`).
             Không suy từ email hay danh sách nhúng trong frontend — đây chỉ là

@@ -16,6 +16,7 @@ import { API_BASE, api, ApiError, type AudioTrack, type Chapter, type NovelBrief
 import { errorMessage } from "@/lib/session";
 import { ChapterComments } from "@/components/ChapterComments";
 import { AskAiPanel } from "@/components/AskAiPanel";
+import { AskAiAssistantStoryEntry } from "@/components/ai/AskAiAssistantStoryEntry";
 import {
   ChapterInteractiveReader,
   ChapterOwnerAudioAction,
@@ -292,6 +293,13 @@ export default async function ChapterPage({
           chapterId={chapter.chapter_id}
           chapterIndex={chapter.order_index}
           chapterContent={chapter.content}
+        />
+        {/* Trợ lý AI V1 (flag-gated) mode `story` — nút riêng, CẠNH "Hỏi AI"
+            ở trên chứ không thay thế nó (xem AskAiAssistantStoryEntry.tsx). */}
+        <AskAiAssistantStoryEntry
+          novelId={chapter.novel_id}
+          chapterId={chapter.chapter_id}
+          chapterIndex={chapter.order_index}
         />
 
         {/* Binh luan chuong — luon hien du co audio hay khong: day la binh

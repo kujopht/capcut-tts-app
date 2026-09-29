@@ -6,11 +6,59 @@
  * bất kể nội dung model trả về là gì. Trích dẫn (`citations`) là liên kết
  * thật tới `/novels/{id}` và `/chapters/{id}`.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAi } from "./AiProvider";
 import { renderMarkdownLite } from "./markdownLite";
 import { FanficIcon } from "@/components/icons/FanficIcon";
+import { AI_PROJECT_FIELD_LABELS, type AiProjectField } from "@/lib/ai/types";
+
+const CAC_TRUONG_DU_AN = Object.keys(AI_PROJECT_FIELD_LABELS) as AiProjectField[];
+
+/**
+ * "Lưu vào dự án" — CHỈ hiện ở mode `writer` khi đã chọn dự án
+ * (`activeProjectId`), và LUÔN cần người dùng bấm chọn mục đích rõ ràng
+ * (nối vào Ý tưởng/Dàn ý/Nhân vật/Thế giới/Ghi chú) — không có đường nào tự
+ * lưu sau khi stream xong (§6: lưu vào dự án chỉ qua nút của người dùng).
+ */
+function AiSaveToProjectMenu({ content }: { content: string }) {
+  const { activeProjectId, saveToProjectField } = useAi();
+  const [mo, setMo] = useState(false);
+  if (!activeProjectId) return null;
+  return (
+    <div className="ai-luu-hop">
+      <button
+        type="button"
+        className="ai-nut ai-nut-nho"
+        aria-label="Lưu vào dự án"
+        aria-expanded={mo}
+        title="Lưu vào dự án"
+        onClick={() => setMo((v) => !v)}
+      >
+        <FanficIcon name="download" size={13} />
+      </button>
+      {mo ? (
+        <ul className="ai-luu-ds" role="menu" aria-label="Lưu vào mục nào">
+          {CAC_TRUONG_DU_AN.map((f) => (
+            <li key={f}>
+              <button
+                type="button"
+                className="ai-luu-muc"
+                role="menuitem"
+                onClick={() => {
+                  void saveToProjectField(f, content, "append");
+                  setMo(false);
+                }}
+              >
+                {AI_PROJECT_FIELD_LABELS[f]}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
 export function AiConversation() {
   const { messages, streaming, streamingText, conversationId, mode } = useAi();
@@ -50,6 +98,9 @@ export function AiConversation() {
                 </li>
               ))}
             </ul>
+          ) : null}
+          {mode === "writer" && m.role === "assistant" && m.status === "complete" ? (
+            <AiSaveToProjectMenu content={m.content} />
           ) : null}
         </div>
       ))}

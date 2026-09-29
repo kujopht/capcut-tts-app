@@ -254,6 +254,79 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
   .ai-dang-go span { animation: none; opacity: 0.6; }
 }
 
+/* --------------------------------------------------------- Studio viết (mode `writer`, §6) */
+.ai-writerbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line-soft);
+}
+.ai-writerbar-hang { display: flex; align-items: center; gap: 4px; }
+.ai-writerbar-chon { flex: 1; min-width: 0; }
+.ai-writerbar-form { display: flex; gap: var(--s2); }
+.ai-writerbar-input { flex: 1; min-height: 32px; padding: 4px var(--s2); resize: none; }
+.ai-writerbar-xacnhan { display: flex; flex-direction: column; gap: var(--s2); }
+.ai-writerbar-xacnhan .row { justify-content: flex-end; gap: var(--s2); }
+.ai-writerbar-chip { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-full, 999px);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ai-chip:hover { background: var(--accent-glow); }
+
+.ai-writerbar-editor { display: flex; flex-direction: column; gap: var(--s2); }
+.ai-writerbar-editor-truong { display: flex; flex-direction: column; gap: 4px; }
+.ai-writerbar-editor-truong label { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.ai-writerbar-editor-truong textarea {
+  min-height: 64px;
+  padding: var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r2);
+  background: var(--bg-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+.ai-writerbar-editor-luu { align-self: flex-end; }
+
+.ai-luu-hop { position: relative; display: inline-block; margin-top: 4px; }
+.ai-luu-ds {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 1;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  min-width: 140px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-3);
+}
+.ai-luu-muc {
+  display: block;
+  width: 100%;
+  padding: 6px var(--s2);
+  border: 0;
+  border-radius: var(--r2);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.ai-luu-muc:hover { background: var(--bg-3); }
+
 /* --------------------------------------------------------- /assistant (mobile chính, desktop dùng được) */
 .ai-trang {
   display: flex;

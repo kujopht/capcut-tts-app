@@ -126,7 +126,7 @@ function thongDiepLoi(code: AiErrorCode, resetAt?: string | null): string {
   }
 }
 
-export function AiControls() {
+export function AiControls({ onClose }: { onClose?: () => void } = {}) {
   const {
     availability,
     closeAssistant,
@@ -198,7 +198,15 @@ export function AiControls() {
             </button>
             {caiDatMo ? <AiSettingsPopover onClose={() => setCaiDatMo(false)} /> : null}
           </span>
-          <button type="button" className="ai-nut ai-nut-nho" aria-label="Đóng trợ lý AI" onClick={closeAssistant}>
+          <button
+            type="button"
+            className="ai-nut ai-nut-nho"
+            aria-label="Đóng trợ lý AI"
+            onClick={() => {
+              closeAssistant();
+              onClose?.();
+            }}
+          >
             <FanficIcon name="close" size={16} />
           </button>
         </div>

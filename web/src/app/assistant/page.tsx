@@ -14,10 +14,12 @@
  * cho nhất quán với các mục khác trong cùng menu.
  */
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { AiComposer } from "@/components/ai/AiComposer";
 import { AiControls } from "@/components/ai/AiControls";
 import { AiConversation } from "@/components/ai/AiConversation";
+import { AiWriterBar } from "@/components/ai/AiWriterBar";
 import { useAi } from "@/components/ai/AiProvider";
 import { AI_ASSISTANT_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
@@ -25,12 +27,22 @@ import { useSession } from "@/lib/session";
 export default function AssistantPage() {
   const { profile, loading } = useSession();
   const { availability, openAssistant } = useAi();
+  const router = useRouter();
 
   useEffect(() => {
     if (!AI_ASSISTANT_ENABLED || !profile) return;
     void openAssistant();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.user_id]);
+
+  /** Nút X trên trang toàn màn hình: quay lại trang trước (nếu có lịch sử
+   *  trong-app), rơi về trang chủ nếu người dùng vào thẳng /assistant
+   *  (đánh dấu trang, gõ URL...) — KHÔNG chỉ tắt `open` (đó là hành vi của
+   *  panel nổi, không có ý nghĩa trên một route riêng). */
+  const veTruoc = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) router.back();
+    else router.push("/");
+  };
 
   if (!AI_ASSISTANT_ENABLED) {
     return (
@@ -66,7 +78,8 @@ export default function AssistantPage() {
 
   return (
     <main className="ai-trang">
-      <AiControls />
+      <AiControls onClose={veTruoc} />
+      <AiWriterBar />
       <AiConversation />
       <AiComposer />
     </main>

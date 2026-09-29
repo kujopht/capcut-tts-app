@@ -66,8 +66,8 @@ import {
   formatAuthor,
   formatChapterCount,
 } from "@/lib/catalog";
-import { Avatar } from "@/components/Avatar";
-import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
+import { UserAvatar } from "@/components/UserAvatar";
+import { CapDoTaiKhoan } from "@/components/CapDoTaiKhoan";
 import { NovelCover } from "@/components/NovelCover";
 import { FandomStrip } from "@/components/FandomStrip";
 import {
@@ -385,11 +385,7 @@ function HomeHeroShowcase({
                     className="showcase-item showcase-post-item"
                     prefetch={false}
                   >
-                    <Avatar
-                      name={authorName}
-                      avatarUrl={bai.author?.avatar_url}
-                      className="showcase-avatar"
-                    />
+                    <UserAvatar user={bai.author ?? { display_name: authorName }} className="showcase-avatar" />
                     <div className="showcase-item-info">
                       <div className="showcase-post-author clamp-1">
                         <strong className="clamp-1 showcase-update-title" title={authorName}>
@@ -432,19 +428,13 @@ function DaiThanhVien({
   if (!gamification) return null;
   return (
     <div className="home-gamification-line rise rise-1">
-      <span className="home-gamification-badge">
-        <IconCrown size={14} className="home-gamification-icon" />
-        <strong>Lv. {gamification.progress.level}</strong>
-      </span>
-      <span className="home-gamification-xp">
-        {gamification.progress.xp}
-        {gamification.progress.next_level_xp
-          ? `/${gamification.progress.next_level_xp}`
-          : ""}{" "}
-        XP
-      </span>
-      <span className="home-gamification-sep" aria-hidden="true">·</span>
-      <span className="home-gamification-title">{gamification.progress.equipped_title}</span>
+      <IconCrown size={14} className="home-gamification-icon" />
+      <CapDoTaiKhoan
+        level={gamification.progress.level}
+        title={gamification.progress.equipped_title}
+        xp={gamification.progress.xp}
+        nextXp={gamification.progress.next_level_xp}
+      />
       {gamification.thanhTuuMoiNhat ? (
         <>
           <span className="home-gamification-sep" aria-hidden="true">·</span>
@@ -564,15 +554,7 @@ function HangBangVang({ it }: { it: LeaderboardEntry }) {
   return (
     <li className="lb-row">
       <span className="lb-rank" aria-hidden="true">#{it.rank}</span>
-      <CosmeticFrame
-        cosmetic={it.equipped_cosmetics.find((c) => c.slot === "avatar_frame")}
-      >
-        <Avatar
-          name={it.display_name || it.username || "?"}
-          avatarUrl={it.avatar_url}
-          className="avatar avatar-sm"
-        />
-      </CosmeticFrame>
+      <UserAvatar user={it} className="avatar avatar-sm" />
       <span className="lb-info">
         {it.username ? (
           <Link href={`/u/${it.username}`} className="binh-luan-ten">

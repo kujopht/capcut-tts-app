@@ -27,6 +27,7 @@ from server.domain import (
     PostLike,
     ReportStatus,
     StoryFollow,
+    UserBlock,
     UserFollow,
     now_iso_us,
 )
@@ -58,6 +59,8 @@ class MockSocialStore:
         self._notifications: Dict[str, Notification] = {}
         #: report_id (tat dinh) -> ban ghi
         self._reports: Dict[str, ContentReport] = {}
+        #: block_id (tat dinh) -> ban ghi (Social Play V1, capability `blocks`).
+        self._blocks: Dict[str, UserBlock] = {}
 
     # =========================================================== THEO DOI NGUOI
 
@@ -202,6 +205,21 @@ class MockSocialStore:
             self._posts[post.post_id] = post
             return post
 
+    def create_post_once(self, post: Post) -> Tuple[Post, bool]:
+        """
+        Tao neu `post.post_id` (khoa TAT DINH tu `client_key` khi co — xem
+        `social.post_key`) chua ton tai. `(post, True)` = vua tao that;
+        `(ban_da_co, False)` = da ton tai tu truoc — tra ve BAN DA LUU, khong
+        phai `post` nguoi goi truyen vao, de tang dich vu tra dung noi dung
+        cua lan tao DAU TIEN thay vi noi dung cua lan bam LAP LAI.
+        """
+        with self._lock:
+            da_co = self._posts.get(post.post_id)
+            if da_co is not None:
+                return da_co, False
+            self._posts[post.post_id] = post
+            return post, True
+
     def get_post(self, post_id: str) -> Optional[Post]:
         with self._lock:
             return self._posts.get(post_id)
@@ -327,6 +345,16 @@ class MockSocialStore:
         with self._lock:
             self._comments[comment.comment_id] = comment
             return comment
+
+    def create_comment_once(self, comment: Comment) -> Tuple[Comment, bool]:
+        """Tuong tu `create_post_once` nhung cho binh luan — khoa TAT DINH
+        tu (tac gia, dich, client_key), xem `social.comment_key`."""
+        with self._lock:
+            da_co = self._comments.get(comment.comment_id)
+            if da_co is not None:
+                return da_co, False
+            self._comments[comment.comment_id] = comment
+            return comment, True
 
     def get_comment(self, comment_id: str) -> Optional[Comment]:
         with self._lock:
@@ -580,3 +608,96 @@ class MockSocialStore:
                 if r.target_id in can and r.status is ReportStatus.OPEN:
                     dem[r.target_id] += 1
         return dem
+
+    # ============================================================ CHAN / TAT TIENG
+
+    def add_user_block(self, block: UserBlock) -> bool:
+        """Tao neu chua co. `False` = da chan/tat tieng nguoi nay tu truoc."""
+        with self._lock:
+            if block.block_id in self._blocks:
+                return False
+            self._blocks[block.block_id] = block
+            return True
+
+    def remove_user_block(self, block_id: str) -> bool:
+        with self._lock:
+            return self._blocks.pop(block_id, None) is not None
+
+    def list_user_blocks(self, blocker_id: str, kind: str = "",
+                         limit: int = 1000) -> List[UserBlock]:
+        with self._lock:
+            rows = [b for b in self._blocks.values() if b.blocker_id == blocker_id]
+        if kind:
+            rows = [b for b in rows if b.kind == kind]
+        rows.sort(key=lambda b: (b.created_at, b.block_id), reverse=True)
+        return rows[:limit]
+
+    def is_blocked_either_direction(self, a: str, b: str) -> bool:
+        """Co mot canh CHAN (khong tinh tat tieng) giua hai nguoi nay, o BAT
+        KY chieu nao — dung de tu choi tuong tac."""
+        with self._lock:
+            return any(
+                bl.kind == "block"
+                and ((bl.blocker_id, bl.blocked_id) in ((a, b), (b, a)))
+                for bl in self._blocks.values()
+            )
+
+    def hidden_authors_for_viewer(self, viewer_id: str,
+                                  limit: int = 1000) -> Set[str]:
+        """Nguoi ma noi dung cua ho phai bi AN khoi bang tin/binh luan CUA
+        `viewer_id` — xem `AppwriteSocialStore.hidden_authors_for_viewer`."""
+        with self._lock:
+            rows = list(self._blocks.values())
+        an: Set[str] = set()
+        for b in rows:
+            if b.blocker_id == viewer_id:
+                an.add(b.blocked_id)
+            elif b.blocked_id == viewer_id and b.kind == "block":
+                an.add(b.blocker_id)
+        return an
+
+    # ================================================================== BANG TIN
+
+    def list_feed_posts(self, *, author_ids: Optional[Sequence[str]] = None,
+                        fandom_id: str = "",
+                        fandom_novel_ids: Sequence[str] = (),
+                        loc_fandom: bool = False,
+                        cursor: Optional[Tuple[str, str]] = None,
+                        limit: int = 20) -> List[Post]:
+        """
+        Trang bang tin THEO PHAM VI (scope), sap `(created_at DESC, post_id
+        DESC)`.
+
+        `loc_fandom=True`: CO loc fandom — khop `fandom_id` (chi truyen khi nang
+        luc `post_fandom` bat) HOAC `novel_id` trong `fandom_novel_ids`; khong co
+        ve nao de khop thi KHONG bai nao (khong bao gio roi ve "tat ca").
+
+        `author_ids=None` = khong loc tac gia (scope `latest`); danh sach
+        RONG = khong ai ca, tra ve rong ngay (cung quy uoc voi `list_posts`).
+        `fandom_id` khop bai co `fandom_id` TRUNG, HOAC bai `story_update` co
+        `novel_id` nam trong `fandom_novel_ids`. `cursor` la `(created_at,
+        post_id)` cua muc CUOI CUNG da xet — chi tra ve muc THUC SU sau no
+        trong thu tu tren (nghiem ngat, khong lap/khong bo sot khi trung
+        `created_at` — xem `social.encode_feed_cursor`).
+        """
+        if author_ids is not None and not list(author_ids):
+            return []
+        with self._lock:
+            rows = list(self._posts.values())
+        rows = [p for p in rows if p.state is ContentState.VISIBLE]
+        if author_ids is not None:
+            can = set(author_ids)
+            rows = [p for p in rows if p.author_user_id in can]
+        if loc_fandom or fandom_id:
+            novel_can = set(fandom_novel_ids)
+            if not fandom_id and not novel_can:
+                return []
+            rows = [
+                p for p in rows
+                if (fandom_id and p.fandom_id == fandom_id)
+                or (p.novel_id and p.novel_id in novel_can)
+            ]
+        rows.sort(key=lambda p: (p.created_at, p.post_id), reverse=True)
+        if cursor is not None:
+            rows = [p for p in rows if (p.created_at, p.post_id) < cursor]
+        return rows[:limit]

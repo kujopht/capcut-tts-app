@@ -20,8 +20,8 @@ import { api, type LeaderboardEntry, type LeaderboardResponse } from "@/lib/api"
 import { errorMessage, useSession } from "@/lib/session";
 import { PageHeader, SkeletonList, EmptyState, ErrorState } from "@/components/ui";
 import { IconCrown } from "@/components/Icons";
-import { Avatar } from "@/components/Avatar";
-import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
+import { UserAvatar } from "@/components/UserAvatar";
+import { hoSoHref } from "@/lib/communityFeed";
 
 const PAGE_SIZE = 20;
 
@@ -60,19 +60,11 @@ function HangXepHang({ it }: { it: LeaderboardEntry }) {
         <HuyHieuHang hang={it.rank} />
         #{it.rank}
       </span>
-      <CosmeticFrame
-        cosmetic={it.equipped_cosmetics.find((c) => c.slot === "avatar_frame")}
-      >
-        <Avatar
-          name={it.display_name || it.username || "?"}
-          avatarUrl={it.avatar_url}
-          className="avatar avatar-sm"
-        />
-      </CosmeticFrame>
+      <UserAvatar user={it} className="avatar avatar-sm" />
       <span className="lb-info">
-        {it.username ? (
-          <Link href={`/u/${it.username}`} className="binh-luan-ten">
-            {it.display_name || it.username}
+        {hoSoHref(it) ? (
+          <Link href={hoSoHref(it)} className="binh-luan-ten">
+            {it.display_name || it.username || "Người chơi"}
           </Link>
         ) : (
           <strong>{it.display_name || "Ẩn danh"}</strong>

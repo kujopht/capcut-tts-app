@@ -154,6 +154,17 @@ class CreatorService:
         except Exception:
             return None
 
+    def banner_url(self, profile: Profile) -> Optional[str]:
+        """URL xem duoc cua banner ho so (Social Play V1) — cung logic voi
+        `avatar_url`."""
+        if not profile.banner_key or self._storage is None:
+            return None
+        try:
+            return self._storage.signed_url(profile.banner_key,
+                                            expires_seconds=3600) or None
+        except Exception:
+            return None
+
     def public_profile_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         """
         Trang cong khai theo username, KEM truyen da xuat ban.
@@ -168,6 +179,21 @@ class CreatorService:
             return None
         return self._public_bundle(profile)
 
+    def public_profile_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Nhu `public_profile_by_username` nhung tra theo DUNG `user_id` —
+        Social Play V1: `GET /api/users/{handle}` chap nhan CA HAI, de web
+        luon dieu huong duoc toi `/u/{username or user_id}` (moi the tac gia
+        deu mang `user_id`, xem `SocialService._the_nguoi`).
+
+        `None` khi khong co ho so nao mang DUNG id nay — KHONG lui ve tim
+        theo username.
+        """
+        ho_so = self._identity.profiles_by_ids([user_id]).get(user_id)
+        if ho_so is None:
+            return None
+        return self._public_bundle(ho_so)
+
     def _public_bundle(self, profile: Profile) -> Dict[str, Any]:
         stats = self._store.get_stats(profile.user_id)
         truyen = [
@@ -181,10 +207,11 @@ class CreatorService:
             "published_novels": len(truyen),
         })
         goi["novels"] = truyen
-        # `avatar_url` la truong TINH (ky lai moi lan doc, het han sau 1h) —
-        # them SAU `public_profile()` giong cach `novels` duoc ghep, vi ham do
-        # la HAM THUAN va khong duoc phep tu goi kho doi tuong.
+        # `avatar_url`/`banner_url` la truong TINH (ky lai moi lan doc, het
+        # han sau 1h) — them SAU `public_profile()` giong cach `novels` duoc
+        # ghep, vi ham do la HAM THUAN va khong duoc phep tu goi kho doi tuong.
         goi["avatar_url"] = self.avatar_url(profile)
+        goi["banner_url"] = self.banner_url(profile)
         return goi
 
     # =========================================================== don tac gia

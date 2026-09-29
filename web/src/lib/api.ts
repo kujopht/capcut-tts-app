@@ -47,6 +47,26 @@ export interface Profile {
   /** URL xem được của avatar, do máy chủ ký. `null`/`undefined` = chưa có —
       giao diện lùi về chữ cái đầu tên. */
   avatar_url?: string | null;
+  /** Social & Play V1 — ảnh bìa hồ sơ, màu nhấn, fandom yêu thích. Tuỳ chọn:
+      máy chủ chưa bật tính năng thì không trả. */
+  banner_url?: string | null;
+  accent?: string | null;
+  fandom_ids?: string[];
+  /** Vật phẩm đang trang bị của CHÍNH MÌNH — để avatar thanh điều hướng mang
+      đúng khung, đổi khung là thấy ngay ở mọi nơi. */
+  equipped_cosmetics?: CosmeticItem[];
+}
+
+/** Một lần lưu trình sửa hồ sơ — mọi trường tuỳ chọn, máy chủ kiểm TẤT CẢ
+    trước khi ghi bất kỳ thứ gì (được cả hoặc không được gì). */
+export interface ProfileUpdate {
+  bio?: string;
+  fandom_ids?: string[];
+  accent?: string | null;
+  avatar?: { data: string; mime: string } | { remove: true };
+  banner?: { data: string; mime: string } | { remove: true };
+  /** `cosmetic_key` khung avatar đã sở hữu, hoặc `null` = không khung. */
+  frame?: string | null;
 }
 
 /**
@@ -287,6 +307,13 @@ export interface PublicProfile {
     achievements: Achievement[];
     equipped_cosmetics: CosmeticItem[];
   };
+  /** Social & Play V1 — tuỳ chọn như mọi trường mới ở đây. */
+  banner_url?: string | null;
+  accent?: string | null;
+  fandom_ids?: string[];
+  /** Chỉ khi người xem đã đăng nhập và xem hồ sơ NGƯỜI KHÁC. Không bao giờ có
+      chiều ngược lại ("họ chặn mình") — lộ ra thì thành công cụ dò xét. */
+  viewer_relation?: { blocked: boolean; muted: boolean };
 }
 
 export interface Novel {
@@ -826,6 +853,14 @@ export const api = {
   /** Go avatar — giao dien lui ve chu cai dau ten. */
   removeAvatar: () =>
     request<{ profile: Profile }>("/api/creator/avatar", { method: "DELETE" }),
+
+  /** Trình sửa hồ sơ (Social & Play V1): MỘT lần lưu, được cả hoặc không được
+      gì — máy chủ giải mã/nén lại ảnh và tự đặt khoá lưu trữ. */
+  updateMyProfile: (payload: ProfileUpdate) =>
+    request<{ profile: Profile }>("/api/me/profile", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
 
   applyAuthor: (payload: {
     pen_name: string;
@@ -2929,6 +2964,16 @@ export interface Post {
     /** Tuỳ chọn để client cũ vẫn biên dịch được — cùng lý do với `Novel.cover_url`. */
     cover_url?: string | null;
   };
+  /** Social & Play V1 — tuỳ chọn: máy chủ cũ không trả, giao diện coi như `false`/rỗng. */
+  spoiler?: boolean;
+  /** Slug trong `ServerLimits.community_fandoms`. Rỗng = không gắn fandom. */
+  fandom_id?: string;
+  /** Chỉ `true` khi TÁC GIẢ đã sửa chữ sau khi đăng — bộ đếm thích/bình luận
+      không bao giờ làm cờ này bật. */
+  edited?: boolean;
+  edited_at?: string;
+  /** Máy chủ trả lại bài CŨ cho một lần gửi lặp lại cùng `client_key`. */
+  replayed?: boolean;
 }
 
 export interface Comment {
@@ -2953,6 +2998,9 @@ export interface Comment {
   updated_at: string;
   author?: AuthorCard;
   replies?: Comment[];
+  /** Social & Play V1 — xem `Post.edited`. */
+  edited?: boolean;
+  edited_at?: string;
 }
 
 export type NotificationKind =
@@ -3028,6 +3076,44 @@ export interface FeedPage {
   following_truncated: boolean;
 }
 
+/**
+ * Bảng tin Social & Play V1 (`/api/feed?scope=…`): phân trang bằng CURSOR tất
+ * định (thời điểm tạo giảm dần, `post_id` phá hoà) và có TRẦN độ sâu — không
+ * có `total`, vì đếm cả kho cho mỗi trang là một phép quét toàn bảng.
+ */
+export interface FeedPageV2 {
+  items: Post[];
+  next_cursor: string | null;
+  scope: "latest" | "following";
+  fandom: string;
+  limit: number;
+  /** Đã chạm trần độ sâu — hết "Xem thêm", giao diện nói rõ. */
+  depth_capped: boolean;
+  following_truncated?: boolean;
+}
+
+export interface CommunityFandom {
+  id: string;
+  label: string;
+}
+
+/** Những gì MÁY CHỦ đang bật — nút nào máy chủ chưa hỗ trợ thì không vẽ. */
+export interface SocialCapabilities {
+  post_spoiler: boolean;
+  post_fandom: boolean;
+  edited_label: boolean;
+  user_reports: boolean;
+  blocks: boolean;
+  profile_banner: boolean;
+  profile_accent: boolean;
+  profile_fandoms: boolean;
+}
+
+export interface BlockList {
+  blocked: AuthorCard[];
+  muted: AuthorCard[];
+}
+
 export interface CommentPage {
   items: Comment[];
   total: number;
@@ -3086,14 +3172,24 @@ export interface ServerLimits {
   >;
   rate: Record<string, { count: number; minutes: number }>;
   /**
-   * Cờ tính năng phía máy chủ (SOCIAL schema/XP atomic/games…) — CHƯA có
-   * trên bản API đang chạy ở nhánh này (`undefined`), và theo kế hoạch sẽ là
-   * `null` trên production cho tới khi PR #229/#231 triển khai. Trang
-   * `/admin/features` đọc trường này CHUNG cho mọi cờ tương lai thay vì đặt
-   * tên từng khoá cụ thể — hình dạng thật của đối tượng này chưa tồn tại
-   * trong mã đang chạy nên không có gì để chép cứng vào đây.
+   * Social & Play V1 — vắng mặt (hoặc `null`) trên máy chủ cũ = coi như mọi cờ đều tắt. Trang
+   * `/admin/features` liệt kê NGUYÊN VĂN khoá/giá trị nhận được, không đặt tên cứng từng cờ.
    */
-  capabilities?: Record<string, boolean> | null;
+  capabilities?: Partial<SocialCapabilities> | null;
+  community_fandoms?: CommunityFandom[];
+  feed_max_depth?: number;
+  profile_accent_presets?: string[];
+  profile_max_fandoms?: number;
+  /** Giới hạn ảnh hồ sơ do máy chủ cưỡng chế (`server/image_normalize.py`). */
+  profile_image?: {
+    avatar_max_input_bytes: number;
+    banner_max_input_bytes: number;
+    max_input_edge_px: number;
+    max_decoded_megapixels: number;
+    avatar_output_size: [number, number];
+    banner_output_size: [number, number];
+    accepted_mime: string[];
+  };
 }
 
 export const social = {
@@ -3134,6 +3230,19 @@ export const social = {
   feed: (limit = 20, offset = 0) =>
     request<FeedPage>(`/api/feed?limit=${limit}&offset=${offset}`),
 
+  /** Bảng tin theo tab/fandom, phân trang CURSOR (Social & Play V1). */
+  feedV2: (q: {
+    scope: "latest" | "following";
+    fandom?: string;
+    cursor?: string | null;
+    limit?: number;
+  }) => {
+    const p = new URLSearchParams({ scope: q.scope, limit: String(q.limit ?? 20) });
+    if (q.fandom) p.set("fandom", q.fandom);
+    if (q.cursor) p.set("cursor", q.cursor);
+    return request<FeedPageV2>(`/api/feed?${p.toString()}`);
+  },
+
   userPosts: (userId: string, limit = 20, offset = 0) =>
     request<FeedPage>(
       `/api/users/${encodeURIComponent(userId)}/posts` +
@@ -3158,6 +3267,10 @@ export const social = {
       width: number;
       height: number;
     }>;
+    /** Khoá idempotent — giữ nguyên qua mọi lần thử lại của CÙNG một bài. */
+    client_key?: string;
+    spoiler?: boolean;
+    fandom_id?: string;
   }) =>
     request<{ post: Post }>("/api/posts", {
       method: "POST",
@@ -3196,10 +3309,18 @@ export const social = {
         `?limit=${limit}&offset=${offset}`,
     ),
 
-  createComment: (postId: string, text: string, parentId = "") =>
+  createComment: (
+    postId: string,
+    text: string,
+    parentId = "",
+    opts: { client_key?: string; spoiler?: boolean } = {},
+  ) =>
     request<{ comment: Comment }>(
       `/api/posts/${encodeURIComponent(postId)}/comments`,
-      { method: "POST", body: JSON.stringify({ text, parent_id: parentId }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ text, parent_id: parentId, ...opts }),
+      },
     ),
 
   replies: (commentId: string, limit = 20, offset = 0) =>
@@ -3287,7 +3408,8 @@ export const social = {
   // -- báo cáo --------------------------------------------------------------
 
   report: (payload: {
-    target_kind: "post" | "comment";
+    /** `user` chỉ khi `capabilities.user_reports`. */
+    target_kind: "post" | "comment" | "user";
     target_id: string;
     reason: ReportReason;
     detail?: string;
@@ -3296,6 +3418,34 @@ export const social = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  // -- chặn / ẩn (Social & Play V1, `capabilities.blocks`) -------------------
+
+  /** Chặn: hai bên không tương tác được nữa, bài của nhau biến khỏi bảng tin. */
+  block: (userId: string) =>
+    request<{ blocked: boolean }>(`/api/users/${encodeURIComponent(userId)}/block`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unblock: (userId: string) =>
+    request<{ blocked: boolean }>(`/api/users/${encodeURIComponent(userId)}/block`, {
+      method: "DELETE",
+    }),
+
+  /** Ẩn: chỉ mình không thấy bài của họ nữa; họ không hề biết. */
+  mute: (userId: string) =>
+    request<{ muted: boolean }>(`/api/users/${encodeURIComponent(userId)}/mute`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unmute: (userId: string) =>
+    request<{ muted: boolean }>(`/api/users/${encodeURIComponent(userId)}/mute`, {
+      method: "DELETE",
+    }),
+
+  myBlocks: () => request<BlockList>("/api/me/blocks"),
 
   // -- tìm kiếm ---------------------------------------------------------------
 
@@ -4412,3 +4562,131 @@ export const GROQ_CONSOLE_KEYS_URL = "https://console.groq.com/keys";
     `/keys` on dinh) — dung goc de tranh 404 neu console doi giao dien, chi
     goc `/` la thu duy nhat Cerebras xac nhan on dinh. */
 export const CEREBRAS_CONSOLE_KEYS_URL = "https://cloud.cerebras.ai";
+
+// =============================================================================
+// FANFIC CHAT V1 — Tencent Chat. Xem `server/main.py` khu "FANFIC CHAT V1" va
+// `components/chat/ChatProvider.tsx`.
+//
+// CHI `ChatProvider` goi hai ham nay, va chi khi nguoi dung THAT SU mo tin
+// nhan — doc/nghe truyen khong bao gio xin phien chat (MAU cua Tencent tinh
+// theo lan dang nhap SDK).
+// =============================================================================
+
+/**
+ * Phien nhan tin. KHONG co credential rieng: moi request chat (REST + luong SSE) dung chinh token
+ * Fanfic, va may chu xac thuc Realtime cua Appwrite bang CHINH session do. Tencent Chat khong con
+ * duoc dung cho tin nhan chu (de danh cho goi thoai/video).
+ */
+export interface ChatSessionResponse {
+  provider: "fanfic";
+  userId: string;
+  /** Mili-giay (so thang voi `Date.now()`). */
+  expiresAt: number;
+  environment: string;
+}
+
+/** Tin nhan nhu may chu tra (`server/messaging/service.py::message_dto`). */
+export interface ChatMessageDto {
+  id: string;
+  client_id: string;
+  peer_id: string;
+  from_me: boolean;
+  text: string;
+  /** Mili-giay. */
+  time: number;
+  kind?: "text" | "sticker";
+  sticker?: { id: string; url: string; alt: string } | null;
+}
+
+/** Bo chon nhan dan (`GET /api/chat/stickers`) — trang thai khoa la CUA NGUOI XEM, do may chu quyet. */
+export interface StickerPackDto {
+  id: string;
+  name: string;
+  locked: boolean;
+  unlock: { kind: "free" | "level" | "achievement" | "event" | "season"; label: string };
+  stickers: { id: string; url: string; alt: string }[];
+}
+
+/** Mot hoi thoai trong hop thu (`member_dto`). */
+export interface ChatConversationDto {
+  peer_id: string;
+  unread: number;
+  muted: boolean;
+  last_text: string;
+  last_time: number;
+  last_from_me: boolean;
+  last_message_id: string;
+}
+
+/**
+ * Luong su kien chat (SSE qua `fetch`, KHONG `EventSource`: EventSource khong gui duoc header
+ * `Authorization`, va token KHONG BAO GIO duoc dat len URL). Tra Response tho — `fanficTransport`
+ * tu doc tung khung.
+ */
+export function openChatStream(signal: AbortSignal): Promise<Response> {
+  const token = getToken();
+  return fetch(`${API_BASE}/api/chat/stream`, {
+    headers: { Accept: "text/event-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    cache: "no-store",
+    signal,
+  });
+}
+
+const peerPath = (peer: string) => `/api/chat/dm/${encodeURIComponent(peer)}`;
+
+/** Danh tinh FANFIC cua mot nguoi trong hoi thoai (khong bao gio lay tu Tencent). */
+export interface ChatIdentity {
+  found: boolean;
+  chat_user_id?: string;
+  user_id?: string;
+  username?: string | null;
+  display_name?: string;
+  avatar_url?: string | null;
+  level?: number;
+  equipped_title?: string;
+  avatar_frame?: CosmeticItem | null;
+  /** Nguoi nay co trong khan gia chat khong (canary). `false` = chua nhan tin duoc voi ho. */
+  chat_enabled?: boolean;
+}
+
+/** Nguoi XEM co duoc dung chat khong — may chu quyet (canary, `FAS_CHAT_V1_AUDIENCE`). Luon 200 khi da dang nhap. */
+export interface ChatAvailability {
+  enabled: boolean;
+  reason: "off" | "not_in_canary" | null;
+}
+
+export const chatApi = {
+  availability: () => request<ChatAvailability>("/api/chat/availability"),
+  session: () => request<ChatSessionResponse>("/api/chat/session", { method: "POST" }),
+  identities: (body: { chat_user_ids?: string[]; usernames?: string[] }) =>
+    request<{ items: ChatIdentity[]; you: string }>("/api/chat/identities", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  conversations: () =>
+    request<{ items: ChatConversationDto[]; unread_total: number }>("/api/chat/conversations"),
+  history: (peer: string, q: { before?: string | null; after?: string | null; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.before) p.set("before", q.before);
+    if (q.after) p.set("after", q.after);
+    if (q.limit) p.set("limit", String(q.limit));
+    const s = p.toString();
+    return request<{ messages: ChatMessageDto[]; cursor: string | null }>(`${peerPath(peer)}/messages${s ? `?${s}` : ""}`);
+  },
+  stickers: () => request<{ packs: StickerPackDto[] }>("/api/chat/stickers"),
+  send: (peer: string, body: { client_id: string; text?: string; kind?: "text" | "sticker"; sticker_id?: string }) =>
+    request<{ message: ChatMessageDto; created: boolean }>(`${peerPath(peer)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  read: (peer: string, upTo?: string | null) =>
+    request<{ conversation: ChatConversationDto | null }>(`${peerPath(peer)}/read`, {
+      method: "POST",
+      body: JSON.stringify(upTo ? { up_to: upTo } : {}),
+    }),
+  mute: (peer: string, muted: boolean) =>
+    request<{ muted: boolean }>(`${peerPath(peer)}/mute`, { method: "POST", body: JSON.stringify({ muted }) }),
+  block: (peer: string, blocked: boolean) =>
+    request<{ blocked: boolean }>(`${peerPath(peer)}/block`, { method: "POST", body: JSON.stringify({ blocked }) }),
+  blocks: () => request<{ items: string[] }>("/api/chat/blocks"),
+};

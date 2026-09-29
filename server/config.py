@@ -295,6 +295,52 @@ class Settings:
     #: Xem `docs/AUTHOR_RANK.md` muc "Ke hoach migration".
     author_gate_enabled: bool = False
 
+    #: Co bat SCHEMA V1 CUA COMMUNITY PLAY (spoiler/fandom/edited/user
+    #: report/blocks/profile banner-accent-fandoms). Doc tu
+    #: `FAS_SOCIAL_V1_SCHEMA`.
+    #:
+    #: MAC DINH TAT — cung ly do voi `author_gate_enabled`: cac thuoc tinh
+    #: Appwrite moi (xem `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`) CHUA
+    #: duoc cap phat tren production. Ghi mot thuoc tinh KHONG TON TAI vao
+    #: Appwrite lam HONG CA LAN GHI do (khong phai chi bo qua truong do), nen
+    #: backend phai TU BIET khi nao duoc phep gui cac truong nay.
+    #:
+    #: Thu tu trien khai dung:
+    #:   1. trien khai ma nguon nay (co TAT — khong ai thay gi doi)
+    #:   2. chay migration additive (`python -m scripts.setup_appwrite`)
+    #:   3. doi soat schema, roi moi dat `FAS_SOCIAL_V1_SCHEMA=1`
+    #:
+    #: Kho MOCK khong co han che schema nay (khong Appwrite that de lam
+    #: hong), nen nang luc luon BAT khi `data_backend == "mock"` — xem
+    #: `server.social.capabilities_for`.
+    social_v1_schema: bool = False
+
+    #: Goc URL CONG KHAI cua CHINH backend nay (khac `web_base_url`, la goc
+    #: cua giao dien web) — dung de dung URL media CUC BO cho QA thi giac
+    #: (`server/adapters.py::LocalStorageAdapter.signed_url`,
+    #: `GET /api/dev/media/{key}`). Doc tu `FAS_PUBLIC_API_BASE`.
+    #:
+    #: CHI co tac dung khi CA `storage_backend == "local"`, `is_development`,
+    #: VA `dev_media_urls_enabled` (duoi) deu dung — R2/production khong bao
+    #: gio doc bien nay.
+    public_api_base: str = "http://localhost:8000"
+
+    #: Cong tac RIENG, MAC DINH TAT, cho URL media cuc bo (muc 9). Doc tu
+    #: `FAS_DEV_MEDIA_URLS`.
+    #:
+    #: VI SAO KHONG chi dua vao `is_development`: `environment` MAC DINH la
+    #: `"development"` (xem `Settings.environment`), nen "chi bat khi dev"
+    #: se AM THAM bat cho MOI backend `local` co san — ke ca cac bo test hien
+    #: co (vd `server/tests/test_api.py`) dang mong `LocalStorageAdapter.
+    #: signed_url()` tra `None` de audio duoc STREAM THANG qua backend thay
+    #: vi chuyen huong toi `/api/dev/media/...` (mot duong CHI phuc vu anh —
+    #: xem `_DEV_MEDIA_CONTENT_TYPES` — nen mot file audio se ra 404). Phat
+    #: hien qua test that (`test_api.py::test_job_reaches_completed_and_
+    #: produces_audio` chuyen tu 200 sang 404 khi bien nay CHUA co va dieu
+    #: kien chi dua vao `is_development`). Mot co RIENG, MAC DINH TAT, giu
+    #: hanh vi cu nguyen ven cho MOI nguoi chua tung nghe toi tinh nang nay.
+    dev_media_urls_enabled: bool = False
+
     #: Token dich vu cho CANARY (Phase 15/18), doc tu `FAS_CANARY_SERVICE_TOKEN`.
     #: MAC DINH RONG — khi rong, KHONG co danh tinh canary nao ton tai va moi
     #: so khop deu that bai; day la trang thai an toan, khong phai "tat kiem tra".
@@ -720,6 +766,8 @@ class Settings:
             # Bao ra de nguoi van hanh thay ngay duong dang nhap nao dang mo.
             "facebook_login_enabled": self.facebook_login_enabled,
             "author_gate_enabled": self.author_gate_enabled,
+            "social_v1_schema": self.social_v1_schema,
+            "dev_media_urls_enabled": self.dev_media_urls_enabled,
             # CHI so luong, KHONG bao gio la danh sach: `/api/health` la
             # cong khai, va lo ra `user_id` cua quan tri la chi dung dich.
             # `admin_count` giu TEN CU (tuong thich nguoc: mot vai cong cu van
@@ -827,6 +875,9 @@ def load_settings() -> Settings:
         web_base_url=_env("FAS_WEB_BASE_URL", "http://localhost:3000").rstrip("/"),
         facebook_login_enabled=_env_bool("FAS_FACEBOOK_LOGIN", False),
         author_gate_enabled=_env_bool("FAS_AUTHOR_GATE", False),
+        social_v1_schema=_env_bool("FAS_SOCIAL_V1_SCHEMA", False),
+        public_api_base=_env("FAS_PUBLIC_API_BASE", "http://localhost:8000").rstrip("/"),
+        dev_media_urls_enabled=_env_bool("FAS_DEV_MEDIA_URLS", False),
         canary_service_token=_env("FAS_CANARY_SERVICE_TOKEN", "").strip(),
         canary_user_id=_env("FAS_CANARY_USER_ID", "svc_canary").strip() or "svc_canary",
         harvester_owner_user_id=_env(

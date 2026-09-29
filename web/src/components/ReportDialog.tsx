@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ApiError, social, type ReportReason } from "@/lib/api";
 
 /** Lý do, kèm câu mô tả người thường đọc được. Khớp `domain.ReportReason`. */
@@ -28,10 +29,14 @@ const LY_DO: ReadonlyArray<{ key: ReportReason; label: string }> = [
 export function ReportDialog({
   targetKind,
   targetId,
+  targetName,
   onClose,
 }: {
-  targetKind: "post" | "comment";
+  /** `user` chỉ được mở khi máy chủ bật `capabilities.user_reports`. */
+  targetKind: "post" | "comment" | "user";
   targetId: string;
+  /** Tên hiển thị của người bị báo cáo (chỉ với `user`). */
+  targetName?: string;
   onClose: () => void;
 }) {
   const [lyDo, setLyDo] = useState<ReportReason>("spam");
@@ -95,7 +100,9 @@ export function ReportDialog({
     }
   }, [targetKind, targetId, lyDo, chiTiet]);
 
-  return (
+  // Portal: `.page` co `transform`, `fixed` ben trong no khong phu man hinh
+  // (lop phu hop thoai bao cao tung ho mot khoang day trang).
+  return createPortal(
     <div className="lop-phu" role="presentation">
       <div
         className="hop-thoai"
@@ -106,7 +113,12 @@ export function ReportDialog({
         ref={hop}
       >
         <h2 id="bao-cao-tieu-de" className="h3">
-          Báo cáo {targetKind === "post" ? "bài đăng" : "bình luận"}
+          Báo cáo{" "}
+          {targetKind === "post"
+            ? "bài đăng"
+            : targetKind === "comment"
+              ? "bình luận"
+              : targetName || "người dùng"}
         </h2>
 
         {xong ? (
@@ -182,6 +194,7 @@ export function ReportDialog({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

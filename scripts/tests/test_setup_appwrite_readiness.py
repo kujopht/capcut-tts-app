@@ -33,12 +33,22 @@ def _tao_setup() -> Setup:
     return Setup(dry_run=True)
 
 
+# Vong cho doc TUNG muc (`GET .../attributes/{key}`, `GET .../indexes/{key}`),
+# khong doc tai lieu collection — xem `Setup._doc_muc_that`. Mock tra dung
+# hinh dang mot muc don.
 def _thuoc_tinh(key: str, status: str, error: str = "") -> dict:
-    return {"attributes": [{"key": key, "status": status, "error": error}]}
+    return {"key": key, "status": status, "error": error}
 
 
 def _index(key: str, status: str, error: str = "") -> dict:
-    return {"indexes": [{"key": key, "status": status, "error": error}]}
+    return {"key": key, "status": status, "error": error}
+
+
+def _theo_duong_dan(bang: dict):
+    """side_effect cho `_call`: tra ket qua theo DUONG DAN duoc hoi (muc cuoi)."""
+    def _call_gia(method, path, *a, **kw):
+        return bang[path]
+    return _call_gia
 
 
 class ChoThuocTinhSanSangTest(unittest.TestCase):
@@ -100,7 +110,7 @@ class ChoThuocTinhSanSangTest(unittest.TestCase):
 
     def test_thuoc_tinh_bien_mat_nem_loi(self):
         s = _tao_setup()
-        with patch.object(s, "_call", return_value={"attributes": []}):
+        with patch.object(s, "_call", return_value={}):
             with self.assertRaises(SystemExit):
                 s._cho_thuoc_tinh_san_sang("/v1/.../profiles", "user_id")
 
@@ -126,13 +136,11 @@ class IndexChoTatCaThuocTinhTest(unittest.TestCase):
 
     def test_index_tu_choi_khi_mot_thuoc_tinh_chua_available(self):
         s = _tao_setup()
-        trang_thai = {
-            "attributes": [
-                {"key": "a", "status": "available"},
-                {"key": "b", "status": "processing"},
-            ]
+        bang = {
+            "/v1/.../t/attributes/a": _thuoc_tinh("a", "available"),
+            "/v1/.../t/attributes/b": _thuoc_tinh("b", "processing"),
         }
-        with patch.object(s, "_call", return_value=trang_thai):
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(bang)):
             with self.assertRaises(SystemExit) as ctx:
                 s._kiem_thuoc_tinh_san_sang_cho_index(
                     "/v1/.../t", "t_idx", ["a", "b"])
@@ -143,14 +151,140 @@ class IndexChoTatCaThuocTinhTest(unittest.TestCase):
 
     def test_index_khong_bao_loi_khi_tat_ca_da_available(self):
         s = _tao_setup()
-        trang_thai = {
-            "attributes": [
-                {"key": "a", "status": "available"},
-                {"key": "b", "status": "available"},
-            ]
+        bang = {
+            "/v1/.../t/attributes/a": _thuoc_tinh("a", "available"),
+            "/v1/.../t/attributes/b": _thuoc_tinh("b", "available"),
         }
-        with patch.object(s, "_call", return_value=trang_thai):
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(bang)):
             s._kiem_thuoc_tinh_san_sang_cho_index("/v1/.../t", "t_idx", ["a", "b"])
+
+
+class CacheCollectionCuKhongChanVongChoTest(unittest.TestCase):
+    """Do that 2026-09-26 tren Appwrite 1.9.6 + MongoDB THU: tai lieu collection
+    trong cache Redis (TTL -1) giu `rights_mode` = 'processing' mai mai, trong
+    khi chinh thuoc tinh da 'available'. Ba lan chay lai deu het 120s o cung mot
+    cho. Vong cho KHONG duoc doc tai lieu collection nua."""
+
+    BASE = "/v1/databases/db/collections/novels"
+    COLLECTION_CU = {
+        "attributes": [{"key": "rights_mode", "status": "processing"}],
+        "indexes": [{"key": "state_idx", "status": "processing"}],
+    }
+
+    def _bang(self):
+        return {
+            self.BASE: self.COLLECTION_CU,
+            f"{self.BASE}/attributes/rights_mode": _thuoc_tinh("rights_mode", "available"),
+            f"{self.BASE}/attributes/state": _thuoc_tinh("state", "available"),
+            f"{self.BASE}/indexes/state_idx": _index("state_idx", "available"),
+        }
+
+    def test_thuoc_tinh_doc_tung_muc_khong_doc_collection(self):
+        s = _tao_setup()
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(self._bang())) as m, \
+             patch("time.sleep", return_value=None):
+            s._cho_thuoc_tinh_san_sang(self.BASE, "rights_mode", timeout_giay=0.01)
+        self.assertEqual([c.args[1] for c in m.call_args_list],
+                         [f"{self.BASE}/attributes/rights_mode"])
+
+    def test_index_doc_tung_muc_khong_doc_collection(self):
+        s = _tao_setup()
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(self._bang())) as m, \
+             patch("time.sleep", return_value=None):
+            s._cho_index_san_sang(self.BASE, "state_idx", timeout_giay=0.01)
+        self.assertNotIn(self.BASE, [c.args[1] for c in m.call_args_list])
+
+    def test_kiem_truoc_index_doc_tung_thuoc_tinh(self):
+        s = _tao_setup()
+        with patch.object(s, "_call", side_effect=_theo_duong_dan(self._bang())) as m:
+            s._kiem_thuoc_tinh_san_sang_cho_index(self.BASE, "x_idx", ["rights_mode", "state"])
+        self.assertNotIn(self.BASE, [c.args[1] for c in m.call_args_list])
+
+
+class IndexCacheCollectionCuTest(unittest.TestCase):
+    """Do that 2026-09-29 (may kiem 1.9.6, `user_follows.created_at`): doc tung muc 'available' nhung POST index
+    400 "not yet available" vi tai lieu collection trong cache van 'processing'; chay lai cung chet dung cho do.
+    PUT collection KHONG DOI GI lam moi cache (do that) -> thu lai thanh cong."""
+
+    BASE = "/v1/databases/db/collections/user_follows"
+    HIEN = {"name": "User follows", "$permissions": [], "documentSecurity": True, "enabled": True,
+            "attributes": [{"key": "created_at", "status": "processing"}]}
+    LOI = SystemExit("Appwrite lỗi 400: The requested attribute 'created_at' is not yet available. Please try again later.")
+
+    def _gia(self, trang_thai="available", lan_hong=1):
+        goi = []
+
+        def _call(method, path, payload=None, **kw):
+            goi.append((method, path, payload))
+            if method == "POST" and path.endswith("/indexes"):
+                if sum(1 for g in goi if g[0] == "POST") <= lan_hong:
+                    raise self.LOI
+                return {}
+            if method == "GET" and path == self.BASE:
+                return dict(self.HIEN)
+            if method == "GET" and "/attributes/" in path:
+                return _thuoc_tinh(path.rsplit("/", 1)[-1], trang_thai)
+            if method == "PUT":
+                return {}
+            raise AssertionError((method, path))
+        return goi, _call
+
+    def _setup(self):
+        s = _tao_setup()
+        s.dry_run = False
+        return s
+
+    def test_lam_moi_cache_bang_put_khong_doi_gi_roi_thu_lai(self):
+        s = self._setup()
+        goi, f = self._gia()
+        with patch.object(s, "_call", side_effect=f):
+            s._ensure_index(self.BASE, "follower_created_idx", "key", ["follower_id", "created_at"])
+        put = [g for g in goi if g[0] == "PUT"]
+        self.assertEqual(len(put), 1)
+        # Gui TUONG MINH ca bon truong, dung gia tri dang co — documentSecurity KHONG bao gio de mac dinh false.
+        self.assertEqual(put[0][2], {"name": "User follows", "permissions": [], "documentSecurity": True, "enabled": True})
+        self.assertEqual(sum(1 for g in goi if g[0] == "POST"), 2)
+
+    def test_thuoc_tinh_that_su_chua_san_sang_thi_khong_cham_collection(self):
+        s = self._setup()
+        goi, f = self._gia(trang_thai="processing")
+        with patch.object(s, "_call", side_effect=f), self.assertRaises(SystemExit):
+            s._ensure_index(self.BASE, "follower_created_idx", "key", ["follower_id", "created_at"])
+        self.assertFalse([g for g in goi if g[0] == "PUT"], "lỗi thật: không được PUT collection")
+
+    def test_loi_400_khac_nem_nguyen_van(self):
+        s = self._setup()
+
+        def _call(method, path, payload=None, **kw):
+            raise SystemExit("Appwrite lỗi 400: Invalid index type")
+        with patch.object(s, "_call", side_effect=_call), self.assertRaises(SystemExit) as ctx:
+            s._ensure_index(self.BASE, "x_idx", "key", ["a"])
+        self.assertIn("Invalid index type", str(ctx.exception))
+
+    def test_co_tran_so_lan_lam_moi(self):
+        s = self._setup()
+        goi, f = self._gia(lan_hong=99)
+        with patch.object(s, "_call", side_effect=f), self.assertRaises(SystemExit):
+            s._ensure_index(self.BASE, "x_idx", "key", ["created_at"])
+        self.assertEqual(sum(1 for g in goi if g[0] == "PUT"), Setup.LAM_MOI_CACHE_TOI_DA)
+
+    def test_sai_kieu_documentSecurity_thi_khong_put(self):
+        for sai in ({"documentSecurity": 0}, {"documentSecurity": "true"}, {"enabled": None}, {"$permissions": "x"}):
+            s = self._setup()
+            goi, f = self._gia()
+            self.HIEN = {**IndexCacheCollectionCuTest.HIEN, **sai}
+            with patch.object(s, "_call", side_effect=f), self.assertRaises(SystemExit):
+                s._ensure_index(self.BASE, "x_idx", "key", ["created_at"])
+            self.assertFalse([g for g in goi if g[0] == "PUT"], f"sai kiểu {sai}: không được PUT")
+
+    def test_thieu_truong_trong_ban_doc_thi_khong_put(self):
+        s = self._setup()
+        goi, f = self._gia()
+        self.HIEN = {"name": "User follows", "enabled": True}  # thieu documentSecurity / $permissions
+        with patch.object(s, "_call", side_effect=f), self.assertRaises(SystemExit) as ctx:
+            s._ensure_index(self.BASE, "x_idx", "key", ["created_at"])
+        self.assertIn("làm mới cache an toàn", str(ctx.exception))
+        self.assertFalse([g for g in goi if g[0] == "PUT"])
 
 
 class IdempotentSauThatBaiMotPhanTest(unittest.TestCase):
@@ -211,6 +345,88 @@ class LoiMangThoangQuaTest(unittest.TestCase):
         self.assertIn("mạng", str(ctx.exception))
 
 
+class PlanChiDocTest(unittest.TestCase):
+    """`--plan`: CHI DOC — rao cung chan moi phuong thuc khac GET; phat hien tai nguyen da co; bao muc khac thiet ke."""
+
+    def _setup(self):
+        s = _tao_setup()
+        s.dry_run, s.plan_only = False, True
+        return s
+
+    def test_rao_cung_chan_ghi_truoc_khi_gui(self):
+        s = self._setup()
+        with patch("httpx.Client", side_effect=AssertionError("không được mở kết nối")):
+            for m in ("POST", "PUT", "PATCH", "DELETE"):
+                with self.assertRaises(SystemExit) as ctx:
+                    s._call(m, "/v1/databases/db/collections", {"collectionId": "x"})
+                self.assertIn("CHỈ ĐỌC", str(ctx.exception))
+
+    def test_phat_hien_da_co_va_se_tao_va_lech(self):
+        from scripts.setup_appwrite import SCHEMA
+
+        s = self._setup()
+        dac_ta = SCHEMA["chat_fanouts"]
+        cot_dung = [{"key": k, "type": "string" if kind == "string" else kind, "size": extra, "required": req,
+                     "status": "available"} for k, kind, req, extra in dac_ta["attributes"]]
+        cot_dung[0]["size"] = 999  # lech co y
+
+        def doc(path):
+            if path.endswith("/collections/chat_messages"):
+                return 404, {"message": "Collection not found"}
+            if path.endswith("/collections/chat_fanouts"):
+                return 200, {"$permissions": [], "documentSecurity": True}
+            if path.endswith("/collections/chat_fanouts/attributes"):
+                return 200, {"attributes": cot_dung + [{"key": "cu_thua", "type": "string"}]}
+            if path.endswith("/collections/chat_fanouts/indexes"):
+                return 200, {"indexes": []}
+            return 200, {}
+        with patch.object(s, "_doc", side_effect=doc):
+            tong = s.plan(["chat_messages", "chat_fanouts"])
+        self.assertEqual(tong["tao_bang"], 1)
+        self.assertEqual(tong["da_co_bang"], 1)
+        self.assertEqual(tong["tao_cot"], len(SCHEMA["chat_messages"]["attributes"]))
+        self.assertEqual(tong["tao_index"], len(SCHEMA["chat_messages"]["indexes"]))
+        self.assertEqual(tong["khac"], 1, "size lệch phải được báo")
+
+    def test_dau_cuoi_main_plan_chi_phat_GET_ra_mang(self):
+        """Qua `main(["--plan", ...])` that (cau hinh gia, transport gia): MOI request roi may deu la GET."""
+        import contextlib
+        import io
+
+        from scripts import setup_appwrite as sa
+
+        cac_goi = []
+
+        def xu_ly(req: httpx.Request) -> httpx.Response:
+            cac_goi.append((req.method, req.url.path))
+            if req.url.path.endswith("/databases/db_gia"):
+                return httpx.Response(200, json={"$id": "db_gia"})
+            return httpx.Response(404, json={"message": "not found", "type": "collection_not_found"})
+
+        that = httpx.Client
+
+        def client_gia(*a, **kw):
+            kw.pop("transport", None)
+            return that(*a, transport=httpx.MockTransport(xu_ly), **kw)
+
+        env = {"FAS_ENV_FILE": "", "DATA_BACKEND": "appwrite", "APPWRITE_ENDPOINT": "https://aw.example.test/v1",
+               "APPWRITE_PROJECT_ID": "du-an-gia", "APPWRITE_DATABASE_ID": "db_gia", "APPWRITE_API_KEY": "khoa-gia-khong-in"}
+        ra = io.StringIO()
+        with patch.dict(os.environ, env), patch.object(sa.httpx, "Client", side_effect=client_gia), \
+                contextlib.redirect_stdout(ra):
+            self.assertEqual(sa.main(["--plan", "--only", "chat_messages,chat_fanouts"]), 0)
+        self.assertTrue(cac_goi, "phải có request đọc")
+        self.assertEqual({m for m, _ in cac_goi}, {"GET"}, cac_goi)
+        self.assertIn("SẼ TẠO 2 bảng", ra.getvalue())
+        self.assertNotIn("khoa-gia-khong-in", ra.getvalue(), "không bao giờ in khoá")
+
+    def test_khoa_khong_du_quyen_bao_ro(self):
+        s = self._setup()
+        with patch.object(s, "_doc", return_value=(401, {})), self.assertRaises(SystemExit) as ctx:
+            s.plan(["chat_messages"])
+        self.assertIn("collections.read", str(ctx.exception))
+
+
 class NovelsKhongCanFulltextTest(unittest.TestCase):
     """2026-08-26: PR #56 them title_fulltext_idx + description_fulltext_idx
     vao `novels` dua tren gia dinh sai la `contains()` can chi muc fulltext.
@@ -238,6 +454,55 @@ class NovelsKhongCanFulltextTest(unittest.TestCase):
             keys,
             {"owner_idx", "state_idx", "state_created_idx", "novel_id_idx"},
         )
+
+
+class Muc404LaChuaHienTest(unittest.TestCase):
+    """Review doc lap 2026-09-28: ngay sau POST, `GET .../attributes/<key>` co the 404 mot luc. Voi phep DOC
+    trang thai tung muc, 404 = "chua hien" (cho tiep toi han) — KHONG phai "xong", khong thoat ngay. Moi 404
+    khac (vd `GET` collection, hay phep GHI) van la loi nhu cu."""
+
+    class _TraLoi:
+        def __init__(self, status):
+            self.status_code, self.content = status, b"{}"
+
+        def json(self):
+            return {"message": "not found", "type": "attribute_not_found"}
+
+    class _Client:
+        def __init__(self, status):
+            self.status = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def request(self, *a, **k):
+            return Muc404LaChuaHienTest._TraLoi(self.status)
+
+    def _setup_that(self):
+        s = _tao_setup()
+        s.dry_run = False  # _call that, nhung httpx gia — khong goi mang
+        return s
+
+    def test_404_tung_muc_la_chua_hien(self):
+        s = self._setup_that()
+        with patch("httpx.Client", lambda **k: self._Client(404)):
+            self.assertEqual(s._call("GET", "/v1/db/c/attributes/user_id", doc_thoi=True),
+                             {"key": "user_id", "status": "chưa hiện (404)"})
+            self.assertEqual(s._call("GET", "/v1/db/c/indexes/user_idx", doc_thoi=True)["status"], "chưa hiện (404)")
+            for method, path, doc in (("GET", "/v1/db/c", True), ("POST", "/v1/db/c/attributes/string", False),
+                                      ("GET", "/v1/db/c/attributes/user_id", False)):
+                with self.assertRaises(SystemExit, msg=(method, path, doc)):
+                    s._call(method, path, doc_thoi=doc)
+
+    def test_vong_cho_404_mai_thi_het_han_bao_ro(self):
+        s = _tao_setup()
+        with patch.object(s, "_call", return_value={"key": "a", "status": "chưa hiện (404)"}), \
+                patch("time.sleep", return_value=None), self.assertRaises(SystemExit) as ctx:
+            s._cho_thuoc_tinh_san_sang("/v1/db/t", "a", timeout_giay=0.01)
+        self.assertIn("404", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -14,8 +14,9 @@ Chay:
 
 from __future__ import annotations
 
+import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -80,6 +81,16 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("last_watch_position_seconds", "double", False, None),
             ("last_watch_duration_seconds", "double", False, None),
             ("last_watch_at", "datetime", False, None),
+            # --- Social Play V1 (capability `social_v1_schema`) ---------------
+            # CHUA ap len production — cung co che "dong-thieu-thi-bo-qua" voi
+            # cac nhom truong V2/V6 o tren: `AppwriteIdentityAdapter` chi gui
+            # thuoc tinh THAT SU co trong schema (`_writable`), va tang dich vu
+            # tu choi ro rang o `Settings.social_v1_schema=False` truoc khi toi
+            # duoc day (xem `social.CapabilityDisabled`). Xem
+            # `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`.
+            ("banner_key", "string", False, 512),
+            ("accent", "string", False, 24),
+            ("fandom_ids", "string", False, 32),    # mang, xem ARRAY_ATTRIBUTES
         ],
         "indexes": [
             ("email_unique", "unique", ["email"]),
@@ -324,6 +335,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("removed_reason", "string", False, 1000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
+            # --- Social Play V1 (capability `social_v1_schema`) ---------------
+            # CHUA ap len production — xem ghi chu o `profiles` phia tren va
+            # `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`.
+            ("spoiler", "boolean", False, None),
+            ("fandom_id", "string", False, 32),
+            ("edited_at", "datetime", False, None),
         ],
         "indexes": [
             # Bang tin "theo doi": `author_user_id IN (...)` + moi nhat truoc.
@@ -337,6 +354,8 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # nhu `get_series_by_ids`; cho toi khi doi, chi muc nay tranh quet
             # toan bang.
             ("post_id_idx", "key", ["post_id"]),
+            # Social Play V1: loc bang tin theo fandom, moi nhat truoc.
+            ("fandom_created_idx", "key", ["fandom_id", "created_at"]),
         ],
     },
     "post_likes": {
@@ -381,6 +400,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("removed_reason", "string", False, 1000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
+            # Social Play V1 (capability `edited_label`) — xem ghi chu o
+            # `profiles` phia tren.
+            ("edited_at", "datetime", False, None),
         ],
         "indexes": [
             # Binh luan cua mot bai, cu nhat truoc.
@@ -437,7 +459,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "attributes": [
             ("report_id", "string", True, 64),
             ("reporter_id", "string", True, 64),
-            ("target_kind", "enum", True, ["post", "comment"]),
+            # Social Play V1 (capability `user_reports`): them "user" — bao
+            # cao MOT NGUOI DUNG, khong phai mot noi dung cu the.
+            ("target_kind", "enum", True, ["post", "comment", "user"]),
             ("target_id", "string", True, 64),
             # Chep lai luc bao cao de khu quan tri khong phai doc them mot bang
             # nua cho moi hang.
@@ -461,6 +485,32 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # co the loc CHI theo target_kind (khong kem status) — khong chi
             # muc nao o tren co target_kind lam cot dau.
             ("target_kind_idx", "key", ["target_kind"]),
+        ],
+    },
+    # --- Social Play V1 (capability `blocks`) --------------------------------
+    # CHUA ap len production. Xem `docs/migrations/SOCIAL_PLAY_V1_SCHEMA.md`.
+    "user_blocks": {
+        "name": "User blocks",
+        # `rowId` = khoa tat dinh tu (nguoi chan, nguoi bi chan, loai) — xem
+        # `social.block_key`/`domain.UserBlock`. Cung ky thuat voi
+        # `user_follows`: chinh no la co che chong bam-hai-lan.
+        "attributes": [
+            ("block_id", "string", True, 64),
+            ("blocker_id", "string", True, 64),
+            ("blocked_id", "string", True, 64),
+            # "block" (hai chieu: tu choi tuong tac + an noi dung ca hai
+            # phia) hoac "mute" (mot chieu: chi an noi dung khoi nguoi tat
+            # tieng) — xem docstring `domain.UserBlock`.
+            ("kind", "enum", True, ["block", "mute"]),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # `list_user_blocks`/`my_blocks` — danh sach cua CHINH nguoi chan.
+            ("blocker_created_idx", "key", ["blocker_id", "created_at"]),
+            # `hidden_authors_for_viewer` (chieu nguoc: ai da chan minh) va
+            # `is_blocked_either_direction`.
+            ("blocked_kind_idx", "key", ["blocked_id", "kind"]),
+            ("blocker_kind_idx", "key", ["blocker_id", "kind"]),
         ],
     },
     "novels": {
@@ -727,6 +777,86 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "attributes": [
             ("job_id", "string", True, 64),
             ("owner_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
+    # ==========================================================================
+    # NHAN TIN 1:1 (Chat V1, phan chu) — xem `server/messaging/` va
+    # `docs/messaging/CHAT_APPWRITE.md`.
+    #
+    # Appwrite SO HUU du lieu + Realtime. Quyen cap BANG rong (khong ai tao/sua
+    # truc tiep); quyen theo HANG chi cap DOC: hoi thoai + tin -> hai thanh vien;
+    # thanh vien -> chinh chu; danh dau phat tan -> khong ai. Chan dung CHUNG
+    # `user_blocks` (dinh nghia DUNG nhu #229 Social/Profile, ben duoi).
+    # Realtime chi day su kien cho nguoi CO QUYEN DOC hang (do that Cloud 2.3).
+    #
+    # ROLLBACK: xoa bon bang `chat_*` (`user_blocks` thuoc Social — giu). Chi mat
+    # tin nhan. Production (1.9.6): CHUA tao — `FAS_CHAT_V1` tat.
+    "chat_conversations": {
+        "name": "Chat Conversations",
+        "attributes": [
+            ("kind", "string", True, 16),          # "dm" (V1 chi 1:1)
+            ("member_a", "string", True, 36),       # hai thanh vien, THEO THU TU (a < b)
+            ("member_b", "string", True, 36),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("member_a_idx", "key", ["member_a"]),
+            ("member_b_idx", "key", ["member_b"]),
+        ],
+    },
+    "chat_messages": {
+        "name": "Chat Messages",
+        "attributes": [
+            ("conversation_id", "string", True, 40),
+            ("sender_id", "string", True, 36),
+            ("recipient_id", "string", True, 36),
+            ("client_id", "string", True, 32),
+            ("text", "string", True, 2000),
+            ("created_at", "datetime", True, None),
+            ("kind", "string", False, 16),
+            # kind "sticker": CHI ma nhan dan (`server/messaging/stickers.py`) — KHONG nhung anh; anh o R2.
+            # `text` cua tin nhan dan = nhan thay the ("Nhãn dán: …") cho ban xem truoc/doc man hinh.
+            ("sticker_id", "string", False, 64),
+        ],
+        "indexes": [
+            # lich su (moi nhat truoc, con tro) + tin moi nhat cho ban xem truoc
+            ("conv_created_idx", "key", ["conversation_id", "created_at"]),
+            # dem "chua doc": tin GUI CHO TOI sau moc da doc
+            ("conv_recipient_created_idx", "key", ["conversation_id", "recipient_id", "created_at"]),
+        ],
+    },
+    "chat_members": {
+        "name": "Chat Members",
+        "attributes": [
+            ("conversation_id", "string", True, 40),
+            ("user_id", "string", True, 36),
+            ("peer_id", "string", True, 36),
+            ("unread_count", "integer", False, None),
+            ("last_read_at", "datetime", False, None),
+            ("last_read_message_id", "string", False, 40),
+            ("muted", "boolean", False, None),
+            ("last_message_id", "string", False, 40),
+            ("last_text", "string", False, 200),
+            ("last_at", "datetime", False, None),
+            ("last_sender_id", "string", False, 36),
+            ("updated_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("user_last_idx", "key", ["user_id", "last_at"]),  # hop thu, moi nhat truoc
+            ("conv_idx", "key", ["conversation_id"]),
+        ],
+    },
+    # CHAN MUC TAI KHOAN: bang `user_blocks` cua Social Play V1 (#229, o tren) — MOT bang, MOT he thong.
+    # Chat doc/ghi DUNG hang do (`social.block_key`, kind "block"); tat tieng hoi thoai la
+    # `chat_members.muted`, KHONG phai kind "mute" (cua Social: an noi dung).
+    # Hang DANH DAU "tin X da phat tan" — tao CUNG giao dich voi phep tang "chua
+    # doc": trung rowId -> ca giao dich hong -> tac dung phu DUNG MOT LAN.
+    "chat_fanouts": {
+        "name": "Chat Fanouts",
+        "attributes": [
+            ("message_id", "string", True, 40),
             ("created_at", "datetime", True, None),
         ],
         "indexes": [],
@@ -1710,10 +1840,43 @@ ARRAY_ATTRIBUTES = frozenset({
 #: Quyen DOC van do tung document quyet dinh (documentSecurity=True).
 COLLECTION_PERMISSIONS: List[str] = []
 
+#: Duong DOC trang thai tung muc (`GET {collection}/attributes/<key>` / `/indexes/<key>`) — xem `Setup._call`.
+_MUC_TUNG_CAI = re.compile(r"/(?:attributes|indexes)/([^/?]+)$")
+
+
+def _mo_ta_cot(kind: str, extra: Any) -> str:
+    if kind == "string":
+        return f"string({extra})"
+    if kind == "enum":
+        return f"enum{list(extra)}"
+    return kind
+
+
+def _lech_cot(a: Dict[str, Any], kind: str, required: bool, extra: Any) -> List[str]:
+    """So mot thuoc tinh DANG CO (JSON cua Appwrite) voi dac ta — tra danh sach khac biet (rong = khop)."""
+    lech: List[str] = []
+    loai, dang = a.get("type"), a.get("format") or ""
+    mong = {"string": ("string", ""), "enum": ("string", "enum"), "email": ("string", "email"),
+            "integer": ("integer", ""), "boolean": ("boolean", ""), "datetime": ("datetime", ""),
+            "double": ("double", "")}.get(kind, (kind, ""))
+    if loai != mong[0] or (mong[1] and dang != mong[1]):
+        lech.append(f"kiểu {loai}{'/' + dang if dang else ''} ≠ {kind}")
+    if kind == "string" and a.get("size") != extra:
+        lech.append(f"size {a.get('size')} ≠ {extra}")
+    if kind == "enum":
+        thieu = [e for e in extra if e not in (a.get("elements") or [])]
+        if thieu:
+            lech.append(f"enum thiếu {thieu}")
+    if bool(a.get("required")) != bool(required):
+        lech.append(f"required {bool(a.get('required'))} ≠ {bool(required)}")
+    return lech
+
 
 class Setup:
-    def __init__(self, dry_run: bool = False):
+    def __init__(self, dry_run: bool = False, plan: bool = False):
         settings = load_settings()
+        #: `--plan`: CHI DOC — `_call` tu choi moi phuong thuc khac GET (rao cung, truoc khi gui).
+        self.plan_only = plan
         # Che do thu chi in ke hoach nen khong can credential
         if not settings.appwrite.configured and not dry_run:
             raise SystemExit(
@@ -1721,6 +1884,11 @@ class Setup:
                 "APPWRITE_PROJECT_ID, APPWRITE_API_KEY, APPWRITE_DATABASE_ID."
             )
         self.cfg = settings.appwrite
+        # Appwrite STAGING (Cloud 2.3) chi co scope TablesDB: dich API cu -> TablesDB CHI cho project
+        # staging da duyet; production khong cham gi, sai dich thi chet ngay. Xem
+        # `server/appwrite_tablesdb_compat.py`.
+        from server.appwrite_tablesdb_compat import kich_hoat_neu_staging
+        kich_hoat_neu_staging(settings)
         # `api_base` da bo `/v1` o cuoi neu co - moi path duoi day tu them `/v1`
         self.endpoint = self.cfg.api_base or "https://<endpoint>"
         self.dry_run = dry_run
@@ -1764,6 +1932,9 @@ class Setup:
             co nay thi moi lan chay lai, moi enum da ton tai lam "tạo mới" tang
             mot don vi, va dong tong ket idempotent noi doi.
         """
+        if self.plan_only and method != "GET":
+            # Rao CUNG cua `--plan`: khong mot request ghi nao roi khoi may, ke ca do loi logic o noi khac.
+            raise SystemExit(f"--plan là chế độ CHỈ ĐỌC: chặn {method} {path} trước khi gửi.")
         if self.dry_run:
             if not doc_thoi:
                 print(f"    [dry-run] {method} {path}")
@@ -1776,6 +1947,12 @@ class Setup:
         if response.status_code == 409:
             self.skipped += 1
             return "exists"
+        muc = _MUC_TUNG_CAI.search(path)
+        if response.status_code == 404 and doc_thoi and method == "GET" and muc:
+            # Phep DOC trang thai TUNG MUC (`_doc_muc_that`): ngay sau POST, endpoint `.../attributes/<key>`
+            # hoac `.../indexes/<key>` co the 404 mot luc — "chua hien", KHONG phai "xong" cung khong phai loi
+            # chot. Vong cho coi no la chua san sang va cho tiep toi han (review doc lap 2026-09-28).
+            return {"key": muc.group(1), "status": "chưa hiện (404)"}
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -1919,6 +2096,29 @@ class Setup:
                 ) from exc
             return None
 
+    def _doc_muc_that(self, base: str, loai: str, key: str,
+                      han_chot: float) -> Optional[Dict]:
+        """Doc TRUC TIEP MOT thuoc tinh/index — `GET {base}/attributes/{key}`
+        hoac `GET {base}/indexes/{key}` — KHONG qua tai lieu collection
+        (`GET {base}`). Tra None khi loi mang thoang qua (xem
+        `_goi_doc_thoi_thu_lai`).
+
+        VI SAO KHONG DOC COLLECTION (do that, Appwrite 1.9.6 + MongoDB tu luu
+        tru, project THU `fas-socialplay-test`, 2026-09-26): sau khi worker da
+        xu ly xong `createAttribute` (hang doi 179/179 thanh cong, 0 dang xu
+        ly, 0 hong), `GET {base}` VAN tra `novels.rights_mode` = 'processing'
+        trong khi `GET {base}/attributes/rights_mode`, `GET {base}/attributes`
+        va chinh tai lieu trong MongoDB deu la 'available'. Khoa cache Redis cua
+        tai lieu collection giu ban cu voi TTL -1 (khong bao gio het han). Day la
+        mot cuoc dua cache-aside: vong cho doc collection tu DB ngay truoc khi
+        worker doi trang thai, worker xoa cache, roi ban cu duoc ghi lai vao
+        cache SAU lan xoa. Cache chi duoc lam moi o lan thay doi schema KE TIEP
+        cua collection do — ma script lai dang dung cho chinh thuoc tinh nay
+        truoc khi lam thay doi ke tiep, nen ba lan chay lai lien tiep deu het
+        120s o cung mot cho. Doc tung muc thi di duong khac, khong vuong cache
+        do. Rat co the day cung la ban chat cua su co 2026-08-21 ben duoi."""
+        return self._goi_doc_thoi_thu_lai(f"{base}/{loai}/{key}", han_chot)
+
     def _cho_thuoc_tinh_san_sang(self, base: str, key: str,
                                  *, timeout_giay: float = 120.0) -> None:
         """Cho DUY NHAT MOT thuoc tinh dat 'available', backoff mu tang dan
@@ -1935,16 +2135,14 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
-            if hien is None:
+            thuoc_tinh = self._doc_muc_that(base, "attributes", key, han_chot)
+            if thuoc_tinh is None:
                 # Loi mang thoang qua, da trong ngan sach thoi gian — thu lai,
                 # KHONG coi la "thuoc tinh bien mat".
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
                 continue
-            thuoc_tinh = next((a for a in hien.get("attributes", [])
-                               if a.get("key") == key), None)
-            if thuoc_tinh is None:
+            if thuoc_tinh.get("key") != key:
                 raise SystemExit(
                     f"Thuộc tính '{key}' biến mất khỏi {base} trong lúc chờ "
                     "sẵn sàng — không nên xảy ra, kiểm tra thủ công."
@@ -1980,13 +2178,12 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
-            if hien is None:
+            idx = self._doc_muc_that(base, "indexes", key, han_chot)
+            if idx is None:
                 time.sleep(khoang_cho)
                 khoang_cho = min(khoang_cho * 1.5, 8.0)
                 continue
-            idx = next((i for i in hien.get("indexes", []) if i.get("key") == key), None)
-            if idx is None:
+            if idx.get("key") != key:
                 raise SystemExit(
                     f"Index '{key}' biến mất khỏi {base} trong lúc chờ sẵn sàng."
                 )
@@ -2078,9 +2275,10 @@ class Setup:
         'available' thay vì để Appwrite trả lỗi 400 mơ hồ 'not yet
         available' không nói rõ thuộc tính nào."""
         import time
-        hien = self._goi_doc_thoi_thu_lai(base, time.monotonic() + 30.0) or {}
-        trang_thai = {a.get("key"): a.get("status")
-                      for a in hien.get("attributes", [])}
+        # Tung thuoc tinh MOT, khong qua tai lieu collection — xem `_doc_muc_that`.
+        han_chot = time.monotonic() + 30.0
+        trang_thai = {k: (self._doc_muc_that(base, "attributes", k, han_chot) or {}).get("status")
+                      for k in keys}
         chua_san_sang = [k for k in keys if trang_thai.get(k) != "available"]
         if chua_san_sang:
             raise SystemExit(
@@ -2091,14 +2289,130 @@ class Setup:
                 "appwrite-worker-databases) trước khi chạy lại."
             )
 
+    #: So lan "lam moi cache collection roi thu lai" toi da cho MOT index (xem `_ensure_index`).
+    LAM_MOI_CACHE_TOI_DA = 2
+
     def _ensure_index(self, base: str, name: str, kind: str, keys: List[str]) -> None:
-        result = self._call("POST", f"{base}/indexes", {
-            "key": name,
-            "type": kind,
-            "attributes": keys,
-            "orders": ["ASC"] * len(keys),
-        })
+        body = {"key": name, "type": kind, "attributes": keys, "orders": ["ASC"] * len(keys)}
+        lan = 0
+        while True:
+            try:
+                result = self._call("POST", f"{base}/indexes", body)
+                break
+            except SystemExit as exc:
+                # Appwrite 1.9.6 + MongoDB (do that tren may kiem 1.9.6, 2026-09-29, `user_follows.created_at`):
+                # doc TUNG MUC tra 'available', nhung TAI LIEU collection trong cache Redis (TTL -1) van ghi
+                # 'processing' -> POST index 400 "not yet available" — chay lai script cung chet DUNG cho do
+                # (cache chi lam moi o lan thay doi schema KE TIEP). Mot lan cap nhat collection KHONG DOI GI lam
+                # moi cache (do that: 'processing' -> 'available'), roi thu lai. CHI khi moi thuoc tinh cua index
+                # da 'available' theo doc tung muc — con lai la loi that, nem nguyen van.
+                if (self.dry_run or lan >= self.LAM_MOI_CACHE_TOI_DA or "not yet available" not in str(exc)
+                        or not self._thuoc_tinh_deu_san_sang(base, keys)):
+                    raise
+                lan += 1
+                self._lam_moi_cache_collection(base)
         print(f"    * index {name} {keys}: {'đã có' if result == 'exists' else 'đã tạo'}")
+
+    def _thuoc_tinh_deu_san_sang(self, base: str, keys: List[str]) -> bool:
+        import time
+        han_chot = time.monotonic() + 30.0
+        return all((self._doc_muc_that(base, "attributes", k, han_chot) or {}).get("status") == "available"
+                   for k in keys)
+
+    def _lam_moi_cache_collection(self, base: str) -> None:
+        """PUT collection voi CHINH gia tri dang co (ten, quyen, documentSecurity, enabled) — khong doi gi, chi
+        buoc Appwrite ghi lai tai lieu + xoa cache. Gui TUONG MINH ca bon truong: `documentSecurity` bi bo trong
+        request se thanh MAC DINH `false` cua Appwrite (mat quyen theo tung document) — khong bao gio de mac dinh.
+        Thieu bat ky truong nao trong ban doc -> KHONG gui gi (nem loi ro rang)."""
+        hien = self._call("GET", base, doc_thoi=True) or {}
+        # Kiem ca KIEU, khong ep: `bool(0)`/`bool("")` se lang le thanh false — mat cach ly theo tung document.
+        # (review doc lap 2026-09-29: day la duong an toan then chot.)
+        dung_kieu = (isinstance(hien.get("name"), str) and isinstance(hien.get("$permissions"), list)
+                     and all(isinstance(p, str) for p in hien.get("$permissions") or [])
+                     and isinstance(hien.get("documentSecurity"), bool) and isinstance(hien.get("enabled"), bool))
+        if not dung_kieu:
+            raise SystemExit(f"Không đọc đủ thiết lập của {base} để làm mới cache an toàn — dừng, kiểm tra thủ công.")
+        self._call("PUT", base, {"name": hien["name"], "permissions": list(hien["$permissions"]),
+                                 "documentSecurity": hien["documentSecurity"], "enabled": hien["enabled"]},
+                   doc_thoi=True)
+        print(f"    (làm mới cache collection {base.rsplit('/', 1)[-1]} — không đổi thiết lập nào)")
+
+    # ------------------------------------------------------------------ --plan (CHI DOC)
+    def _doc(self, path: str) -> Tuple[int, Dict[str, Any]]:
+        """GET — phep DUY NHAT cua `--plan`. Tra (status, JSON); 404 la du lieu (chua co), khong phai loi."""
+        with httpx.Client(timeout=TIMEOUT) as client:
+            r = client.get(f"{self.endpoint}{path}", headers=self._headers())
+        try:
+            return r.status_code, (r.json() if r.content else {})
+        except ValueError:
+            return r.status_code, {}
+
+    def plan(self, danh_sach: List[str]) -> Dict[str, int]:
+        """In KE HOACH day du (bang, cot, index, quyen) + phat hien tai nguyen DA CO. KHONG ghi gi."""
+        db = self.cfg.database_id
+        print(f"KẾ HOẠCH (chỉ đọc) — {self.endpoint} · project {self.cfg.project_id} · db {db}")
+        st, _ = self._doc(f"/v1/databases/{db}")
+        if st in (401, 403):
+            raise SystemExit(f"Khoá không đủ quyền đọc schema (HTTP {st}). Cần scope databases.read, "
+                             "collections.read, attributes.read, indexes.read (khoá APPWRITE_SCHEMA_API_KEY).")
+        if st not in (200, 404):
+            raise SystemExit(f"GET database trả HTTP {st} — dừng.")
+        print("  database:", "đã có" if st == 200 else "CHƯA CÓ (sẽ tạo)")
+        tong = {"tao_bang": 0, "tao_cot": 0, "tao_index": 0, "khac": 0, "da_co_bang": 0}
+        for cid in danh_sach:
+            spec = SCHEMA[cid]
+            base = f"/v1/databases/{db}/collections/{cid}"
+            st, col = self._doc(base)
+            print(f"\nCollection {cid} — \"{spec['name']}\"")
+            if st == 404:
+                tong["tao_bang"] += 1
+                print(f"  SẼ TẠO · permissions={COLLECTION_PERMISSIONS} · documentSecurity=true")
+                for key, kind, req, extra in spec["attributes"]:
+                    tong["tao_cot"] += 1
+                    print(f"    + {key}: {_mo_ta_cot(kind, extra)}{' · bắt buộc' if req else ''}")
+                for name, kind, keys in spec["indexes"]:
+                    tong["tao_index"] += 1
+                    print(f"    + index {name} [{kind}] {keys}")
+                continue
+            if st != 200:
+                raise SystemExit(f"GET {cid} trả HTTP {st} — dừng.")
+            tong["da_co_bang"] += 1
+            quyen, ds = col.get("$permissions"), col.get("documentSecurity")
+            dung = quyen == COLLECTION_PERMISSIONS and ds is True
+            if not dung:
+                tong["khac"] += 1
+            print(f"  ĐÃ CÓ · permissions={quyen} · documentSecurity={ds}" + ("" if dung else "  ⚠ KHÁC thiết kế"))
+            _, ds_cot = self._doc(f"{base}/attributes")
+            co = {a.get("key"): a for a in ds_cot.get("attributes") or []}
+            for key, kind, req, extra in spec["attributes"]:
+                a = co.get(key)
+                if a is None:
+                    tong["tao_cot"] += 1
+                    print(f"    + {key}: {_mo_ta_cot(kind, extra)}{' · bắt buộc' if req else ''}  (SẼ TẠO)")
+                    continue
+                lech = _lech_cot(a, kind, req, extra)
+                if lech:
+                    tong["khac"] += 1
+                print(f"    = {key}: đã có ({a.get('status')})" + (f"  ⚠ {'; '.join(lech)}" if lech else ""))
+            thua = sorted(k for k in co if k not in {x[0] for x in spec["attributes"]})
+            if thua:
+                print(f"    (trên máy chủ, không có trong SCHEMA — không đụng: {thua})")
+            _, ds_idx = self._doc(f"{base}/indexes")
+            coi = {i.get("key"): i for i in ds_idx.get("indexes") or []}
+            for name, kind, keys in spec["indexes"]:
+                i = coi.get(name)
+                if i is None:
+                    tong["tao_index"] += 1
+                    print(f"    + index {name} [{kind}] {keys}  (SẼ TẠO)")
+                    continue
+                lech = ([f"type {i.get('type')} ≠ {kind}"] if i.get("type") != kind else []) + \
+                       ([f"cột {i.get('attributes')} ≠ {keys}"] if list(i.get("attributes") or []) != list(keys) else [])
+                if lech:
+                    tong["khac"] += 1
+                print(f"    = index {name}: đã có ({i.get('status')})" + (f"  ⚠ {'; '.join(lech)}" if lech else ""))
+        print(f"\nTổng: {tong['da_co_bang']} bảng đã có · SẼ TẠO {tong['tao_bang']} bảng, {tong['tao_cot']} cột, "
+              f"{tong['tao_index']} index · {tong['khac']} mục KHÁC thiết kế (cần người xem). KHÔNG ghi gì.")
+        return tong
 
     def run(self, only: str = "") -> None:
         """
@@ -2145,6 +2459,15 @@ def main(argv: List[str]) -> int:
             if not only:
                 raise SystemExit("--only= cần một tên collection. "
                                  f"Chọn một trong: {', '.join(SCHEMA)}")
+    if "--plan" in argv:
+        # CHI DOC: phat hien tai nguyen da co + in ke hoach. `--only` nhan danh sach cach nhau bang dau phay;
+        # bo trong = moi collection trong SCHEMA.
+        ds = [x.strip() for x in only.split(",") if x.strip()] if only else list(SCHEMA)
+        la = [x for x in ds if x not in SCHEMA]
+        if la:
+            raise SystemExit(f"Không có collection {la} trong SCHEMA.")
+        Setup(plan=True).plan(ds)
+        return 0
     if only:
         print(f"Chỉ chạm collection: {only}")
     Setup(dry_run=dry_run).run(only=only)

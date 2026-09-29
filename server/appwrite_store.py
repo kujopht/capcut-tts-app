@@ -334,6 +334,30 @@ def q_contains(attribute: str, value: Any) -> Dict[str, Any]:
     return {"method": "contains", "attribute": attribute, "values": [value]}
 
 
+def q_less_than(attribute: str, value: Any) -> Dict[str, Any]:
+    """
+    `attribute < value`, dang DICT (nestable trong `q_or`/`q_and`) — dung cho
+    cursor bang tin (Social Play V1): trang sau la "moi hon" hay "cung moc,
+    id nho hon" trong thu tu GIAM DAN.
+
+    Goi truc tiep o cap TREN CUNG thi boc bang `json.dumps(...)`.
+    """
+    return {"method": "lessThan", "attribute": attribute, "values": [value]}
+
+
+def q_and(*conditions: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Thoa TAT CA cac dieu kien — dang DICT (nestable trong `q_or`), doi xung
+    voi `q_or`. Dung khi mot nhanh cua `q_or` can hai dieu kien cung dung
+    (vi du cursor bang tin: "cung `created_at`" VA "`post_id` nho hon").
+
+    MOT dieu kien thi tra ve CHINH no, cung ly do voi `q_or`.
+    """
+    if len(conditions) == 1:
+        return conditions[0]
+    return {"method": "and", "values": list(conditions)}
+
+
 def q_or(*conditions: Dict[str, Any]) -> str:
     """
     Thoa MOT trong cac dieu kien.

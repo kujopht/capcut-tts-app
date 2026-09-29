@@ -72,6 +72,9 @@ ICON_MAP: dict[str, str] = {
     "external-link": "external-link-alt-solid",
     "trash": "trash-alt-solid",
     "spark": "magic-solid",
+    "edit": "pen-solid",
+    "attach": "paperclip-solid",
+    "undo": "undo-solid",
 }
 
 VIEWBOX_RE = re.compile(r'viewBox="([^"]+)"')

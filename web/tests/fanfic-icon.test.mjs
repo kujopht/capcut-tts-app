@@ -31,7 +31,7 @@ const NHUNG_MAT_CAN_CO = [
   "report", "block", "mute", "game", "trophy", "leaderboard", "level",
   "ai", "support", "sticker", "emoji", "close", "send", "stop", "refresh",
   "history", "plus", "menu", "chevron-down", "chevron-left",
-  "external-link", "trash",
+  "external-link", "trash", "edit", "attach", "undo",
 ];
 
 test("moi ten icon trong bang loi ket duong dan (viewBox + path)", () => {

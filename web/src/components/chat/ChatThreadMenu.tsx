@@ -164,7 +164,7 @@ export function ChatThreadMenu({ peerId, peerName, coTrangTin = false }: {
                 setMo(false);
                 router.push(`/messages?c=${encodeURIComponent(peerId)}`);
               }}>
-              <span aria-hidden="true">⤢</span>
+              <FanficIcon name="external-link" size={16} />
               Mở trong trang Tin nhắn
             </button>
           ) : null}
@@ -179,12 +179,12 @@ export function ChatThreadMenu({ peerId, peerName, coTrangTin = false }: {
           {canBlock ? (
             !blocksLoaded ? (
               <button type="button" role="menuitem" className="chat-menu-muc" disabled>
-                <span aria-hidden="true">⛔</span>
+                <FanficIcon name="block" size={16} />
                 Đang tải…
               </button>
             ) : daChan ? (
               <button type="button" role="menuitem" className="chat-menu-muc" onClick={() => void boChan()}>
-                <span aria-hidden="true">↺</span>
+                <FanficIcon name="undo" size={16} />
                 Bỏ chặn
               </button>
             ) : (
@@ -198,7 +198,7 @@ export function ChatThreadMenu({ peerId, peerName, coTrangTin = false }: {
                   setHoiChan(true);
                 }}
               >
-                <span aria-hidden="true">⛔</span>
+                <FanficIcon name="block" size={16} />
                 Chặn người này
               </button>
             )
@@ -209,7 +209,7 @@ export function ChatThreadMenu({ peerId, peerName, coTrangTin = false }: {
                 setMo(false);
                 setBaoCao(true);
               }}>
-              <span aria-hidden="true">🚩</span>
+              <FanficIcon name="report" size={16} />
               Báo cáo
             </button>
           ) : null}

@@ -116,15 +116,15 @@ function MenuBai({
         <div className="menu-panel" role="menu" aria-label="Tuỳ chọn bài viết">
           {cuaToi ? (
             <>
-              {muc("sua", "✏ Sửa bài viết")}
-              {muc("xoa", "🗑 Xóa bài viết")}
+              {muc("sua", "Sửa bài viết", "edit")}
+              {muc("xoa", "Xóa bài viết", "trash")}
             </>
           ) : (
             <>
               {muc("bao-cao", "Báo cáo bài viết", "report")}
               {coTheBaoCaoNguoi ? muc("bao-cao-nguoi", `Báo cáo ${tenTacGia}`, "report") : null}
               {coTheChan ? muc("an", `Ẩn bài của ${tenTacGia}`, "mute") : null}
-              {coTheChan ? muc("chan", `⛔ Chặn ${tenTacGia}`) : null}
+              {coTheChan ? muc("chan", `Chặn ${tenTacGia}`, "block") : null}
             </>
           )}
         </div>

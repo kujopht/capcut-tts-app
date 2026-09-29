@@ -130,7 +130,7 @@ function MenuHoSo({
         <div className="menu-panel" role="menu" aria-label={`Tuỳ chọn với ${ten}`}>
           {cap.user_reports ? muc("Báo cáo người dùng", () => setBaoCao(true), "report") : null}
           {cap.blocks ? (qh.muted ? muc("Bỏ ẩn bài", () => setHoi("bo-an"), "notification") : muc("Ẩn bài của họ", () => setHoi("an"), "mute")) : null}
-          {cap.blocks ? (qh.blocked ? muc("Bỏ chặn", () => setHoi("bo-chan")) : muc("⛔ Chặn", () => setHoi("chan"))) : null}
+          {cap.blocks ? (qh.blocked ? muc("Bỏ chặn", () => setHoi("bo-chan"), "undo") : muc("Chặn", () => setHoi("chan"), "block")) : null}
         </div>
       ) : null}
       {baoCao ? <ReportDialog targetKind="user" targetId={p.user_id} targetName={ten} onClose={() => setBaoCao(false)} /> : null}

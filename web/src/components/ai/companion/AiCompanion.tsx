@@ -233,8 +233,13 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
     let raf = 0;
     const measure = () => {
       raf = 0;
-      const r = rectOf(host);
-      const home: Rect = { ...r, left: r.left - rt.position.x, top: r.top - rt.position.y };
+      // "Nhà" = hộp của khung bao `.ai-companion-floating` (cố định, KHÔNG bao
+      // giờ bị dịch; host nằm ở góc trên-trái của nó, cùng kích thước). Không
+      // suy từ `hộp host − runtime.position`: hai giá trị đó lệch nhau trong
+      // một khoảnh khắc (panel mở sẵn lúc tải trang, giảm chuyển động) là chỗ
+      // ngồi bị nhân đôi — đo được ở QA Lightning lượt 2 (translate(-428,-1188)).
+      const wrap = host.parentElement ?? host;
+      const home: Rect = rectOf(wrap);
       const nav = document.querySelector(".site-header");
       const navBottom = nav ? nav.getBoundingClientRect().bottom : 0;
       rt.setBounds(boundsFor(home, window.innerWidth, navBottom));

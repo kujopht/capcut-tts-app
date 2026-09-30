@@ -211,6 +211,8 @@ test("mobile: khong linh vat noi o <=1023px; /assistant dung ban inline trong lu
     "cung dieu kien voi AiLauncher (availability null = chua hoi may chu, van hien)");
   assert.match(c, /variant === "inline" && keyboardOpen/, "ban phim mo -> thu lai");
   assert.match(c, /setPaused\(!visible\)/, "an -> dung dong ho hoat anh");
+  assert.match(c, /const home: Rect = rectOf\(wrap\)/, "nha = khung bao co dinh");
+  assert.ok(!/r\.left - rt\.position\.x/.test(c), "khong suy nha tu host - runtime.position (nhan doi cho ngoi)");
   assert.match(css, /z-index: 54;/, "duoi Chat Dock (55) va panel/nut AI (56)");
 });
 

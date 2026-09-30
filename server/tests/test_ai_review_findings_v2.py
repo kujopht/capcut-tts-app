@@ -460,7 +460,8 @@ class TestM7RedactBeforeProvider(unittest.TestCase):
         created = client.post("/api/ai/conversations", headers=_auth("alice"), json={"mode": "general"})
         cid = created.json()["conversation_id"]
 
-        secret = "sk-abcdefghijklmnopqrstuvwx"
+        # Ghep luc chay (quy uoc .gitleaks.toml) — nguon khong chua chuoi lien tuc giong khoa that.
+        secret = "sk-" + "abcdefgh" * 3
         with client.stream(
                 "POST", f"/api/ai/conversations/{cid}/messages", headers=_auth("alice"),
                 json={"content": f"khoá của tôi là Bearer {secret} giúp tôi với",

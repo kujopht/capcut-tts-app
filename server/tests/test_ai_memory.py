@@ -15,14 +15,19 @@ from server.ai_assistant.memory import (
 )
 from server.config import AppwriteSettings
 
+# Bi mat GIA ghep LUC CHAY (quy uoc .gitleaks.toml sau su co 2026-08-16): nguon khong chua chuoi lien tuc giong
+# khoa/JWT that, nen gitleaks khong can allowlist nao cho tep nay.
+KHOA_GIA = "sk-" + "abcdefgh" * 3
+JWT_GIA = ".".join(["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"])
+
 
 class TestRedact(unittest.TestCase):
     def test_bearer_token_is_redacted(self) -> None:
-        text = "here is my token: Bearer sk-abcdefghijklmnopqrstuvwx"
-        self.assertNotIn("sk-abcdefghijklmnopqrstuvwx", redact(text))
+        text = f"here is my token: Bearer {KHOA_GIA}"
+        self.assertNotIn(KHOA_GIA, redact(text))
 
     def test_jwt_is_redacted(self) -> None:
-        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+        jwt = JWT_GIA
         self.assertNotIn(jwt, redact(f"leaked: {jwt}"))
 
     def test_ordinary_text_untouched(self) -> None:
@@ -149,10 +154,10 @@ class TestAppwriteAiRepo(unittest.TestCase):
             return httpx.Response(201, json={"$id": "m1", "message_count": 0})
 
         repo = self._repo(handler)
-        secret_text = "token của tôi là Bearer sk-abcdefghijklmnopqrstuvwx nhé"
+        secret_text = f"token của tôi là Bearer {KHOA_GIA} nhé"
         repo.create_message(AiMessage(
             message_id="m1", conversation_id="c1", user_id="u1", role="user", content=secret_text))
-        self.assertNotIn("sk-abcdefghijklmnopqrstuvwx", seen["content"])
+        self.assertNotIn(KHOA_GIA, seen["content"])
 
     def test_increment_usage_read_modify_write(self) -> None:
         state = {"exists": False, "requests": 0, "input_tokens": 0, "output_tokens": 0}

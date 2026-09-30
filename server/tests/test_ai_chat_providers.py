@@ -22,8 +22,14 @@ from server.llm_gateway.chat_providers import (
 
 class TestAssertWorktree(unittest.TestCase):
     def test_server_module_is_from_this_worktree(self) -> None:
+        """Goi `server` duoc import phai la CUNG checkout voi tep test nay (chong chay nham mot ban checkout
+        khac co san `server/` tren sys.path). So voi goc kho suy tu VI TRI tep test — khong cung ten thu muc,
+        vi ten do khac nhau giua may dev, worktree va CI (ban dau cung "ai-assistant-backend" nen hong tren CI)."""
+        from pathlib import Path
+
         import server
-        self.assertIn("ai-assistant-backend", server.__file__.replace("\\", "/"))
+        goc_kho = Path(__file__).resolve().parents[2]
+        self.assertEqual(Path(server.__file__).resolve().parent, goc_kho / "server")
 
 
 def _sse_body(chunks):

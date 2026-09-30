@@ -45,6 +45,7 @@ import { UserAvatar, tenHienThi } from "@/components/UserAvatar";
 import { CommentThread } from "@/components/CommentThread";
 import { ReportDialog } from "@/components/ReportDialog";
 import { ImageLightbox } from "@/components/ImageLightbox";
+import { FanficIcon, type IconName } from "@/components/icons/FanficIcon";
 
 type HanhDongMenu = "sua" | "xoa" | "bao-cao" | "bao-cao-nguoi" | "an" | "chan";
 
@@ -84,7 +85,7 @@ function MenuBai({
     };
   }, [mo]);
 
-  const muc = (h: HanhDongMenu, nhan: string) => (
+  const muc = (h: HanhDongMenu, nhan: string, icon?: IconName) => (
     <button
       type="button"
       className="menu-item"
@@ -94,7 +95,7 @@ function MenuBai({
         onChon(h);
       }}
     >
-      {nhan}
+      {icon ? <FanficIcon name={icon} size={16} /> : null} {nhan}
     </button>
   );
 
@@ -115,15 +116,15 @@ function MenuBai({
         <div className="menu-panel" role="menu" aria-label="Tuỳ chọn bài viết">
           {cuaToi ? (
             <>
-              {muc("sua", "✏ Sửa bài viết")}
-              {muc("xoa", "🗑 Xóa bài viết")}
+              {muc("sua", "Sửa bài viết", "edit")}
+              {muc("xoa", "Xóa bài viết", "trash")}
             </>
           ) : (
             <>
-              {muc("bao-cao", "🚩 Báo cáo bài viết")}
-              {coTheBaoCaoNguoi ? muc("bao-cao-nguoi", `🚩 Báo cáo ${tenTacGia}`) : null}
-              {coTheChan ? muc("an", `🔕 Ẩn bài của ${tenTacGia}`) : null}
-              {coTheChan ? muc("chan", `⛔ Chặn ${tenTacGia}`) : null}
+              {muc("bao-cao", "Báo cáo bài viết", "report")}
+              {coTheBaoCaoNguoi ? muc("bao-cao-nguoi", `Báo cáo ${tenTacGia}`, "report") : null}
+              {coTheChan ? muc("an", `Ẩn bài của ${tenTacGia}`, "mute") : null}
+              {coTheChan ? muc("chan", `Chặn ${tenTacGia}`, "block") : null}
             </>
           )}
         </div>
@@ -411,7 +412,11 @@ export function PostCard({
       {/* Tom tat tuong tac — dong chu nho, chi hien khi CO gi de noi. */}
       {bai.like_count > 0 || bai.comment_count > 0 ? (
         <p className="hint bai-tom-tat">
-          {bai.like_count > 0 ? `♥ ${formatNumber(bai.like_count)}` : null}
+          {bai.like_count > 0 ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <FanficIcon name="like" size={14} /> {formatNumber(bai.like_count)}
+            </span>
+          ) : null}
           {bai.like_count > 0 && bai.comment_count > 0 ? " · " : null}
           {bai.comment_count > 0 ? `${formatNumber(bai.comment_count)} bình luận` : null}
         </p>
@@ -425,20 +430,19 @@ export function PostCard({
             aria-pressed={bai.liked}
             onClick={thich}
           >
-            <span aria-hidden="true" className="bai-tim">
-              {bai.liked ? "♥" : "♡"}
-            </span>{" "}
+            {/* Hinh dang (dac/rong) phai khac nhau, khong chi mau (WCAG 1.4.1). */}
+            <FanficIcon name={bai.liked ? "like" : "like-outline"} size={16} className="bai-tim" />{" "}
             Thích
           </button>
         ) : (
           <Link className="btn btn-ghost bai-nut" href={loginHref(pathname)} prefetch={false}>
-            <span aria-hidden="true">♡</span> Thích
+            <FanficIcon name="like-outline" size={16} /> Thích
           </Link>
         )}
 
         {commentsElsewhere ? (
           <span className="btn btn-ghost bai-nut bai-nut-tinh" aria-hidden="true">
-            💬 Bình luận
+            <FanficIcon name="comment" size={16} /> Bình luận
           </span>
         ) : (
           <button
@@ -447,12 +451,12 @@ export function PostCard({
             aria-expanded={moBinhLuan}
             onClick={() => datMoBinhLuan(!moBinhLuan)}
           >
-            <span aria-hidden="true">💬</span> Bình luận
+            <FanficIcon name="comment" size={16} /> Bình luận
           </button>
         )}
 
         <button type="button" className="btn btn-ghost bai-nut" onClick={chiaSe}>
-          <span aria-hidden="true">↗</span> Chia sẻ
+          <FanficIcon name="share" size={16} /> Chia sẻ
         </button>
       </footer>
 

@@ -21,6 +21,7 @@ import { ChatThread, KhungCho } from "./ChatThread";
 import { ChatThreadMenu } from "./ChatThreadMenu";
 import { ChatUserHeader } from "./ChatUserHeader";
 import { UnreadBadge } from "./UnreadBadge";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 /** Dong mot cua so -> tieu diem sang o soan cua cua so CON MO khac, khong thi ve nut Tin nhan. */
 function tieuDiemSauKhiDong(conLai: string | undefined) {
@@ -74,7 +75,7 @@ export function ChatWindow({ peerId, minimized }: { peerId: string; minimized: b
           </button>
           <button type="button" className="chat-nut chat-nut-nho" aria-label={`Đóng cuộc trò chuyện với ${ten}`}
             title="Đóng" onClick={dong}>
-            <span aria-hidden="true">✕</span>
+            <FanficIcon name="close" size={14} />
           </button>
         </div>
       </section>
@@ -108,7 +109,7 @@ export function ChatWindow({ peerId, minimized }: { peerId: string; minimized: b
           </button>
           <button type="button" className="chat-nut chat-nut-nho" aria-label={`Đóng cuộc trò chuyện với ${ten}`}
             title="Đóng (Esc)" onClick={dong}>
-            <span aria-hidden="true">✕</span>
+            <FanficIcon name="close" size={14} />
           </button>
         </ChatUserHeader>
       </div>

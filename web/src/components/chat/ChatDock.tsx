@@ -17,6 +17,7 @@ import { useChat } from "./ChatProvider";
 import { ChatAvatar, tenHien } from "./ChatAvatar";
 import { ChatWindow } from "./ChatWindow";
 import { UnreadBadge } from "./UnreadBadge";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 function NganTran({ items }: { items: DockWindow[] }) {
   const { identityOf, conversations, openChat, closeChat } = useChat();
@@ -64,7 +65,7 @@ function NganTran({ items }: { items: DockWindow[] }) {
                 </button>
                 <button type="button" className="chat-nut chat-nut-nho" aria-label={`Đóng cuộc trò chuyện với ${ten}`}
                   onClick={() => closeChat(w.peerId)}>
-                  <span aria-hidden="true">✕</span>
+                  <FanficIcon name="close" size={14} />
                 </button>
               </li>
             );

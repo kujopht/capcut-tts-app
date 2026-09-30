@@ -19,6 +19,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { StickerRef } from "@/lib/chat/types";
 import { useChat } from "./ChatProvider";
 import { StickerPicker } from "./StickerPicker";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 const TOI_DA = 2000;
 const EMOJI = ["😀", "😂", "🥰", "😍", "😅", "😭", "😢", "🤔", "👍", "🙏", "👏", "❤️", "🔥", "🎉", "✨", "👀"];
@@ -162,7 +163,7 @@ function OSoan({ peerId, peerName, autoFocus = false }: { peerId: string; peerNa
         <div className="chat-soan-emoji">
           <button type="button" className="chat-nut" aria-label="Chèn biểu tượng cảm xúc" aria-expanded={moEmoji}
             title="Biểu tượng cảm xúc" onClick={() => { setMoEmoji((v) => !v); setMoNhanDan(false); }}>
-            <span aria-hidden="true">😊</span>
+            <FanficIcon name="emoji" size={18} />
           </button>
           {moEmoji ? (
             <div className="chat-emoji-bang" role="group" aria-label="Biểu tượng cảm xúc">
@@ -177,19 +178,19 @@ function OSoan({ peerId, peerName, autoFocus = false }: { peerId: string; peerNa
         {canSticker ? (
           <button type="button" className="chat-nut chat-nut-nhan-dan" aria-label="Chọn nhãn dán" aria-expanded={moNhanDan}
             title="Nhãn dán" disabled={!guiDuoc} onClick={() => { setMoNhanDan((v) => !v); setMoEmoji(false); }}>
-            <span aria-hidden="true">🏷️</span>
+            <FanficIcon name="sticker" size={18} />
           </button>
         ) : null}
         {/* Dinh kem CHUA co (can R2 + quet noi dung) — nut hien de biet la se co, KHONG gia vo hoat dong. */}
         <button type="button" className="chat-nut" disabled aria-disabled="true"
           aria-label="Đính kèm tệp — sắp có" title="Đính kèm — sắp có">
-          <span aria-hidden="true">📎</span>
+          <FanficIcon name="attach" size={18} />
         </button>
         <span className="chat-soan-gian" />
         {gt.length > TOI_DA - 200 ? <span className="hint chat-soan-dem" aria-live="polite">{gt.length}/{TOI_DA}</span> : null}
         <button type="submit" className="chat-nut chat-nut-gui" disabled={!guiDuoc || rong}
           aria-label={guiDuoc ? "Gửi tin nhắn" : "Chưa gửi được — đang chờ kết nối"}>
-          <span aria-hidden="true">➤</span>
+          <FanficIcon name="send" size={16} />
         </button>
       </div>
     </form>

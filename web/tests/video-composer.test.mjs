@@ -198,9 +198,10 @@ test("Studio con BON diem den chinh, Audio dung sau Noi dung", () => {
 
 test("moi muc Studio dung icon rieng — khong hai muc nao trung", () => {
   // Bon muc nam canh nhau trong thanh ben; trung hinh thi cai dang mo khong
-  // con nhan ra duoc.
+  // con nhan ra duoc. V4: icon la <FanficIcon name="..."/> (Icons8 Line
+  // Awesome vendor hoa), khong con la ham IconXxx cua Icons.tsx.
   const shell = read("../src/components/StudioShell.tsx");
-  const icons = [...shell.matchAll(/icon: (Icon\w+),/g)].map((m) => m[1]);
+  const icons = [...shell.matchAll(/icon: \(p\) => <FanficIcon name="([a-z-]+)"/g)].map((m) => m[1]);
   assert.equal(icons.length, 4, "phải có đúng bốn mục Studio");
   assert.equal(new Set(icons).size, icons.length, "hai mục Studio dùng trùng icon");
   assert.match(read("../src/components/Icons.tsx"), /export function IconClapper/);

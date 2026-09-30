@@ -16,6 +16,7 @@ import { CHAT_V1_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import { MAN_HINH_CHAT_NHO, useChat } from "./ChatProvider";
 import { InboxPopover } from "./InboxPopover";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 export function ChatLauncher() {
   const { profile } = useSession();
@@ -69,7 +70,7 @@ export function ChatLauncher() {
         aria-label={unreadTotal > 0 ? `Tin nhắn, ${unreadTotal} chưa đọc` : "Tin nhắn"}
         onClick={bam}
       >
-        <span aria-hidden="true">💬</span>
+        <FanficIcon name="message" size={20} />
         {unreadTotal > 0 ? (
           <span className="bell-dot" aria-hidden="true">{unreadTotal > 9 ? "9+" : unreadTotal}</span>
         ) : null}

@@ -30,6 +30,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, social, type Notification } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { khiNao } from "@/lib/time";
+import { FanficIcon } from "@/components/icons/FanficIcon";
 
 /** Câu mô tả cho từng loại. Người gây ra được ghép vào trước. */
 function moTa(n: Notification): string {
@@ -183,7 +184,7 @@ export function NotificationBell() {
         }
         onClick={moBang}
       >
-        <span aria-hidden="true">🔔</span>
+        <FanficIcon name="notification" size={18} />
         {chuaDoc > 0 ? (
           <span className="bell-dot" aria-hidden="true">
             {chuaDoc > 9 ? "9+" : chuaDoc}

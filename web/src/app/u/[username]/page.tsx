@@ -34,6 +34,7 @@ import { CapDoTaiKhoan } from "@/components/CapDoTaiKhoan";
 import { ReportDialog } from "@/components/ReportDialog";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { ProfileTabs } from "./ProfileTabs";
+import { FanficIcon, type IconName } from "@/components/icons/FanficIcon";
 
 /** Menu ⋯ cua nguoi xem ho so NGUOI KHAC. */
 function MenuHoSo({
@@ -98,7 +99,7 @@ function MenuHoSo({
     }
   };
 
-  const muc = (nhan: string, fn: () => void) => (
+  const muc = (nhan: string, fn: () => void, icon?: IconName) => (
     <button
       type="button"
       className="menu-item"
@@ -108,7 +109,7 @@ function MenuHoSo({
         fn();
       }}
     >
-      {nhan}
+      {icon ? <FanficIcon name={icon} size={16} /> : null} {nhan}
     </button>
   );
 
@@ -127,9 +128,9 @@ function MenuHoSo({
       </button>
       {mo ? (
         <div className="menu-panel" role="menu" aria-label={`Tuỳ chọn với ${ten}`}>
-          {cap.user_reports ? muc("🚩 Báo cáo người dùng", () => setBaoCao(true)) : null}
-          {cap.blocks ? (qh.muted ? muc("🔔 Bỏ ẩn bài", () => setHoi("bo-an")) : muc("🔕 Ẩn bài của họ", () => setHoi("an"))) : null}
-          {cap.blocks ? (qh.blocked ? muc("Bỏ chặn", () => setHoi("bo-chan")) : muc("⛔ Chặn", () => setHoi("chan"))) : null}
+          {cap.user_reports ? muc("Báo cáo người dùng", () => setBaoCao(true), "report") : null}
+          {cap.blocks ? (qh.muted ? muc("Bỏ ẩn bài", () => setHoi("bo-an"), "notification") : muc("Ẩn bài của họ", () => setHoi("an"), "mute")) : null}
+          {cap.blocks ? (qh.blocked ? muc("Bỏ chặn", () => setHoi("bo-chan"), "undo") : muc("Chặn", () => setHoi("chan"), "block")) : null}
         </div>
       ) : null}
       {baoCao ? <ReportDialog targetKind="user" targetId={p.user_id} targetName={ten} onClose={() => setBaoCao(false)} /> : null}

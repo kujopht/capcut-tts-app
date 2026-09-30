@@ -16,6 +16,7 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { hoSoHref } from "@/lib/communityFeed";
 import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
 import { MUSIC_ENABLED } from "@/lib/features";
+import { FanficIcon, type IconName } from "@/components/icons/FanficIcon";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -47,14 +48,18 @@ import { MUSIC_ENABLED } from "@/lib/features";
 interface NavItem {
   href: string;
   label: string;
+  /** Icon dat CANH nhan chu — nhan chu VAN giu nguyen, chi them hinh. BAT
+   *  BUOC ngay trong muc (khong phai mot bang tra rieng theo href) de them
+   *  mot muc moi ma quen icon thi hong o typecheck, khong phai o runtime. */
+  icon: IconName;
   cta?: boolean;
 }
 
 const LINKS: NavItem[] = [
-  { href: "/", label: "Trang chủ" },
-  { href: "/community", label: "Cộng đồng" },
-  { href: "/library", label: "Thư viện" },
-  { href: "/entertainment", label: "Giải trí" },
+  { href: "/", label: "Trang chủ", icon: "home" },
+  { href: "/community", label: "Cộng đồng", icon: "community" },
+  { href: "/library", label: "Thư viện", icon: "library" },
+  { href: "/entertainment", label: "Giải trí", icon: "game" },
 ];
 
 export function NavLinks() {
@@ -134,7 +139,8 @@ export function NavLinks() {
                 : undefined
             }
           >
-            <span style={{ display: "inline-flex", alignItems: "center" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <FanficIcon name={link.icon} size={18} />
               {link.label}
               {MUSIC_ENABLED && link.href === "/entertainment" ? <SoundwaveMini /> : null}
             </span>

@@ -250,6 +250,10 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         if not rt.enabled or rt.repo is None or rt.gateway is None:
             return {"enabled": False, "reason": rt.reason or "off", "name": rt.assistant_name,
                     "modes": [], "web_search": False}
+        # Control plane global kill switch (`/admin/ai`, fail-closed config).
+        if rt.control is not None and not rt.control.enabled():
+            return {"enabled": False, "reason": "disabled_by_admin", "name": rt.assistant_name,
+                    "modes": [], "web_search": False}
         tier = _tier_of(profile)
         status_ = budget_status(rt.repo, user_id=profile.user_id, daily_limit=_daily_limit(rt, tier))
         # `memory_enabled` here is informational (same source as GET
@@ -362,6 +366,15 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         profile = await run_in_threadpool(resolve_profile, authorization)
         conv, _ = await run_in_threadpool(_own_conversation, profile.user_id, conversation_id)
         _run(lambda: rt.rpm_limiter.check(profile.user_id, rpm=rt.rpm))
+        if rt.control is not None:
+            # Kill switch + global/per-user daily ceilings from the control
+            # plane (reads the store -> off the event loop).
+            denied = await run_in_threadpool(rt.control.admission, profile.user_id)
+            if denied is not None:
+                detail: Dict[str, Any] = {"code": denied.code, "message": denied.message}
+                if denied.reset_at:
+                    detail["reset_at"] = denied.reset_at
+                raise HTTPException(denied.status, detail)
         tier = _tier_of(profile)
         daily_limit = _daily_limit(rt, tier)
         # R4 (review finding): `enforce_budget`/`get_preferences`/`create_message`/
@@ -568,12 +581,23 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 finalize_result["counted_in"] = counted_in
                 finalize_result["counted_out"] = counted_out
                 finalize_result["budget"] = budget
+                if rt.control is not None and served["provider_name"]:
+                    # Per-SLOT usage/cost for the control plane (provider_name
+                    # is the slot id there). Never allowed to fail the turn.
+                    try:
+                        await run_in_threadpool(rt.control.record_turn, served["provider_name"],
+                                                counted_in, counted_out, final_status)
+                    except Exception:  # noqa: BLE001
+                        log.warning("ai_assistant: control-plane usage record failed", exc_info=True)
 
             yield _sse("meta", {"message_id": assistant_message_id, "conversation_id": conversation_id})
             pump: Optional[StreamPump] = None
             try:
+                # Web-search turns route through their own profile (control
+                # plane `web_search_profile`); `AiGateway` ignores `workload`.
+                workload = "web_search" if (payload.use_web_search and rt.web_search_enabled) else None
                 gen = rt.gateway.stream(turns, mode=conv.mode,
-                                       user_ref=_hashed_user_ref(rt, profile.user_id))
+                                       user_ref=_hashed_user_ref(rt, profile.user_id), workload=workload)
                 # The provider generator runs on the pump's own thread
                 # (never on the event loop, contract §0.2) and is closed
                 # THERE under `contextlib.closing` (R3) the moment

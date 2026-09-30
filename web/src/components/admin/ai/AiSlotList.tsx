@@ -1,0 +1,269 @@
+"use client";
+
+/**
+ * Danh sách slot, gộp theo loại provider. Đếm ngược cooldown chạy client-side
+ * (mỗi giây, chỉ khi có slot đang COOLDOWN — không polling mạng, không chạy
+ * khi tab không có slot nào cần đếm).
+ */
+
+import { useEffect, useState } from "react";
+import type { AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
+import { AiQuotaBar } from "./AiQuotaBar";
+import { AiSlotForm } from "./AiSlotForm";
+
+const NHAN_LOAI: Record<AiProviderType, string> = {
+  gemini: "Gemini Pool",
+  groq: "Groq Pool",
+  workers_ai: "Cloudflare Workers AI Pool",
+  qwen: "Alibaba Qwen Pool",
+  azure_openai: "Azure OpenAI Pool",
+  openrouter: "OpenRouter Pool",
+};
+
+const NHAN_TRANG_THAI: Record<AiSlot["health"]["status"], string> = {
+  HEALTHY: "HEALTHY",
+  COOLDOWN: "COOLDOWN",
+  DISABLED: "DISABLED",
+  MISSING_SECRET: "THIẾU KHOÁ",
+  OVER_CAP: "OVER_CAP",
+  DEGRADED: "DEGRADED",
+};
+
+const LOP_TRANG_THAI: Record<AiSlot["health"]["status"], string> = {
+  HEALTHY: "tt-duyet",
+  COOLDOWN: "tt-cho",
+  DISABLED: "tt-trong",
+  MISSING_SECRET: "tt-tuchoi",
+  OVER_CAP: "tt-tuchoi",
+  DEGRADED: "tt-treo",
+};
+
+function thoiGianTuongDoi(iso: string | null): string {
+  if (!iso) return "chưa có";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const giay = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (giay < 60) return `${giay} giây trước`;
+  const phut = Math.round(giay / 60);
+  if (phut < 60) return `${phut} phút trước`;
+  const gio = Math.round(phut / 60);
+  if (gio < 24) return `${gio} giờ trước`;
+  return `${Math.round(gio / 24)} ngày trước`;
+}
+
+function useDemNguoc(slots: AiSlot[]): Record<string, number> {
+  const coCooldown = slots.some((s) => s.health.status === "COOLDOWN" && s.health.cooldown_s > 0);
+  const [con, setCon] = useState<Record<string, number>>(() =>
+    Object.fromEntries(slots.map((s) => [s.slot_id, s.health.cooldown_s])),
+  );
+
+  useEffect(() => {
+    setCon(Object.fromEntries(slots.map((s) => [s.slot_id, s.health.cooldown_s])));
+  }, [slots]);
+
+  useEffect(() => {
+    if (!coCooldown) return;
+    const id = window.setInterval(() => {
+      setCon((cur) => {
+        const ra: Record<string, number> = {};
+        for (const [k, v] of Object.entries(cur)) ra[k] = Math.max(0, v - 1);
+        return ra;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [coCooldown]);
+
+  return con;
+}
+
+function DongSlot({
+  slot,
+  con,
+  laOwner,
+  dangGui,
+  onSua,
+  onResetCooldown,
+  onXoa,
+}: {
+  slot: AiSlot;
+  con: number;
+  laOwner: boolean;
+  dangGui: boolean;
+  onSua: () => void;
+  onResetCooldown: () => void;
+  onXoa: () => void;
+}) {
+  const [xacNhanXoa, setXacNhanXoa] = useState(false);
+  const h = slot.health;
+
+  return (
+    <div className="card stack-2 ai-admin-slot">
+      <div className="row row-spread">
+        <strong>{slot.label} <span className="hint">({slot.slot_id})</span></strong>
+        <span className={`tt ${LOP_TRANG_THAI[h.status]}`}>
+          {h.status === "COOLDOWN"
+            ? `COOLDOWN · 429×${h.recent_429} · ${con}s`
+            : NHAN_TRANG_THAI[h.status]}
+        </span>
+      </div>
+
+      <dl className="admin-ho-so">
+        <dt>Model</dt><dd>{slot.model}</dd>
+        <dt>Bật</dt><dd>{slot.enabled ? "Có" : "Không"}</dd>
+        <dt>Ưu tiên / trọng số</dt><dd>{slot.priority} / {slot.weight}</dd>
+        <dt>Thất bại liên tiếp</dt><dd>{h.consecutive_failures}</dd>
+        <dt>Lần thành công gần nhất</dt><dd>{thoiGianTuongDoi(h.last_success_at)}</dd>
+        <dt>Workload</dt><dd>{slot.workloads.length ? slot.workloads.join(", ") : "—"}</dd>
+        <dt>Secret ref</dt>
+        <dd>
+          {h.secret.ref} → <code>{h.secret.env_name}</code>{" "}
+          <span className={`tt ${h.secret.present ? "tt-duyet" : "tt-tuchoi"}`}>
+            {h.secret.present ? "Đã cấu hình" : "Thiếu khoá"}
+          </span>
+          {h.secret.present ? <span className="hint"> · {h.secret.fingerprint}</span> : null}
+        </dd>
+      </dl>
+
+      <AiQuotaBar nhan="Yêu cầu hôm nay" daDung={h.usage_today.requests} tran={slot.daily_request_cap} />
+      <AiQuotaBar nhan="Token hôm nay" daDung={h.usage_today.input_tokens + h.usage_today.output_tokens} tran={slot.daily_token_cap} />
+      <p className="hint">
+        RPM mềm: {slot.rpm_soft_cap || "không giới hạn"} · TPM mềm: {slot.tpm_soft_cap || "không giới hạn"} ·
+        Chi phí hôm nay: ${(h.usage_today.cost_micro_usd / 1_000_000).toFixed(4)}
+      </p>
+
+      {laOwner ? (
+        xacNhanXoa ? (
+          <div className="row row-tight">
+            <span className="hint">Xoá hẳn slot {slot.slot_id}?</span>
+            <button type="button" className="btn btn-danger btn-sm" disabled={dangGui} onClick={onXoa}>
+              Xác nhận xoá
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => setXacNhanXoa(false)}>Huỷ</button>
+          </div>
+        ) : (
+          <div className="row row-tight">
+            <button type="button" className="btn btn-sm" onClick={onSua} disabled={dangGui}>Sửa</button>
+            {h.status === "COOLDOWN" ? (
+              <button type="button" className="btn btn-sm" onClick={onResetCooldown} disabled={dangGui}>
+                Reset cooldown
+              </button>
+            ) : null}
+            <button type="button" className="btn btn-danger btn-sm" onClick={() => setXacNhanXoa(true)} disabled={dangGui}>
+              Xoá
+            </button>
+          </div>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+export function AiSlotList({
+  slots,
+  meta,
+  laOwner,
+  dangGui,
+  loiTruong,
+  onTao,
+  onSua,
+  onXoa,
+  onResetCooldown,
+}: {
+  slots: AiSlot[];
+  meta: AiConfigMeta;
+  laOwner: boolean;
+  dangGui: boolean;
+  loiTruong: { field: string; message: string }[];
+  /** Trả `true` khi thành công — danh sách tự đóng form/reset trạng thái. */
+  onTao: (payload: AiSlotInput) => Promise<boolean>;
+  onSua: (slotId: string, payload: AiSlotInput) => Promise<boolean>;
+  onXoa: (slotId: string) => Promise<boolean>;
+  onResetCooldown: (slotId: string) => Promise<boolean>;
+}) {
+  const [dangSua, setDangSua] = useState<string | null>(null);
+  const [dangTao, setDangTao] = useState(false);
+  const dem = useDemNguoc(slots);
+
+  const theoLoai = new Map<AiProviderType, AiSlot[]>();
+  for (const s of slots) {
+    theoLoai.set(s.provider_type, [...(theoLoai.get(s.provider_type) ?? []), s]);
+  }
+
+  if (slots.length === 0 && !dangTao) {
+    return (
+      <div className="card admin-chua-cau-hinh stack-2" role="status">
+        <strong>Chưa có slot provider nào.</strong>
+        <p className="hint">
+          Thêm một slot để bắt đầu định tuyến AI qua provider đó. Khoá thật
+          KHÔNG nhập ở đây — sau khi tạo slot với một `secret_ref`, chủ máy
+          chủ cần đặt biến môi trường <code>FAS_AI_SECRET_&lt;secret_ref&gt;</code>{" "}
+          rồi khởi động lại dịch vụ để slot chuyển từ &quot;Thiếu khoá&quot;
+          sang &quot;Đã cấu hình&quot;.
+        </p>
+        {laOwner ? (
+          <button type="button" className="btn btn-primary" onClick={() => setDangTao(true)}>
+            Thêm slot
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="stack-3">
+      {laOwner && !dangTao ? (
+        <div className="row">
+          <button type="button" className="btn btn-primary" onClick={() => setDangTao(true)}>
+            Thêm slot
+          </button>
+        </div>
+      ) : null}
+
+      {dangTao ? (
+        <AiSlotForm
+          meta={meta}
+          dangGui={dangGui}
+          loiTruong={loiTruong}
+          onLuu={(payload) => {
+            void onTao(payload).then((ok) => { if (ok) setDangTao(false); });
+          }}
+          onHuy={() => setDangTao(false)}
+        />
+      ) : null}
+
+      {[...theoLoai.entries()].map(([loai, dsSlot]) => (
+        <div key={loai} className="stack-2">
+          <h3 className="section-title-sm">{NHAN_LOAI[loai] ?? loai}</h3>
+          <div className="stack-2 ai-admin-slot-scroll">
+            {dsSlot.map((s) =>
+              dangSua === s.slot_id ? (
+                <AiSlotForm
+                  key={s.slot_id}
+                  slot={s}
+                  meta={meta}
+                  dangGui={dangGui}
+                  loiTruong={loiTruong}
+                  onLuu={(payload) => {
+                    void onSua(s.slot_id, payload).then((ok) => { if (ok) setDangSua(null); });
+                  }}
+                  onHuy={() => setDangSua(null)}
+                />
+              ) : (
+                <DongSlot
+                  key={s.slot_id}
+                  slot={s}
+                  con={dem[s.slot_id] ?? s.health.cooldown_s}
+                  laOwner={laOwner}
+                  dangGui={dangGui}
+                  onSua={() => setDangSua(s.slot_id)}
+                  onResetCooldown={() => onResetCooldown(s.slot_id)}
+                  onXoa={() => onXoa(s.slot_id)}
+                />
+              ),
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

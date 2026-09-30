@@ -13495,3 +13495,83 @@ body.co-dock { padding-bottom: var(--dock-cao, 120px); }
 @media (max-width: 1100px) {
   .nav-link-icon { display: none; }
 }
+
+/* -- /admin/ai — AI Control Plane --------------------------------------------
+   Dung lai .card/.tt/.stat/.admin-bang cua khu quan tri; o day chi co phan
+   RIENG: thanh han muc, luoi slot/ho so, hop xac nhan, loi canh truong. Khong
+   dung token vang (xem fantasy-identity.test.mjs) — canh bao dung sac cam cua
+   `.tt-treo`, cung mot nghia "can chu y" nhu nhan trang thai. */
+.ai-admin-muc { scroll-margin-top: 88px; }
+.ai-admin-tab {
+  display: flex; gap: var(--s2); overflow-x: auto; padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.ai-admin-tab::-webkit-scrollbar { display: none; }
+.ai-admin-tab a {
+  flex: 0 0 auto; padding: 6px 12px; border-radius: var(--r-full);
+  border: 1px solid var(--line); color: var(--text-2); text-decoration: none;
+  font-size: var(--t-sm); white-space: nowrap;
+}
+.ai-admin-tab a:hover { color: var(--text); border-color: var(--line-strong); }
+.ai-admin-thong-bao { border-color: #4ade8040; background: #4ade800d; }
+.ai-admin-xac-nhan { border-color: #fb923c59; background: #fb923c0f; }
+.ai-admin-loi { color: var(--danger); font-size: var(--t-sm); }
+.ai-admin-loi-dau {
+  display: flex; flex-direction: column; gap: 2px; padding: var(--s2) var(--s3);
+  border: 1px solid #f8717140; border-radius: var(--r2); color: var(--danger);
+  font-size: var(--t-sm);
+}
+.ai-admin-2cot {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s3);
+}
+.ai-admin-2cot > * { min-width: 0; }
+.ai-admin-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.ai-admin-form legend { padding: 0; margin-bottom: var(--s2); }
+.ai-admin-form .input, .ai-admin-form .select { width: 100%; }
+
+.ai-quota-bar { display: flex; flex-direction: column; gap: 4px; }
+.ai-quota-bar-track {
+  height: 6px; border-radius: var(--r-full); background: #ffffff12; overflow: hidden;
+}
+.ai-quota-bar-fill {
+  height: 100%; border-radius: inherit; background: #4ade80;
+  transition: width 0.3s ease;
+}
+.ai-quota-bar-fill-vuot { background: #f87171; }
+
+.ai-admin-slot-scroll {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: var(--s3);
+}
+.ai-admin-slot, .ai-admin-ho-so { min-width: 0; }
+.ai-admin-slot code, .ai-admin-audit code { overflow-wrap: anywhere; }
+.ai-admin-luoi-ho-so {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: var(--s3); align-items: start;
+}
+.ai-admin-buoc { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ai-admin-buoc li {
+  padding: 6px var(--s2); border: 1px solid var(--line-soft); border-radius: var(--r2);
+  flex-wrap: nowrap;
+}
+.ai-admin-so {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 4px;
+  border-radius: var(--r-full); background: #ffffff12; font-size: var(--t-xs); font-weight: 650;
+}
+.ai-admin-ds-doi { margin: 0; padding-left: 1.2em; font-size: var(--t-sm); color: var(--text-2); }
+.ai-admin-doi { overflow-wrap: anywhere; }
+
+@media (max-width: 560px) {
+  /* Bang audit thanh the: moi o mot dong "nhan: gia tri" — 5 cot khong vua 390px. */
+  .ai-admin-audit thead { display: none; }
+  .ai-admin-audit tr { display: block; padding: var(--s2) 0; border-bottom: 1px solid var(--line-soft); }
+  .ai-admin-audit td { display: flex; gap: var(--s2); border: 0; padding: 2px var(--s3); }
+  .ai-admin-audit td::before {
+    content: attr(data-nhan); flex: 0 0 92px; color: var(--text-3); font-size: var(--t-xs);
+  }
+  .ai-admin-buoc li { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-quota-bar-fill { transition: none; }
+}

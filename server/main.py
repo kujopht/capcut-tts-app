@@ -4457,8 +4457,28 @@ ai_tool_ctx = ToolContext(
         get_chapter=lambda chapter_id: store.get_chapter(chapter_id),
         get_novel=lambda novel_id: store.get_novel(novel_id), is_published=_ai_da_xuat_ban),
 )
-ai_assistant_runtime = build_ai_runtime(settings, tool_ctx=ai_tool_ctx)
+from server.ai_assistant.control import build_control_plane  # noqa: E402
+from server.ai_assistant.control.admin_routes import build_ai_admin_router  # noqa: E402
+
+# Control plane `/admin/ai` (FAS_AI_ADMIN_V1, TAT mac dinh). Khi bat, no THAY
+# chuoi provider tu env: dinh tuyen/tran/cong tac doc tu kho, thieu/hong = AI tat.
+ai_control_plane = build_control_plane(settings)
+ai_assistant_runtime = build_ai_runtime(settings, tool_ctx=ai_tool_ctx, control=ai_control_plane)
 app.include_router(build_ai_router(ai_assistant_runtime, resolve_profile=current_profile))
+
+
+def _ai_admin_reader(profile: Profile = Depends(current_profile)) -> Profile:
+    """Doc `/api/admin/ai/*`: ADMIN hoac OWNER (MODERATOR/nguoi thuong 403).
+    Ten `admin_or_owner_profile` duoc tra LUC GOI — no dinh nghia sau trong tep."""
+    return admin_or_owner_profile(profile)
+
+
+def _ai_admin_owner(profile: Profile = Depends(current_profile)) -> Profile:
+    """Ghi `/api/admin/ai/*`: CHI OWNER (khoa provider, cong tac tong, tran chi phi)."""
+    return owner_profile(profile)
+
+
+app.include_router(build_ai_admin_router(ai_control_plane, reader=_ai_admin_reader, owner=_ai_admin_owner))
 
 
 def _chat_cho_phep(user_id: str) -> None:

@@ -1,0 +1,298 @@
+"use client";
+
+/**
+ * Form thêm/sửa một slot provider AI.
+ *
+ * KHÔNG có trường nào nhận API key thật — chỉ `secret_ref` (tên tham chiếu
+ * dạng `[A-Z][A-Z0-9_]{2,63}`), backend tự tra biến môi trường
+ * `FAS_AI_SECRET_<secret_ref>` mà chủ sở hữu máy chủ đã đặt sẵn.
+ */
+
+import { useState } from "react";
+import type { AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
+
+const NHAN_LOAI: Record<AiProviderType, string> = {
+  gemini: "Google Gemini",
+  groq: "Groq",
+  workers_ai: "Cloudflare Workers AI",
+  qwen: "Alibaba Qwen",
+  azure_openai: "Azure OpenAI",
+  openrouter: "OpenRouter",
+};
+
+interface LoiTruong {
+  field: string;
+  message: string;
+}
+
+function loiCua(loi: LoiTruong[], truong: string): string | undefined {
+  return loi.find((l) => l.field === truong)?.message;
+}
+
+/** Dòng lỗi NGAY DƯỚI trường — `role="alert"` để trình đọc màn hình đọc ra. */
+function LoiDuoi({ loi, truong }: { loi: LoiTruong[]; truong: string }) {
+  const m = loiCua(loi, truong);
+  return m ? <span className="ai-admin-loi" role="alert">{m}</span> : null;
+}
+
+/** Trường có trong form — lỗi nào KHÔNG thuộc danh sách này hiện ở đầu form
+ *  (vd `slot`: dữ liệu sai kiểu) để không lỗi nào bị nuốt. */
+const TRUONG_FORM = new Set([
+  "slot_id", "provider_type", "label", "secret_ref", "model", "endpoint", "api_version",
+  "priority", "weight", "daily_request_cap", "daily_token_cap", "rpm_soft_cap", "tpm_soft_cap",
+  "workloads", "price_in_micro_per_mtok", "price_out_micro_per_mtok",
+]);
+
+export function AiSlotForm({
+  slot,
+  meta,
+  dangGui,
+  loiTruong,
+  onLuu,
+  onHuy,
+}: {
+  /** `undefined` = form TẠO MỚI; có giá trị = form SỬA (khoá slot_id/provider_type). */
+  slot?: AiSlot;
+  meta: AiConfigMeta;
+  dangGui: boolean;
+  loiTruong: LoiTruong[];
+  onLuu: (payload: AiSlotInput) => void;
+  onHuy: () => void;
+}) {
+  const suaSlot = !!slot;
+  const [slotId, setSlotId] = useState(slot?.slot_id ?? "");
+  const [providerType, setProviderType] = useState<AiProviderType>(slot?.provider_type ?? meta.provider_types[0]);
+  const [label, setLabel] = useState(slot?.label ?? "");
+  const [secretRef, setSecretRef] = useState(slot?.secret_ref ?? "");
+  const [model, setModel] = useState(slot?.model ?? "");
+  const [enabled, setEnabled] = useState(slot?.enabled ?? true);
+  const [endpoint, setEndpoint] = useState(slot?.endpoint ?? "");
+  const [apiVersion, setApiVersion] = useState(slot?.api_version ?? "");
+  const [priority, setPriority] = useState(slot?.priority ?? 50);
+  const [weight, setWeight] = useState(slot?.weight ?? 10);
+  const [dailyRequestCap, setDailyRequestCap] = useState(slot?.daily_request_cap ?? 0);
+  const [dailyTokenCap, setDailyTokenCap] = useState(slot?.daily_token_cap ?? 0);
+  const [rpmSoftCap, setRpmSoftCap] = useState(slot?.rpm_soft_cap ?? 0);
+  const [tpmSoftCap, setTpmSoftCap] = useState(slot?.tpm_soft_cap ?? 0);
+  const [workloads, setWorkloads] = useState<string[]>(slot?.workloads ?? ["general"]);
+  const [priceIn, setPriceIn] = useState(slot?.price_in_micro_per_mtok ?? 0);
+  const [priceOut, setPriceOut] = useState(slot?.price_out_micro_per_mtok ?? 0);
+
+  const canEndpoint = providerType === "workers_ai" || providerType === "azure_openai";
+  const canApiVersion = providerType === "azure_openai";
+  const goiYEndpoint =
+    providerType === "workers_ai"
+      ? "https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1"
+      : (meta.endpoint_hosts[providerType] ?? []).map((h) => `https://<tên>${h}`).join(" hoặc ");
+  const loiKhac = loiTruong.filter((l) => !TRUONG_FORM.has(l.field));
+
+  const doiWorkload = (w: string, on: boolean) => {
+    setWorkloads((cur) => (on ? [...cur, w] : cur.filter((x) => x !== w)));
+  };
+
+  const nop = (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload: AiSlotInput = {
+      label,
+      secret_ref: secretRef,
+      model,
+      enabled,
+      // Loại không hiện ô endpoint thì GIỮ giá trị cũ (mặc định rỗng = endpoint chuẩn).
+      endpoint: canEndpoint ? endpoint : (slot?.endpoint ?? ""),
+      api_version: canApiVersion ? apiVersion : "",
+      priority,
+      weight,
+      daily_request_cap: dailyRequestCap,
+      daily_token_cap: dailyTokenCap,
+      rpm_soft_cap: rpmSoftCap,
+      tpm_soft_cap: tpmSoftCap,
+      workloads,
+      price_in_micro_per_mtok: priceIn,
+      price_out_micro_per_mtok: priceOut,
+    };
+    if (!suaSlot) {
+      payload.slot_id = slotId;
+      payload.provider_type = providerType;
+    }
+    onLuu(payload);
+  };
+
+  return (
+    <form className="card stack-2 ai-admin-form" onSubmit={nop} noValidate>
+      <h3 className="section-title-sm">{suaSlot ? `Sửa slot ${slot.slot_id}` : "Thêm slot mới"}</h3>
+      {loiKhac.length ? (
+        <div className="ai-admin-loi-dau" role="alert">
+          {loiKhac.map((l) => <span key={`${l.field}:${l.message}`}>{l.field}: {l.message}</span>)}
+        </div>
+      ) : null}
+
+      <div className="stack-2">
+        <label className="stack-1">
+          <span className="hint">Slot ID</span>
+          <input
+            className="input"
+            value={slotId}
+            disabled={suaSlot}
+            onChange={(e) => setSlotId(e.target.value)}
+            placeholder="vd: gemini-01"
+            required
+          />
+          <LoiDuoi loi={loiTruong} truong="slot_id" />
+        </label>
+
+        <label className="stack-1">
+          <span className="hint">Loại provider</span>
+          <select
+            className="select"
+            value={providerType}
+            disabled={suaSlot}
+            onChange={(e) => setProviderType(e.target.value as AiProviderType)}
+          >
+            {meta.provider_types.map((t) => (
+              <option key={t} value={t}>{NHAN_LOAI[t] ?? t}</option>
+            ))}
+          </select>
+          <LoiDuoi loi={loiTruong} truong="provider_type" />
+        </label>
+
+        <label className="stack-1">
+          <span className="hint">Nhãn hiển thị</span>
+          <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={60} required />
+          <LoiDuoi loi={loiTruong} truong="label" />
+        </label>
+
+        <label className="stack-1">
+          <span className="hint">Tên tham chiếu khoá (secret_ref)</span>
+          <input
+            className="input"
+            value={secretRef}
+            onChange={(e) => setSecretRef(e.target.value.toUpperCase())}
+            placeholder="vd: GEMINI_PROJECT_01"
+            required
+          />
+          <span className="hint">
+            Không nhập API key ở đây — chủ máy chủ đặt giá trị thật vào biến môi
+            trường <code>FAS_AI_SECRET_{secretRef || "…"}</code>.
+          </span>
+          <LoiDuoi loi={loiTruong} truong="secret_ref" />
+        </label>
+
+        <label className="stack-1">
+          <span className="hint">Model</span>
+          <input className="input" value={model} onChange={(e) => setModel(e.target.value)}
+            placeholder="vd: gemini-2.0-flash" required />
+          <LoiDuoi loi={loiTruong} truong="model" />
+        </label>
+
+        <label className="row row-tight">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          <span>Bật slot này</span>
+        </label>
+
+        {canEndpoint ? (
+          <label className="stack-1">
+            <span className="hint">Endpoint</span>
+            <input className="input" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} required />
+            {goiYEndpoint ? <span className="hint">Dạng hợp lệ: {goiYEndpoint}</span> : null}
+            <LoiDuoi loi={loiTruong} truong="endpoint" />
+          </label>
+        ) : null}
+
+        {canApiVersion ? (
+          <label className="stack-1">
+            <span className="hint">API version (Azure)</span>
+            <input className="input" value={apiVersion} onChange={(e) => setApiVersion(e.target.value)}
+              placeholder="vd: 2024-10-21" />
+            <LoiDuoi loi={loiTruong} truong="api_version" />
+          </label>
+        ) : null}
+
+        <div className="ai-admin-2cot">
+          <label className="stack-1">
+            <span className="hint">Ưu tiên (0-99, nhỏ hơn thử trước)</span>
+            <input className="input" type="number" min={0} max={99} value={priority}
+              onChange={(e) => setPriority(Number(e.target.value))} />
+            <LoiDuoi loi={loiTruong} truong="priority" />
+          </label>
+          <label className="stack-1">
+            <span className="hint">Trọng số (1-100)</span>
+            <input className="input" type="number" min={1} max={100} value={weight}
+              onChange={(e) => setWeight(Number(e.target.value))} />
+            <LoiDuoi loi={loiTruong} truong="weight" />
+          </label>
+        </div>
+
+        <div className="ai-admin-2cot">
+          <label className="stack-1">
+            <span className="hint">Trần yêu cầu/ngày (0 = không giới hạn)</span>
+            <input className="input" type="number" min={0} value={dailyRequestCap}
+              onChange={(e) => setDailyRequestCap(Number(e.target.value))} />
+            <LoiDuoi loi={loiTruong} truong="daily_request_cap" />
+          </label>
+          <label className="stack-1">
+            <span className="hint">Trần token/ngày (0 = không giới hạn)</span>
+            <input className="input" type="number" min={0} value={dailyTokenCap}
+              onChange={(e) => setDailyTokenCap(Number(e.target.value))} />
+            <LoiDuoi loi={loiTruong} truong="daily_token_cap" />
+          </label>
+        </div>
+
+        <div className="ai-admin-2cot">
+          <label className="stack-1">
+            <span className="hint">Trần mềm RPM (0 = không giới hạn)</span>
+            <input className="input" type="number" min={0} value={rpmSoftCap}
+              onChange={(e) => setRpmSoftCap(Number(e.target.value))} />
+            <LoiDuoi loi={loiTruong} truong="rpm_soft_cap" />
+          </label>
+          <label className="stack-1">
+            <span className="hint">Trần mềm TPM (0 = không giới hạn)</span>
+            <input className="input" type="number" min={0} value={tpmSoftCap}
+              onChange={(e) => setTpmSoftCap(Number(e.target.value))} />
+            <LoiDuoi loi={loiTruong} truong="tpm_soft_cap" />
+          </label>
+        </div>
+
+        <div className="ai-admin-2cot">
+          <label className="stack-1">
+            <span className="hint">Giá vào (micro-USD/1M token)</span>
+            <input className="input" type="number" min={0} value={priceIn}
+              onChange={(e) => setPriceIn(Number(e.target.value))} />
+            <LoiDuoi loi={loiTruong} truong="price_in_micro_per_mtok" />
+          </label>
+          <label className="stack-1">
+            <span className="hint">Giá ra (micro-USD/1M token)</span>
+            <input className="input" type="number" min={0} value={priceOut}
+              onChange={(e) => setPriceOut(Number(e.target.value))} />
+            <LoiDuoi loi={loiTruong} truong="price_out_micro_per_mtok" />
+          </label>
+        </div>
+
+        <fieldset className="stack-1">
+          <legend className="hint">Workload cho phép</legend>
+          <div className="row">
+            {meta.workloads.map((w) => (
+              <label key={w} className="row row-tight">
+                <input
+                  type="checkbox"
+                  checked={workloads.includes(w)}
+                  onChange={(e) => doiWorkload(w, e.target.checked)}
+                />
+                <span>{w}</span>
+              </label>
+            ))}
+          </div>
+          <LoiDuoi loi={loiTruong} truong="workloads" />
+        </fieldset>
+      </div>
+
+      <div className="row row-tight">
+        <button type="submit" className="btn btn-primary" disabled={dangGui}>
+          {suaSlot ? "Lưu thay đổi" : "Tạo slot"}
+        </button>
+        <button type="button" className="btn btn-sm" onClick={onHuy} disabled={dangGui}>
+          Huỷ
+        </button>
+      </div>
+    </form>
+  );
+}

@@ -185,7 +185,7 @@ test("15. Chế độ AI dùng đúng 4 mode + nhãn tiếng Việt, không tự
   const types = read("lib/ai/types.ts");
   assert.match(types, /"general" \| "story" \| "support" \| "writer"/);
   assert.match(types, /general: "Trợ lý chung"/);
-  assert.match(types, /story: "Truyện"/);
+  assert.match(types, /story: "Truyện \(beta\)"/); // release gate B: phạm vi hạn chế
   assert.match(types, /support: "Hỗ trợ"/);
   assert.match(types, /writer: "Studio viết"/);
 });
@@ -311,4 +311,91 @@ test("F4. Nhãn hạn mức hiện PHẦN TRĂM (không phải số token thô) 
   assert.match(controls, /title=\{`\$\{availability\.limits\.used_today[\s\S]*?token`\}/, "số token thô chỉ nằm trong title (tooltip)");
   assert.ok(!/Đã dùng \{availability\.limits\.used_today\.toLocaleString\("vi-VN"\)\}\//.test(controls),
     "không còn hiện thẳng used_today/limit_today ở câu chính (dạng cũ gây hiểu lầm token = lượt hỏi)");
+});
+
+// ---------------------------------------------------------------- Release gate C
+// Lỗi: mở /assistant rồi quay về trang thường -> panel nổi TỰ BẬT (vì trang
+// /assistant gọi openAssistant() và ghi cờ mở vào sessionStorage).
+
+function khoGia() {
+  const m = new Map();
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => void m.set(k, String(v)),
+    removeItem: (k) => void m.delete(k),
+    _m: m,
+  };
+}
+
+test("RG-C1. Hành vi thật: vào /assistant rồi quay về -> panel nổi ĐÓNG; hội thoại/lịch sử giữ nguyên", async () => {
+  const { apDungHanhDongMo, khoiPhucMo, ghiPhien, CO_HOI_THOAI } = await import("../src/lib/ai/phienMo.ts");
+
+  // (a) Chưa từng mở panel: vào /assistant, quay về (tải lại/khôi phục) -> đóng.
+  const kho = khoGia();
+  ghiPhien(CO_HOI_THOAI, "conv_1", kho); // /assistant đã nạp/tạo một hội thoại
+  assert.equal(apDungHanhDongMo("vao_toan_man", kho), false);
+  assert.deepEqual(khoiPhucMo(kho), { open: false, conversationId: "conv_1" });
+
+  // (b) Panel nổi ĐANG MỞ rồi sang /assistant (menu "Trợ lý AI"): quay về vẫn đóng.
+  const kho2 = khoGia();
+  assert.equal(apDungHanhDongMo("mo_noi", kho2), true);
+  ghiPhien(CO_HOI_THOAI, "conv_2", kho2);
+  apDungHanhDongMo("vao_toan_man", kho2);
+  assert.deepEqual(khoiPhucMo(kho2), { open: false, conversationId: "conv_2" },
+    "cờ mở phải bị xoá, hội thoại đang mở phải còn");
+
+  // (c) Người dùng TỰ mở lại panel sau đó -> mở, cùng hội thoại cũ.
+  assert.equal(apDungHanhDongMo("mo_noi", kho2), true);
+  assert.deepEqual(khoiPhucMo(kho2), { open: true, conversationId: "conv_2" });
+
+  // (d) Đóng bằng X -> đóng; hội thoại vẫn giữ.
+  assert.equal(apDungHanhDongMo("dong_noi", kho2), false);
+  assert.deepEqual(khoiPhucMo(kho2), { open: false, conversationId: "conv_2" });
+
+  // (e) Không có sessionStorage (SSR/chế độ riêng tư chặn) -> không ném, đóng.
+  assert.equal(apDungHanhDongMo("vao_toan_man", null), false);
+  assert.deepEqual(khoiPhucMo(null), { open: false, conversationId: null });
+});
+
+test("RG-C2. Nối dây: /assistant dùng enterFullscreen, KHÔNG openAssistant; chỉ nút mở tường minh ghi 'mo_noi'", () => {
+  const boChuThich = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const page = boChuThich(read("app/assistant/page.tsx"));
+  assert.match(page, /void enterFullscreen\(\)/);
+  assert.ok(!/openAssistant/.test(page), "/assistant không được gọi openAssistant (nó ghi cờ mở panel nổi)");
+
+  const provider = read("components/ai/AiProvider.tsx");
+  assert.ok(!/fas\.ai\.open|CO_MO/.test(provider), "cờ mở chỉ được đụng qua lib/ai/phienMo.ts");
+  const moNoi = provider.match(/apDungHanhDongMo\("mo_noi"\)/g) ?? [];
+  assert.equal(moNoi.length, 1, "chỉ đúng MỘT chỗ ghi cờ mở: openAssistant");
+  const openFn = provider.slice(provider.indexOf("const openAssistant"), provider.indexOf("const enterFullscreen"));
+  assert.match(openFn, /apDungHanhDongMo\("mo_noi"\)/);
+  const fullFn = provider.slice(provider.indexOf("const enterFullscreen"), provider.indexOf("const closeAssistant"));
+  assert.match(fullFn, /apDungHanhDongMo\("vao_toan_man"\)/);
+  assert.match(fullFn, /await ensureReady\(\)/);
+  // ensureReady KHÔNG được đổi `open` hay ghi cờ.
+  const readyFn = provider.slice(provider.indexOf("const ensureReady"), provider.indexOf("const openAssistant"));
+  assert.ok(!/open:\s*true|apDungHanhDongMo/.test(readyFn), "ensureReady phải trung lập với trạng thái mở");
+  // Bản nháp không bị bất kỳ hành động mở/đóng nào xoá.
+  for (const fn of [openFn, fullFn, readyFn]) assert.ok(!/draft:/.test(fn));
+
+  // Di động: lối vào Story chuẩn bị hội thoại rồi sang /assistant, không bật panel nổi.
+  const entry = boChuThich(read("components/ai/AskAiAssistantStoryEntry.tsx"));
+  const nhanhNho = entry.slice(entry.indexOf("matchMedia(MAN_HINH_NHO)"), entry.indexOf("} else {"));
+  assert.match(nhanhNho, /await ensureReady\(opts\)/);
+  assert.match(nhanhNho, /router\.push\("\/assistant"\)/);
+  assert.ok(!/openAssistant/.test(nhanhNho));
+});
+
+test("RG-B. Story mode trung thực: nhãn beta + nói rõ chỉ đọc chương đang mở", () => {
+  const types = read("lib/ai/types.ts");
+  assert.match(types, /story: "Truyện \(beta\)"/);
+  const conv = read("components/ai/AiConversation.tsx");
+  assert.match(conv, /chỉ đọc phần đầu của chương bạn đang mở/);
+  assert.match(conv, /chưa đọc được các chương khác hay cả bộ truyện/);
+  // Không nơi nào trong UI AI hứa "cả bộ truyện"/"toàn bộ truyện" như một khả năng.
+  for (const f of readdirSync(`${SRC}components/ai`)) {
+    if (!f.endsWith(".tsx")) continue;
+    const s = read(`components/ai/${f}`);
+    assert.ok(!/hiểu (cả|toàn bộ) (bộ )?truyện/i.test(s), `${f} hứa quá khả năng Story mode`);
+  }
 });

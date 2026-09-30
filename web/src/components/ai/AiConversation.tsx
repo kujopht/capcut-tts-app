@@ -78,10 +78,11 @@ export function AiConversation() {
         <div className="ai-trong">
           <FanficIcon name="ai" size={28} />
           <p className="hint">
-            {conversationId
-              ? "Bắt đầu cuộc trò chuyện mới."
-              : mode === "story"
-                ? "Hỏi trợ lý về chương bạn đang đọc."
+            {/* Story mode nói ĐÚNG phạm vi backend V1 — không hứa quá khả năng. */}
+            {mode === "story"
+              ? "Bản beta: trợ lý chỉ đọc phần đầu của chương bạn đang mở — chưa đọc được các chương khác hay cả bộ truyện."
+              : conversationId
+                ? "Bắt đầu cuộc trò chuyện mới."
                 : "Hỏi trợ lý AI bất cứ điều gì."}
           </p>
         </div>

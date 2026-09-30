@@ -26,12 +26,15 @@ import { useSession } from "@/lib/session";
 
 export default function AssistantPage() {
   const { profile, loading } = useSession();
-  const { availability, openAssistant } = useAi();
+  const { availability, enterFullscreen } = useAi();
   const router = useRouter();
 
+  // `enterFullscreen`, KHÔNG `openAssistant`: trang này thay chỗ panel nổi —
+  // nó đóng panel nổi và xoá cờ mở, nên quay về trang thường panel VẪN ĐÓNG
+  // tới khi người dùng tự mở (hội thoại/lịch sử/nháp được giữ nguyên).
   useEffect(() => {
     if (!AI_ASSISTANT_ENABLED || !profile) return;
-    void openAssistant();
+    void enterFullscreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.user_id]);
 

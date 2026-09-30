@@ -25,18 +25,23 @@ export function AskAiAssistantStoryEntry({
   chapterId: string;
   chapterIndex: number;
 }) {
-  const { enabled, openAssistant } = useAi();
+  const { enabled, openAssistant, ensureReady } = useAi();
   const router = useRouter();
 
   if (!enabled) return null;
 
   const bam = async () => {
-    await openAssistant({
-      mode: "story",
+    const opts = {
+      mode: "story" as const,
       context: { novel_id: novelId, chapter_id: chapterId, current_chapter_index: chapterIndex },
-    });
+    };
     if (typeof window !== "undefined" && window.matchMedia(MAN_HINH_NHO).matches) {
+      // Di động: chỉ chuẩn bị hội thoại rồi sang `/assistant` — KHÔNG bật
+      // panel nổi (nó sẽ bật lại khi quay về hoặc xoay/phóng cửa sổ).
+      await ensureReady(opts);
       router.push("/assistant");
+    } else {
+      await openAssistant(opts);
     }
   };
 

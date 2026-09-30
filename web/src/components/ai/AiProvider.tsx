@@ -8,10 +8,12 @@
  * `components/chat/**` không bị chạm.
  *
  * LƯỜI (lazy): đăng nhập KHÔNG mở trợ lý, KHÔNG gọi `/api/ai/availability`
- * ngay lúc mount. Chỉ khi `openAssistant()` được gọi lần đầu (nút nổi, mục
- * menu, hoặc `/assistant`) mới xin `availability` — giữ đúng nguyên tắc
- * "idle gần như zero mạng". Đã mở một lần trong TAB này thì tải lại trang sẽ
- * tự mở lại (`sessionStorage`), giống hành vi Chat V1.
+ * ngay lúc mount. Chỉ khi `openAssistant()` (nút nổi) hoặc `ensureReady()`
+ * (`/assistant`, lối vào Story trên di động) được gọi lần đầu mới xin
+ * `availability` — giữ đúng nguyên tắc "idle gần như zero mạng". Panel nổi đã
+ * được NGƯỜI DÙNG mở trong TAB này thì tải lại trang sẽ tự mở lại
+ * (`sessionStorage`), giống hành vi Chat V1 — còn `/assistant` thì KHÔNG bao
+ * giờ bật panel nổi (xem `lib/ai/phienMo.ts`).
  *
  * Tên/model provider KHÔNG BAO GIỜ lộ ra ở tầng này — chỉ `availability.name`
  * (tên hiển thị) và `mode`.
@@ -27,6 +29,7 @@ import {
 } from "react";
 import { ApiError } from "@/lib/api";
 import { aiApi, docVanBanTruongDuAn, ghepBodyDuAn, taoClientId } from "@/lib/ai/client";
+import { CO_HOI_THOAI, apDungHanhDongMo, docPhien, ghiPhien, khoiPhucMo } from "@/lib/ai/phienMo";
 import { AI_ASSISTANT_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import type {
@@ -41,27 +44,6 @@ import type {
   AiProjectField,
   AiProjectSummary,
 } from "@/lib/ai/types";
-
-const CO_MO = "fas.ai.open";
-const CO_HOI_THOAI = "fas.ai.conv";
-
-function docPhien(key: string): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.sessionStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function ghiPhien(key: string, value: string | null) {
-  if (typeof window === "undefined") return;
-  try {
-    if (value === null) window.sessionStorage.removeItem(key);
-    else window.sessionStorage.setItem(key, value);
-  } catch {
-    // Chế độ riêng tư/hết hạn mức — bỏ qua, không phải lỗi nghiêm trọng.
-  }
-}
 
 function loiTuApiError(e: unknown): AiErrorInfo {
   if (e instanceof ApiError) {
@@ -99,7 +81,12 @@ interface AiState {
 
 interface AiContextValue extends AiState {
   enabled: boolean;
+  /** Người dùng MỞ panel nổi (tường minh) — ghi cờ phiên, rồi `ensureReady`. */
   openAssistant: (opts?: { mode?: AiMode; context?: AiConversationContext }) => Promise<void>;
+  /** Nạp availability + lịch sử + hội thoại (tạo mới nếu có `mode`/`context`) — KHÔNG đổi `open`. */
+  ensureReady: (opts?: { mode?: AiMode; context?: AiConversationContext }) => Promise<void>;
+  /** Trang `/assistant` mount: đóng panel nổi + xoá cờ mở (không tự bật lại khi quay về), rồi `ensureReady`. */
+  enterFullscreen: () => Promise<void>;
   closeAssistant: () => void;
   toggleHistory: () => void;
   selectConversation: (id: string) => Promise<void>;
@@ -167,10 +154,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   // Khôi phục trạng thái mở/hội thoại của tab (chỉ khi đã đăng nhập).
   useEffect(() => {
     if (!AI_ASSISTANT_ENABLED || !profile) return;
-    const daMo = docPhien(CO_MO) === "1";
-    const hoiThoai = docPhien(CO_HOI_THOAI);
-    if (daMo) {
-      setState((s) => ({ ...s, open: true, conversationId: hoiThoai }));
+    const { open, conversationId } = khoiPhucMo();
+    if (open) {
+      setState((s) => ({ ...s, open: true, conversationId }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.user_id]);
@@ -215,11 +201,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const openAssistant = useCallback(
+  const ensureReady = useCallback(
     async (opts?: { mode?: AiMode; context?: AiConversationContext }) => {
       if (!AI_ASSISTANT_ENABLED || !profile) return;
-      setState((s) => ({ ...s, open: true }));
-      ghiPhien(CO_MO, "1");
       const av = await xinAvailability();
       if (!av) return;
       void taiLichSu();
@@ -240,9 +224,26 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     [profile, xinAvailability, taiLichSu, taiHoiThoai, state.conversationId],
   );
 
+  const openAssistant = useCallback(
+    async (opts?: { mode?: AiMode; context?: AiConversationContext }) => {
+      if (!AI_ASSISTANT_ENABLED || !profile) return;
+      const open = apDungHanhDongMo("mo_noi");
+      setState((s) => ({ ...s, open }));
+      await ensureReady(opts);
+    },
+    [profile, ensureReady],
+  );
+
+  const enterFullscreen = useCallback(async () => {
+    if (!AI_ASSISTANT_ENABLED || !profile) return;
+    const open = apDungHanhDongMo("vao_toan_man");
+    setState((s) => ({ ...s, open }));
+    await ensureReady();
+  }, [profile, ensureReady]);
+
   const closeAssistant = useCallback(() => {
-    setState((s) => ({ ...s, open: false }));
-    ghiPhien(CO_MO, null);
+    const open = apDungHanhDongMo("dong_noi");
+    setState((s) => ({ ...s, open }));
   }, []);
 
   const toggleHistory = useCallback(() => {
@@ -598,6 +599,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       ...state,
       enabled: AI_ASSISTANT_ENABLED,
       openAssistant,
+      ensureReady,
+      enterFullscreen,
       closeAssistant,
       toggleHistory,
       selectConversation,
@@ -622,6 +625,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     [
       state,
       openAssistant,
+      ensureReady,
+      enterFullscreen,
       closeAssistant,
       toggleHistory,
       selectConversation,

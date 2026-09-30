@@ -14,7 +14,9 @@ export const AI_MODES: AiMode[] = ["general", "story", "support", "writer"];
 /** Nhãn tiếng Việt hiển thị cho người dùng — KHÔNG lộ tên provider/model. */
 export const AI_MODE_LABELS: Record<AiMode, string> = {
   general: "Trợ lý chung",
-  story: "Truyện",
+  // Beta: backend V1 chỉ đưa phần đầu CHƯƠNG ĐANG MỞ vào ngữ cảnh (xem
+  // docs/ai/AI_ASSISTANT_V1.md "Story mode — thực tế nhận được gì").
+  story: "Truyện (beta)",
   support: "Hỗ trợ",
   writer: "Studio viết",
 };

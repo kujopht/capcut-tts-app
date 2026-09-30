@@ -174,7 +174,7 @@ test("man thap: dung canh trai panel; khong con cho an toan -> null (an di)", ()
 
 // ------------------------------------------------------------------ cờ + tính năng
 
-test("co: mac dinh TAT, AI tat -> companion tat, tat thi khong co chunk", () => {
+test("co: mac dinh TAT, AI tat -> companion tat, tat thi loader null (khong tai chunk)", () => {
   const f = read("../src/lib/features.ts");
   assert.match(f, /AI_COMPANION_ENABLED =\s*AI_ASSISTANT_ENABLED && process\.env\.NEXT_PUBLIC_AI_COMPANION_ENABLED === "1"/);
   const gate = codeOnly(read(COMP + "AiCompanionGate.tsx"));
@@ -206,7 +206,9 @@ test("mobile: khong linh vat noi o <=1023px; /assistant dung ban inline trong lu
   const css = read("../src/components/ai/ai.css");
   assert.match(css, /@media \(max-width: 1023px\) \{ \.ai-companion-floating \{ display: none; \} \}/);
   const c = codeOnly(read(COMP + "AiCompanion.tsx"));
-  assert.match(c, /isDesktop && !onAssistantPage && available === true/);
+  assert.match(c, /isDesktop && !onAssistantPage && launcherVisible/);
+  assert.match(c, /const launcherVisible = ai\.availability !== false && !\(ai\.availability && !ai\.availability\.enabled\)/,
+    "cung dieu kien voi AiLauncher (availability null = chua hoi may chu, van hien)");
   assert.match(c, /variant === "inline" && keyboardOpen/, "ban phim mo -> thu lai");
   assert.match(c, /setPaused\(!visible\)/, "an -> dung dong ho hoat anh");
   assert.match(css, /z-index: 54;/, "duoi Chat Dock (55) va panel/nut AI (56)");

@@ -111,9 +111,13 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
   const reduced = prefs.reducedMotion || systemReduced;
   const size = variant === "floating" ? SIZE_FLOATING : isDesktop ? SIZE_INLINE_DESKTOP : SIZE_INLINE_MOBILE;
 
+  // CÙNG điều kiện với `AiLauncher`: `availability` chỉ được xin khi người dùng mở
+  // trợ lý, nên trước đó nó là `null` (chưa biết) — linh vật vẫn đứng cạnh nút mở
+  // (trạng thái idle, KHÔNG kết luận offline); máy chủ báo tắt → ẩn như nút.
+  const launcherVisible = ai.availability !== false && !(ai.availability && !ai.availability.enabled);
   const mounted =
     ai.enabled && !!profile && !prefs.hidden &&
-    (variant === "inline" ? onAssistantPage : isDesktop && !onAssistantPage && available === true);
+    (variant === "inline" ? onAssistantPage : isDesktop && !onAssistantPage && launcherVisible);
 
   const hiddenAtHome = variant === "floating" && !ai.open && HIDE_HOME_ON.some((re) => re.test(pathname));
   const visible = mounted && !hiddenAtHome && !(variant === "floating" && ai.open && noSeat) &&

@@ -35,8 +35,13 @@ export interface Seat {
 }
 
 const GAP = 8;
-/** Phần canvas trong suốt phía dưới chân nhân vật — cho chân chạm mép panel. */
-const FOOT_OVERLAP = 0.14;
+/**
+ * Phần canvas trong suốt dưới chân nhân vật đứng — chân chạm mép panel. Nhỏ vì
+ * `sit-down` của runtime tự hạ thêm 19% cỡ khi ngồi (linh vật nằm DƯỚI panel
+ * theo z-index, nên phần chồng bị panel che — không đè lên chữ/nút — nhưng
+ * chồng nhiều quá thì khuất mất thân, đo QA 2026-10-01).
+ */
+const FOOT_OVERLAP = 0.06;
 
 export function computeSeat({ home, panel, navBottom, viewportWidth, size }: SeatInput): Seat | null {
   // 1) Mép trên panel, sát góc trái (xa nút Đóng ở góc phải).

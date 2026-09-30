@@ -34,12 +34,17 @@ class ProviderError(Exception):
     elsewhere won't help (bad request shape, auth rejected). `code` is a
     short machine-stable label for logs/telemetry, never the raw vendor
     response body (that could contain a request echo with secrets — see
-    `server/secret_redaction.py`)."""
+    `server/secret_redaction.py`). `retry_after_s` is the provider's own
+    `Retry-After` (seconds) on a 429, when it sent a usable one — the
+    gateway cools that provider down for that long (`CircuitBreaker.
+    cool_down`) instead of hammering it on every request."""
 
-    def __init__(self, message: str, *, transient: bool = True, code: str = "provider_error"):
+    def __init__(self, message: str, *, transient: bool = True, code: str = "provider_error",
+                 retry_after_s: Optional[float] = None):
         super().__init__(message)
         self.transient = transient
         self.code = code
+        self.retry_after_s = retry_after_s
 
 
 @dataclass(frozen=True)

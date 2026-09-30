@@ -52,6 +52,24 @@ from server.llm_gateway.provider import LLMCompletion, LLMProvider, LLMProviderE
 
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
+#: Bounds for a provider-sent `Retry-After` — a hostile/buggy value can
+#: neither disable cooldown (0) nor park a provider for a day.
+RETRY_AFTER_MIN_S = 1.0
+RETRY_AFTER_MAX_S = 600.0
+
+
+def _retry_after_s(resp: httpx.Response) -> Optional[float]:
+    """`Retry-After` in delta-seconds form only (the HTTP-date form is rare
+    for rate limits; it falls back to the gateway's default cooldown)."""
+    if resp.status_code != 429:
+        return None
+    raw = (resp.headers.get("retry-after") or "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return max(RETRY_AFTER_MIN_S, min(RETRY_AFTER_MAX_S, value))
+
 
 def _turn_to_openai_message(turn: ChatTurn) -> Dict[str, Any]:
     role = turn.role if turn.role in ("system", "user", "assistant", "tool") else "user"
@@ -161,7 +179,7 @@ class OpenAICompatChatProvider(ChatProvider):
             raise ProviderError(
                 f"'{self.name}' trả lỗi {resp.status_code}.",
                 transient=resp.status_code >= 500 or resp.status_code == 429,
-                code=f"provider_http_{resp.status_code}")
+                code=f"provider_http_{resp.status_code}", retry_after_s=_retry_after_s(resp))
         try:
             data = resp.json()
             choice = data["choices"][0]
@@ -218,7 +236,7 @@ class OpenAICompatChatProvider(ChatProvider):
                     raise ProviderError(
                         f"'{self.name}' trả lỗi {resp.status_code}.",
                         transient=resp.status_code >= 500 or resp.status_code == 429,
-                        code=f"provider_http_{resp.status_code}")
+                        code=f"provider_http_{resp.status_code}", retry_after_s=_retry_after_s(resp))
                 finish_reason = "stop"
                 for line in resp.iter_lines():
                     if not line:

@@ -4438,8 +4438,26 @@ app.include_router(build_messaging_router(messaging_runtime, resolve_profile=_ng
 # =============================================================================
 from server.ai_assistant.routes import build_ai_router  # noqa: E402
 from server.ai_assistant.runtime import build_ai_runtime  # noqa: E402
+from server.ai_assistant.tools import (  # noqa: E402
+    ToolContext, build_chapter_excerpt_fn, build_may_read_novel_fn,
+)
 
-ai_assistant_runtime = build_ai_runtime(settings)
+
+def _ai_da_xuat_ban(obj: Any) -> bool:
+    return getattr(obj, "state", None) is PublishState.PUBLISHED
+
+
+# Story mode V1 doc DUNG chuong dang mo (co tran), cung luat quyen doc voi
+# `GET /api/chapters/{id}` (+ chuong nhap chi chu so huu). Lambda de tra `store`
+# LUC GOI (bai test co the thay `store`), khong dong bang luc import.
+ai_tool_ctx = ToolContext(
+    may_read_novel_fn=build_may_read_novel_fn(
+        get_novel=lambda novel_id: store.get_novel(novel_id), is_published=_ai_da_xuat_ban),
+    chapter_excerpt_fn=build_chapter_excerpt_fn(
+        get_chapter=lambda chapter_id: store.get_chapter(chapter_id),
+        get_novel=lambda novel_id: store.get_novel(novel_id), is_published=_ai_da_xuat_ban),
+)
+ai_assistant_runtime = build_ai_runtime(settings, tool_ctx=ai_tool_ctx)
 app.include_router(build_ai_router(ai_assistant_runtime, resolve_profile=current_profile))
 
 

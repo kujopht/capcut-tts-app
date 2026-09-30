@@ -118,7 +118,7 @@ Chính sách dữ liệu:
 | Mode | Ngữ cảnh | Công cụ (chỉ đọc) |
 |---|---|---|
 | `general` | hội thoại | `search_library` (metadata công khai), `web_search` (nếu bật + người dùng chọn) |
-| `story` | CHỈ khi người dùng mở truyện/chương (context_novel_id/chapter_id gửi tường minh từ trang đọc) | `retrieve_story_chunks` (tái dùng `server/chat/retrieval` + spoiler gate theo `current_chapter_index`), `search_library` |
+| `story` (**beta**) | CHỈ khi người dùng mở truyện/chương (context_novel_id/chapter_id gửi tường minh từ trang đọc) — V1 thực tế: **chỉ trích đoạn chương đang mở**, xem "Story mode — thực tế nhận được gì" bên dưới | `current_chapter_excerpt`; `retrieve_story_chunks` có sẵn nhưng **chưa nối** chỉ mục vector nên luôn rỗng ở production |
 | `support` | chẩn đoán an toàn | `get_safe_diagnostics` (danh sách CHO PHÉP: trạng thái dịch vụ công khai, cờ tính năng bật/tắt, trạng thái job CỦA CHÍNH người dùng) — không log, không env, không token; nếu chưa giải quyết → đề xuất `create_escalation` (người dùng BẤM xác nhận, model không tự gửi) |
 | `writer` | dự án viết đã lưu (`ai_projects`) | không; tiểu chế độ: brainstorm, premise, outline, characters, worldbuilding, draft_chapter (trần output riêng lớn hơn) — lưu vào dự án chỉ qua nút của người dùng |
 
@@ -163,7 +163,7 @@ Adapter: `NullWebSearch` (mặc định, trả rỗng + cờ "tắt"), `MockWebS
 | `GET/POST /api/ai/projects`, `GET/PUT/DELETE /api/ai/projects/{id}` | dự án viết |
 | `POST /api/ai/support/escalations` | tạo yêu cầu hỗ trợ (người dùng xác nhận) |
 
-Sự kiện SSE: `meta{message_id, conversation_id}` → `delta{text}`* → (`citations{items}`)? → `usage{input_tokens, output_tokens, used_today, limit_today}` → `done{status: complete|stopped}`; hoặc `error{code, message}`. Heartbeat comment `: ping` mỗi 15 s. Dừng: client huỷ fetch → server phát hiện ngắt (`request.is_disconnected()` giữa các chunk) → đóng stream upstream, lưu `status=stopped` với phần đã sinh.
+Sự kiện SSE: `meta{message_id, conversation_id}` → `delta{text}`* → (`citations{items}`)? → `usage{input_tokens, output_tokens, used_today, limit_today}` → `done{status: complete|stopped}`; hoặc `error{code, message}`. Heartbeat comment `: ping` sau mỗi `FAS_AI_HEARTBEAT_S` giây (15–25, mặc định 15) provider im lặng — xem "Release gate / A". Dừng: client huỷ fetch → server phát hiện ngắt (`request.is_disconnected()` giữa các chunk) → đóng stream upstream, lưu `status=stopped` với phần đã sinh.
 
 Mã lỗi ổn định: `ai_not_enabled`(503), `ai_no_provider`(503), `ai_rate_limited`(429), `ai_budget_exhausted`(429), `ai_busy`(503), `ai_context_too_large`(400), `ai_provider_unavailable`(503), `ai_provider_interrupted`(sự kiện), `ai_forbidden`(403), `ai_not_found`(404).
 
@@ -320,6 +320,71 @@ thật trong bản đầu; cả 4 đã sửa VÀ có bài kiểm khoá lại
   trực tiếp trên luồng asyncio nữa (test
   `TestR4EventLoopNotBlocked` xác minh bằng cách so `threading.
   current_thread()` của lời gọi kho với luồng gọi request).
+
+## Release gate (2026-09-30)
+
+### A. Heartbeat SSE
+
+- `server/ai_assistant/stream_pump.py`: một luồng daemon riêng lặp generator
+  ĐỒNG BỘ của gateway, đẩy từng sự kiện vào `asyncio.Queue`; route chờ có
+  thời hạn. Hết `AiRuntime.heartbeat_s` giây mà provider im lặng → gửi dòng
+  chú thích SSE `: ping\n\n` (không có `event:`/`data:` nên không bao giờ
+  thành nội dung trợ lý; `web/src/lib/ai/sse.ts` bỏ dòng `:` trước khi tách
+  khung).
+- `FAS_AI_HEARTBEAT_S` (mặc định 15), luôn kẹp vào [15, 25]; giá trị không phải
+  số → `ConfigError` (không lặng lẽ lấy mặc định).
+- Không giữ khe threadpool dùng chung khi chờ; generator được lặp VÀ đóng trên
+  chính luồng bơm (`GeneratorExit` đi xuyên `closing(...)` của gateway và
+  provider). Mọi đường thoát (xong, lỗi, ngắt kết nối/huỷ) gọi `pump.stop()`
+  trong `finally`: luồng thoát ở sự kiện KẾ TIẾP của provider, muộn nhất khi
+  read-timeout của chính provider nổ — không mồ côi vĩnh viễn.
+- Giới hạn đã biết (chấp nhận cho V1): hàng đợi không có trần (trần thật là
+  `max_output_tokens`); sau khi client ngắt, luồng bơm còn giữ kết nối httpx tới
+  sự kiện kế hoặc read-timeout của provider — số luồng sống có thể vượt
+  `FAS_AI_MAX_STREAMS` trong chốc lát với provider im lặng (RPM chặn trần).
+- Lỗi phía TRÊN tầng provider (gateway đã tự đổi mọi lỗi provider thành
+  `ErrorEvent`) → `error{ai_provider_unavailable}` với thông điệp cố định;
+  nội dung ngoại lệ chỉ vào log.
+- Test: `server/tests/test_ai_heartbeat.py` — unit bơm (thứ tự, im lặng,
+  stop đóng generator trên luồng bơm, lỗi, huỷ giữa lúc chờ không mất gì) +
+  uvicorn THẬT qua socket thô (TestClient đệm body nên che mất heartbeat):
+  heartbeat giữa hai delta, delta giữ nguyên, event loop không bị chặn, ngắt
+  kết nối lúc im lặng → lưu `stopped`, nhả khe stream, không rò luồng.
+
+### B. Story mode — thực tế nhận được gì
+
+| Nguồn | Production V1 |
+|---|---|
+| Trích đoạn chương đang mở (`chapter_id` của hội thoại) | **CÓ** — tối đa `MAX_CHAPTER_EXCERPT_CHARS` = 6000 ký tự ĐẦU chương, bọc `DỮ LIỆU KHÔNG ĐÁNG TIN`, qua `redact`; dài hơn thì prompt ghi rõ "đã cắt" |
+| Chương khác / cả bộ truyện / tìm theo câu hỏi (vector) | **KHÔNG** — `retrieve_story_chunks` chưa nối chỉ mục vector nên luôn rỗng; nay còn fail-closed nếu thiếu hàm kiểm quyền |
+| Tiến độ đọc (`current_chapter_index`) | chỉ dùng cho đường vector (chưa nối) |
+
+Quyền (kiểm LẠI mỗi lượt, không cache) = ĐÚNG luật của `GET /api/chapters/{id}`
+(`_can_read_chapter`): chương phải thuộc đúng `novel_id`; TRUYỆN CHA quyết định
+(đã xuất bản, hoặc là chủ) — chương mồ côi bị từ chối. `Chapter.state` KHÔNG
+được xét: không đường tạo chương nào đặt nó thành PUBLISHED, nên xét nó làm mọi
+chương thật bị từ chối với mọi độc giả (review độc lập bắt được). Chương gắn với
+HỘI THOẠI lúc tạo (nút "Hỏi về chương này"); prompt ghi rõ điều đó kèm tiêu đề,
+để câu hỏi về một chương khác nhận câu trả lời trung thực. Không có trích đoạn
+(chưa nối, không quyền, thiếu id, chương rỗng, lỗi kho) → prompt nhận
+`STORY_NO_CHAPTER_NOTE`: mô hình phải nói là chưa đọc được chương, KHÔNG
+đoán tình tiết. Prompt `story` tự nhận "bản beta" và nói đúng phạm vi.
+Nối dây ở `server/main.py::ai_tool_ctx` (`build_chapter_excerpt_fn` +
+`build_may_read_novel_fn`, dùng `store` thật). Test:
+`server/tests/test_ai_story_mode.py`.
+
+### Admin AI — chuẩn bị tối thiểu (KHÔNG xây `/admin/ai`)
+
+| Nhu cầu `/admin/ai` sau này | Hiện trạng sau release gate |
+|---|---|
+| Bật/tắt provider, ưu tiên | `AiGateway.provider_chain` (thứ tự = ưu tiên, vắng = tắt) — đọc LẠI mỗi lượt (chụp danh sách đầu lượt), đổi lúc chạy có hiệu lực từ lượt KẾ |
+| Model | `AiGateway.model_overrides[mode][provider]` — cũng đọc mỗi lượt |
+| Sức khoẻ | `AiGateway.health()` (chỉ phía server, chưa route nào lộ): enabled, priority, cooling_down_s, consecutive_failures, usage — không khoá/URL |
+| Cooldown 429 | MỚI: 429 → `CircuitBreaker.cool_down` NGAY theo `Retry-After` (kẹp 1–600 s; thiếu/dạng ngày → 30 s), không chờ 3 lỗi liên tiếp; không bao giờ rút ngắn cửa sổ đang mở |
+| Bộ đếm usage theo provider | MỚI: provider/model phục vụ lượt được ghi vào `ai_messages.provider_name/model` (sự kiện nội bộ `ProviderServed`, KHÔNG gửi qua SSE, không trả ở `GET /conversations/{id}`) + `usage()` trong tiến trình |
+| Trọng số, trần request/token theo ngày cho TỪNG provider | CHƯA — cần sổ cái theo provider (bổ sung thuần: một collection mới, ví dụ `ai_provider_usage_daily`, và một nguồn chính sách đọc ở đầu `stream()`); schema/interface hiện tại không chặn việc này |
+
+Test: `server/tests/test_ai_admin_prep.py`.
 
 ### Thứ chưa làm (ngoài phạm vi backend-foundation của mission này)
 

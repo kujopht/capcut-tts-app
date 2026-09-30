@@ -131,4 +131,26 @@ class CircuitBreaker:
         state = self._state.setdefault(provider_name, _BreakerState())
         state.consecutive_failures += 1
         if state.consecutive_failures >= self._threshold:
-            state.open_until = self._clock() + self._open_seconds
+            until = self._clock() + self._open_seconds
+            # Never SHORTEN a longer window already opened by `cool_down` (a
+            # 429's Retry-After) — a concurrent stream's 5xx must not cut it.
+            state.open_until = until if state.open_until is None else max(state.open_until, until)
+
+    def cool_down(self, provider_name: str, seconds: float) -> None:
+        """Open NOW for `seconds` (a 429 is an explicit "stop", not one of
+        `failure_threshold` random failures). Never SHORTENS an existing
+        open window; counts as a failure too."""
+        state = self._state.setdefault(provider_name, _BreakerState())
+        state.consecutive_failures += 1
+        until = self._clock() + max(0.0, float(seconds))
+        state.open_until = until if state.open_until is None else max(state.open_until, until)
+
+    def snapshot(self) -> Dict[str, Dict[str, float]]:
+        """Read model for health/admin views: per provider, consecutive
+        failures and seconds left in the open window (0 = closed)."""
+        now = self._clock()
+        return {
+            name: {"consecutive_failures": s.consecutive_failures,
+                   "open_for_s": max(0.0, (s.open_until or now) - now)}
+            for name, s in self._state.items()
+        }

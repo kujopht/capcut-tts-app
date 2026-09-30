@@ -29,3 +29,19 @@ export const MUSIC_ENABLED = process.env.NEXT_PUBLIC_MUSIC_ENABLED === "1";
  * một tính năng nửa vời trên production.
  */
 export const CHAT_V1_ENABLED = process.env.NEXT_PUBLIC_CHAT_V1_ENABLED === "1";
+
+/**
+ * `AI_ASSISTANT_ENABLED` — Fanfic AI Assistant V1 (`/api/ai/*`, xem
+ * `docs/` thiết kế nền móng). TẮT mặc định: chưa bật thì KHÔNG có nút mở trợ
+ * lý (desktop lẫn mobile), không mục "Trợ lý AI" trong menu tài khoản, và
+ * `/assistant` báo chưa mở — 0 request `/api/ai/*` nào rời trình duyệt.
+ *
+ * Bật cần CẢ HAI: build web với `NEXT_PUBLIC_AI_ASSISTANT_ENABLED=1` VÀ máy
+ * chủ `FAS_AI_ASSISTANT_V1=1` (thiếu máy chủ thì `GET /api/ai/availability`
+ * trả `enabled=false` và giao diện im lặng, không tự bật một tính năng
+ * nửa vời trên production — cùng khuôn với `CHAT_V1_ENABLED`).
+ *
+ * Tên/model provider KHÔNG BAO GIỜ lộ ra người dùng thường — chỉ tên hiển thị
+ * (`availability.name`) và mode.
+ */
+export const AI_ASSISTANT_ENABLED = process.env.NEXT_PUBLIC_AI_ASSISTANT_ENABLED === "1";

@@ -20,6 +20,7 @@ import { ChatDock } from "@/components/chat/ChatDock";
 import { AiProvider } from "@/components/ai/AiProvider";
 import { AiLauncher } from "@/components/ai/AiLauncher";
 import { AiPanel } from "@/components/ai/AiPanel";
+import { AiCompanionGate } from "@/components/ai/companion/AiCompanionGate";
 import "@/components/ai/ai.css";
 
 // Mo ta cu noi ve viec tao audio truoc tien. San pham nay la nen tang doc va
@@ -221,6 +222,9 @@ export default function RootLayout({
                 báo chưa mở (`AiLauncher`/`AiPanel` tự trả `null`). */}
             <AiLauncher />
             <AiPanel />
+            {/* Linh vật Ink Scout (cờ NEXT_PUBLIC_AI_COMPANION_ENABLED, mặc định TẮT —
+                tắt thì không một byte mã/asset linh vật nào được tải). */}
+            <AiCompanionGate variant="floating" />
           </AudioEngineProvider>
           </AiProvider>
           </ChatProvider>

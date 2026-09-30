@@ -379,3 +379,36 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
     background: var(--bg);
   }
 }
+
+/* --------------------------------------------------------- Ink Scout (cờ NEXT_PUBLIC_AI_COMPANION_ENABLED)
+  Linh vật là trang trí: KHÔNG nhận focus, KHÔNG bắt con trỏ (chỉ bật ở vị trí nhà
+  để có trạng thái hover). z-index 54 — DƯỚI Chat Dock (55), nút mở + panel AI
+  (56): chồng lấn thì các lớp đó luôn thắng, và khi nhảy lên panel linh vật hiện
+  ra "từ sau panel". Vị trí ngồi luôn tính dưới đáy `.site-header`.
+  Runtime tự đặt kích thước + `translate(x,y)` cho host; KHÔNG bao giờ lật ngang
+  (không scaleX âm ở bất cứ đâu — vệt tóc/cổ áo có bên trái/phải cố định). */
+.ai-companion { pointer-events: none; }
+.ai-companion-host { pointer-events: none; }
+.ai-companion-floating {
+  --ai-dock-offset: 0px;
+  position: fixed;
+  /* ngay bên trái nút mở trợ lý (52px + 6px khe) */
+  right: calc(74px + var(--ai-dock-offset));
+  bottom: 88px;
+  z-index: 54;
+  width: 96px;
+  height: 96px;
+  transition: opacity var(--dur-fast, 0.15s) var(--ease, ease);
+}
+body:has(.mini) .ai-companion-floating { bottom: 152px; }
+@media (max-width: 1023px) { .ai-companion-floating { display: none; } }
+.ai-companion-nha .ai-companion-host { pointer-events: auto; }
+.ai-companion-an { opacity: 0; visibility: hidden; }
+.ai-companion-inline {
+  display: flex;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding-top: var(--s2);
+}
+.ai-companion-inline.ai-companion-an { display: none; }
+@media (prefers-reduced-motion: reduce) { .ai-companion-floating { transition: none; } }

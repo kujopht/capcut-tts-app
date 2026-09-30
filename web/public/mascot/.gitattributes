@@ -1,0 +1,4 @@
+# Ink Scout web subset: byte-identical copies of the approved pack (sha256 in
+# ink-scout/SUBSET.json). No end-of-line conversion on any OS — a CRLF checkout
+# of ink-scout.js would no longer be the approved runtime.
+* -text

@@ -21,6 +21,7 @@ import { AiControls } from "@/components/ai/AiControls";
 import { AiConversation } from "@/components/ai/AiConversation";
 import { AiWriterBar } from "@/components/ai/AiWriterBar";
 import { useAi } from "@/components/ai/AiProvider";
+import { AiCompanionGate } from "@/components/ai/companion/AiCompanionGate";
 import { AI_ASSISTANT_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 
@@ -74,6 +75,7 @@ export default function AssistantPage() {
     return (
       <main className="ai-trang wrap stack-2">
         <h1 className="page-title">Trợ lý AI</h1>
+        <AiCompanionGate variant="inline" />
         <p className="hint">Trợ lý AI hiện chưa khả dụng trên máy chủ.</p>
       </main>
     );
@@ -82,6 +84,9 @@ export default function AssistantPage() {
   return (
     <main className="ai-trang">
       <AiControls onClose={veTruoc} />
+      {/* Linh vật nằm TRONG luồng nội dung (giữa đầu trang và hội thoại) — không
+          bao giờ đè lên ô soạn; tự thu lại khi bàn phím ảo mở. */}
+      <AiCompanionGate variant="inline" />
       <AiWriterBar />
       <AiConversation />
       <AiComposer />

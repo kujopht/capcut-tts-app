@@ -4431,6 +4431,17 @@ messaging_runtime = _build_messaging_runtime(settings, user_exists=_nguoi_chat_t
                                              viewer_of=_nguoi_gui_nhan_dan)
 app.include_router(build_messaging_router(messaging_runtime, resolve_profile=_nguoi_xem_chat))
 
+# =============================================================================
+# Fanfic AI Assistant V1 — `/api/ai/*`, behind FAS_AI_ASSISTANT_V1 (default OFF).
+# COMPLETELY SEPARATE from `/api/chat/ask` (reader AI, unchanged) and from
+# `server/messaging/**` (Chat V1 nhắn tin, unchanged) — see docs/ai/AI_ASSISTANT_V1.md.
+# =============================================================================
+from server.ai_assistant.routes import build_ai_router  # noqa: E402
+from server.ai_assistant.runtime import build_ai_runtime  # noqa: E402
+
+ai_assistant_runtime = build_ai_runtime(settings)
+app.include_router(build_ai_router(ai_assistant_runtime, resolve_profile=current_profile))
+
 
 def _chat_cho_phep(user_id: str) -> None:
     """Cung luat voi `server/messaging/routes.py`: may chu tat -> 503; bat nhung nguoi nay ngoai khan gia (canary)

@@ -25,10 +25,15 @@ _MODE_PROMPTS = {
         "Bạn là {name}, trợ lý AI của Fanfic World — trò chuyện, gợi ý truyện, "
         "trả lời câu hỏi chung về nền tảng."
     ),
+    # Release gate B: nói ĐÚNG thứ mô hình nhận được — tối đa phần đầu của
+    # CHƯƠNG ĐANG MỞ (xem `tools.MAX_CHAPTER_EXCERPT_CHARS`), không tra cứu được
+    # chương khác hay cả bộ truyện.
     "story": (
-        "Bạn là {name}, trợ lý đọc truyện của Fanfic World. Chỉ trả lời dựa trên "
-        "chương/truyện mà người dùng đang đọc và dữ liệu truy xuất được cung cấp — "
-        "không tiết lộ tình tiết vượt quá tiến độ đọc của người dùng."
+        "Bạn là {name}, trợ lý đọc truyện của Fanfic World (bản beta). Bạn CHỈ được "
+        "cung cấp nội dung CHƯƠNG ĐANG MỞ của người dùng (có thể đã bị cắt bớt phần "
+        "cuối) — không đọc được các chương khác hay toàn bộ truyện. Chỉ trả lời dựa "
+        "trên phần chương được cung cấp; hỏi về chương khác thì nói rõ là bạn chưa "
+        "xem được. Không tiết lộ tình tiết vượt quá tiến độ đọc của người dùng."
     ),
     "support": (
         "Bạn là {name}, trợ lý hỗ trợ kỹ thuật của Fanfic World. Chỉ dùng chẩn đoán "
@@ -42,6 +47,16 @@ _MODE_PROMPTS = {
         "riêng của họ. Chỉ lưu vào dự án khi người dùng bấm nút xác nhận."
     ),
 }
+
+
+#: Story mode turn WITHOUT any chapter text (unwired, no permission, no
+#: chapter id, empty chapter) — stated explicitly so the model says it cannot
+#: see the chapter instead of guessing a plot.
+STORY_NO_CHAPTER_NOTE = (
+    "LƯU Ý: lượt này KHÔNG có nội dung chương nào được cung cấp cho bạn. Đừng đoán "
+    "hay bịa tình tiết — nói rõ là bạn chưa đọc được chương này, và mời người dùng "
+    "dán đoạn văn họ muốn hỏi."
+)
 
 
 def system_prompt(mode: str, *, assistant_name: str) -> str:

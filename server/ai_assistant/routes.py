@@ -3,24 +3,25 @@ Routes — Fanfic AI Assistant V1 §10. `FAS_AI_ASSISTANT_V1=0` (default) ->
 every route except `GET /api/ai/availability` returns 503 `ai_not_enabled`.
 Streaming (`POST /api/ai/conversations/{id}/messages`) never blocks the
 event loop: the gateway's provider iterator is a plain sync generator
-(httpx sync streaming under the hood) consumed via
-`starlette.concurrency.iterate_in_threadpool` — each `next()` call runs in
-the threadpool, not on the asyncio loop (contract §0.2's explicit lesson:
-"a Render process starved of threads hangs even /api/health").
+(httpx sync streaming under the hood) iterated on a dedicated pump thread
+(`stream_pump.py`) — never on the asyncio loop (contract §0.2's explicit
+lesson: "a Render process starved of threads hangs even /api/health"). The
+route waits on the pump with a timeout and sends an SSE comment heartbeat
+(`SSE_HEARTBEAT`) every `AiRuntime.heartbeat_s` seconds of provider silence.
 """
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import hmac
 import json
+import logging
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 import anyio
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
-from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from typing_extensions import Annotated
@@ -29,7 +30,7 @@ from server.ai_assistant.config import (
     MAX_CONVERSATIONS_PER_USER, MAX_USER_MESSAGE_CHARS, MODES, estimate_tokens,
 )
 from server.ai_assistant.context_builder import build_context
-from server.ai_assistant.gateway import ErrorEvent
+from server.ai_assistant.gateway import ErrorEvent, ProviderServed
 from server.ai_assistant.limits import (
     AiBudgetExceeded, AiBusy, AiRateLimited, budget_status, enforce_budget, record_usage,
 )
@@ -38,11 +39,15 @@ from server.ai_assistant.memory import (
     now_iso, redact,
 )
 from server.ai_assistant.runtime import AiRuntime
+from server.ai_assistant.stream_pump import END, SILENCE, PumpError, StreamPump
+from server.ai_assistant.prompts import STORY_NO_CHAPTER_NOTE
 from server.ai_assistant.tools import (
-    UNTRUSTED_DATA_PREAMBLE, citations_for, format_web_results_for_prompt,
-    retrieve_story_chunks, search_library, web_search,
+    UNTRUSTED_DATA_PREAMBLE, citations_for, current_chapter_excerpt,
+    format_web_results_for_prompt, retrieve_story_chunks, search_library, web_search,
 )
 from server.llm_gateway.chat_provider import Delta, Done, UsageEvent
+
+log = logging.getLogger("fanfic.ai_assistant")
 
 ConvId = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
 ProjectId = ConvId
@@ -101,6 +106,20 @@ def _new_id() -> str:
 
 def _sse(event: str, data: Dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+#: SSE COMMENT line (spec: a line starting with ":" is ignored by every
+#: EventSource/parser) — keeps idle proxies from closing the response while a
+#: provider is silent, and can never be mistaken for assistant content: it
+#: has no `event:`/`data:` field at all. The web client's parser
+#: (`web/src/lib/ai/sse.ts::tachKhungSse`) drops ":" lines before framing.
+SSE_HEARTBEAT = ": ping\n\n"
+
+#: A failure ABOVE the provider layer (the gateway converts every provider
+#: failure itself) — reuses a stable §10 code rather than inventing one the
+#: client doesn't know; the real exception stays in the server log only.
+_INTERNAL_ERROR = {"code": "ai_provider_unavailable",
+                   "message": "Trợ lý AI đang tạm gián đoạn — thử lại sau."}
 
 
 def _tier_of(profile: Any) -> str:
@@ -393,6 +412,23 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
 
             retrieval_block = ""
             citations: List[Any] = []
+            if conv.mode == "story":
+                # Story mode V1 (release gate B): the ONLY story text is a
+                # capped excerpt of the chapter the user has open, and only
+                # if they may read it (checked per turn). No excerpt -> an
+                # explicit "you have no chapter text" note, so the model says
+                # so instead of inventing plot.
+                excerpt = current_chapter_excerpt(
+                    rt.tool_ctx, novel_id=conv.context_novel_id,
+                    chapter_id=conv.context_chapter_id, user_id=profile.user_id)
+                if excerpt is not None:
+                    tieu_de = redact(excerpt.chapter_title) or "(không tên)"
+                    cat = f", đã cắt còn {len(excerpt.text)} ký tự đầu" if excerpt.truncated else ""
+                    retrieval_block = (
+                        UNTRUSTED_DATA_PREAMBLE
+                        + f"\nCHƯƠNG ĐANG MỞ — «{tieu_de}»{cat}:\n" + redact(excerpt.text))
+                else:
+                    retrieval_block = STORY_NO_CHAPTER_NOTE
             if conv.mode == "story" and conv.context_novel_id:
                 # L12/M10 (review finding): honor the conversation's ACTUAL
                 # `current_chapter_index` (was hard-coded to `1` regardless
@@ -411,8 +447,11 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                     # authored, not the operator) — wrap with the same
                     # preamble already used for web results (contract §8),
                     # and redact it too (M7) before it ever reaches a turn.
-                    retrieval_block = UNTRUSTED_DATA_PREAMBLE + "\nDỮ LIỆU TRUYỆN TRUY XUẤT ĐƯỢC:\n" + \
+                    # Appended AFTER the current-chapter block: this path
+                    # stays fail-closed until a vector index is wired.
+                    retrieved = UNTRUSTED_DATA_PREAMBLE + "\nDỮ LIỆU TRUYỆN TRUY XUẤT ĐƯỢC:\n" + \
                         "\n---\n".join(redact(r.chunk_text) for r in results)
+                    retrieval_block = retrieval_block + "\n\n" + retrieved
             if payload.use_library:
                 hits = search_library(rt.tool_ctx, redacted_content)
                 if hits:
@@ -458,6 +497,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             final_status = "complete"
             error_payload: Optional[Dict[str, Any]] = None
             finalize_result: Dict[str, Any] = {}
+            served: Dict[str, str] = {"provider_name": "", "model": ""}
 
             async def _finalize() -> None:
                 """Records usage + persists the assistant message — MUST run
@@ -507,7 +547,9 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                         message_id=assistant_message_id, conversation_id=conversation_id,
                         user_id=profile.user_id, role="assistant", content=final_text,
                         status=final_status, citations_json=citations_json,
-                        provider_name="", model="", input_tokens=counted_in,
+                        # Caps = `ai_messages` attribute sizes in scripts/setup_appwrite.py.
+                        provider_name=served["provider_name"][:40], model=served["model"][:80],
+                        input_tokens=counted_in,
                         output_tokens=counted_out)
                     # Same store as the user turn above (contract §5): durable
                     # when memory is on, TTL-bounded in-process cache when off
@@ -523,31 +565,56 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 finalize_result["budget"] = budget
 
             yield _sse("meta", {"message_id": assistant_message_id, "conversation_id": conversation_id})
+            pump: Optional[StreamPump] = None
             try:
                 gen = rt.gateway.stream(turns, mode=conv.mode,
                                        user_ref=_hashed_user_ref(rt, profile.user_id))
-                # R3 (review finding): `contextlib.closing` guarantees the
-                # provider's underlying generator (which holds the httpx
-                # streaming context manager / upstream connection open) is
-                # closed DETERMINISTICALLY the moment we stop iterating —
-                # on a client disconnect (`break` below) or on any
-                # exception — rather than relying on eventual GC.
-                with contextlib.closing(gen):
-                    async for ev in iterate_in_threadpool(gen):
+                # The provider generator runs on the pump's own thread
+                # (never on the event loop, contract §0.2) and is closed
+                # THERE under `contextlib.closing` (R3) the moment
+                # iteration stops — see `stream_pump.py`. Waiting with a
+                # timeout is what makes the heartbeat possible: a silent
+                # provider yields `SILENCE` every `rt.heartbeat_s` seconds
+                # instead of one opaque, unbounded `await`.
+                pump = StreamPump(gen).start()
+                while True:
+                    ev = await pump.next(rt.heartbeat_s)
+                    if ev is SILENCE:
                         if await request.is_disconnected():
                             final_status = "stopped"
                             break
-                        if isinstance(ev, Delta):
-                            text_parts.append(ev.text)
-                            yield _sse("delta", {"text": ev.text})
-                        elif isinstance(ev, UsageEvent):
-                            in_tok, out_tok = ev.input_tokens, ev.output_tokens
-                        elif isinstance(ev, ErrorEvent):
-                            final_status = "error"
-                            error_payload = {"code": ev.code, "message": ev.message}
-                            break
-                        elif isinstance(ev, Done):
-                            pass
+                        yield SSE_HEARTBEAT
+                        continue
+                    if ev is END:
+                        break
+                    if await request.is_disconnected():
+                        final_status = "stopped"
+                        break
+                    if isinstance(ev, PumpError):
+                        # The gateway already converts every provider
+                        # failure into an `ErrorEvent`; reaching this means a
+                        # bug above the provider layer. Fixed message only —
+                        # the exception text stays in the server log.
+                        log.error("ai_assistant: stream pump failed: %s", type(ev.exc).__name__,
+                                  exc_info=ev.exc)
+                        final_status = "error"
+                        error_payload = dict(_INTERNAL_ERROR)
+                        break
+                    if isinstance(ev, Delta):
+                        text_parts.append(ev.text)
+                        yield _sse("delta", {"text": ev.text})
+                    elif isinstance(ev, ProviderServed):
+                        # Server-side only (persisted for per-provider usage
+                        # counting); NEVER forwarded over SSE (§0.3).
+                        served["provider_name"], served["model"] = ev.provider_name, ev.model
+                    elif isinstance(ev, UsageEvent):
+                        in_tok, out_tok = ev.input_tokens, ev.output_tokens
+                    elif isinstance(ev, ErrorEvent):
+                        final_status = "error"
+                        error_payload = {"code": ev.code, "message": ev.message}
+                        break
+                    elif isinstance(ev, Done):
+                        pass
             except BaseException:
                 # B2 (review finding): reached on a real client disconnect —
                 # the task group above cancels this coroutine mid-`async
@@ -560,6 +627,11 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 final_status = "stopped"
                 raise
             finally:
+                if pump is not None:
+                    # Every exit path (end, error, disconnect/cancel): the
+                    # pump thread exits at the provider's next event and
+                    # closes the generator itself (no leaked worker).
+                    pump.stop()
                 try:
                     with anyio.CancelScope(shield=True):
                         await _finalize()

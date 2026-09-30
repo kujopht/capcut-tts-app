@@ -42,6 +42,9 @@ class AiRuntime:
     daily_tokens_premium: int = 200000
     rpm: int = 8
     web_search_enabled: bool = False
+    #: Giay im lang toi da truoc khi luong SSE gui mot dong chu thich
+    #: `: ping` (xem `stream_pump.py`). Settings kep vao [15, 25]; bai test
+    #: dat truc tiep gia tri nho de chay nhanh va tat dinh.
     heartbeat_s: float = 15.0
     #: M8 (review finding): HMAC-SHA256 key for `routes.py::_hashed_user_ref`
     #: — never the raw user id is sent to a provider as `user_ref`. Sourced
@@ -123,4 +126,5 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None) -
         assistant_name=ai.assistant_name,
         daily_tokens_free=ai.daily_tokens_free, daily_tokens_premium=ai.daily_tokens_premium,
         rpm=ai.rpm, web_search_enabled=(ai.web_search_provider or "off") != "off",
+        heartbeat_s=float(getattr(ai, "heartbeat_s", 15)),
         stream_guard=StreamGuard(max_streams_per_instance=ai.max_streams), **kwargs)

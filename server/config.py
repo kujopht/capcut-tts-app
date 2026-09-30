@@ -294,6 +294,10 @@ class AiAssistantSettings:
     daily_tokens_premium: int = 200000
     rpm: int = 8
     max_streams: int = 4
+    #: Nhip heartbeat SSE (giay) khi provider IM LANG — dong chu thich `: ping`
+    #: giu ket noi song qua proxy/CDN (Cloudflare/Render cat ket noi rong
+    #: ~100 s). Luon nam trong [15, 25]; xem `_ai_assistant_settings`.
+    heartbeat_s: int = 15
     #: M8 (review finding): server-side salt for HMAC-SHA256(user_id) sent
     #: to providers as `GenerateRequest.user_ref` (its own docstring: "HASH
     #: of the real user id, never the raw id"). Empty by default — see
@@ -1061,6 +1065,9 @@ def _ai_assistant_settings() -> AiAssistantSettings:
         daily_tokens_premium=_int("FAS_AI_DAILY_TOKENS_PREMIUM", 200000),
         rpm=_int("FAS_AI_RPM", 8),
         max_streams=_int("FAS_AI_MAX_STREAMS", 4),
+        # Kep vao [15, 25]: duoi 15 s la ton bang thong/CPU vo ich, tren 25 s
+        # thi co proxy cat ket noi rong truoc khi ping kip toi.
+        heartbeat_s=max(15, min(25, _int("FAS_AI_HEARTBEAT_S", 15))),
         user_ref_salt=_env("FAS_AI_USER_REF_SALT"),
     )
 

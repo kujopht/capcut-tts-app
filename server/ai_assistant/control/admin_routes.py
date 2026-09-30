@@ -74,20 +74,25 @@ def build_ai_admin_router(plane: Optional[ControlPlane], *, reader: Callable[...
         response.headers["Cache-Control"] = "no-store"
         return {"items": _run(lambda: _plane().audit(max(1, min(int(limit), 100))))}
 
-    # ------------------------------------------------------------- write (OWNER)
-    @r.put("/api/admin/ai/global")
-    def put_global(body: Any = Body(...), p: Any = Depends(owner)) -> Dict[str, Any]:
-        b = dict(_body(body))
+    def _expected_version(b: Dict[str, Any]) -> Optional[int]:
         expected = b.pop("expected_version", None)
         if expected is not None and (isinstance(expected, bool) or not isinstance(expected, int)):
             raise HTTPException(_HTTP_422,
                                 {"code": "ai_admin_invalid", "message": "expected_version phải là số nguyên."})
+        return expected
+
+    # ------------------------------------------------------------- write (OWNER)
+    @r.put("/api/admin/ai/global")
+    def put_global(body: Any = Body(...), p: Any = Depends(owner)) -> Dict[str, Any]:
+        b = dict(_body(body))
+        expected = _expected_version(b)
         return {"controls": _run(lambda: _plane().update_controls(p.user_id, b, expected))}
 
     @r.put("/api/admin/ai/provider-types/{provider_type}")
     def put_type(provider_type: str, body: Any = Body(...), p: Any = Depends(owner)) -> Dict[str, Any]:
-        b = _body(body)
-        _run(lambda: _plane().set_provider_type(p.user_id, provider_type, b.get("enabled")))
+        b = dict(_body(body))
+        expected = _expected_version(b)
+        _run(lambda: _plane().set_provider_type(p.user_id, provider_type, b.get("enabled"), expected))
         return {"ok": True}
 
     @r.post("/api/admin/ai/slots")

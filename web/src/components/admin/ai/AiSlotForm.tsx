@@ -132,8 +132,10 @@ export function AiSlotForm({
             disabled={suaSlot}
             onChange={(e) => setSlotId(e.target.value)}
             placeholder={`vd: ${providerType.replace(/_/g, "-")}-01`}
+            maxLength={27}
             required
           />
+          <span className="hint">2–27 ký tự a-z, 0-9, “-”, “_”.</span>
           <LoiDuoi loi={loiTruong} truong="slot_id" />
         </label>
 
@@ -169,7 +171,8 @@ export function AiSlotForm({
           />
           <span className="hint">
             Không nhập API key ở đây — chủ máy chủ đặt giá trị thật vào biến môi
-            trường <code>FAS_AI_SECRET_{secretRef || "…"}</code>.
+            trường <code>FAS_AI_SECRET_{secretRef || "…"}</code>. Tên phải bắt đầu
+            bằng <code>{providerType.toUpperCase()}_</code>: khoá gắn với loại provider.
           </span>
           <LoiDuoi loi={loiTruong} truong="secret_ref" />
         </label>

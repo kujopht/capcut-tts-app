@@ -60,7 +60,11 @@ DEFAULT_MODE_PROFILES: Dict[str, str] = {
     "general": "FREE_FIRST", "story": "STORY", "writer": "WRITER", "support": "SUPPORT_SAFE",
 }
 
-SLOT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,39}$")
+#: 2-27 chars: the daily usage document id is ``{slot_id}_{yyyymmdd}`` and an
+#: Appwrite document id is at most 36 chars (27 + 1 + 8). A longer id would make
+#: every usage write fail and the slot's caps silently read as 0.
+SLOT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,26}$")
+MAX_ENDPOINT_LEN = 300  # ai_provider_slots.endpoint attribute size
 SECRET_REF_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 MODEL_RE = re.compile(r"^[A-Za-z0-9._:/@-]{1,120}$")
 API_VERSION_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}(-preview)?$")
@@ -169,13 +173,16 @@ def _endpoint_errors(provider_type: str, endpoint: str) -> Optional[str]:
         if provider_type in ("workers_ai", "azure_openai"):
             return "bắt buộc với loại provider này"
         return None
+    if len(endpoint) > MAX_ENDPOINT_LEN:
+        return f"tối đa {MAX_ENDPOINT_LEN} ký tự"
     try:
         u = urlsplit(endpoint)
+        port = u.port  # raises ValueError for a non-numeric port
     except ValueError:
         return "URL không hợp lệ"
     if u.scheme != "https" or not u.hostname or u.username or u.password or u.query or u.fragment:
         return "chỉ nhận https://host/đường-dẫn (không user, query hay fragment)"
-    if u.port not in (None, 443):
+    if port not in (None, 443):
         return "chỉ cổng 443"
     host = u.hostname.lower()
     allowed = ENDPOINT_HOSTS.get(provider_type, ())
@@ -186,18 +193,30 @@ def _endpoint_errors(provider_type: str, endpoint: str) -> Optional[str]:
     return None
 
 
+def secret_ref_prefix(provider_type: str) -> str:
+    """`gemini` -> `GEMINI_`, `azure_openai` -> `AZURE_OPENAI_`."""
+    return provider_type.upper() + "_"
+
+
 def validate_slot(slot: ProviderSlot) -> None:
     e: List[Dict[str, str]] = []
     if not SLOT_ID_RE.match(slot.slot_id or ""):
-        e.append({"field": "slot_id", "message": "2–40 ký tự a-z, 0-9, '-', '_' (bắt đầu bằng chữ/số)"})
+        e.append({"field": "slot_id", "message": "2–27 ký tự a-z, 0-9, '-', '_' (bắt đầu bằng chữ/số)"})
     if slot.provider_type not in PROVIDER_TYPES:
         e.append({"field": "provider_type", "message": "loại provider không hỗ trợ"})
     if not (slot.label or "").strip() or len(slot.label) > 60:
         e.append({"field": "label", "message": "1–60 ký tự"})
     if not SECRET_REF_RE.match(slot.secret_ref or ""):
         e.append({"field": "secret_ref", "message": "TÊN tham chiếu (A-Z, 0-9, '_', 3–64 ký tự) — không phải khoá"})
-    if not MODEL_RE.match(slot.model or ""):
-        e.append({"field": "model", "message": "1–120 ký tự A-Z a-z 0-9 . _ : / @ -"})
+    elif slot.provider_type in PROVIDER_TYPES and not slot.secret_ref.startswith(secret_ref_prefix(slot.provider_type)):
+        # A key is bound to its provider type: a Gemini key can never be sent to
+        # an Azure (or any other type's) endpoint by re-pointing a slot.
+        e.append({"field": "secret_ref",
+                  "message": f"phải bắt đầu bằng {secret_ref_prefix(slot.provider_type)} (khoá gắn với loại provider)"})
+    if not MODEL_RE.match(slot.model or "") or ".." in (slot.model or ""):
+        e.append({"field": "model", "message": "1–120 ký tự A-Z a-z 0-9 . _ : / @ - (không có '..')"})
+    elif slot.provider_type == "azure_openai" and "/" in slot.model:
+        e.append({"field": "model", "message": "tên deployment Azure không chứa '/'"})
     if slot.provider_type in PROVIDER_TYPES:
         msg = _endpoint_errors(slot.provider_type, slot.endpoint)
         if msg:
@@ -271,6 +290,13 @@ def validate_config(cfg: ControlConfig) -> None:
 # ------------------------------------------------------------------ (de)serialisation
 
 
+def _strict_bool(v: Any) -> bool:
+    """`bool("false")` is True — a JSON body must carry a real boolean."""
+    if not isinstance(v, bool):
+        raise ConfigValidationError([{"field": "enabled", "message": "phải là true/false"}])
+    return v
+
+
 def slot_from_dict(d: Mapping[str, Any]) -> ProviderSlot:
     """From an API body or stored row. Unknown keys are ignored; missing keys
     take the dataclass default. Raises ConfigValidationError on bad types."""
@@ -278,7 +304,7 @@ def slot_from_dict(d: Mapping[str, Any]) -> ProviderSlot:
         return ProviderSlot(
             slot_id=str(d.get("slot_id", "")), provider_type=str(d.get("provider_type", "")),
             label=str(d.get("label", "")), secret_ref=str(d.get("secret_ref", "")),
-            model=str(d.get("model", "")), enabled=bool(d.get("enabled", False)),
+            model=str(d.get("model", "")), enabled=_strict_bool(d.get("enabled", False)),
             endpoint=str(d.get("endpoint", "") or ""), api_version=str(d.get("api_version", "") or ""),
             priority=d.get("priority", 50), weight=d.get("weight", 10),
             daily_request_cap=d.get("daily_request_cap", 0), daily_token_cap=d.get("daily_token_cap", 0),
@@ -328,5 +354,8 @@ def controls_with(c: GlobalControls, patch: Mapping[str, Any]) -> GlobalControls
         raise ConfigValidationError([{"field": k, "message": "không được sửa qua API này"} for k in unknown])
     kw = dict(patch)
     if "mode_profiles" in kw:
-        kw["mode_profiles"] = dict(kw["mode_profiles"] or {})
+        mp = kw["mode_profiles"] or {}
+        if not isinstance(mp, Mapping) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in mp.items()):
+            raise ConfigValidationError([{"field": "mode_profiles", "message": "phải là object {chế độ: hồ sơ}"}])
+        kw["mode_profiles"] = dict(mp)
     return replace(c, **kw)

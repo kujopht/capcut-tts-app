@@ -20,11 +20,13 @@ Bảng điều khiển cho **Owner/Admin** để định tuyến provider, đặ
 
 `secrets.py::SecretResolver` đọc biến môi trường **lúc gọi** (không cache vào cấu hình). Đổi khoá = đổi biến môi trường + khởi động lại; vân tay đổi theo, client provider được dựng lại.
 
+**Khoá gắn với loại provider.** `secret_ref` phải bắt đầu bằng tên loại viết hoa: `GEMINI_…`, `GROQ_…`, `WORKERS_AI_…`, `QWEN_…`, `AZURE_OPENAI_…`, `OPENROUTER_…`. Nhờ vậy không thể trỏ lại một slot để gửi khoá Gemini tới endpoint Azure (hay loại khác).
+
 ## 2. Mô hình cấu hình
 
 ### Slot provider (`ProviderSlot`)
 
-`slot_id`, `provider_type` (`gemini`, `groq`, `workers_ai`, `qwen`, `azure_openai`, `openrouter`), `label`, `secret_ref`, `model`, `enabled`, `endpoint` (bắt buộc với `workers_ai`/`azure_openai`; host nằm trong danh sách cho phép theo loại — chống SSRF), `api_version` (Azure), `priority` (0–99, nhỏ thử trước), `weight` (1–100), `daily_request_cap`, `daily_token_cap`, `rpm_soft_cap`, `tpm_soft_cap` (0 = không trần), `workloads` (`general`, `story`, `support`, `writer`, `web_search`), giá micro-USD / 1M token (vào/ra) để ước tính chi phí.
+`slot_id` (2–27 ký tự: id tài liệu usage là `{slot_id}_{yyyymmdd}` và Appwrite giới hạn 36 ký tự), `provider_type` (`gemini`, `groq`, `workers_ai`, `qwen`, `azure_openai`, `openrouter`), `label`, `secret_ref`, `model` (không có `..`; với Azure không có `/`), `enabled`, `endpoint` (bắt buộc với `workers_ai`/`azure_openai`; ≤300 ký tự; host nằm trong danh sách cho phép theo loại — chống SSRF), `api_version` (Azure), `priority` (0–99, nhỏ thử trước), `weight` (1–100), `daily_request_cap`, `daily_token_cap`, `rpm_soft_cap`, `tpm_soft_cap` (0 = không trần), `workloads` (`general`, `story`, `support`, `writer`, `web_search`), giá micro-USD / 1M token (vào/ra) để ước tính chi phí.
 
 **Gemini project pool** = nhiều slot `provider_type=gemini`, mỗi slot một `secret_ref` riêng (`GEMINI_PROJECT_01`…). Cooldown, bộ đếm, sức khoẻ tính **theo slot**, nên project 03 bị 429 không kéo project 01 xuống.
 
@@ -37,7 +39,7 @@ Bảng điều khiển cho **Owner/Admin** để định tuyến provider, đặ
 | `WRITER` | qwen → azure_openai → gemini |
 | `STORY` | gemini → groq → qwen |
 | `SUPPORT_SAFE` | azure_openai → qwen (chỉ slot có workload `support`) |
-| `WEB_SEARCH` | gemini → qwen (lượt có tìm web; công cụ tìm web định tuyến riêng qua `web_search_tool`) |
+| `WEB_SEARCH` | gemini → qwen (LLM cho lượt có tìm web). Công cụ tìm web THẬT vẫn do cấu hình `web_search_provider` hiện có quyết định; `web_search_tool` trong control plane hiện chỉ nhận `off` và để dành cho bước sau |
 
 Chế độ → hồ sơ: `general→FREE_FIRST`, `story→STORY`, `writer→WRITER`, `support→SUPPORT_SAFE`; lượt tìm web → `web_search_profile`. Owner đổi được thứ tự, thêm/bớt bước, tắt hồ sơ.
 
@@ -49,7 +51,7 @@ Mỗi **bước** là một loại provider (cả pool: xếp theo `priority`, c
 
 ## 3. Thứ tự kiểm một lượt chat
 
-1. `admission()` (trước khi stream): công tắc tổng → 503 `ai_not_enabled`; trần toàn cục/chi phí → 429 `ai_budget_exhausted`; trần theo người dùng → 429 `ai_budget_exhausted`. Ngân sách token theo tier cũ vẫn áp dụng.
+1. `admission()` (trước khi stream): công tắc tổng → 503 `ai_not_enabled`; trần toàn cục/chi phí → 429 `ai_budget_exhausted`; trần theo người dùng → 429 `ai_budget_exhausted`. **Không đọc được bộ đếm** (kho sập, hôm nay chưa có số nào trong bộ nhớ) → 503 `ai_storage_unavailable`: số không biết không bao giờ được coi là 0. Ngân sách token theo tier cũ vẫn áp dụng.
 2. `plan()`: dựng danh sách slot theo hồ sơ, mỗi slot kèm lý do bỏ qua hoặc "đủ điều kiện": `slot_disabled`, `type_disabled`, `workload_not_allowed`, `missing_secret`, `cooldown`, `request_cap`, `token_cap`, `rpm_soft_cap`, `tpm_soft_cap`.
 3. `ControlledGateway.stream()`: thử lần lượt. 429 → cooldown theo `Retry-After` (1–600 s, mặc định 30 s); lỗi khác → circuit breaker theo slot. Không còn slot nào → sự kiện lỗi thân thiện (`ai_budget_exhausted` nếu do trần, `ai_no_provider` nếu không có gì bật/cấu hình).
 4. Kết thúc lượt: cộng usage/chi phí cho **đúng slot đã phục vụ** (`ai_provider_usage_daily`), cùng lúc với ledger theo người dùng như trước.
@@ -84,7 +86,14 @@ Lỗi: 422 `ai_admin_invalid` (kèm danh sách `{field, message}`), 409 `ai_admi
 
 ## 6. Nhật ký audit
 
-Mọi thay đổi ghi từng **trường**: admin_id, thời điểm, entity (`global`, `slot:<id>`, `profile:<tên>`, `provider_type:<loại>`), giá trị cũ → mới (không bí mật; `secret_ref` là tên nên được ghi). Xoá slot ghi giá trị cũ → `null`. Reset cooldown cũng được ghi.
+Mọi thay đổi ghi từng **trường**: admin_id, thời điểm, entity (`global`, `slot:<id>`, `profile:<tên>`, `provider_type:<loại>`), giá trị cũ → mới (không bí mật; `secret_ref` là tên nên được ghi). Xoá slot ghi giá trị cũ → `null`. Reset cooldown cũng được ghi. Nếu kho từ chối lần ghi audit sau khi thay đổi đã lưu, từng dòng audit được ghi vào log lỗi của máy chủ (`ai_control audit (store write failed)`) thay vì trả 503 cho một thay đổi đã áp dụng.
+
+## 6b. Đồng thời và đường sửa
+
+- Mọi thao tác ghi chạy **tuần tự trong một tiến trình**. Appwrite không có ghi có điều kiện; giữa nhiều instance vẫn có thể có lần ghi đè (xem Giới hạn).
+- **Tắt khẩn cấp luôn thắng**: `ai_enabled=false` và tắt một loại provider không bao giờ bị từ chối vì `expected_version` cũ. Bật lại thì phải có bản cấu hình hiện tại (409 nếu cũ).
+- Không tạo được slot thứ 41 (quá `MAX_SLOTS` sẽ làm cả cấu hình không hợp lệ).
+- Khi mọi dòng đọc được nhưng **cả cấu hình** không hợp lệ (ví dụ hồ sơ còn trỏ tới slot vừa bị xoá ở instance khác): AI tắt, nhưng Owner vẫn **xoá slot, sửa hồ sơ, reset cooldown** được từ `/admin/ai` để đưa cấu hình về hợp lệ. Mọi thao tác khác trả 409 cho tới lúc đó.
 
 ## 7. Giới hạn đã biết
 
@@ -92,6 +101,8 @@ Mọi thay đổi ghi từng **trường**: admin_id, thời điểm, entity (`g
 - Bộ đếm dùng đọc-sửa-ghi như `ai_usage_daily` — có thể lệch nhỏ khi hai lượt ghi cùng lúc.
 - Cấu hình được cache 15 s: đổi cấu hình có hiệu lực trong ≤15 s trên mọi instance.
 - Chi phí là **ước tính** theo giá Owner nhập, không phải hoá đơn thật.
+- Ghi tuần tự chỉ trong một instance: hai instance cùng ghi dòng `global` có thể đè nhau (Render hiện chạy một instance).
+- Danh sách host Azure là hậu tố (`.openai.azure.com`, `.cognitiveservices.azure.com`), nên một phiên Owner bị chiếm có thể trỏ slot Azure tới resource Azure của người khác cùng với khoá `AZURE_OPENAI_*`. Chỉ Owner làm được và mọi thay đổi có audit.
 
 ## 8. Rollout (mỗi bước chờ Owner duyệt)
 

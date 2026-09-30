@@ -15,6 +15,7 @@ FAIL-CLOSED rules (the whole point of this module):
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import random
@@ -26,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Deque, Dict, List, Mapping, Optional, Tuple
 
 from server.ai_assistant.control.model import (
-    DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, WORKLOADS,
+    DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, WORKLOADS,
     ConfigValidationError, ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, controls_to_dict,
     controls_with, slot_from_dict, slot_to_dict, validate_config, validate_controls, validate_profile,
     validate_slot,
@@ -44,6 +45,18 @@ from server.llm_gateway.chat_provider import ChatProvider
 from server.llm_gateway.usage_limits import CircuitBreaker
 
 log = logging.getLogger("fanfic.ai_assistant")
+
+
+def _serialized(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Run one admin mutation at a time in this process. Appwrite has no
+    conditional write, so without this two tabs (e.g. a provider toggle and the
+    emergency OFF) could each rewrite the whole `global` row from a stale read
+    and one change would be lost. Across instances the race remains (documented)."""
+    @functools.wraps(fn)
+    def wrapper(self: "ControlPlane", *a: Any, **kw: Any) -> Any:
+        with self._mut_lock:
+            return fn(self, *a, **kw)
+    return wrapper
 
 CACHE_TTL_S = 15.0
 STALE_OK_S = 600.0
@@ -103,6 +116,7 @@ class ControlPlane:
         self._active_users_fn = active_users_fn
         self._user_usage_fn = user_usage_fn
         self._lock = threading.Lock()
+        self._mut_lock = threading.RLock()
         self._cfg: Optional[ControlConfig] = None
         self._cfg_at = 0.0
         self._good_at = 0.0
@@ -139,7 +153,7 @@ class ControlPlane:
             with self._lock:
                 self._cfg, self._cfg_at, self._good_at, self.state = cfg, now, now, state
             return cfg
-        except (ControlConfigCorrupt, ConfigValidationError):
+        except (ControlConfigCorrupt, ConfigValidationError, ValueError, TypeError):
             log.error("ai_control: stored configuration is corrupt — AI is fail-closed until it is repaired")
             closed = self._closed()
             with self._lock:
@@ -162,19 +176,28 @@ class ControlPlane:
 
     # ------------------------------------------------------------ usage (today)
     def usage_today(self) -> Dict[str, UsageCounters]:
+        return self._usage_state()[0]
+
+    def _usage_state(self) -> Tuple[Dict[str, UsageCounters], bool]:
+        """Today's per-slot counters and whether they are KNOWN. Unknown (store
+        unreachable and nothing cached for today) must not read as 0: admission
+        refuses instead. A failed read keeps the last numbers and waits a full
+        TTL before retrying, so an outage does not add a store timeout to every turn."""
         day, now = today_utc(), self._clock()
         with self._lock:
-            fresh = day == self._usage_day and now - self._usage_at < USAGE_TTL_S
-            if fresh:
-                return {k: replace(v) for k, v in self._usage.items()}
+            if day == self._usage_day and now - self._usage_at < USAGE_TTL_S:
+                return {k: replace(v) for k, v in self._usage.items()}, True
         try:
             usage = self.store.usage_for_day(day)
         except ControlStoreUnavailable:
             with self._lock:
-                return {k: replace(v) for k, v in self._usage.items()} if day == self._usage_day else {}
+                if day == self._usage_day:
+                    self._usage_at = now
+                    return {k: replace(v) for k, v in self._usage.items()}, True
+                return {}, False
         with self._lock:
             self._usage, self._usage_day, self._usage_at = usage, day, now
-            return {k: replace(v) for k, v in usage.items()}
+            return {k: replace(v) for k, v in usage.items()}, True
 
     def _bump_local(self, slot_id: str, **delta: int) -> None:
         with self._lock:
@@ -279,7 +302,9 @@ class ControlPlane:
         c = cfg.controls
         if not c.ai_enabled:
             return AdmissionError(503, "ai_not_enabled", "Trợ lý AI đang tạm tắt.")
-        usage = self.usage_today()
+        usage, known = self._usage_state()
+        if not known and (c.global_daily_request_cap or c.global_daily_token_cap or c.daily_cost_cap_micro_usd):
+            return AdmissionError(503, "ai_storage_unavailable", "Chưa đọc được hạn mức AI — thử lại sau ít phút.")
         req = sum(u.requests for u in usage.values())
         tok = sum(u.tokens for u in usage.values())
         cost = sum(u.cost_micro_usd for u in usage.values())
@@ -288,7 +313,11 @@ class ControlPlane:
                 (c.daily_cost_cap_micro_usd and cost >= c.daily_cost_cap_micro_usd):
             return AdmissionError(429, "ai_budget_exhausted", "Trợ lý AI đã dùng hết hạn mức hôm nay.", _reset_at_iso())
         if self._user_usage_fn is not None:
-            ureq, utok = self._user_usage_fn(user_id, today_utc())
+            try:
+                ureq, utok = self._user_usage_fn(user_id, today_utc())
+            except Exception:  # noqa: BLE001 — unknown usage never means "under the cap"
+                log.warning("ai_control: per-user usage unavailable — refusing the turn")
+                return AdmissionError(503, "ai_storage_unavailable", "Chưa đọc được hạn mức AI — thử lại sau ít phút.")
             if (c.per_user_daily_request_cap and ureq >= c.per_user_daily_request_cap) or \
                     (c.per_user_daily_token_cap and utok >= c.per_user_daily_token_cap):
                 return AdmissionError(429, "ai_budget_exhausted", "Bạn đã dùng hết lượt hỏi hôm nay.", _reset_at_iso())
@@ -397,17 +426,29 @@ class ControlPlane:
                  "old_value": e.old_value, "new_value": e.new_value} for e in self.store.list_audit(limit)]
 
     # ------------------------------------------------------------ admin mutations (owner)
-    def _fresh(self) -> ControlConfig:
+    def _fresh(self, *, repair: bool = False) -> ControlConfig:
         """The CURRENT stored config for a mutation — uncached, and refusing to
-        build on top of a corrupt/unreachable store (a repair goes through ops)."""
+        build on top of a corrupt/unreachable store.
+
+        `repair=True` (delete a slot, edit a profile, reset a cooldown) still
+        works when every row parses but the WHOLE config fails validation — e.g.
+        a profile left pointing at a slot another instance just deleted. Those
+        edits are how the owner gets out of that state from /admin/ai; the edit
+        itself is still validated and AI stays fail-closed until the whole
+        config is valid again."""
         try:
             cfg = self.store.load()
-            validate_config(cfg)
-            return cfg
-        except (ControlConfigCorrupt, ConfigValidationError) as exc:
+        except ControlConfigCorrupt as exc:
             raise ControlConflict("Cấu hình AI đang hỏng — cần sửa trực tiếp ở kho trước khi chỉnh qua giao diện.") from exc
         except ControlStoreUnavailable as exc:
             raise ControlConflict("Không đọc được kho cấu hình AI — thử lại sau.") from exc
+        try:
+            validate_config(cfg)
+        except (ConfigValidationError, ValueError, TypeError) as exc:
+            if not repair:
+                raise ControlConflict("Cấu hình AI đang không hợp lệ — chỉ xoá slot hoặc sửa hồ sơ định tuyến được "
+                                      "cho tới khi hợp lệ trở lại.") from exc
+        return cfg
 
     @staticmethod
     def _val(v: Any) -> str:
@@ -419,13 +460,25 @@ class ControlPlane:
                 for k in sorted(set(old) | set(new)) if old.get(k) != new.get(k)]
 
     def _commit(self, entries: List[AuditEntry]) -> None:
-        if entries:
-            self.store.add_audit(entries)
+        """The change is already saved: refresh caches first, then audit. If the
+        audit write fails the entries go to the error log instead (they carry
+        no secret by construction) — never a 503 for a change that did apply."""
         self.invalidate()
+        if not entries:
+            return
+        try:
+            self.store.add_audit(entries)
+        except ControlStoreUnavailable:
+            for e in entries:
+                log.error("ai_control audit (store write failed): admin=%s entity=%s field=%s old=%s new=%s at=%s",
+                          e.admin_id, e.entity, e.field, e.old_value, e.new_value, e.at)
 
+    @_serialized
     def update_controls(self, actor: str, patch: Mapping[str, Any], expected_version: Optional[int] = None) -> Dict[str, Any]:
         cfg = self._fresh()
-        if expected_version is not None and expected_version != cfg.controls.version:
+        # The emergency OFF always wins: it must never fail on a stale version.
+        emergency_off = dict(patch) == {"ai_enabled": False}
+        if expected_version is not None and expected_version != cfg.controls.version and not emergency_off:
             raise ControlConflict("Cấu hình vừa được người khác đổi — tải lại rồi thử lại.")
         new = controls_with(cfg.controls, patch)
         validate_controls(new)
@@ -440,12 +493,17 @@ class ControlPlane:
         self._commit(self._diff(actor, "global", old_d, new_d))
         return controls_to_dict(new)
 
-    def set_provider_type(self, actor: str, provider_type: str, enabled: bool) -> None:
+    @_serialized
+    def set_provider_type(self, actor: str, provider_type: str, enabled: bool,
+                          expected_version: Optional[int] = None) -> None:
         if provider_type not in PROVIDER_TYPES:
             raise ConfigValidationError([{"field": "provider_type", "message": "loại provider không hỗ trợ"}])
         if not isinstance(enabled, bool):
             raise ConfigValidationError([{"field": "enabled", "message": "phải là true/false"}])
         cfg = self._fresh()
+        # Turning a type OFF is always allowed; turning one ON needs a current view.
+        if expected_version is not None and expected_version != cfg.controls.version and enabled:
+            raise ControlConflict("Cấu hình vừa được người khác đổi — tải lại rồi thử lại.")
         types = dict(cfg.controls.provider_types)
         old = types.get(provider_type, False)
         types[provider_type] = enabled
@@ -454,16 +512,22 @@ class ControlPlane:
         self.store.save_controls(new)
         self._commit(self._diff(actor, f"provider_type:{provider_type}", {"enabled": old}, {"enabled": enabled}))
 
+    @_serialized
     def create_slot(self, actor: str, body: Mapping[str, Any]) -> Dict[str, Any]:
         cfg = self._fresh()
         slot = slot_from_dict(body)
         validate_slot(slot)
         if slot.slot_id in cfg.slots:
             raise ControlConflict(f"Slot '{slot.slot_id}' đã tồn tại.")
+        # More than MAX_SLOTS makes the whole config invalid on the next load
+        # (AI fail-closed), so refuse the slot that would cross the line.
+        if len(cfg.slots) >= MAX_SLOTS:
+            raise ConfigValidationError([{"field": "slots", "message": f"tối đa {MAX_SLOTS} slot — xoá bớt slot không dùng"}])
         self.store.save_slot(slot)
         self._commit(self._diff(actor, f"slot:{slot.slot_id}", {}, slot_to_dict(slot)))
         return slot_to_dict(slot)
 
+    @_serialized
     def update_slot(self, actor: str, slot_id: str, body: Mapping[str, Any]) -> Dict[str, Any]:
         cfg = self._fresh()
         old = cfg.slots.get(slot_id)
@@ -478,8 +542,9 @@ class ControlPlane:
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), slot_to_dict(slot)))
         return slot_to_dict(slot)
 
+    @_serialized
     def delete_slot(self, actor: str, slot_id: str) -> None:
-        cfg = self._fresh()
+        cfg = self._fresh(repair=True)
         old = cfg.slots.get(slot_id)
         if old is None:
             raise KeyError(slot_id)
@@ -489,8 +554,9 @@ class ControlPlane:
         self.store.delete_slot(slot_id)
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), {}))
 
+    @_serialized
     def update_profile(self, actor: str, name: str, steps: List[str], enabled: bool) -> Dict[str, Any]:
-        cfg = self._fresh()
+        cfg = self._fresh(repair=True)
         if not isinstance(steps, list) or any(not isinstance(s, str) for s in steps) or not isinstance(enabled, bool):
             raise ConfigValidationError([{"field": "steps", "message": "danh sách bước không hợp lệ"}])
         p = RoutingProfile(name=name, steps=tuple(steps), enabled=enabled)
@@ -502,8 +568,9 @@ class ControlPlane:
                                 {"steps": list(p.steps), "enabled": p.enabled}))
         return {"name": p.name, "steps": list(p.steps), "enabled": p.enabled}
 
+    @_serialized
     def reset_cooldown(self, actor: str, slot_id: str) -> None:
-        cfg = self._fresh()
+        cfg = self._fresh(repair=True)
         if slot_id not in cfg.slots:
             raise KeyError(slot_id)
         before = self.breaker.snapshot().get(slot_id, {}).get("open_for_s", 0.0)

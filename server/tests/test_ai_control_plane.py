@@ -76,7 +76,10 @@ class Scripted(ChatProvider):
 
 
 def slot(slot_id: str, ptype: str = "gemini", **kw) -> ProviderSlot:
-    base = dict(slot_id=slot_id, provider_type=ptype, label=slot_id.upper(), secret_ref=slot_id.upper().replace("-", "_"),
+    ref = slot_id.upper().replace("-", "_")
+    if not ref.startswith(ptype.upper() + "_"):
+        ref = f"{ptype.upper()}_{ref}"  # a key is bound to its provider type (secret_ref prefix)
+    base = dict(slot_id=slot_id, provider_type=ptype, label=slot_id.upper(), secret_ref=ref,
                 model=f"{ptype}-model", enabled=True, workloads=("general", "story", "writer", "support", "web_search"))
     if ptype == "workers_ai":
         base["endpoint"] = "https://api.cloudflare.com/client/v4/accounts/abc123/ai/v1"
@@ -167,6 +170,39 @@ class TestValidation(unittest.TestCase):
         with self.assertRaises(ConfigValidationError):
             validate_slot(slot_from_dict({"slot_id": "g-1", "provider_type": "gemini", "label": "x",
                                           "secret_ref": "G_1", "model": "m", "priority": "high"}))
+        with self.assertRaises(ConfigValidationError, msg='"false" must not become True'):
+            slot_from_dict({"slot_id": "g-1", "provider_type": "gemini", "enabled": "false"})
+
+    def test_slot_id_fits_the_usage_document_id(self) -> None:
+        """Usage rows are ``{slot_id}_{yyyymmdd}``; Appwrite ids are <= 36 chars."""
+        longest = "g" * 27
+        validate_slot(slot(longest))
+        self.assertLessEqual(len(f"{longest}_{today_utc()}"), 36)
+        with self.assertRaises(ConfigValidationError):
+            validate_slot(slot("g" * 28))
+
+    def test_secret_ref_is_bound_to_its_provider_type(self) -> None:
+        validate_slot(slot("az-01", "azure_openai", secret_ref="AZURE_OPENAI_MAIN"))
+        with self.assertRaises(ConfigValidationError) as ctx:
+            validate_slot(slot("az-01", "azure_openai", secret_ref="GEMINI_PROJECT_01"))
+        self.assertEqual(ctx.exception.errors[0]["field"], "secret_ref")
+
+    def test_model_cannot_walk_the_path(self) -> None:
+        validate_slot(slot("or-01", "openrouter", model="meta-llama/llama-3.1-8b-instruct"))
+        for ptype, model in (("openrouter", "../../admin"), ("azure_openai", "gpt4o/../../x"), ("azure_openai", "a/b")):
+            with self.assertRaises(ConfigValidationError, msg=model):
+                validate_slot(slot("x-01", ptype, model=model))
+
+    def test_malformed_or_long_endpoint_is_a_validation_error(self) -> None:
+        for bad in ("https://api.groq.com:abc/v1", "https://api.groq.com/" + "a" * 300):
+            with self.assertRaises(ConfigValidationError, msg=bad[:40]):
+                validate_slot(slot("groq-01", "groq", endpoint=bad))
+
+    def test_mode_profiles_must_be_an_object(self) -> None:
+        from server.ai_assistant.control.model import controls_with
+        for bad in ("abc", 5, ["FREE_FIRST"], {"general": 1}):
+            with self.assertRaises(ConfigValidationError, msg=repr(bad)):
+                controls_with(GlobalControls(), {"mode_profiles": bad})
 
 
 # ============================================================ secrets
@@ -469,6 +505,77 @@ class TestMutationsAndAudit(unittest.TestCase):
         p.store.corrupt = True
         with self.assertRaises(ControlConflict):
             p.update_controls("owner1", {"ai_enabled": True})
+
+    def test_the_41st_slot_is_refused_instead_of_locking_the_config(self) -> None:
+        from server.ai_assistant.control.model import MAX_SLOTS
+        p = plane_with([slot(f"gemini-{i:02d}") for i in range(MAX_SLOTS)])
+        with self.assertRaises(ConfigValidationError):
+            p.create_slot("owner1", {"slot_id": "gemini-99", "provider_type": "gemini", "label": "x",
+                                     "secret_ref": "GEMINI_99", "model": "m", "workloads": ["general"],
+                                     "enabled": True})
+        self.assertEqual(len(p.store.slots), MAX_SLOTS)
+        self.assertTrue(p.enabled(), "config stays valid")
+
+    def test_invalid_config_can_still_be_repaired_from_the_ui(self) -> None:
+        a = slot("gemini-01")
+        p = plane_with([a], profiles={"FREE_FIRST": RoutingProfile("FREE_FIRST", ("gemini-01", "gemini"))})
+        # Another instance deleted the slot while the profile still points at it.
+        del p.store.slots["gemini-01"]
+        p.invalidate()
+        self.assertFalse(p.enabled())
+        self.assertEqual(p.state, "corrupt")
+        with self.assertRaises(ControlConflict, msg="growing a broken config is refused"):
+            p.create_slot("owner1", {"slot_id": "gemini-02", "provider_type": "gemini", "label": "x",
+                                     "secret_ref": "GEMINI_02", "model": "m", "workloads": ["general"], "enabled": True})
+        with self.assertRaises(ConfigValidationError, msg="the repair edit itself is still validated"):
+            p.update_profile("owner1", "FREE_FIRST", ["gemini-01"], True)
+        p.update_profile("owner1", "FREE_FIRST", ["gemini"], True)
+        self.assertTrue(p.enabled(), "valid again after the repair")
+        self.assertEqual(p.state, "ok")
+
+    def test_emergency_off_wins_over_a_stale_version(self) -> None:
+        p = plane_with([slot("gemini-01")])
+        stale = p.snapshot().controls.version
+        p.set_provider_type("owner1", "groq", False)  # someone else bumped the version
+        p.update_controls("owner1", {"ai_enabled": False}, expected_version=stale)
+        self.assertFalse(p.enabled(), "OFF must never fail on a stale version")
+        with self.assertRaises(ControlConflict, msg="turning ON needs a current view"):
+            p.update_controls("owner1", {"ai_enabled": True}, expected_version=stale)
+        with self.assertRaises(ControlConflict):
+            p.set_provider_type("owner1", "groq", True, expected_version=stale)
+        p.set_provider_type("owner1", "gemini", False, expected_version=stale)
+        self.assertFalse(p.snapshot().controls.provider_types["gemini"])
+
+    def test_audit_write_failure_does_not_fail_an_applied_change(self) -> None:
+        p = plane_with([slot("gemini-01")])
+
+        def down(entries):
+            raise ControlStoreUnavailable("audit down")
+        p.store.add_audit = down  # type: ignore[assignment]
+        with self.assertLogs("fanfic.ai_assistant", level="ERROR") as logs:
+            p.update_controls("owner1", {"ai_enabled": False})
+        self.assertFalse(p.enabled(), "applied, and the cache was refreshed")
+        self.assertIn("field=ai_enabled", "\n".join(logs.output))
+        self.assertNotIn(FAKE_KEY, "\n".join(logs.output))
+
+    def test_unknown_usage_is_refused_not_read_as_zero(self) -> None:
+        p = plane_with([slot("gemini-01")], controls=GlobalControls(
+            ai_enabled=True, provider_types={t: True for t in ("gemini", "groq", "workers_ai", "qwen",
+                                                               "azure_openai", "openrouter")},
+            version=1, global_daily_request_cap=10))
+
+        def down(day):
+            raise ControlStoreUnavailable("usage down")
+        p.store.usage_for_day = down  # type: ignore[assignment]
+        d = p.admission("u1")
+        self.assertEqual((d.status, d.code), (503, "ai_storage_unavailable"))
+
+    def test_per_user_usage_failure_is_a_503(self) -> None:
+        def boom(uid, day):
+            raise RuntimeError("ledger down")
+        p = plane_with([slot("gemini-01")], user_usage=boom)
+        d = p.admission("u1")
+        self.assertEqual((d.status, d.code), (503, "ai_storage_unavailable"))
 
 
 # ============================================================ Appwrite store

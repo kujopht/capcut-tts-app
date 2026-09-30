@@ -227,7 +227,7 @@ export default function AdminAi() {
           trangThai={c.provider_types}
           laOwner={laOwner}
           onDoi={async (type: AiProviderType, enabled: boolean) => {
-            await chay(() => aiControl.setProviderType(type, enabled), { loai: "chung" },
+            await chay(() => aiControl.setProviderType(type, enabled, c.version), { loai: "chung" },
               `${enabled ? "Đã bật" : "Đã tắt"} loại provider ${type}.`);
           }}
         />

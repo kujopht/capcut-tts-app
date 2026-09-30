@@ -295,10 +295,12 @@ export const aiControl = {
       body: JSON.stringify(patch),
     }),
 
-  setProviderType: (type: AiProviderType, enabled: boolean) =>
+  /** `expectedVersion`: bật một loại cần bản cấu hình hiện tại (409 nếu cũ);
+   *  TẮT thì server luôn cho qua. */
+  setProviderType: (type: AiProviderType, enabled: boolean, expectedVersion?: number) =>
     requestAi<{ ok: boolean }>(`/api/admin/ai/provider-types/${type}`, {
       method: "PUT",
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify({ enabled, expected_version: expectedVersion }),
     }),
 
   createSlot: (payload: AiSlotInput) =>

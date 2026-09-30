@@ -45,8 +45,8 @@ export const metadata: Metadata = {
   title: { default: "Fanfic World", template: "%s · Fanfic World" },
   description: DESCRIPTION,
   applicationName: "Fanfic World",
-  // `icon.svg`, `apple-icon.tsx` va `opengraph-image.tsx` trong cung thu muc
-  // duoc Next tu gan vao <head> — khong khai bao tay o day.
+  // `favicon.ico`, `apple-icon.png` va `opengraph-image.tsx` trong cung thu
+  // muc duoc Next tu gan vao <head> — khong khai bao tay o day.
   openGraph: {
     type: "website",
     siteName: "Fanfic World",

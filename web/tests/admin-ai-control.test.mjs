@@ -53,6 +53,19 @@ test("khong co chuoi giong khoa that trong ma giao dien (AIza…, sk-…, gsk_�
   }
 });
 
+test("khong ten provider nao viet cung trong JS (chunk tai cong khai duoc) — nhan/quy tac lay tu meta", () => {
+  const PROVIDER = /gemini|groq|workers_ai|qwen|azure|openrouter|dashscope|cloudflare/i;
+  for (const [f, src] of allUi()) {
+    // Kieu union `AiProviderType` bi xoa khi bien dich — khong vao bundle.
+    const code = codeOnly(src).replace(/export type AiProviderType =[\s\S]*?;/, "");
+    assert.ok(!PROVIDER.test(code), `${f}: có tên provider viết cứng: ${code.match(PROVIDER)?.[0]}`);
+  }
+  const form = read("../src/components/admin/ai/AiSlotForm.tsx");
+  assert.match(form, /meta\.requires_endpoint\.includes\(providerType\)/);
+  assert.match(form, /meta\.uses_api_version\.includes\(providerType\)/);
+  assert.match(form, /meta\.endpoint_hints\[providerType\]/);
+});
+
 test("khong dangerouslySetInnerHTML trong cac component AI admin", () => {
   for (const [f, src] of allUi()) assert.ok(!/dangerouslySetInnerHTML/.test(src), f);
 });

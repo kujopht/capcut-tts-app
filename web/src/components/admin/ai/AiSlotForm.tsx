@@ -6,19 +6,14 @@
  * KHÔNG có trường nào nhận API key thật — chỉ `secret_ref` (tên tham chiếu
  * dạng `[A-Z][A-Z0-9_]{2,63}`), backend tự tra biến môi trường
  * `FAS_AI_SECRET_<secret_ref>` mà chủ sở hữu máy chủ đã đặt sẵn.
+ *
+ * Không có tên provider nào viết cứng ở đây: nhãn, loại nào bắt buộc
+ * endpoint, loại nào dùng api_version và mẫu endpoint đều đến từ `meta` của
+ * server — chunk JS tải công khai được, API mới là thứ bị chặn quyền.
  */
 
 import { useState } from "react";
 import type { AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
-
-const NHAN_LOAI: Record<AiProviderType, string> = {
-  gemini: "Google Gemini",
-  groq: "Groq",
-  workers_ai: "Cloudflare Workers AI",
-  qwen: "Alibaba Qwen",
-  azure_openai: "Azure OpenAI",
-  openrouter: "OpenRouter",
-};
 
 interface LoiTruong {
   field: string;
@@ -46,6 +41,7 @@ const TRUONG_FORM = new Set([
 export function AiSlotForm({
   slot,
   meta,
+  nhanLoai,
   dangGui,
   loiTruong,
   onLuu,
@@ -54,6 +50,8 @@ export function AiSlotForm({
   /** `undefined` = form TẠO MỚI; có giá trị = form SỬA (khoá slot_id/provider_type). */
   slot?: AiSlot;
   meta: AiConfigMeta;
+  /** Nhãn hiển thị theo loại, từ `config.provider_types` của server. */
+  nhanLoai: Record<string, string>;
   dangGui: boolean;
   loiTruong: LoiTruong[];
   onLuu: (payload: AiSlotInput) => void;
@@ -78,12 +76,11 @@ export function AiSlotForm({
   const [priceIn, setPriceIn] = useState(slot?.price_in_micro_per_mtok ?? 0);
   const [priceOut, setPriceOut] = useState(slot?.price_out_micro_per_mtok ?? 0);
 
-  const canEndpoint = providerType === "workers_ai" || providerType === "azure_openai";
-  const canApiVersion = providerType === "azure_openai";
-  const goiYEndpoint =
-    providerType === "workers_ai"
-      ? "https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1"
-      : (meta.endpoint_hosts[providerType] ?? []).map((h) => `https://<tên>${h}`).join(" hoặc ");
+  const canEndpoint = meta.requires_endpoint.includes(providerType);
+  const canApiVersion = meta.uses_api_version.includes(providerType);
+  const goiYEndpoint = meta.endpoint_hints[providerType] ?? "";
+  // Ví dụ dựng từ loại đang chọn — không viết cứng tên provider nào.
+  const viDuRef = `${providerType.toUpperCase()}_PROJECT_01`;
   const loiKhac = loiTruong.filter((l) => !TRUONG_FORM.has(l.field));
 
   const doiWorkload = (w: string, on: boolean) => {
@@ -134,7 +131,7 @@ export function AiSlotForm({
             value={slotId}
             disabled={suaSlot}
             onChange={(e) => setSlotId(e.target.value)}
-            placeholder="vd: gemini-01"
+            placeholder={`vd: ${providerType.replace(/_/g, "-")}-01`}
             required
           />
           <LoiDuoi loi={loiTruong} truong="slot_id" />
@@ -149,7 +146,7 @@ export function AiSlotForm({
             onChange={(e) => setProviderType(e.target.value as AiProviderType)}
           >
             {meta.provider_types.map((t) => (
-              <option key={t} value={t}>{NHAN_LOAI[t] ?? t}</option>
+              <option key={t} value={t}>{nhanLoai[t] ?? t}</option>
             ))}
           </select>
           <LoiDuoi loi={loiTruong} truong="provider_type" />
@@ -167,7 +164,7 @@ export function AiSlotForm({
             className="input"
             value={secretRef}
             onChange={(e) => setSecretRef(e.target.value.toUpperCase())}
-            placeholder="vd: GEMINI_PROJECT_01"
+            placeholder={`vd: ${viDuRef}`}
             required
           />
           <span className="hint">
@@ -180,7 +177,7 @@ export function AiSlotForm({
         <label className="stack-1">
           <span className="hint">Model</span>
           <input className="input" value={model} onChange={(e) => setModel(e.target.value)}
-            placeholder="vd: gemini-2.0-flash" required />
+            placeholder="tên model đúng như provider công bố" required />
           <LoiDuoi loi={loiTruong} truong="model" />
         </label>
 
@@ -200,7 +197,7 @@ export function AiSlotForm({
 
         {canApiVersion ? (
           <label className="stack-1">
-            <span className="hint">API version (Azure)</span>
+            <span className="hint">API version</span>
             <input className="input" value={apiVersion} onChange={(e) => setApiVersion(e.target.value)}
               placeholder="vd: 2024-10-21" />
             <LoiDuoi loi={loiTruong} truong="api_version" />

@@ -148,6 +148,12 @@ export interface AiConfigMeta {
   default_endpoints: Record<string, string>;
   /** Máy chủ được phép theo loại (".openai.azure.com" = mọi tên miền con). */
   endpoint_hosts: Record<string, string[]>;
+  /** Loại BẮT BUỘC nhập endpoint (không có endpoint mặc định). */
+  requires_endpoint: string[];
+  /** Loại dùng `api_version`. */
+  uses_api_version: string[];
+  /** Mẫu endpoint hợp lệ theo loại — hiện dưới ô nhập. */
+  endpoint_hints: Record<string, string>;
   secret_env_prefix: string;
 }
 

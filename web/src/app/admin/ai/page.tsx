@@ -49,6 +49,15 @@ const MUC = [
   ["nhat-ky", "Nhật ký"],
 ] as const;
 
+async function taiDuLieu(): Promise<DuLieu> {
+  const [overview, config, audit] = await Promise.all([
+    aiControl.getOverview(),
+    aiControl.getConfig(),
+    aiControl.getAudit(50),
+  ]);
+  return { overview, config, audit: audit.items };
+}
+
 export default function AdminAi() {
   const { profile } = useSession();
   const laOwner = profile?.admin_role === "owner";
@@ -63,23 +72,37 @@ export default function AdminAi() {
   const [loiGlobal, setLoiGlobal] = useState<LoiTruong>([]);
   const [loiHoSo, setLoiHoSo] = useState<Record<string, LoiTruong>>({});
 
+  const [taiLuc, setTaiLuc] = useState(0);
+
+  const nhan = useCallback((d: DuLieu) => {
+    setDuLieu(d);
+    setTaiLuc(Date.now());
+    setLoiTai(null);
+  }, []);
+  const hong = useCallback((e: unknown) => {
+    setLoiTai(e instanceof ApiError ? e : new ApiError("Không tải được bảng điều khiển AI.", 0));
+  }, []);
+
+  // Tải lần đầu: setState chỉ trong callback của promise (không đồng bộ
+  // trong thân effect), và bỏ kết quả nếu trang đã rời đi.
+  useEffect(() => {
+    let conSong = true;
+    taiDuLieu()
+      .then((d) => { if (conSong) nhan(d); })
+      .catch((e) => { if (conSong) hong(e); })
+      .finally(() => { if (conSong) setDangTai(false); });
+    return () => { conSong = false; };
+  }, [nhan, hong]);
+
   const nap = useCallback(async () => {
     try {
-      const [overview, config, audit] = await Promise.all([
-        aiControl.getOverview(),
-        aiControl.getConfig(),
-        aiControl.getAudit(50),
-      ]);
-      setDuLieu({ overview, config, audit: audit.items });
-      setLoiTai(null);
+      nhan(await taiDuLieu());
     } catch (e) {
-      setLoiTai(e instanceof ApiError ? e : new ApiError("Không tải được bảng điều khiển AI.", 0));
+      hong(e);
     } finally {
       setDangTai(false);
     }
-  }, []);
-
-  useEffect(() => { void nap(); }, [nap]);
+  }, [nhan, hong]);
 
   /** Chạy MỘT thao tác ghi: khoá nút, xoá lỗi cũ, tải lại sau khi xong.
    *  Trả `true` khi thành công để form tự đóng. */
@@ -213,13 +236,15 @@ export default function AdminAi() {
       <section id="providers" className="stack-2 ai-admin-muc">
         <h2 className="section-title">Providers &amp; slot</h2>
         <p className="hint">
-          Mỗi slot trỏ tới MỘT khoá qua tên tham chiếu — nhiều project Gemini là nhiều slot
-          (<code>GEMINI_PROJECT_01</code>, <code>GEMINI_PROJECT_02</code>…). Cooldown, hạn mức và
-          sức khoẻ tính riêng từng slot.
+          Mỗi slot trỏ tới MỘT khoá qua tên tham chiếu — nhiều project cùng một loại là nhiều
+          slot trong cùng pool (<code>&lt;LOẠI&gt;_PROJECT_01</code>, <code>&lt;LOẠI&gt;_PROJECT_02</code>…).
+          Cooldown, hạn mức và sức khoẻ tính riêng từng slot.
         </p>
         <AiSlotList
           slots={config.slots}
           meta={config.meta}
+          nhanLoai={Object.fromEntries(config.provider_types.map((t) => [t.type, t.label]))}
+          taiLuc={taiLuc}
           laOwner={laOwner}
           dangGui={dangGui}
           loiTruong={loiSlot}
@@ -253,7 +278,10 @@ export default function AdminAi() {
 
       <section id="han-muc" className="stack-2 ai-admin-muc">
         <h2 className="section-title">Hạn mức &amp; chế độ</h2>
+        {/* `key` theo phiên bản: người khác vừa lưu (hoặc ta vừa lưu) thì form
+            dựng lại từ giá trị mới — không cần effect sao chép prop vào state. */}
         <AiGlobalCaps
+          key={c.version}
           controls={c}
           profiles={config.meta.profiles}
           modes={config.meta.modes}

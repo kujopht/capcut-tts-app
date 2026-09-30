@@ -9,7 +9,7 @@
  * `max_output_tokens`/`max_context_tokens` luôn phải có giá trị.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AiControls, AiGlobalPatch, AiMode } from "@/lib/admin/aiControl";
 
 type SoTruong =
@@ -67,9 +67,8 @@ export function AiGlobalCaps({
   const [f, setF] = useState(tuControls);
   const [xacNhan, setXacNhan] = useState(false);
 
-  // Đổi phiên bản (người khác vừa lưu, hoặc ta vừa lưu xong) -> nạp lại form.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setF(tuControls()); setXacNhan(false); }, [controls.version]);
+  // Đổi phiên bản -> trang cha đổi `key={controls.version}` nên form DỰNG LẠI
+  // từ giá trị mới; không sao chép prop vào state bằng effect.
 
   const patch: AiGlobalPatch = {
     ...f.so,

@@ -92,6 +92,13 @@ class TestAccessMatrix(unittest.TestCase):
             self.assertEqual(self.c.get(path, headers=auth("admin")).status_code, 200, path)
             self.assertEqual(self.c.get(path, headers=auth("owner")).status_code, 200, path)
 
+    def test_config_meta_drives_the_ui(self) -> None:
+        """The UI reads provider rules from here, so the JS chunk carries no provider names."""
+        meta = self.c.get("/api/admin/ai/config", headers=auth("admin")).json()["meta"]
+        self.assertEqual(sorted(meta["requires_endpoint"]), ["azure_openai", "workers_ai"])
+        self.assertEqual(meta["uses_api_version"], ["azure_openai"])
+        self.assertEqual(set(meta["endpoint_hints"]), set(meta["requires_endpoint"]))
+
     def test_writes_are_owner_only(self) -> None:
         writes = [("put", "/api/admin/ai/global", {"ai_enabled": False}),
                   ("put", "/api/admin/ai/provider-types/gemini", {"enabled": False}),

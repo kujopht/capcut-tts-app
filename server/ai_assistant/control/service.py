@@ -343,6 +343,14 @@ class ControlPlane:
                      "profiles": list(PROFILES), "modes": list(MODES),
                      "default_endpoints": dict(DEFAULT_ENDPOINTS),
                      "endpoint_hosts": {k: list(v) for k, v in ENDPOINT_HOSTS.items()},
+                     # The admin UI renders from these instead of hard-coding
+                     # provider names/rules into the (publicly fetchable) JS chunk.
+                     "requires_endpoint": [t for t in PROVIDER_TYPES if t not in DEFAULT_ENDPOINTS],
+                     "uses_api_version": ["azure_openai"],
+                     "endpoint_hints": {
+                         "workers_ai": "https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1",
+                         "azure_openai": "https://<resource>.openai.azure.com hoặc https://<resource>.cognitiveservices.azure.com",
+                     },
                      "secret_env_prefix": "FAS_AI_SECRET_"},
         }
 

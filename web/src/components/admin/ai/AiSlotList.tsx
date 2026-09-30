@@ -3,22 +3,15 @@
 /**
  * Danh sách slot, gộp theo loại provider. Đếm ngược cooldown chạy client-side
  * (mỗi giây, chỉ khi có slot đang COOLDOWN — không polling mạng, không chạy
- * khi tab không có slot nào cần đếm).
+ * khi tab không có slot nào cần đếm). Thời gian còn lại TÍNH từ mốc tải
+ * (`taiLuc`) chứ không chép `cooldown_s` vào state — dữ liệu mới về là số
+ * đúng ngay, không cần effect đồng bộ.
  */
 
 import { useEffect, useState } from "react";
 import type { AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
 import { AiQuotaBar } from "./AiQuotaBar";
 import { AiSlotForm } from "./AiSlotForm";
-
-const NHAN_LOAI: Record<AiProviderType, string> = {
-  gemini: "Gemini Pool",
-  groq: "Groq Pool",
-  workers_ai: "Cloudflare Workers AI Pool",
-  qwen: "Alibaba Qwen Pool",
-  azure_openai: "Azure OpenAI Pool",
-  openrouter: "OpenRouter Pool",
-};
 
 const NHAN_TRANG_THAI: Record<AiSlot["health"]["status"], string> = {
   HEALTHY: "HEALTHY",
@@ -51,29 +44,20 @@ function thoiGianTuongDoi(iso: string | null): string {
   return `${Math.round(gio / 24)} ngày trước`;
 }
 
-function useDemNguoc(slots: AiSlot[]): Record<string, number> {
+function useDemNguoc(slots: AiSlot[], taiLuc: number): Record<string, number> {
   const coCooldown = slots.some((s) => s.health.status === "COOLDOWN" && s.health.cooldown_s > 0);
-  const [con, setCon] = useState<Record<string, number>>(() =>
-    Object.fromEntries(slots.map((s) => [s.slot_id, s.health.cooldown_s])),
-  );
-
-  useEffect(() => {
-    setCon(Object.fromEntries(slots.map((s) => [s.slot_id, s.health.cooldown_s])));
-  }, [slots]);
+  const [bayGio, setBayGio] = useState(taiLuc);
 
   useEffect(() => {
     if (!coCooldown) return;
-    const id = window.setInterval(() => {
-      setCon((cur) => {
-        const ra: Record<string, number> = {};
-        for (const [k, v] of Object.entries(cur)) ra[k] = Math.max(0, v - 1);
-        return ra;
-      });
-    }, 1000);
+    const id = window.setInterval(() => setBayGio(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [coCooldown]);
 
-  return con;
+  const daQua = Math.max(0, (bayGio - taiLuc) / 1000);
+  return Object.fromEntries(
+    slots.map((s) => [s.slot_id, Math.max(0, Math.round(s.health.cooldown_s - daQua))]),
+  );
 }
 
 function DongSlot({
@@ -161,6 +145,8 @@ function DongSlot({
 export function AiSlotList({
   slots,
   meta,
+  nhanLoai,
+  taiLuc,
   laOwner,
   dangGui,
   loiTruong,
@@ -171,6 +157,10 @@ export function AiSlotList({
 }: {
   slots: AiSlot[];
   meta: AiConfigMeta;
+  /** Nhãn theo loại, từ `config.provider_types` — không viết cứng tên provider. */
+  nhanLoai: Record<string, string>;
+  /** `Date.now()` lúc dữ liệu về — mốc cho đếm ngược cooldown. */
+  taiLuc: number;
   laOwner: boolean;
   dangGui: boolean;
   loiTruong: { field: string; message: string }[];
@@ -182,7 +172,7 @@ export function AiSlotList({
 }) {
   const [dangSua, setDangSua] = useState<string | null>(null);
   const [dangTao, setDangTao] = useState(false);
-  const dem = useDemNguoc(slots);
+  const dem = useDemNguoc(slots, taiLuc);
 
   const theoLoai = new Map<AiProviderType, AiSlot[]>();
   for (const s of slots) {
@@ -222,6 +212,7 @@ export function AiSlotList({
       {dangTao ? (
         <AiSlotForm
           meta={meta}
+          nhanLoai={nhanLoai}
           dangGui={dangGui}
           loiTruong={loiTruong}
           onLuu={(payload) => {
@@ -233,7 +224,7 @@ export function AiSlotList({
 
       {[...theoLoai.entries()].map(([loai, dsSlot]) => (
         <div key={loai} className="stack-2">
-          <h3 className="section-title-sm">{NHAN_LOAI[loai] ?? loai}</h3>
+          <h3 className="section-title-sm">{nhanLoai[loai] ?? loai} · pool {dsSlot.length} slot</h3>
           <div className="stack-2 ai-admin-slot-scroll">
             {dsSlot.map((s) =>
               dangSua === s.slot_id ? (
@@ -241,6 +232,7 @@ export function AiSlotList({
                   key={s.slot_id}
                   slot={s}
                   meta={meta}
+                  nhanLoai={nhanLoai}
                   dangGui={dangGui}
                   loiTruong={loiTruong}
                   onLuu={(payload) => {

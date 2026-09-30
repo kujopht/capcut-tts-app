@@ -9,7 +9,7 @@
  * Không kéo-thả: nút Lên/Xuống dùng được bằng bàn phím và trên màn 390px.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AiConfigMeta, AiProviderTypeInfo, AiRoutingProfile, AiSlot } from "@/lib/admin/aiControl";
 
 const MAX_BUOC = 12;
@@ -63,11 +63,6 @@ function TheHoSo({
   const [enabled, setEnabled] = useState(hoSo.enabled);
   const [them, setThem] = useState("");
   const [xacNhan, setXacNhan] = useState(false);
-
-  useEffect(() => {
-    setSteps(hoSo.steps);
-    setEnabled(hoSo.enabled);
-  }, [hoSo]);
 
   const doi = JSON.stringify(steps) !== JSON.stringify(hoSo.steps) || enabled !== hoSo.enabled;
   const luaChon = [
@@ -205,7 +200,9 @@ export function AiRoutingProfiles({
           ...(webSearchProfile === p.name ? ["web_search"] : []),
         ];
         return (
-          <TheHoSo key={p.name} hoSo={p} meta={meta} types={types} slots={slots} laOwner={laOwner}
+          // `key` gồm cả nội dung: hồ sơ đổi trên server (lưu xong, người khác
+          // lưu) thì thẻ dựng lại từ giá trị mới thay vì giữ bản nháp cũ.
+          <TheHoSo key={`${p.name}:${p.enabled}:${p.steps.join(",")}`} hoSo={p} meta={meta} types={types} slots={slots} laOwner={laOwner}
             dangGui={dangGui} dangDung={dangDung} loiTruong={loiTheoHoSo[p.name] ?? []} onLuu={onLuu} />
         );
       })}

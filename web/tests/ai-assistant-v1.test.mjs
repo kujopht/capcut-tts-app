@@ -450,9 +450,9 @@ test("RG-QA2. Back sau điều hướng cứng (bfcache) không giữ panel mở
   assert.match(provider, /ghiNhap\(uidRef\.current, text\)/);
 });
 
-test("RG-QA3. Không tràn ngang ở 1024px với font hệ thống rộng: icon nav ẩn ở 901–1100px, nhãn chữ giữ nguyên", () => {
+test("RG-QA3. Không tràn ngang ở 1024px/390px với font hệ thống rộng: icon nav ẩn ≤1100px, nhãn chữ giữ nguyên", () => {
   const css = read("app/globals.css");
-  assert.match(css, /@media \(min-width: 901px\) and \(max-width: 1100px\) \{\s*\.nav-link-icon \{ display: none; \}/);
+  assert.match(css, /@media \(max-width: 1100px\) \{\s*\.nav-link-icon \{ display: none; \}/);
   const nav = read("components/NavAuth.tsx");
   assert.match(nav, /<FanficIcon name=\{link\.icon\} size=\{18\} className="nav-link-icon" \/>/);
 });

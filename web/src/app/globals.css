@@ -13483,11 +13483,15 @@ body.co-dock { padding-bottom: var(--dock-cao, 120px); }
 .cap-do-danh-xung { color: var(--text); font-weight: 550; }
 .cap-do-xp { color: #38bdf8; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* Icon canh nhan muc dieu huong (#252) them ~96px vao header. O 1024px voi
-   font he thong RONG (system-ui -> DejaVu Sans tren Linux) header tran ngang
-   ~35px (do QA release gate AI V1 tren Lightning). Tu 901px den 1100px chi giu
-   NHAN CHU — nhan van day du nen khong mat thong tin. <=900px la thanh cuon
-   ngang rieng (breakpoint 900px), icon giu nguyen o do. */
-@media (min-width: 901px) and (max-width: 1100px) {
+/* Icon canh nhan muc dieu huong (#252) them ~96px vao hang dieu huong. Do o
+   QA release gate AI V1 (Chrome tren Lightning, font he thong rong: DejaVu Sans):
+   - 1024px: header tran ngang ~35px;
+   - 390px: quy tac "Sprint 2" (380-640px, `overflow-x: visible`) gia dinh bon
+     muc VUA mot hang — sai khi co icon: hang rong 446px, ca trang (layout
+     viewport di dong) no ra 446px, `/assistant` toan man hinh bi cat mat nut
+     Dong. Ngay tren Windows anh chup cung da rong 397px.
+   Duoi 1100px chi giu NHAN CHU — nhan day du nen khong mat thong tin, va do
+   dung la bo cuc da duoc do cho quy tac Sprint 2. */
+@media (max-width: 1100px) {
   .nav-link-icon { display: none; }
 }

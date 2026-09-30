@@ -131,7 +131,10 @@ class CircuitBreaker:
         state = self._state.setdefault(provider_name, _BreakerState())
         state.consecutive_failures += 1
         if state.consecutive_failures >= self._threshold:
-            state.open_until = self._clock() + self._open_seconds
+            until = self._clock() + self._open_seconds
+            # Never SHORTEN a longer window already opened by `cool_down` (a
+            # 429's Retry-After) — a concurrent stream's 5xx must not cut it.
+            state.open_until = until if state.open_until is None else max(state.open_until, until)
 
     def cool_down(self, provider_name: str, seconds: float) -> None:
         """Open NOW for `seconds` (a 429 is an explicit "stop", not one of

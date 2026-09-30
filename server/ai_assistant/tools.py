@@ -120,15 +120,19 @@ def build_chapter_excerpt_fn(*, get_chapter: Callable[[str], Any], get_novel: Ca
                              is_published: Callable[[Any], bool],
                              max_chars: int = MAX_CHAPTER_EXCERPT_CHARS,
                              ) -> Callable[[str, str, str], Optional[ChapterExcerpt]]:
-    """The reader's own permission, applied per turn (not cached — a novel
+    """EXACTLY the reader's own rule (`server/main.py::_can_read_chapter`,
+    used by `GET /api/chapters/{id}`), applied per turn (not cached — a novel
     unpublished mid-conversation stops being readable on the next message):
 
     * the chapter must belong to `novel_id` (a conversation cannot pair a
       readable novel with someone else's chapter id);
-    * the novel must be readable (`build_may_read_novel_fn`'s rule) — an
-      orphan chapter (no novel) is denied;
-    * the chapter itself must be published, or owned by the user (a draft
-      chapter of a published novel stays private to its author).
+    * the PARENT novel decides visibility (`build_may_read_novel_fn`'s rule).
+      `Chapter.state` is deliberately NOT consulted: no normal code path ever
+      sets it to PUBLISHED (see `server/main.py::_dem_truyen_chuong_da_xuat_ban`)
+      — checking it made every real chapter unreadable to every reader
+      (independent review of the release gate);
+    * an orphan chapter (novel lookup fails) is denied — stricter than the
+      reader's owner-only fallback, and orphans have no code path anyway.
     """
     may_read_novel = build_may_read_novel_fn(get_novel=get_novel, is_published=is_published)
 
@@ -138,8 +142,6 @@ def build_chapter_excerpt_fn(*, get_chapter: Callable[[str], Any], get_novel: Ca
         except Exception:  # noqa: BLE001 — fail closed
             return None
         if chapter.novel_id != novel_id or not may_read_novel(novel_id, user_id):
-            return None
-        if not (is_published(chapter) or (user_id and user_id == chapter.owner_id)):
             return None
         text = (chapter.content or "").strip()
         if not text:

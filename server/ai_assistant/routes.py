@@ -424,9 +424,14 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 if excerpt is not None:
                     tieu_de = redact(excerpt.chapter_title) or "(không tên)"
                     cat = f", đã cắt còn {len(excerpt.text)} ký tự đầu" if excerpt.truncated else ""
+                    # The chapter is fixed when the conversation is created
+                    # (the reader's "Hỏi về chương này" button) — say so, with
+                    # its title, so a later "this chapter" about ANOTHER
+                    # chapter gets an honest answer.
                     retrieval_block = (
                         UNTRUSTED_DATA_PREAMBLE
-                        + f"\nCHƯƠNG ĐANG MỞ — «{tieu_de}»{cat}:\n" + redact(excerpt.text))
+                        + f"\nCHƯƠNG CỦA HỘI THOẠI NÀY (người dùng mở khi bắt đầu hội thoại) — «{tieu_de}»{cat}:\n"
+                        + redact(excerpt.text))
                 else:
                     retrieval_block = STORY_NO_CHAPTER_NOTE
             if conv.mode == "story" and conv.context_novel_id:

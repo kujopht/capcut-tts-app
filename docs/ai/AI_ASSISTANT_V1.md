@@ -338,6 +338,10 @@ thật trong bản đầu; cả 4 đã sửa VÀ có bài kiểm khoá lại
   provider). Mọi đường thoát (xong, lỗi, ngắt kết nối/huỷ) gọi `pump.stop()`
   trong `finally`: luồng thoát ở sự kiện KẾ TIẾP của provider, muộn nhất khi
   read-timeout của chính provider nổ — không mồ côi vĩnh viễn.
+- Giới hạn đã biết (chấp nhận cho V1): hàng đợi không có trần (trần thật là
+  `max_output_tokens`); sau khi client ngắt, luồng bơm còn giữ kết nối httpx tới
+  sự kiện kế hoặc read-timeout của provider — số luồng sống có thể vượt
+  `FAS_AI_MAX_STREAMS` trong chốc lát với provider im lặng (RPM chặn trần).
 - Lỗi phía TRÊN tầng provider (gateway đã tự đổi mọi lỗi provider thành
   `ErrorEvent`) → `error{ai_provider_unavailable}` với thông điệp cố định;
   nội dung ngoại lệ chỉ vào log.
@@ -355,9 +359,13 @@ thật trong bản đầu; cả 4 đã sửa VÀ có bài kiểm khoá lại
 | Chương khác / cả bộ truyện / tìm theo câu hỏi (vector) | **KHÔNG** — `retrieve_story_chunks` chưa nối chỉ mục vector nên luôn rỗng; nay còn fail-closed nếu thiếu hàm kiểm quyền |
 | Tiến độ đọc (`current_chapter_index`) | chỉ dùng cho đường vector (chưa nối) |
 
-Quyền (kiểm LẠI mỗi lượt, không cache): chương phải thuộc đúng `novel_id`;
-truyện phải đọc được (đã xuất bản, hoặc là chủ) — chương mồ côi bị từ chối;
-chương nháp của truyện đã xuất bản chỉ chủ đọc được. Không có trích đoạn
+Quyền (kiểm LẠI mỗi lượt, không cache) = ĐÚNG luật của `GET /api/chapters/{id}`
+(`_can_read_chapter`): chương phải thuộc đúng `novel_id`; TRUYỆN CHA quyết định
+(đã xuất bản, hoặc là chủ) — chương mồ côi bị từ chối. `Chapter.state` KHÔNG
+được xét: không đường tạo chương nào đặt nó thành PUBLISHED, nên xét nó làm mọi
+chương thật bị từ chối với mọi độc giả (review độc lập bắt được). Chương gắn với
+HỘI THOẠI lúc tạo (nút "Hỏi về chương này"); prompt ghi rõ điều đó kèm tiêu đề,
+để câu hỏi về một chương khác nhận câu trả lời trung thực. Không có trích đoạn
 (chưa nối, không quyền, thiếu id, chương rỗng, lỗi kho) → prompt nhận
 `STORY_NO_CHAPTER_NOTE`: mô hình phải nói là chưa đọc được chương, KHÔNG
 đoán tình tiết. Prompt `story` tự nhận "bản beta" và nói đúng phạm vi.

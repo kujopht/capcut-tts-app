@@ -32,6 +32,10 @@ from server.tests.test_ai_routes import _auth, _enabled_runtime, _make_app
 PUB, DRAFT = PublishState.PUBLISHED, PublishState.DRAFT
 
 
+def _auth_tok(tok: str) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {tok}"}
+
+
 @dataclass
 class _Novel:
     novel_id: str
@@ -99,8 +103,12 @@ class TestChapterExcerptPermissions(unittest.TestCase):
         self.assertIsNone(self.fn("n_draft", "c_in_draft_novel", "user_reader"))
         self.assertIsNotNone(self.fn("n_draft", "c_in_draft_novel", "user_author"))
 
-    def test_draft_chapter_of_published_novel_only_for_its_owner(self) -> None:
-        self.assertIsNone(self.fn("n_pub", "c_draftch", "user_reader"))
+    def test_chapter_state_is_ignored_parent_novel_decides_like_the_reader(self) -> None:
+        # Real chapters are created with state DRAFT and never flipped (see
+        # server/main.py::_dem_truyen_chuong_da_xuat_ban); GET /api/chapters/{id}
+        # lets anyone read them once the NOVEL is published. Story mode must
+        # match — the first version denied every real chapter to readers.
+        self.assertIsNotNone(self.fn("n_pub", "c_draftch", "user_reader"))
         self.assertIsNotNone(self.fn("n_pub", "c_draftch", "user_author"))
 
     def test_chapter_must_belong_to_the_claimed_novel(self) -> None:
@@ -159,7 +167,8 @@ class TestVectorRetrievalFailsClosedWhenPermissionUnwired(unittest.TestCase):
 class TestStoryPromptIsHonest(unittest.TestCase):
     def test_prompt_states_the_real_scope(self) -> None:
         p = system_prompt("story", assistant_name="Fanfic AI")
-        self.assertIn("CHƯƠNG ĐANG MỞ", p)
+        self.assertIn("MỘT CHƯƠNG", p)
+        self.assertIn("khi bắt đầu hội thoại này", p)
         self.assertIn("không đọc được các chương khác", p)
         self.assertIn("beta", p)
 
@@ -210,15 +219,49 @@ class TestStoryRouteContext(unittest.TestCase):
 
     def test_readable_chapter_text_reaches_the_prompt_as_untrusted_data(self) -> None:
         prompt = self._ask("reader", "n_pub", "c_pub")
-        self.assertIn("CHƯƠNG ĐANG MỞ — «Chương 3: Mưa»", prompt)
+        self.assertIn("CHƯƠNG CỦA HỘI THOẠI NÀY (người dùng mở khi bắt đầu hội thoại) — «Chương 3: Mưa»", prompt)
         self.assertIn("Trời mưa suốt đêm.", prompt)
         self.assertIn("DỮ LIỆU KHÔNG ĐÁNG TIN", prompt)
         self.assertNotIn(STORY_NO_CHAPTER_NOTE, prompt)
 
-    def test_someone_elses_draft_never_reaches_the_prompt(self) -> None:
-        prompt = self._ask("reader", "n_pub", "c_draftch")
-        self.assertNotIn("Bí mật chưa đăng.", prompt)
+    def test_someone_elses_unpublished_novel_never_reaches_the_prompt(self) -> None:
+        prompt = self._ask("reader", "n_draft", "c_in_draft_novel")
+        self.assertNotIn("Nội dung nháp.", prompt)
         self.assertIn(STORY_NO_CHAPTER_NOTE, prompt)
+
+    def test_real_chapter_state_draft_in_published_novel_reaches_a_reader(self) -> None:
+        """Regression (independent review): every real chapter has state
+        DRAFT; the first version gave readers the 'no chapter' note."""
+        prompt = self._ask("reader4", "n_pub", "c_draftch")
+        self.assertIn("Bí mật chưa đăng.", prompt)
+        self.assertNotIn(STORY_NO_CHAPTER_NOTE, prompt)
+
+    def test_real_store_default_chapter_is_readable_after_the_novel_is_published(self) -> None:
+        """Over the REAL `MockMetadataStore` and the excerpt function actually
+        wired in server/main.py (no HTTP — avoids the suite-wide register rate
+        limiter): a Chapter with its DEFAULT state (DRAFT, like every chapter
+        the app creates) becomes readable to another user exactly when its
+        novel is published via the store's own `publish_novel`."""
+        import server.main as server_main
+        from server.adapters import MockMetadataStore
+        from server.domain import Chapter, Novel
+
+        cu = server_main.store
+        server_main.store = MockMetadataStore()
+        try:
+            nv = server_main.store.create_novel(Novel(owner_id="user_tacgia", title="Truyện thử Story"))
+            ch = server_main.store.create_chapter(Chapter(novel_id=nv.novel_id, owner_id="user_tacgia",
+                                                          title="Chương 1", content="Nội dung thật của chương."))
+            self.assertIs(ch.state, PublishState.DRAFT)
+            fn = server_main.ai_tool_ctx.chapter_excerpt_fn
+            self.assertIsNone(fn(nv.novel_id, ch.chapter_id, "user_docgia"),
+                              "unpublished novel: another user must not get the excerpt")
+            server_main.store.publish_novel(nv.novel_id, "user_tacgia")
+            ex = fn(nv.novel_id, ch.chapter_id, "user_docgia")
+            self.assertIsNotNone(ex, "published novel: a reader must get the chapter excerpt")
+            self.assertEqual(ex.text, "Nội dung thật của chương.")
+        finally:
+            server_main.store = cu
 
     def test_no_chapter_context_says_so_explicitly(self) -> None:
         r = self.client.post("/api/ai/conversations", headers=_auth("r2"), json={"mode": "story"})

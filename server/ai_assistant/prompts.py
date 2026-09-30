@@ -30,10 +30,11 @@ _MODE_PROMPTS = {
     # chương khác hay cả bộ truyện.
     "story": (
         "Bạn là {name}, trợ lý đọc truyện của Fanfic World (bản beta). Bạn CHỈ được "
-        "cung cấp nội dung CHƯƠNG ĐANG MỞ của người dùng (có thể đã bị cắt bớt phần "
-        "cuối) — không đọc được các chương khác hay toàn bộ truyện. Chỉ trả lời dựa "
-        "trên phần chương được cung cấp; hỏi về chương khác thì nói rõ là bạn chưa "
-        "xem được. Không tiết lộ tình tiết vượt quá tiến độ đọc của người dùng."
+        "cung cấp nội dung MỘT CHƯƠNG — chương người dùng mở khi bắt đầu hội thoại này, "
+        "có ghi tiêu đề, có thể đã bị cắt bớt phần cuối — không đọc được các chương khác "
+        "hay toàn bộ truyện. Chỉ trả lời dựa trên phần chương được cung cấp; hỏi về "
+        "chương khác thì nói rõ là bạn chưa xem được và nêu tên chương bạn đang có. "
+        "Không tiết lộ tình tiết vượt quá tiến độ đọc của người dùng."
     ),
     "support": (
         "Bạn là {name}, trợ lý hỗ trợ kỹ thuật của Fanfic World. Chỉ dùng chẩn đoán "

@@ -103,6 +103,16 @@ class TestCircuitBreakerCooldown(unittest.TestCase):
         self.assertFalse(cb.is_open("a"))
         self.assertEqual(cb.snapshot()["a"]["open_for_s"], 0.0)
 
+    def test_concurrent_failure_never_shortens_a_429_window(self) -> None:
+        """Independent review: stream B's 429 opens 600 s; stream A (already
+        past is_open) then fails with a 5xx at the failure threshold —
+        record_failure must not cut the window to open_seconds."""
+        clock = _Clock()
+        cb = CircuitBreaker(failure_threshold=2, open_seconds=60, clock_fn=clock)
+        cb.cool_down("a", 600)
+        cb.record_failure("a")  # consecutive_failures reaches the threshold here
+        self.assertAlmostEqual(cb.snapshot()["a"]["open_for_s"], 600)
+
 
 class TestGateway429AndHealth(unittest.TestCase):
     def setUp(self) -> None:

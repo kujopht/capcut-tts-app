@@ -10,6 +10,7 @@
  * huỷ (nút Dừng).
  */
 import { API_BASE, ApiError, getToken } from "@/lib/api";
+import { docLoiApi } from "./loiApi";
 import { tachKhungSse, dienDichKhungAi } from "./sse";
 import type {
   AiAvailability,
@@ -73,19 +74,29 @@ function headers(json: boolean): HeadersInit {
   };
 }
 
-async function doc<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    let detail: unknown = null;
-    try {
-      detail = await res.json();
-    } catch {
-      // không phải JSON — giữ detail = null
-    }
-    const obj = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : null;
-    const message = (obj && typeof obj.message === "string" && obj.message) || res.statusText || "Lỗi máy chủ";
-    const code = obj && typeof obj.code === "string" ? obj.code : undefined;
-    throw new ApiError(message, res.status, code);
+/** `ApiError` + `reset_at` của lỗi hết ngân sách ngày (để hiện "Làm mới lúc …"). */
+export class AiApiError extends ApiError {
+  resetAt: string | null;
+  constructor(message: string, status: number, code?: string, resetAt: string | null = null) {
+    super(message, status, code);
+    this.name = "AiApiError";
+    this.resetAt = resetAt;
   }
+}
+
+async function loiTuPhanHoi(res: Response, macDinh: string): Promise<AiApiError> {
+  let body: unknown = null;
+  try {
+    body = await res.json();
+  } catch {
+    // không phải JSON — giữ body = null
+  }
+  const l = docLoiApi(body, res.status, macDinh);
+  return new AiApiError(l.message, l.status, l.code, l.resetAt);
+}
+
+async function doc<T>(res: Response): Promise<T> {
+  if (!res.ok) throw await loiTuPhanHoi(res, res.statusText || "Lỗi máy chủ");
   return (await res.json()) as T;
 }
 
@@ -212,18 +223,7 @@ export const aiApi = {
       signal,
       cache: "no-store",
     });
-    if (!res.ok || !res.body) {
-      let detail: unknown = null;
-      try {
-        detail = await res.json();
-      } catch {
-        // không phải JSON
-      }
-      const obj = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : null;
-      const message = (obj && typeof obj.message === "string" && obj.message) || "Không thể kết nối trợ lý AI.";
-      const code = obj && typeof obj.code === "string" ? obj.code : undefined;
-      throw new ApiError(message, res.status, code);
-    }
+    if (!res.ok || !res.body) throw await loiTuPhanHoi(res, "Không thể kết nối trợ lý AI.");
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";

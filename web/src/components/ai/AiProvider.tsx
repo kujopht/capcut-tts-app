@@ -28,8 +28,10 @@ import {
   useState,
 } from "react";
 import { ApiError } from "@/lib/api";
-import { aiApi, docVanBanTruongDuAn, ghepBodyDuAn, taoClientId } from "@/lib/ai/client";
-import { CO_HOI_THOAI, apDungHanhDongMo, docPhien, ghiPhien, khoiPhucMo } from "@/lib/ai/phienMo";
+import { AiApiError, aiApi, docVanBanTruongDuAn, ghepBodyDuAn, taoClientId } from "@/lib/ai/client";
+import {
+  CO_HOI_THOAI, apDungHanhDongMo, docNhap, docPhien, ghiNhap, ghiPhien, khoiPhucMo, openSauKhiPhucHoi,
+} from "@/lib/ai/phienMo";
 import { AI_ASSISTANT_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import type {
@@ -48,7 +50,8 @@ import type {
 function loiTuApiError(e: unknown): AiErrorInfo {
   if (e instanceof ApiError) {
     const code = (e.code as AiErrorInfo["code"]) || "ai_provider_unavailable";
-    return { code, message: e.message || "Có lỗi khi liên hệ trợ lý AI." };
+    const reset_at = e instanceof AiApiError ? e.resetAt : null;
+    return { code, message: e.message || "Có lỗi khi liên hệ trợ lý AI.", reset_at };
   }
   return { code: "network_error", message: "Mất kết nối mạng." };
 }
@@ -148,6 +151,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     draft: "",
   });
   const ctrlRef = useRef<AbortController | null>(null);
+  /** user_id hiện tại cho các trình xử lý không phụ thuộc render (bản nháp theo người dùng). */
+  const uidRef = useRef<string | null>(null);
+  uidRef.current = profile?.user_id ?? null;
   const assistantIdRef = useRef<string | null>(null);
   const lastUserTextRef = useRef<string>("");
 
@@ -155,11 +161,27 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!AI_ASSISTANT_ENABLED || !profile) return;
     const { open, conversationId } = khoiPhucMo();
+    const draft = docNhap(profile.user_id);
     if (open) {
-      setState((s) => ({ ...s, open: true, conversationId }));
+      setState((s) => ({ ...s, open: true, conversationId, draft: s.draft || draft }));
+    } else if (draft) {
+      setState((s) => ({ ...s, draft: s.draft || draft }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.user_id]);
+
+  // Back sau một điều hướng CỨNG: trình duyệt phục hồi trang từ bfcache với
+  // bộ nhớ JS cũ (có thể panel đang mở) — đồng bộ lại theo cờ phiên (mà
+  // `/assistant` đã xoá) + bản nháp mới nhất. Đo được ở QA release gate.
+  useEffect(() => {
+    if (!AI_ASSISTANT_ENABLED) return;
+    const khiHien = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      setState((s) => ({ ...s, open: openSauKhiPhucHoi(s.open), draft: docNhap(uidRef.current) }));
+    };
+    window.addEventListener("pageshow", khiHien);
+    return () => window.removeEventListener("pageshow", khiHien);
+  }, []);
 
   const xinAvailability = useCallback(async (): Promise<AiAvailability | false> => {
     if (state.availability) return state.availability;
@@ -488,6 +510,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
 
   const setDraft = useCallback((text: string) => {
     setState((s) => ({ ...s, draft: text }));
+    ghiNhap(uidRef.current, text);
   }, []);
 
   /** Tải danh sách dự án viết — gọi khi vào mode `writer`/mở thanh dự án, KHÔNG lúc mount. */

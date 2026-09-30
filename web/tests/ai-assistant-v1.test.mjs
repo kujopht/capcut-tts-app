@@ -399,3 +399,60 @@ test("RG-B. Story mode trung thực: nhãn beta + nói rõ chỉ đọc chương
     assert.ok(!/hiểu (cả|toàn bộ) (bộ )?truyện/i.test(s), `${f} hứa quá khả năng Story mode`);
   }
 });
+
+test("RG-QA. Lỗi HTTP /api/ai/* dạng FastAPI {detail:{code,...}} đọc đúng mã (429 hết ngân sách/RPM không còn thành 'gián đoạn')", async () => {
+  const { docLoiApi } = await import("../src/lib/ai/loiApi.ts");
+  const hetNganSach = docLoiApi(
+    { detail: { code: "ai_budget_exhausted", message: "Đã dùng hết 400 token hôm nay.", reset_at: "2026-10-01T00:00:00+00:00" } },
+    429, "mặc định");
+  assert.equal(hetNganSach.code, "ai_budget_exhausted");
+  assert.equal(hetNganSach.resetAt, "2026-10-01T00:00:00+00:00");
+  assert.equal(hetNganSach.status, 429);
+  assert.equal(docLoiApi({ detail: { code: "ai_rate_limited", message: "x" } }, 429, "m").code, "ai_rate_limited");
+  assert.equal(docLoiApi({ detail: { code: "ai_busy", message: "x" } }, 503, "m").code, "ai_busy");
+  // 401 của FastAPI: detail là CHUỖI.
+  assert.deepEqual(docLoiApi({ detail: "Cần đăng nhập." }, 401, "m"), { message: "Cần đăng nhập.", status: 401, resetAt: null });
+  // Dạng phẳng cũ + thân không phải JSON vẫn không ném.
+  assert.equal(docLoiApi({ code: "ai_not_found", message: "y" }, 404, "m").code, "ai_not_found");
+  assert.deepEqual(docLoiApi(null, 500, "mặc định"), { message: "mặc định", status: 500, code: undefined, resetAt: null });
+
+  const client = read("lib/ai/client.ts");
+  assert.ok(!/obj\.code/.test(client), "client.ts không còn tự đọc code ở tầng ngoài cùng");
+  assert.match(client, /throw await loiTuPhanHoi\(res, "Không thể kết nối trợ lý AI\."\)/);
+  const provider = read("components/ai/AiProvider.tsx");
+  assert.match(provider, /e instanceof AiApiError \? e\.resetAt : null/);
+});
+
+test("RG-QA2. Back sau điều hướng cứng (bfcache) không giữ panel mở khi cờ đã xoá; bản nháp theo tab + theo người dùng", async () => {
+  const { apDungHanhDongMo, openSauKhiPhucHoi, docNhap, ghiNhap, TRAN_NHAP } = await import("../src/lib/ai/phienMo.ts");
+  const kho = khoGia();
+  // Trang "/" có panel đang mở (ảnh chụp bfcache: open=true) -> /assistant (document khác) xoá cờ -> Back.
+  apDungHanhDongMo("mo_noi", kho);
+  apDungHanhDongMo("vao_toan_man", kho);
+  assert.equal(openSauKhiPhucHoi(true, kho), false, "panel phải đóng khi phục hồi từ bfcache");
+  // Người dùng tự mở lại rồi Back tới một trang khác -> vẫn mở (cờ còn), và KHÔNG bao giờ tự mở.
+  apDungHanhDongMo("mo_noi", kho);
+  assert.equal(openSauKhiPhucHoi(true, kho), true);
+  assert.equal(openSauKhiPhucHoi(false, kho), false, "phục hồi không bao giờ tự mở panel");
+  // Bản nháp: sống qua document khác, tách theo người dùng, có trần, xoá khi rỗng.
+  ghiNhap("usr_a", "nháp của A", kho);
+  assert.equal(docNhap("usr_a", kho), "nháp của A");
+  assert.equal(docNhap("usr_b", kho), "", "người khác cùng tab không thấy nháp của A");
+  assert.equal(docNhap(null, kho), "");
+  ghiNhap("usr_a", "x".repeat(TRAN_NHAP + 50), kho);
+  assert.equal(docNhap("usr_a", kho).length, TRAN_NHAP);
+  ghiNhap("usr_a", "", kho);
+  assert.equal(docNhap("usr_a", kho), "");
+
+  const provider = read("components/ai/AiProvider.tsx");
+  assert.match(provider, /addEventListener\("pageshow", khiHien\)/);
+  assert.match(provider, /openSauKhiPhucHoi\(s\.open\)/);
+  assert.match(provider, /ghiNhap\(uidRef\.current, text\)/);
+});
+
+test("RG-QA3. Không tràn ngang ở 1024px với font hệ thống rộng: icon nav ẩn ở 901–1100px, nhãn chữ giữ nguyên", () => {
+  const css = read("app/globals.css");
+  assert.match(css, /@media \(min-width: 901px\) and \(max-width: 1100px\) \{\s*\.nav-link-icon \{ display: none; \}/);
+  const nav = read("components/NavAuth.tsx");
+  assert.match(nav, /<FanficIcon name=\{link\.icon\} size=\{18\} className="nav-link-icon" \/>/);
+});

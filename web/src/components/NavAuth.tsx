@@ -140,7 +140,7 @@ export function NavLinks() {
             }
           >
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <FanficIcon name={link.icon} size={18} />
+              <FanficIcon name={link.icon} size={18} className="nav-link-icon" />
               {link.label}
               {MUSIC_ENABLED && link.href === "/entertainment" ? <SoundwaveMini /> : null}
             </span>

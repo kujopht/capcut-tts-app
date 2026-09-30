@@ -17,6 +17,12 @@
 
 export const CO_MO = "fas.ai.open";
 export const CO_HOI_THOAI = "fas.ai.conv";
+/** Bản nháp ô soạn — theo TAB (sessionStorage), để sống qua một lần tải lại
+ *  trang hoặc qua `/assistant` khi trình duyệt coi đó là một document khác
+ *  (điều hướng cứng + bfcache, đo được ở QA release gate). */
+export const CO_NHAP = "fas.ai.draft";
+/** Trần bản nháp lưu lại (ô soạn cho tối đa 4000 ký tự; dư để không cắt nhầm). */
+export const TRAN_NHAP = 8000;
 
 /** Tập con của `Storage` mà ta dùng — test truyền một bản giả dựa trên `Map`. */
 export interface KhoPhien {
@@ -75,4 +81,30 @@ export function apDungHanhDongMo(hanhDong: HanhDongMo, kho: KhoPhien | null = kh
 /** Trạng thái khôi phục khi tải lại trang/đăng nhập lại trong CÙNG tab. */
 export function khoiPhucMo(kho: KhoPhien | null = khoPhien()): { open: boolean; conversationId: string | null } {
   return { open: docPhien(CO_MO, kho) === "1", conversationId: docPhien(CO_HOI_THOAI, kho) };
+}
+
+/**
+ * Trang được trình duyệt PHỤC HỒI từ bfcache (Back sau một điều hướng cứng):
+ * bộ nhớ JS là ảnh chụp lúc rời trang — có thể panel đang mở, trong khi
+ * `/assistant` (một document khác) đã đóng panel và xoá cờ. Panel chỉ được
+ * GIỮ mở nếu cờ vẫn còn; hàm này KHÔNG BAO GIỜ tự mở panel.
+ */
+export function openSauKhiPhucHoi(openHienTai: boolean, kho: KhoPhien | null = khoPhien()): boolean {
+  return openHienTai && docPhien(CO_MO, kho) === "1";
+}
+
+/** Khoá bản nháp THEO NGƯỜI DÙNG — người khác đăng nhập trong cùng tab không
+ *  thấy bản nháp của người trước. Không có user -> không đọc/ghi gì. */
+function khoaNhap(userId: string | null | undefined): string | null {
+  return userId ? `${CO_NHAP}:${userId}` : null;
+}
+
+export function docNhap(userId: string | null | undefined, kho: KhoPhien | null = khoPhien()): string {
+  const k = khoaNhap(userId);
+  return k ? (docPhien(k, kho) ?? "").slice(0, TRAN_NHAP) : "";
+}
+
+export function ghiNhap(userId: string | null | undefined, text: string, kho: KhoPhien | null = khoPhien()): void {
+  const k = khoaNhap(userId);
+  if (k) ghiPhien(k, text ? text.slice(0, TRAN_NHAP) : null, kho);
 }

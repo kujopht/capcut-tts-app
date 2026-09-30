@@ -27,7 +27,7 @@ import {
 } from "@/lib/admin/aiControl";
 import { Loading } from "@/components/ui";
 import { IconBulb } from "@/components/Icons";
-import { AiOverviewCards } from "@/components/admin/ai/AiOverviewCards";
+import { AiOverviewCards, ngayUtc } from "@/components/admin/ai/AiOverviewCards";
 import { AiKillSwitch } from "@/components/admin/ai/AiKillSwitch";
 import { AiProviderTypes } from "@/components/admin/ai/AiProviderTypes";
 import { AiSlotList } from "@/components/admin/ai/AiSlotList";
@@ -206,7 +206,7 @@ export default function AdminAi() {
       </div>
 
       <section id="tong-quan" className="stack-2 ai-admin-muc">
-        <h2 className="section-title">Tổng quan hôm nay ({overview.day})</h2>
+        <h2 className="section-title">Tổng quan hôm nay ({ngayUtc(overview.day)}, UTC)</h2>
         <AiOverviewCards overview={overview} config={config} />
       </section>
 

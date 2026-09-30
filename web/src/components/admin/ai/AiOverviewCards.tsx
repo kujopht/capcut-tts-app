@@ -14,6 +14,17 @@ const CHU_TRANG_THAI: Record<AiOverview["state"], string> = {
   stale: "Kho cấu hình tạm mất kết nối — đang dùng bản hợp lệ gần nhất (tối đa 10 phút), sau đó AI tự tắt.",
 };
 
+function gioDiaPhuong(iso: string): string {
+  if (!iso) return "—";
+  const t = new Date(iso);
+  return Number.isNaN(t.getTime()) ? iso : t.toLocaleString("vi-VN");
+}
+
+/** Ngày UTC của server (`YYYYMMDD`) → `DD/MM/YYYY`. */
+export function ngayUtc(day: string): string {
+  return /^\d{8}$/.test(day) ? `${day.slice(6, 8)}/${day.slice(4, 6)}/${day.slice(0, 4)}` : day;
+}
+
 function dinhDangUsd(microUsd: number): string {
   return `$${(microUsd / 1_000_000).toFixed(4)}`;
 }
@@ -84,7 +95,7 @@ export function AiOverviewCards({ overview, config }: { overview: AiOverview; co
 
       <p className="hint">
         Phiên bản cấu hình hiện tại: {config.controls.version} · cập nhật lần cuối bởi{" "}
-        {config.controls.updated_by || "—"} lúc {config.controls.updated_at || "—"}.
+        {config.controls.updated_by || "—"} lúc {gioDiaPhuong(config.controls.updated_at)}.
       </p>
     </div>
   );

@@ -82,3 +82,12 @@ ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_secret_redaction.py:j
 #    phai feature/) nen 8 commit cua no CHUA TUNG duoc gitleaks quet lan nao
 #    truoc PR hop nhat nay.
 ff6437b1df9e2f45c537bda41ce7db1b8d473483:tests/test_router_control_room.py:appwrite-api-key:341
+#
+# 7) server/tests/test_ai_memory.py:25 (commit c028983, PR #253) — JWT MAU
+#    cong khai (header HS256, payload {"sub":"1234567890"} — vi du kinh dien,
+#    khong ky boi khoa nao cua Fanfic) dung de kiem bo loc bi mat. Da sua o HEAD
+#    thanh ghep chuoi luc chay (JWT_GIA), nen chuoi khong con o HEAD va KHONG
+#    sinh dau van tay moi; muc nay chi che LICH SU cua c028983 (da day len
+#    origin/feat/ai-assistant-v1-backend — khong viet lai lich su da cong bo).
+#    Cung ly do "feat/ khong phai feature/": nhanh chua tung duoc quet truoc PR.
+c0289833522de6b877d9f1a51766a5383e127272:server/tests/test_ai_memory.py:jwt:25

@@ -430,12 +430,13 @@ export function PostCard({
             aria-pressed={bai.liked}
             onClick={thich}
           >
-            <FanficIcon name="like" size={16} className="bai-tim" />{" "}
+            {/* Hinh dang (dac/rong) phai khac nhau, khong chi mau (WCAG 1.4.1). */}
+            <FanficIcon name={bai.liked ? "like" : "like-outline"} size={16} className="bai-tim" />{" "}
             Thích
           </button>
         ) : (
           <Link className="btn btn-ghost bai-nut" href={loginHref(pathname)} prefetch={false}>
-            <FanficIcon name="like" size={16} /> Thích
+            <FanficIcon name="like-outline" size={16} /> Thích
           </Link>
         )}
 

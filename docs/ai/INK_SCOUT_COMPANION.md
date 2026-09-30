@@ -112,3 +112,47 @@ WebP 512 px (~60 KB) đủ cho bong bóng chat; hiển thị 96–128 px CSS (2�
 * `return-home` dùng lại NGUYÊN `walk`.
 * `hover` không có poster tĩnh riêng (manifest trỏ về poster `answering`).
 * Atlas `hop-left/right` 16 ô nhưng chỉ 10 khung duy nhất (6 ô trống).
+
+## 7. Đo đạc (Lightning CPU, `next start`, dữ liệu MOCK, Chrome for Testing headless)
+
+**Bundle JS** (tổng chunk tĩnh của mọi tuyến, `do_bundle_ink.py`):
+
+| Hạng mục | Trước khi sửa (`main`) | Sau khi sửa (nhánh) |
+|---|---|---|
+| Mọi cờ TẮT | 903 746 B · 275 614 B gzip | 906 409 B · 275 767 B gzip (**+153 B gzip**) |
+| AI BẬT, linh vật TẮT vs BẬT | — | ≈ bằng nhau; khác biệt nằm ở chunk lười |
+| Chunk lười `AiCompanion` | — | 7 950 B · **3 289 B gzip**, chỉ tải khi cần |
+
+**Mạng (asset linh vật)**:
+
+| Tình huống | Số yêu cầu | Byte |
+|---|---|---|
+| Nạp nguội, đứng "nhà" (idle) | 3 (runtime + manifest + sprite idle) | **151 405 B** |
+| Cả phiên QA 1600 px (mọi trạng thái + chuyển động) | 40 | 1 089 865 B |
+| Cờ linh vật TẮT / mobile ngoài `/assistant` | 0 | 0 |
+
+**CPU** (`Performance.getMetrics` TaskDuration, ms mỗi giây — lượt 3, mã cuối `56fa2f2`; lượt 2 trong ngoặc):
+
+| Tình huống | Tổng | Script |
+|---|---|---|
+| Không linh vật (đường cơ sở, cùng trang) | 67,76 (72,71) | 1,12 (1,21) |
+| Linh vật idle ở "nhà" | 100,6 (108,28) | 4,67 (3,93) |
+| Ngồi trên panel, lắng nghe (tư thế tĩnh) | 72,16 (69,6) | 1,28 |
+| Tab ẩn | 0 lần vẽ / 2,5 s (so với 47 / 2 s khi hiện) | — |
+
+Heap JS ≈ 11,7 MB ở cả ba tình huống (linh vật không làm tăng đáng kể).
+
+Ngân sách đề xuất (để giữ trong các PR sau): asset ban đầu ≤ 200 KB, chunk lười ≤ 5 KB gzip, bộ con ≤ 2,7 MB, script ≤ 5 ms/s khi idle.
+
+## 8. QA (1600×900, 1440×900, 1024×768, 390×844 — giả lập)
+
+Ba lượt; lượt 3 chạy trên đúng mã cuối (băm tệp khớp commit). 22 mục đều ĐẠT, 0 lỗi console. Lượt 2 bắt được lỗi giảm chuyển động khi panel đã mở lúc nạp (chỗ ngồi bị cộng đôi `translate(-428px,-1188px)`); lượt 3 xác nhận đã sửa: `translate(-214px,-594.24px)`, trùng vị trí ở chế độ thường. Các mục: idle · hover · mở → nhảy lên mép panel · thinking · answering · writing · Truyện → searching · error · offline · Dừng → listening (không success) · success một lần · đóng → về nhà · mở/đóng dồn dập kết thúc ở nhà/idle · làm mới → 1 canvas, 1 runtime · 1024 → ngồi cạnh trái panel · tab ẩn dừng vẽ · Giảm chuyển động (ảnh tĩnh, dời chỗ tức thì) · Ẩn Ink Scout · cùng Chat Dock (không đè, dịch theo dock) · mobile `/assistant` listening/thinking/answering/offline · ô soạn không bị che ở cao 844 và 480 · ≤1023 px không có linh vật nổi.
+
+**Giới hạn**: mobile CHỈ là giả lập (Chrome headless, viewport 390×844). Bàn phím ảo không giả lập được ở headless — dùng viewport thấp 390×480 làm đại diện. Chưa thử trên điện thoại thật (iOS Safari / Android Chrome).
+
+## 9. Kế hoạch triển khai
+
+1. Merge PR (cờ TẮT mặc định → production không đổi; chỉ thêm ~153 B gzip và thư mục `public/mascot/ink-scout/` 2,2 MB, không được yêu cầu).
+2. Khi Trợ lý AI đã bật cho người dùng (hiện `FAS_AI_ASSISTANT_V1` / `NEXT_PUBLIC_AI_ASSISTANT_ENABLED` vẫn TẮT): build với `NEXT_PUBLIC_AI_COMPANION_ENABLED=1`, chủ sở hữu kiểm trên thiết bị thật (desktop + một iPhone + một Android).
+3. Theo dõi: lỗi `mascoterror` ở console, CPU idle, phản hồi người dùng; tắt bằng cách build lại với cờ `0` (không cần dọn dữ liệu — chỉ localStorage `fas.aiCompanion.v1`).
+4. Sticker Ink Scout: PR riêng theo đề xuất §5 sau khi Chat V1 bật.

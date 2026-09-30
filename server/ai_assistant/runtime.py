@@ -9,7 +9,7 @@ import logging
 import os
 import secrets
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from server.ai_assistant.config import resolve_provider_chain
 from server.ai_assistant.ephemeral import EphemeralConversationStore
@@ -33,7 +33,11 @@ class AiRuntime:
     #: `memory_enabled=false` destination (contract §5) — NEVER durable,
     #: NEVER touched when memory is on. See `ephemeral.py`'s own docstring.
     ephemeral: EphemeralConversationStore = field(default_factory=EphemeralConversationStore)
-    gateway: Optional[AiGateway] = None
+    #: `AiGateway` (env-configured chain) or `ControlledGateway` (control plane).
+    gateway: Optional[Any] = None
+    #: Control plane (`FAS_AI_ADMIN_V1`): admission caps, kill switch, per-slot
+    #: usage. `None` = legacy env-configured behaviour.
+    control: Optional[Any] = None
     tool_ctx: ToolContext = field(default_factory=ToolContext)
     rpm_limiter: RpmLimiter = field(default_factory=RpmLimiter)
     stream_guard: StreamGuard = field(default_factory=lambda: StreamGuard(max_streams_per_instance=4))
@@ -88,25 +92,34 @@ def _build_provider(name: str, settings: Any) -> Optional[ChatProvider]:
     return None
 
 
-def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None) -> AiRuntime:
+def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
+                     control: Optional[Any] = None) -> AiRuntime:
+    """`control` (the `/admin/ai` plane, `FAS_AI_ADMIN_V1`) REPLACES the
+    env-configured provider chain: routing, kill switch and caps then come
+    from the stored control config, and an absent/corrupt config means AI off
+    (fail-closed) — `FAS_AI_PROVIDERS` and the `AI_*` keys are ignored."""
     ai = settings.ai_assistant
     if not ai.enabled:
-        return AiRuntime(False, reason="FAS_AI_ASSISTANT_V1 chưa bật")
+        return AiRuntime(False, reason="FAS_AI_ASSISTANT_V1 chưa bật", control=control)
 
-    chain = resolve_provider_chain(ai, environment=settings.environment)
-    if not chain:
-        return AiRuntime(False, reason="no_provider")
+    if control is not None:
+        from server.ai_assistant.control.router import ControlledGateway
+        gateway: Any = ControlledGateway(control)
+    else:
+        chain = resolve_provider_chain(ai, environment=settings.environment)
+        if not chain:
+            return AiRuntime(False, reason="no_provider")
 
-    providers: Dict[str, ChatProvider] = {}
-    for name in chain:
-        p = _build_provider(name, settings)
-        if p is not None:
-            providers[name] = p
-    usable_chain = [n for n in chain if n in providers]
-    if not usable_chain:
-        return AiRuntime(False, reason="no_provider")
+        providers: Dict[str, ChatProvider] = {}
+        for name in chain:
+            p = _build_provider(name, settings)
+            if p is not None:
+                providers[name] = p
+        usable_chain = [n for n in chain if n in providers]
+        if not usable_chain:
+            return AiRuntime(False, reason="no_provider")
 
-    gateway = AiGateway(providers=providers, provider_chain=usable_chain)
+        gateway = AiGateway(providers=providers, provider_chain=usable_chain)
 
     data_backend = str(getattr(settings, "data_backend", "mock")).lower()
     if data_backend == "appwrite":
@@ -121,8 +134,14 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None) -
     if getattr(ai, "user_ref_salt", ""):
         kwargs["user_ref_salt"] = ai.user_ref_salt
 
+    if control is not None:
+        def _user_usage(user_id: str, day: str) -> Tuple[int, int]:
+            u = repo.get_usage_day(user_id, day)
+            return (u.requests, u.input_tokens + u.output_tokens) if u else (0, 0)
+        control.attach_usage_sources(active_users_fn=repo.count_usage_users, user_usage_fn=_user_usage)
+
     return AiRuntime(
-        True, repo=repo, gateway=gateway, tool_ctx=tool_ctx or ToolContext(),
+        True, repo=repo, gateway=gateway, control=control, tool_ctx=tool_ctx or ToolContext(),
         assistant_name=ai.assistant_name,
         daily_tokens_free=ai.daily_tokens_free, daily_tokens_premium=ai.daily_tokens_premium,
         rpm=ai.rpm, web_search_enabled=(ai.web_search_provider or "off") != "off",

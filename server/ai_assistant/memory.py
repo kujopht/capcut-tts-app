@@ -186,6 +186,9 @@ class AiRepo:
     def get_usage_day(self, user_id: str, day: str) -> Optional[AiUsageDay]: ...
     def increment_usage(self, user_id: str, day: str, *, input_tokens: int,
                         output_tokens: int) -> AiUsageDay: ...
+    def count_usage_users(self, day: str) -> Optional[int]:
+        """Distinct users with any AI usage on `day` (admin overview metric)."""
+        ...
     # escalations
     def create_escalation(self, e: AiEscalation) -> AiEscalation: ...
     # bulk delete
@@ -366,6 +369,10 @@ class InMemoryAiRepo(AiRepo):
     def get_usage_day(self, user_id: str, day: str) -> Optional[AiUsageDay]:
         with self._lock:
             return self._usage.get(f"{user_id}_{day}")
+
+    def count_usage_users(self, day: str) -> Optional[int]:
+        with self._lock:
+            return sum(1 for u in self._usage.values() if u.day == day)
 
     def increment_usage(self, user_id: str, day: str, *, input_tokens: int,
                         output_tokens: int) -> AiUsageDay:
@@ -734,6 +741,15 @@ class AppwriteAiRepo(AiRepo):
         self._delete(T_PROJ, project_id)
 
     # ------------------------------------------------------------- usage
+    def count_usage_users(self, day: str) -> Optional[int]:
+        """`total` of rows for that day (one row per user per day, see schema)."""
+        try:
+            b = self._call("GET", self._collection(T_USAGE),
+                           queries=[self._q("equal", "day", [day]), self._q("limit", values=[1])])
+        except (_Loi, AiUnavailable):
+            return None
+        return int((b or {}).get("total") or 0)
+
     def get_usage_day(self, user_id: str, day: str) -> Optional[AiUsageDay]:
         r = self._get(T_USAGE, f"{user_id}_{day}")
         if not r:

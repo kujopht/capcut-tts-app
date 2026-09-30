@@ -1926,6 +1926,105 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("status_created_idx", "key", ["status", "created_at"]),
         ],
     },
+    # --- AI control plane `/admin/ai` (docs/ai/AI_ADMIN_CONTROL_PLANE.md) -------
+    # CAU HINH + bo dem + nhat ky — KHONG BAO GIO bi mat: slot chi mang TEN tham
+    # chieu (`secret_ref`), gia tri nam o bien moi truong `FAS_AI_SECRET_<ref>`.
+    # Bo sung THUAN (khong doi collection cu). CHUA ap len production; cong
+    # `FAS_AI_ADMIN_V1` mac dinh TAT. Doc: `server/ai_assistant/control/store.py`.
+    "ai_control_settings": {
+        # MOT dong, id "global". Thieu dong = AI TAT (fail-closed).
+        "name": "AI Control Settings",
+        "attributes": [
+            ("ai_enabled", "boolean", False, None),
+            ("provider_types_json", "string", False, 400),
+            ("global_daily_request_cap", "integer", False, None),
+            ("global_daily_token_cap", "integer", False, None),
+            ("per_user_daily_request_cap", "integer", False, None),
+            ("per_user_daily_token_cap", "integer", False, None),
+            ("daily_cost_cap_micro_usd", "integer", False, None),
+            ("max_output_tokens", "integer", False, None),
+            ("max_context_tokens", "integer", False, None),
+            ("mode_profiles_json", "string", False, 400),
+            ("web_search_profile", "string", False, 32),
+            ("web_search_tool", "string", False, 32),
+            ("version", "integer", False, None),
+            ("updated_by", "string", False, 64),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
+    "ai_provider_slots": {
+        # id = slot_id. `secret_ref` la TEN, khong phai khoa.
+        "name": "AI Provider Slots",
+        "attributes": [
+            ("slot_id", "string", True, 40),
+            ("provider_type", "enum", True, ["gemini", "groq", "workers_ai", "qwen", "azure_openai", "openrouter"]),
+            ("label", "string", False, 60),
+            ("secret_ref", "string", True, 64),
+            ("model", "string", True, 120),
+            ("enabled", "boolean", False, None),
+            ("endpoint", "string", False, 300),
+            ("api_version", "string", False, 20),
+            ("priority", "integer", False, None),
+            ("weight", "integer", False, None),
+            ("daily_request_cap", "integer", False, None),
+            ("daily_token_cap", "integer", False, None),
+            ("rpm_soft_cap", "integer", False, None),
+            ("tpm_soft_cap", "integer", False, None),
+            ("workloads_json", "string", False, 200),
+            ("price_in_micro_per_mtok", "integer", False, None),
+            ("price_out_micro_per_mtok", "integer", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("type_idx", "key", ["provider_type"]),
+        ],
+    },
+    "ai_routing_profiles": {
+        # id = ten ho so (FREE_FIRST, QUALITY_FIRST, WRITER, STORY, SUPPORT_SAFE, WEB_SEARCH).
+        "name": "AI Routing Profiles",
+        "attributes": [
+            ("name", "string", True, 32),
+            ("steps_json", "string", False, 600),
+            ("enabled", "boolean", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
+    "ai_provider_usage_daily": {
+        # id = `{slot_id}_{yyyymmdd}` — CHI bo dem, khong noi dung hoi thoai.
+        "name": "AI Provider Usage Daily",
+        "attributes": [
+            ("slot_id", "string", True, 40),
+            ("day", "string", True, 8),
+            ("requests", "integer", False, None),
+            ("input_tokens", "integer", False, None),
+            ("output_tokens", "integer", False, None),
+            ("errors", "integer", False, None),
+            ("rate_limited", "integer", False, None),
+            ("cost_micro_usd", "integer", False, None),
+            ("last_success_at", "datetime", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("day_idx", "key", ["day"]),
+        ],
+    },
+    "ai_admin_audit": {
+        # Chi-them. Gia tri cu/moi la cau hinh KHONG bi mat (secret_ref la TEN).
+        "name": "AI Admin Audit",
+        "attributes": [
+            ("admin_id", "string", True, 64),
+            ("at", "datetime", True, None),
+            ("entity", "string", True, 80),
+            ("field", "string", True, 60),
+            ("old_value", "string", False, 500),
+            ("new_value", "string", False, 500),
+        ],
+        "indexes": [
+            ("at_idx", "key", ["at"]),
+        ],
+    },
 }
 
 #: Cac thuoc tinh la MANG. Appwrite doi co `array: true` luc tao; thieu no thi

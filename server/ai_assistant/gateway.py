@@ -115,7 +115,9 @@ class AiGateway:
         return out
 
     def stream(self, messages: List[ChatTurn], *, mode: str,
-              user_ref: str = "") -> Iterator[StreamEvent]:
+              user_ref: str = "", workload: Optional[str] = None) -> Iterator[StreamEvent]:
+        # `workload` exists for signature parity with the control plane's
+        # `ControlledGateway`; the env-configured chain has one route only.
         limits = MODE_LIMITS.get(mode, MODE_LIMITS["general"])
         trimmed = trim_context(messages, max_tokens=limits["max_context_tokens"])
         tried_any = False

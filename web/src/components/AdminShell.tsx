@@ -29,6 +29,7 @@ import { useSession } from "@/lib/session";
 import { Loading } from "@/components/ui";
 import {
   IconBook,
+  IconBulb,
   IconChart,
   IconCompass,
   IconFeather,
@@ -132,6 +133,7 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
   },
   { muc: [{ href: "/admin/analytics", nhan: "Analytics", icon: IconChart, vaiToiThieu: "admin" }] },
   { muc: [{ href: "/admin/ai-credits", nhan: "AI / Credits", icon: IconSparkles, vaiToiThieu: "admin" }] },
+  { muc: [{ href: "/admin/ai", nhan: "AI Control Plane", icon: IconBulb, vaiToiThieu: "admin" }] },
   { muc: [{ href: "/admin/system", nhan: "System", icon: IconGear, vaiToiThieu: "owner" }] },
   { muc: [{ href: "/admin/audit-log", nhan: "Audit Log", icon: IconHistory, vaiToiThieu: "admin" }] },
 ];
@@ -143,6 +145,17 @@ function duVaiTro(cua: AdminRole | undefined, toiThieu: AdminRole | undefined): 
   if (!toiThieu) return true;
   const BAC: Record<AdminRole, number> = { none: 0, moderator: 1, admin: 2, owner: 3 };
   return BAC[cua ?? "none"] >= BAC[toiThieu];
+}
+
+/**
+ * Muc dieu huong co khop duong dan hien tai khong — theo TUNG DOAN, khong theo
+ * tien to chuoi: `/admin/ai` khong duoc sang khi dang o `/admin/ai-credits`
+ * (hai muc cung sang `aria-current` la hai "trang hien tai"). `/admin` chi
+ * khop tuyet doi, neu khong no nuot moi trang con.
+ */
+function khopMuc(pathname: string, href: string): boolean {
+  if (href === "/admin") return pathname === "/admin";
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 /**
@@ -187,7 +200,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   */
   const tenTrang =
     NHOM_DIEU_HUONG.flatMap((n) => n.muc)
-      .filter((m) => (m.href === "/admin" ? pathname === "/admin" : pathname.startsWith(m.href)))
+      .filter((m) => khopMuc(pathname, m.href))
       .sort((a, b) => b.href.length - a.href.length)[0]?.nhan ?? "Fanfic World";
 
   return (
@@ -240,8 +253,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                   <span className="admin-nhom-nhan">{n.nhom}</span>
                 ) : null}
                 {mucHienDuoc.map(({ href, nhan, icon: Icon }) => {
-                  const dang =
-                    href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+                  const dang = khopMuc(pathname, href);
                   return (
                     <Link
                       key={href}

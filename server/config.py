@@ -298,6 +298,11 @@ class AiAssistantSettings:
     #: giu ket noi song qua proxy/CDN (Cloudflare/Render cat ket noi rong
     #: ~100 s). Luon nam trong [15, 25]; xem `_ai_assistant_settings`.
     heartbeat_s: int = 15
+    #: Control plane `/admin/ai` (docs/ai/AI_ADMIN_CONTROL_PLANE.md). TAT mac
+    #: dinh. Bat thi: API/UI quan tri AI mo cho Owner/Admin, VA dinh tuyen chat
+    #: doc cau hinh tu kho (slot provider + ho so + tran) thay vi
+    #: `FAS_AI_PROVIDERS` — thieu/hong cau hinh thi AI TAT (fail-closed).
+    admin_v1: bool = False
     #: M8 (review finding): server-side salt for HMAC-SHA256(user_id) sent
     #: to providers as `GenerateRequest.user_ref` (its own docstring: "HASH
     #: of the real user id, never the raw id"). Empty by default — see
@@ -310,6 +315,7 @@ class AiAssistantSettings:
         `LlmGatewaySettings.describe`/`AppwriteSettings.configured`."""
         return {
             "enabled": self.enabled,
+            "admin_v1": self.admin_v1,
             "assistant_name": self.assistant_name,
             "providers": list(self.providers),
             "qwen_configured": bool(self.qwen_api_key),
@@ -853,6 +859,9 @@ class Settings:
                 and self.translation_model),
             "image_studio": self.image_studio.describe(),
             "llm_gateway": self.llm_gateway.describe(),
+            # CHI hai co bat/tat (khong ten provider, khong khoa): de kiem mot lan
+            # deploy "toi" (AI tat) tu `/api/health` cong khai ma khong can dang nhap.
+            "ai_assistant": {"enabled": self.ai_assistant.enabled, "admin_v1": self.ai_assistant.admin_v1},
         }
 
 
@@ -1068,6 +1077,7 @@ def _ai_assistant_settings() -> AiAssistantSettings:
         # Kep vao [15, 25]: duoi 15 s la ton bang thong/CPU vo ich, tren 25 s
         # thi co proxy cat ket noi rong truoc khi ping kip toi.
         heartbeat_s=max(15, min(25, _int("FAS_AI_HEARTBEAT_S", 15))),
+        admin_v1=_env_bool("FAS_AI_ADMIN_V1", False),
         user_ref_salt=_env("FAS_AI_USER_REF_SALT"),
     )
 

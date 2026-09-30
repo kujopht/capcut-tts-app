@@ -47,6 +47,10 @@ ICON_MAP: dict[str, str] = {
     "play": "play-solid",
     "pause": "pause-solid",
     "like": "heart-solid",
+    # NGOAI LE DUY NHAT khong phai "solid": trang thai CHUA thich can mot tim
+    # RONG, neu khong "da thich"/"chua thich" chi con khac nhau o MAU (WCAG
+    # 1.4.1). Van cung bo Line Awesome, cung viewBox 32, cung net day.
+    "like-outline": "heart",
     "comment": "comment-solid",
     "share": "share-solid",
     "report": "flag-solid",

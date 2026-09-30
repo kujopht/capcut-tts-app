@@ -124,3 +124,21 @@ test("cac be mat da migrate KHONG con emoji cu (💬 🔔 🔕 👤 ✕ ➤)", (
   kiemTraKhongCon("components/chat/ChatComposer.tsx", ["➤"]);
   kiemTraKhongCon("components/NotificationBell.tsx", ["🔔"]);
 });
+
+test("nut Thich: da thich / chua thich khac nhau o HINH DANG, khong chi mau (WCAG 1.4.1)", () => {
+  const postCard = readFileSync(path.join(SRC, "components", "PostCard.tsx"), "utf8");
+  assert.match(postCard, /name=\{bai\.liked \? "like" : "like-outline"\}/);
+  assert.match(readFileSync(GENERATED, "utf8"), /"like-outline": \{ viewBox: "0 0 32 32"/);
+});
+
+test("muc dieu huong chinh mang icon NGAY TRONG muc (thieu icon = loi typecheck)", () => {
+  const nav = readFileSync(path.join(SRC, "components", "NavAuth.tsx"), "utf8");
+  assert.match(nav, /icon: IconName;/);
+  assert.match(nav, /<FanficIcon name=\{link\.icon\}/);
+  assert.ok(!nav.includes("BIEU_TUONG_MUC"), "bang tra theo href da bo");
+});
+
+test("dau 'da tat thong bao' la trang tri — an voi trinh doc man hinh", () => {
+  const ds = readFileSync(path.join(SRC, "components", "chat", "ConversationList.tsx"), "utf8");
+  assert.match(ds, /className="chat-ds-tat" aria-hidden="true" title="Đã tắt thông báo"/);
+});

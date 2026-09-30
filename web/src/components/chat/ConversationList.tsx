@@ -80,7 +80,7 @@ export function ConversationList({
                 <span className="chat-ds-dong">
                   <strong className="truncate">{ten}</strong>
                   {c.muted ? (
-                    <span className="chat-ds-tat" title="Đã tắt thông báo">
+                    <span className="chat-ds-tat" aria-hidden="true" title="Đã tắt thông báo">
                       <FanficIcon name="mute" size={14} />
                     </span>
                   ) : null}

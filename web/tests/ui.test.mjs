@@ -533,104 +533,81 @@ test("khong goi setState long trong ham cap nhat cua setState", () => {
 
 /* ------------------------------------------------- nhan dien thuong hieu */
 
-test("co du bon bien the logo", () => {
+/*
+  Logo moi (2026-09) lay tu HAI anh chu du an chon — xem `components/Logo.tsx`:
+  icon vuong bo goc cho moi cho icon nho, bieu tuong + chu cho logo giao dien.
+  Cac bai duoi day khoa nhung dieu KHONG duoc hong khi ai do sinh lai anh.
+*/
+
+/** [rong, cao, loai mau] cua PNG, doc tu IHDR. Loai 6 = RGBA, 2 = RGB. */
+const dauPng = (duong) => {
+  const buf = readFileSync(new URL(duong, import.meta.url));
+  assert.equal(buf.toString("ascii", 1, 4), "PNG", `${duong} khong phai PNG`);
+  return [buf.readUInt32BE(16), buf.readUInt32BE(20), buf.readUInt8(25)];
+};
+
+/** [rong, cao] cua WebP co kenh alpha (khoi VP8X). */
+const dauWebp = (duong) => {
+  const buf = readFileSync(new URL(duong, import.meta.url));
+  assert.equal(buf.toString("ascii", 8, 12), "WEBP", `${duong} khong phai WebP`);
+  assert.equal(buf.toString("ascii", 12, 16), "VP8X", `${duong} phai co kenh alpha`);
+  return [buf.readUIntLE(24, 3) + 1, buf.readUIntLE(27, 3) + 1];
+};
+
+test("co du bo tai san logo", () => {
   assert.ok(has("../src/components/Logo.tsx"), "thieu component logo");
-  assert.ok(has("../src/app/icon.svg"), "thieu favicon");
-  assert.ok(has("../public/brand/logo-mark.svg"), "thieu bieu tuong vuong");
-  assert.ok(has("../public/brand/logo-full.svg"), "thieu logo day du");
-  assert.ok(has("../public/brand/logo-mono.svg"), "thieu ban mot mau");
-  assert.ok(has("../src/app/apple-icon.tsx"), "thieu apple-touch-icon");
+  assert.ok(has("../src/app/favicon.ico"), "thieu favicon.ico");
+  assert.ok(has("../src/app/apple-icon.png"), "thieu apple-touch-icon");
   assert.ok(has("../src/app/opengraph-image.tsx"), "thieu anh Open Graph");
+  for (const f of ["logo-emblem.webp", "logo-wordmark.webp", "icon-maskable-512.png"]) {
+    assert.ok(has(`../public/brand/${f}`), `thieu ${f}`);
+  }
+  for (const s of [16, 32, 48, 192, 512]) {
+    assert.ok(has(`../public/brand/icon-${s}.png`), `thieu icon-${s}.png`);
+  }
 });
 
-test("logo la SVG nguyen ban, khong nhung anh ngoai", () => {
+test("logo cu da go het, khong con favicon SVG gianh cho", () => {
+  // Trinh duyet ho tro SVG uu tien `icon.svg` hon `favicon.ico` — sot mot file
+  // la tab van hien logo CU du moi thu khac da doi.
   for (const f of [
     "../src/app/icon.svg",
+    "../src/app/apple-icon.tsx",
+    "../public/brand/logo-mark.svg",
     "../public/brand/logo-full.svg",
     "../public/brand/logo-mono.svg",
   ]) {
-    const svg = read(f);
-    assert.match(svg, /^<svg[\s\S]*<\/svg>\s*$/, `${f} phai la SVG`);
-    assert.ok(!/<image\b/.test(svg), `${f} khong duoc nhung anh bitmap`);
-    assert.ok(!/href="http/.test(svg), `${f} khong duoc tai tai nguyen ngoai`);
-    assert.match(svg, /<title>/, `${f} thieu <title> cho doc man hinh`);
+    assert.ok(!has(f), `${f} la logo cu, phai go`);
   }
 });
 
-test("mot bieu tuong duy nhat cho ca hai khu vuc", () => {
-  // Ban DAY DU dung chung tung toa do o moi noi
-  const key = 'd="M4.6 16.4 14.6 18 14.6 26.8 4.6 25.2Z"';
-  for (const f of [
-    "../src/components/Logo.tsx",
-    "../src/components/BrandMark.tsx",
-    "../public/brand/logo-mark.svg",
-    "../public/brand/logo-full.svg",
-  ]) {
-    assert.ok(read(f).includes(key), `${f} dung hinh khac — phai la mot logo`);
-  }
+test("mot nguon logo cho moi noi", () => {
+  const logo = read("../src/components/Logo.tsx");
+  assert.match(logo, /icon: "\/brand\/icon-192\.png"/);
+  assert.match(logo, /emblem: "\/brand\/logo-emblem\.webp"/);
+  assert.match(logo, /wordmark: "\/brand\/logo-wordmark\.webp"/);
+  // Anh OG (Satori) dung CUNG icon, nhung san — Worker khong doc tep luc chay.
+  assert.match(read("../src/components/BrandMark.tsx"), /src=\{BRAND_MARK_PNG\}/);
+  assert.match(read("../src/components/brandMarkData.ts"), /"data:image\/png;base64,iVBORw0KGgo/);
 });
 
-test("favicon la ban rut gon cua cung mot logo, khong phai logo khac", () => {
-  const favicon = read("../src/app/icon.svg");
-  const full = read("../public/brand/logo-mark.svg");
-
-  // Cung ngon ngu hinh: o bo tron gradient thuong hieu + hinh mau muc dam
-  for (const token of ['#7c8cff', '#4dd6c1', '#0b0d12', '<rect width="32" height="32"']) {
-    assert.ok(favicon.includes(token), `favicon thieu ${token}`);
-    assert.ok(full.includes(token), `logo day du thieu ${token}`);
-  }
-
-  // Ban favicon phai co KHOI DAY HON de con doc duoc o 16px.
-  // Lay be rong cua thanh song am (nhan ra qua rx rieng cua tung ban).
-  // String.raw: trong template literal thuong, `\d` bi nuot mat dau gach cheo
-  // va lop ky tu thanh [d.] — khong khop chu so nao.
-  const barWidth = (svg, rx) =>
-    Number(
-      new RegExp(String.raw`<rect[^>]*width="([\d.]+)"[^>]*rx="` + rx + `"`).exec(
-        svg,
-      )?.[1],
-    );
-
-  const wFavicon = barWidth(favicon, "2.2");
-  const wFull = barWidth(full, "1.6");
-  assert.ok(wFavicon > 0 && wFull > 0, `khong doc duoc be rong: ${wFavicon} / ${wFull}`);
-  assert.ok(
-    wFavicon > wFull,
-    `thanh song am cua favicon phai day hon: ${wFavicon} vs ${wFull}`,
-  );
-});
-
-test("bieu tuong ket hop trang sach va song am", () => {
-  // Ca hai ban deu la: 3 thanh song am + 2 trang sach
-  for (const [f, barRx, pageWidth] of [
-    ["../src/app/icon.svg", "2.2", "1.5"],
-    ["../public/brand/logo-mark.svg", "1.6", "1.8"],
-  ]) {
-    const svg = read(f);
-    assert.equal(
-      (svg.match(new RegExp(`<rect[^>]*rx="${barRx}"`, "g")) ?? []).length, 3,
-      `${f} phai co 3 thanh song am`,
-    );
-    assert.equal(
-      (svg.match(new RegExp(`<path[^>]*stroke-width="${pageWidth}"`, "g")) ?? []).length, 2,
-      `${f} phai co 2 trang sach`,
-    );
-  }
-});
-
-test("favicon khong chua chu", () => {
-  const svg = read("../src/app/icon.svg");
-  assert.ok(!/<text/.test(svg), "favicon khong duoc co chu");
-  // <title> la nhan cho doc man hinh, khong phai chu ve tren hinh
-  assert.match(svg, /<title>Fanfic World<\/title>/);
-});
-
-test("co du bo favicon: ico, svg, png va apple-touch-icon", () => {
-  assert.ok(has("../src/app/favicon.ico"), "thieu favicon.ico");
-  assert.ok(has("../src/app/icon.svg"), "thieu icon.svg");
-  assert.ok(has("../src/app/apple-icon.tsx"), "thieu apple-touch-icon");
+test("bo icon vuong dung kich thuoc, dung do trong suot", () => {
+  // Icon thuong: goc trong suot (o bo goc nam tren nen cua tab/launcher).
   for (const s of [16, 32, 48, 192, 512]) {
-    assert.ok(has(`../public/brand/icon-${s}.png`), `thieu icon-${s}.png`);
+    assert.deepEqual(dauPng(`../public/brand/icon-${s}.png`), [s, s, 6], `icon-${s}.png`);
+  }
+  // iOS to den phan trong suot, `maskable` bi cat theo hinh cua may: ca hai
+  // PHAI phu kin, khong kenh alpha.
+  assert.deepEqual(dauPng("../src/app/apple-icon.png"), [180, 180, 2]);
+  assert.deepEqual(dauPng("../public/brand/icon-maskable-512.png"), [512, 512, 2]);
+});
+
+test("width/height cua logo khop ti le anh that (khong meo, khong nhay bo cuc)", () => {
+  const logo = read("../src/components/Logo.tsx");
+  for (const [ten, tep] of [["EMBLEM_RATIO", "logo-emblem.webp"], ["WORDMARK_RATIO", "logo-wordmark.webp"]]) {
+    const m = new RegExp(`const ${ten} = (\\d+) \\/ (\\d+);`).exec(logo);
+    assert.ok(m, `thieu ${ten}`);
+    assert.deepEqual(dauWebp(`../public/brand/${tep}`), [Number(m[1]), Number(m[2])], tep);
   }
 });
 
@@ -649,14 +626,16 @@ test("web manifest tro dung bo icon lon", () => {
   const manifest = read("../src/app/manifest.ts");
   assert.match(manifest, /\/brand\/icon-192\.png/);
   assert.match(manifest, /\/brand\/icon-512\.png/);
-  assert.match(manifest, /purpose: "maskable"/);
+  assert.match(manifest, /src: "\/brand\/icon-maskable-512\.png",\s*sizes: "512x512",\s*type: "image\/png",\s*purpose: "maskable"/);
   assert.match(manifest, /theme_color: "#0b0d12"/);
 });
 
-test("ban mot mau va logo day du hop ca nen sang lan nen toi", () => {
-  for (const f of ["../public/brand/logo-mono.svg", "../public/brand/logo-full.svg"]) {
-    assert.match(read(f), /prefers-color-scheme: dark/, `${f} thieu bien the nen toi`);
-  }
+test("logo hien ro tren nen toi cua site", () => {
+  // Site chi co nen toi; anh chu da doi "fanfic" sang mau sang luc sinh. Vong
+  // tron navy cua bieu tuong can quang tim de khong chim vao nen.
+  const css = read("../src/app/globals.css");
+  assert.match(css, /color-scheme: dark;/);
+  assert.match(css, /\.brand-emblem \{[^}]*filter: drop-shadow\(0 0 3px rgba\(150, 130, 255, 0\.4\)\);/);
 });
 
 test("logo duoc dat o header, footer va trang dang nhap", () => {
@@ -707,7 +686,6 @@ test("ten san pham la Fanfic World o MOI be mat chia se duoc", () => {
     "../src/app/layout.tsx",
     "../src/app/manifest.ts",
     "../src/app/opengraph-image.tsx",
-    "../src/app/icon.svg",
     "../src/app/login/page.tsx",
     "../src/components/Logo.tsx",
   ]) {
@@ -717,22 +695,16 @@ test("ten san pham la Fanfic World o MOI be mat chia se duoc", () => {
   assert.match(read("../src/app/opengraph-image.tsx"), /Fanfic World/);
 
   /*
-    Thuong hieu NGAN o header van la "Fanfic" — dong phu bi an o do
-    (`.site-header .brand-text-sub`), nen doi dong phu khong dung toi thanh
-    dieu huong. Giu khang dinh nay de lan sau ai do doi logo thi biet rang
-    hai cho nay CO Y khac nhau.
+    Logo giao dien la ANH chu "fanfic.world" (dung ten mien); ten doc man hinh
+    van la ten san pham "Fanfic World".
   */
   const logo = read("../src/components/Logo.tsx");
-  assert.match(logo, /Fanfic <span className="brand-text-sub">World<\/span>/);
-  assert.match(read("../src/app/globals.css"),
-    /\.site-header \.brand-text-sub \{ display: none; \}/);
+  assert.match(logo, /alt="Fanfic World"/);
+  assert.match(logo, /title="Fanfic World"/);
 });
 
 test("anh sinh phia may chu khai bao dung kich thuoc", () => {
-  const apple = read("../src/app/apple-icon.tsx");
-  assert.match(apple, /width: 180, height: 180/);
-  assert.match(apple, /contentType = "image\/png"/);
-
+  // apple-touch-icon nay la PNG tinh (kich thuoc da khoa o bai "bo icon vuong").
   const og = read("../src/app/opengraph-image.tsx");
   assert.match(og, /width: 1200, height: 630/);
   assert.match(og, /export const alt/);
@@ -740,9 +712,12 @@ test("anh sinh phia may chu khai bao dung kich thuoc", () => {
 
 test("logo khong pha bo cuc header hien co", () => {
   const css = read("../src/app/globals.css");
-  // Logo la SVG that nen o gia lap bang CSS phai bi go
+  // Logo la anh that nen o gia lap bang CSS phai bi go
   assert.ok(!css.includes(".brand-mark {"), "còn CSS chết của ô giả lập cũ");
-  assert.match(css, /\.brand svg \{ flex: 0 0 auto; \}/, "logo phải không bị co");
+  assert.match(css, /\.brand img, \.logo-lockup img \{ flex: 0 0 auto; display: block; \}/,
+    "logo phải không bị co");
+  // Dong phu cu ("World" an trong header) khong con ton tai.
+  assert.ok(!css.includes(".brand-text-sub"), "còn CSS chết của dòng phụ cũ");
 });
 
 /* ------------------------------------------------- H1: tran ngang mobile */

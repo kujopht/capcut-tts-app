@@ -15,12 +15,23 @@ only be swapped for the next one in the chain if it fails BEFORE its first
 any further provider failure becomes an `ErrorEvent(code="ai_provider_
 interrupted")` and the stream ends — two providers are never silently
 stitched into one answer.
+
+Admin readiness (release gate, `/admin/ai` later): `provider_chain` (order
+= priority, absence = disabled) and `model_overrides` are read on EVERY
+`stream()` call, so a future policy source can swap them atomically at
+runtime; a 429 cools the provider down for its `Retry-After`
+(`CircuitBreaker.cool_down`); `health()` is the server-side read model; the
+serving provider/model of each turn is reported to the ROUTE (never the
+client) via `ProviderServed`, so usage can be counted per provider.
+Per-provider daily request/token caps and weights are NOT built — they
+need a per-provider ledger (additive: a new collection), see
+`docs/ai/AI_ASSISTANT_V1.md` "Release gate / Admin AI".
 """
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass, field
-from typing import Dict, Iterator, List, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, Iterator, List, Optional
 
 from server.ai_assistant.config import MODE_LIMITS, estimate_tokens
 from server.llm_gateway.chat_provider import (
@@ -33,6 +44,20 @@ from server.llm_gateway.usage_limits import CircuitBreaker
 class ErrorEvent:
     code: str
     message: str
+
+
+@dataclass(frozen=True)
+class ProviderServed:
+    """Internal, SERVER-ONLY event: yielded once, right before the first
+    `Delta` of the provider that actually answers. The route records it on
+    the persisted message and never forwards it over SSE (§0.3: provider and
+    model names never reach the client)."""
+    provider_name: str
+    model: str
+
+
+#: Cooldown when a 429 carries no usable `Retry-After`.
+DEFAULT_429_COOLDOWN_S = 30.0
 
 
 def trim_context(messages: List[ChatTurn], *, max_tokens: int) -> List[ChatTurn]:
@@ -71,12 +96,31 @@ class AiGateway:
             return override
         return getattr(provider, "_default_model", provider_name)
 
+    def health(self) -> Dict[str, Dict[str, Any]]:
+        """Server-side read model for a future `/admin/ai` (NOT exposed by
+        any route yet): per configured provider — in chain (enabled), chain
+        position (priority), cooldown/failure state, process-local usage
+        counters. Contains no key, URL or secret."""
+        breaker = self.circuit_breaker.snapshot()
+        out: Dict[str, Dict[str, Any]] = {}
+        for name, provider in self.providers.items():
+            b = breaker.get(name, {"consecutive_failures": 0, "open_for_s": 0.0})
+            out[name] = {
+                "enabled": name in self.provider_chain,
+                "priority": self.provider_chain.index(name) if name in self.provider_chain else None,
+                "cooling_down_s": round(b["open_for_s"], 1),
+                "consecutive_failures": b["consecutive_failures"],
+                "usage": asdict(provider.usage()),
+            }
+        return out
+
     def stream(self, messages: List[ChatTurn], *, mode: str,
               user_ref: str = "") -> Iterator[StreamEvent]:
         limits = MODE_LIMITS.get(mode, MODE_LIMITS["general"])
         trimmed = trim_context(messages, max_tokens=limits["max_context_tokens"])
         tried_any = False
-        for name in self.provider_chain:
+        # Snapshot: a runtime policy change mid-stream affects the NEXT turn only.
+        for name in list(self.provider_chain):
             if self.circuit_breaker.is_open(name):
                 continue
             provider = self.providers.get(name)
@@ -100,13 +144,18 @@ class AiGateway:
                 # point) — never left to eventual GC.
                 with contextlib.closing(provider.stream(req)) as provider_events:
                     for ev in provider_events:
-                        if isinstance(ev, Delta):
+                        if isinstance(ev, Delta) and not started:
                             started = True
+                            yield ProviderServed(provider_name=name, model=model)
                         yield ev
                 self.circuit_breaker.record_success(name)
                 return
             except ProviderError as exc:
-                self.circuit_breaker.record_failure(name)
+                if exc.code == "provider_http_429" or exc.retry_after_s is not None:
+                    self.circuit_breaker.cool_down(
+                        name, exc.retry_after_s if exc.retry_after_s is not None else DEFAULT_429_COOLDOWN_S)
+                else:
+                    self.circuit_breaker.record_failure(name)
                 if started:
                     # M9 (review finding): `str(exc)` here used to leak the
                     # provider's own error text verbatim over SSE —

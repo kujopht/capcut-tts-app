@@ -83,6 +83,11 @@ export interface AiSlotHealth {
   secret: AiSlotSecret;
   usage_today: AiSlotUsage;
   last_success_at: string | null;
+  /** Lỗi provider gần nhất — mã đã làm sạch (`provider_http_404`…), không bao giờ là thông điệp của nhà cung cấp. */
+  last_error_code?: string | null;
+  /** Enum lỗi của nhà cung cấp (`NOT_FOUND`, `PERMISSION_DENIED:SERVICE_DISABLED`, `model_not_found`). */
+  last_error_category?: string | null;
+  last_error_at?: string | null;
 }
 
 export interface AiSlot {

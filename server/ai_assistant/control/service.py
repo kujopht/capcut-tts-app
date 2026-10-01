@@ -19,6 +19,7 @@ import functools
 import json
 import logging
 import random
+import re
 import threading
 import time
 from collections import deque
@@ -61,6 +62,10 @@ def _serialized(fn: Callable[..., Any]) -> Callable[..., Any]:
 CACHE_TTL_S = 15.0
 STALE_OK_S = 600.0
 USAGE_TTL_S = 10.0
+#: `provider_http_404`, `provider_network_error` … (see chat_providers).
+_ERROR_CODE_RE = re.compile(r"^provider_[a-z0-9_]{1,40}$")
+#: Vendor enums only: upper/lower letters, underscore, one optional ':' joiner. No digits.
+_ERROR_CATEGORY_RE = re.compile(r"^[A-Za-z_]{3,48}(:[A-Z_]{3,48})?$")
 
 
 def today_utc() -> str:
@@ -126,6 +131,9 @@ class ControlPlane:
         self._usage_at = -1e9
         self._windows: Dict[str, _Window] = {}
         self._recent_429: Dict[str, Deque[float]] = {}
+        #: slot_id -> (code, category, at_iso) of the LAST provider failure. In-process like
+        #: the breaker (a restart clears it); only sanitized enums, never a vendor message.
+        self._last_error: Dict[str, Tuple[str, Optional[str], str]] = {}
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                              user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None) -> None:
@@ -254,14 +262,33 @@ class ControlPlane:
         with self._lock:
             self._windows.setdefault(slot.slot_id, _Window()).events.append((self._clock(), est_tokens))
 
-    def note_rate_limited(self, slot: ProviderSlot) -> None:
+    def note_failure(self, slot: ProviderSlot, code: Optional[str], category: Optional[str] = None) -> None:
+        """Remember the sanitized classification of a slot's latest failure (any phase,
+        including mid-stream). `code` must look like `provider_*`, `category` like a vendor
+        enum (`NOT_FOUND`, `PERMISSION_DENIED:SERVICE_DISABLED`, `model_not_found`) —
+        anything else is replaced, so free text can never reach the admin API."""
+        c = code if isinstance(code, str) and _ERROR_CODE_RE.match(code) else "provider_error"
+        cat = category if isinstance(category, str) and _ERROR_CATEGORY_RE.match(category) else None
+        with self._lock:
+            self._last_error[slot.slot_id] = (c, cat, now_iso())
+
+    def last_error(self, slot_id: str) -> Optional[Dict[str, Optional[str]]]:
+        with self._lock:
+            e = self._last_error.get(slot_id)
+        return {"code": e[0], "category": e[1], "at": e[2]} if e else None
+
+    def note_rate_limited(self, slot: ProviderSlot, code: Optional[str] = "provider_http_429",
+                          category: Optional[str] = None) -> None:
         with self._lock:
             dq = self._recent_429.setdefault(slot.slot_id, deque())
             dq.append(self._clock())
+        self.note_failure(slot, code, category)
         self._bump_local(slot.slot_id, rate_limited=1)
         self._safe_usage(slot.slot_id, rate_limited=1)
 
-    def note_error(self, slot: ProviderSlot) -> None:
+    def note_error(self, slot: ProviderSlot, code: Optional[str] = "provider_error",
+                   category: Optional[str] = None) -> None:
+        self.note_failure(slot, code, category)
         self._bump_local(slot.slot_id, errors=1)
         self._safe_usage(slot.slot_id, errors=1)
 
@@ -349,7 +376,13 @@ class ControlPlane:
                 "usage_today": {"requests": u.requests, "input_tokens": u.input_tokens,
                                 "output_tokens": u.output_tokens, "errors": u.errors,
                                 "rate_limited": u.rate_limited, "cost_micro_usd": u.cost_micro_usd},
-                "last_success_at": u.last_success_at or None}
+                "last_success_at": u.last_success_at or None,
+                **self._last_error_fields(slot.slot_id)}
+
+    def _last_error_fields(self, slot_id: str) -> Dict[str, Optional[str]]:
+        e = self.last_error(slot_id) or {}
+        return {"last_error_code": e.get("code"), "last_error_category": e.get("category"),
+                "last_error_at": e.get("at")}
 
     def config_view(self) -> Dict[str, Any]:
         cfg = self.snapshot()

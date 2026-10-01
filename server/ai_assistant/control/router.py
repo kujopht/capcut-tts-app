@@ -134,14 +134,19 @@ class ControlledGateway:
                 plane.breaker.record_success(slot.slot_id)  # type: ignore[attr-defined]
                 return
             except ProviderError as exc:
+                category = getattr(exc, "category", None)
                 if exc.code == "provider_http_429" or exc.retry_after_s is not None:
                     plane.breaker.cool_down(  # type: ignore[attr-defined]
                         slot.slot_id, exc.retry_after_s if exc.retry_after_s is not None else DEFAULT_429_COOLDOWN_S)
-                    plane.note_rate_limited(slot)  # type: ignore[attr-defined]
+                    plane.note_rate_limited(slot, exc.code, category)  # type: ignore[attr-defined]
                 else:
                     plane.breaker.record_failure(slot.slot_id)  # type: ignore[attr-defined]
                     if not started:
-                        plane.note_error(slot)  # type: ignore[attr-defined]
+                        plane.note_error(slot, exc.code, category)  # type: ignore[attr-defined]
+                    else:
+                        # Mid-stream: not counted as a request error (usage is billed), but
+                        # the slot's health still shows WHY the stream broke.
+                        plane.note_failure(slot, exc.code, category)  # type: ignore[attr-defined]
                 if started:
                     yield ErrorEvent(code="ai_provider_interrupted",
                                      message="Kết nối tới nhà cung cấp AI bị gián đoạn giữa chừng — thử lại sau.")
@@ -151,9 +156,10 @@ class ControlledGateway:
                 log.warning("ai_control: slot %s raised an unexpected error", slot.slot_id, exc_info=True)
                 plane.breaker.record_failure(slot.slot_id)  # type: ignore[attr-defined]
                 if started:
+                    plane.note_failure(slot, "provider_unexpected_error")  # type: ignore[attr-defined]
                     yield ErrorEvent(code="ai_provider_interrupted", message="Nhà cung cấp AI gặp sự cố không mong đợi.")
                     return
-                plane.note_error(slot)  # type: ignore[attr-defined]
+                plane.note_error(slot, "provider_unexpected_error")  # type: ignore[attr-defined]
                 continue
         if tried_any:
             yield ErrorEvent(code="ai_provider_unavailable",

@@ -97,6 +97,16 @@ function DongSlot({
         <dt>Ưu tiên / trọng số</dt><dd>{slot.priority} / {slot.weight}</dd>
         <dt>Thất bại liên tiếp</dt><dd>{h.consecutive_failures}</dd>
         <dt>Lần thành công gần nhất</dt><dd>{thoiGianTuongDoi(h.last_success_at)}</dd>
+        <dt>Lỗi gần nhất</dt>
+        <dd>
+          {h.last_error_code ? (
+            <>
+              <code>{h.last_error_code}</code>
+              {h.last_error_category ? <> · <code>{h.last_error_category}</code></> : null}
+              <span className="hint"> · {thoiGianTuongDoi(h.last_error_at ?? null)}</span>
+            </>
+          ) : "chưa có"}
+        </dd>
         <dt>Workload</dt><dd>{slot.workloads.length ? slot.workloads.join(", ") : "—"}</dd>
         <dt>Secret ref</dt>
         <dd>

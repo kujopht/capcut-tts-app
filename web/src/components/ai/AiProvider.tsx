@@ -66,6 +66,9 @@ interface AiState {
   messages: AiMessage[];
   streaming: boolean;
   streamingText: string;
+  /** Máy chủ ĐÃ bắt đầu trả lời lượt này (nhận `meta`). Trước đó: máy chủ còn dựng ngữ cảnh
+   *  (truy chương, thư viện); sau đó và trước token đầu: chờ nhà cung cấp (kể cả failover). */
+  responseStarted: boolean;
   conversations: AiConversationSummary[];
   historyOpen: boolean;
   error: AiErrorInfo | null;
@@ -138,6 +141,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     messages: [],
     streaming: false,
     streamingText: "",
+    responseStarted: false,
     conversations: [],
     historyOpen: false,
     error: null,
@@ -359,9 +363,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           citations: [],
           created_at: new Date().toISOString(),
         };
-        setState((s) => ({ ...s, messages: [...s.messages, userMsg], streaming: true, streamingText: "", error: null }));
+        setState((s) => ({ ...s, messages: [...s.messages, userMsg], streaming: true, streamingText: "", responseStarted: false, error: null }));
       } else {
-        setState((s) => ({ ...s, streaming: true, streamingText: "", error: null }));
+        setState((s) => ({ ...s, streaming: true, streamingText: "", responseStarted: false, error: null }));
       }
       const ctrl = new AbortController();
       ctrlRef.current = ctrl;
@@ -373,6 +377,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           (ev) => {
             if (ev.type === "meta") {
               assistantIdRef.current = ev.message_id;
+              setState((s) => (s.responseStarted ? s : { ...s, responseStarted: true }));
             } else if (ev.type === "delta") {
               setState((s) => ({ ...s, streamingText: s.streamingText + ev.text }));
             } else if (ev.type === "citations") {

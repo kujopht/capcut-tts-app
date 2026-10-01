@@ -1,0 +1,169 @@
+{
+ "source": "unpacked canonical project (mascot/), NOT the ZIP",
+ "runtimeUnchanged": true,
+ "files": [
+  {
+   "path": "animations/error/sprite.webp",
+   "bytes": 26102,
+   "sha256": "81832327c568afad56af7e84269543015225a188e47b7626975334463816d563"
+  },
+  {
+   "path": "animations/idle/sprite.webp",
+   "bytes": 145178,
+   "sha256": "f4603c88889a9d0dfeb9988d4d2d118994c8f2ba61d891b182ecd68dbcf2189c"
+  },
+  {
+   "path": "animations/listening/sprite.webp",
+   "bytes": 63568,
+   "sha256": "eca2f37043b2f5b66242cac541b096c6929f1048d9ded389d8f5ce8e512e7a6b"
+  },
+  {
+   "path": "animations/searching/sprite.webp",
+   "bytes": 67294,
+   "sha256": "2e8b628cede5e592074008f06cd5c5d66e52a09e5bfb717fc187887da9f1cfd9"
+  },
+  {
+   "path": "animations/sleepy/sprite.webp",
+   "bytes": 79070,
+   "sha256": "25ae9591cfe3fdf4d3494cbaae0928afc164782de0d86919cdbe0e8bade920ce"
+  },
+  {
+   "path": "animations/success/sprite.webp",
+   "bytes": 67532,
+   "sha256": "19cd3fde808f6becb036949c57599e1d3f0abf5fa29c975b8287b4679fd72d05"
+  },
+  {
+   "path": "animations/talking/sprite.webp",
+   "bytes": 87594,
+   "sha256": "aa7116c0eb5f4b0b7c2c15a9a5ec35bfcea6883ff994e8853d4c9c3fca3d0a27"
+  },
+  {
+   "path": "animations/thinking/sprite.webp",
+   "bytes": 63208,
+   "sha256": "51c05e800940664deff7c7b3a4a11729a88974f8970a008cfc0748453a21d7e1"
+  },
+  {
+   "path": "animations/typing/sprite.webp",
+   "bytes": 88606,
+   "sha256": "a7bc979a9346e8b3c5d7056cd9f30336851267f884f328e8cf3551fc07801f2e"
+  },
+  {
+   "path": "animations/walk/sprite.webp",
+   "bytes": 122558,
+   "sha256": "28a9cdb1b2da0a008cd3d74f354305fce1fd7386d634c11243065b6e30c65c16"
+  },
+  {
+   "path": "animations/wave/sprite.webp",
+   "bytes": 61858,
+   "sha256": "aaa1b933b7ce100a106e3d6efa59fa1f6cd636e2ce452a81ef31f18dddf3f6bf"
+  },
+  {
+   "path": "master/states/answering.webp",
+   "bytes": 56560,
+   "sha256": "b518298d27f615e1991fe0dc7cccb42a51ff9ad65afcffbcfcf1db3a1f5fbdb9"
+  },
+  {
+   "path": "master/states/error.webp",
+   "bytes": 59548,
+   "sha256": "10750a2607aff179b4bb82f4af397e89e56990c3aa6cf562b159d09d22136668"
+  },
+  {
+   "path": "master/states/idle.webp",
+   "bytes": 55232,
+   "sha256": "d62587ddefa8aa0def1506ae7192ccbe5c48b3878d38be2dd7a32a47b863d203"
+  },
+  {
+   "path": "master/states/listening.webp",
+   "bytes": 49022,
+   "sha256": "c203708e47300fc7c99f37dbe3cb1bfd89286816bf2ca9a77644e83c94ea8798"
+  },
+  {
+   "path": "master/states/offline.webp",
+   "bytes": 32066,
+   "sha256": "23fe0e1ba0745cb96837369621d1f75c486f34b9cb026a8134600a0453eaf56c"
+  },
+  {
+   "path": "master/states/searching.webp",
+   "bytes": 65428,
+   "sha256": "1b1c37918e8f93ee5f8edf6b02a8db9375704fc8c4a8cc38c6a7c31c912d6660"
+  },
+  {
+   "path": "master/states/success.webp",
+   "bytes": 59892,
+   "sha256": "7f46804a91d5905a5bcc449128dcdc673801970881485160d21a7caa73095382"
+  },
+  {
+   "path": "master/states/thinking.webp",
+   "bytes": 54404,
+   "sha256": "b0202ba8a697c6b9d29af590fc5e36e7ad3100bdf51a774222af2b2855bc32ea"
+  },
+  {
+   "path": "master/states/writing.webp",
+   "bytes": 60476,
+   "sha256": "ba192aae8c3eae775d72515434f48fc653f68834051aad805fd096e173a9e13d"
+  },
+  {
+   "path": "poses/peeking.webp",
+   "bytes": 40588,
+   "sha256": "a82f49c67fd6d6c04eef8536c40c96cf3bcf05d24a9856f95298a608dcf3f929"
+  },
+  {
+   "path": "poses/sitting-edge.webp",
+   "bytes": 38330,
+   "sha256": "4a1d2428c75e068bb6479ab87af9d3099cd64da303e606bd0f23d98cf695e18e"
+  },
+  {
+   "path": "runtime/ink-scout.js",
+   "bytes": 13466,
+   "sha256": "6d490dd24c343c4fa4cdf5a003d2d21ac411d17d7bd3454a6c7d8ec68057b1c2"
+  },
+  {
+   "path": "transitions/hop-left/sprite.webp",
+   "bytes": 154250,
+   "sha256": "308299ec6561b605aaae9821f49b75ac2506ff5385a687c741a05158ae8340df"
+  },
+  {
+   "path": "transitions/hop-right/sprite.webp",
+   "bytes": 153874,
+   "sha256": "e8798d0ca6ead946bfebb1dd2e29c4a1a717a6412f35492e43d96361b0644c3e"
+  },
+  {
+   "path": "transitions/peek-out/sprite.webp",
+   "bytes": 191240,
+   "sha256": "be8e5169e847b96130cd55a9fc91c338a978699a81a8c89bfa6355b86367383c"
+  },
+  {
+   "path": "transitions/sit-down/sprite.webp",
+   "bytes": 123934,
+   "sha256": "aa4775dcb498433875b65cd1be265ba4445dd30ea49408ce3d1bd6bcef3f8895"
+  },
+  {
+   "path": "transitions/stand-up/sprite.webp",
+   "bytes": 123800,
+   "sha256": "cefc8ae322c0b9acd75a55e3095576281a4a2a8edf1a2c8ff023a47e8a643ac2"
+  }
+ ],
+ "manifestBytes": 17854,
+ "totalBytes": 2222532,
+ "budgetBytes": 2700000,
+ "packBytes": 74314576,
+ "byKind": {
+  "state-sprite": 750010,
+  "transition-sprite": 869656,
+  "static-poster": 492628,
+  "pose": 78918,
+  "runtime": 13466
+ },
+ "excluded": [
+  "sources/ (generation sheets)",
+  "*.png sprite atlases / posters / master PNGs",
+  "Lottie animation.json (embedded PNG frames)",
+  "animated.webp",
+  "sprite.json (coords are in manifest)",
+  "expressions/",
+  "poses/ except sitting-edge + peeking",
+  "stickers/ (not integrated in this PR)",
+  "master front/side/back/three-quarter references",
+  "qa/, tools/, vendor/, node_modules/, the ZIP"
+ ]
+}

@@ -9,6 +9,8 @@ import { useEffect, useRef, useState } from "react";
 import { useAi } from "./AiProvider";
 import { AI_MODES, AI_MODE_LABELS, type AiErrorCode } from "@/lib/ai/types";
 import { FanficIcon } from "@/components/icons/FanficIcon";
+import { AI_COMPANION_ENABLED } from "@/lib/features";
+import { CompanionSettings } from "./companion/CompanionSettings";
 
 /**
  * F4 (QA Chrome thật): nhãn usage từng hiện thẳng số TOKEN dưới nhãn "lượt"
@@ -99,6 +101,7 @@ function AiSettingsPopover({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       )}
+      {AI_COMPANION_ENABLED ? <CompanionSettings /> : null}
     </div>
   );
 }

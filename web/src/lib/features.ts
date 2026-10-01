@@ -45,3 +45,17 @@ export const CHAT_V1_ENABLED = process.env.NEXT_PUBLIC_CHAT_V1_ENABLED === "1";
  * (`availability.name`) và mode.
  */
 export const AI_ASSISTANT_ENABLED = process.env.NEXT_PUBLIC_AI_ASSISTANT_ENABLED === "1";
+
+/**
+ * `AI_COMPANION_ENABLED` — linh vật Ink Scout đi cùng Trợ lý AI
+ * (`components/ai/companion/`, `docs/ai/INK_SCOUT_COMPANION.md`). TẮT mặc định.
+ *
+ * Luôn đi SAU `AI_ASSISTANT_ENABLED`: trợ lý tắt thì linh vật tắt, bất kể cờ
+ * này. Trợ lý bật + cờ này tắt = giao diện AI bình thường, không linh vật và
+ * KHÔNG một byte mã/asset linh vật nào được TẢI: `loader` của cổng là `null`,
+ * nên chunk lười (~3 KB gzip — Turbopack vẫn xuất tệp này ra thư mục build)
+ * không bao giờ được yêu cầu; JS ban đầu chỉ thêm phần cổng nhỏ (đo: +153 B
+ * gzip so với `main`). Bật = build với `NEXT_PUBLIC_AI_COMPANION_ENABLED=1`.
+ */
+export const AI_COMPANION_ENABLED =
+  AI_ASSISTANT_ENABLED && process.env.NEXT_PUBLIC_AI_COMPANION_ENABLED === "1";

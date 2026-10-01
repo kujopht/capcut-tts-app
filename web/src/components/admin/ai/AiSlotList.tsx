@@ -67,6 +67,7 @@ function DongSlot({
   dangGui,
   onSua,
   onResetCooldown,
+  onKiemTra,
   onXoa,
 }: {
   slot: AiSlot;
@@ -75,6 +76,7 @@ function DongSlot({
   dangGui: boolean;
   onSua: () => void;
   onResetCooldown: () => void;
+  onKiemTra: () => void;
   onXoa: () => void;
 }) {
   const [xacNhanXoa, setXacNhanXoa] = useState(false);
@@ -97,6 +99,16 @@ function DongSlot({
         <dt>Ưu tiên / trọng số</dt><dd>{slot.priority} / {slot.weight}</dd>
         <dt>Thất bại liên tiếp</dt><dd>{h.consecutive_failures}</dd>
         <dt>Lần thành công gần nhất</dt><dd>{thoiGianTuongDoi(h.last_success_at)}</dd>
+        <dt>Lỗi gần nhất</dt>
+        <dd>
+          {h.last_error_code ? (
+            <>
+              <code>{h.last_error_code}</code>
+              {h.last_error_category ? <> · <code>{h.last_error_category}</code></> : null}
+              <span className="hint"> · {thoiGianTuongDoi(h.last_error_at ?? null)}</span>
+            </>
+          ) : "chưa có"}
+        </dd>
         <dt>Workload</dt><dd>{slot.workloads.length ? slot.workloads.join(", ") : "—"}</dd>
         <dt>Secret ref</dt>
         <dd>
@@ -127,6 +139,10 @@ function DongSlot({
         ) : (
           <div className="row row-tight">
             <button type="button" className="btn btn-sm" onClick={onSua} disabled={dangGui}>Sửa</button>
+            <button type="button" className="btn btn-sm" onClick={onKiemTra} disabled={dangGui || !h.secret.present}
+                    title="Gửi MỘT request tối thiểu thật qua slot này (chạy được cả khi slot đang tắt)">
+              Kiểm tra
+            </button>
             {h.status === "COOLDOWN" ? (
               <button type="button" className="btn btn-sm" onClick={onResetCooldown} disabled={dangGui}>
                 Reset cooldown
@@ -154,6 +170,7 @@ export function AiSlotList({
   onSua,
   onXoa,
   onResetCooldown,
+  onKiemTra,
 }: {
   slots: AiSlot[];
   meta: AiConfigMeta;
@@ -169,6 +186,7 @@ export function AiSlotList({
   onSua: (slotId: string, payload: AiSlotInput) => Promise<boolean>;
   onXoa: (slotId: string) => Promise<boolean>;
   onResetCooldown: (slotId: string) => Promise<boolean>;
+  onKiemTra: (slotId: string) => Promise<boolean>;
 }) {
   const [dangSua, setDangSua] = useState<string | null>(null);
   const [dangTao, setDangTao] = useState(false);
@@ -249,6 +267,7 @@ export function AiSlotList({
                   dangGui={dangGui}
                   onSua={() => setDangSua(s.slot_id)}
                   onResetCooldown={() => onResetCooldown(s.slot_id)}
+                  onKiemTra={() => void onKiemTra(s.slot_id)}
                   onXoa={() => onXoa(s.slot_id)}
                 />
               ),

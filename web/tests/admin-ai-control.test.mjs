@@ -76,11 +76,19 @@ test("client goi dung cac route /api/admin/ai/* kem Bearer token", () => {
   const src = client();
   for (const r of ["/api/admin/ai/overview", "/api/admin/ai/config", "/api/admin/ai/audit",
     "/api/admin/ai/global", "/api/admin/ai/provider-types/", "/api/admin/ai/slots",
-    "/reset-cooldown", "/api/admin/ai/profiles/"]) {
+    "/reset-cooldown", "/probe", "/api/admin/ai/profiles/"]) {
     assert.ok(src.includes(r), `thiếu ${r}`);
   }
   assert.match(src, /Authorization", `Bearer \$\{token\}`/);
   assert.match(src, /encodeURIComponent\(slotId\)/);
+});
+
+test("ket qua kiem slot chi co ok/do tre/ma loi da lam sach — khong co van ban nha cung cap", () => {
+  const src = client();
+  const m = src.match(/export interface AiProbeResult \{([\s\S]*?)\}/);
+  assert.ok(m, "thiếu AiProbeResult");
+  const fields = [...m[1].matchAll(/^\s*(\w+)\??:/gm)].map((x) => x[1]).sort();
+  assert.deepEqual(fields, ["category", "code", "latency_ms", "model", "ok", "slot_id"]);
 });
 
 test("loi 422 giu danh sach loi theo truong de hien canh o nhap", () => {

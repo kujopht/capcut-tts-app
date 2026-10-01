@@ -83,6 +83,11 @@ export interface AiSlotHealth {
   secret: AiSlotSecret;
   usage_today: AiSlotUsage;
   last_success_at: string | null;
+  /** Lỗi provider gần nhất — mã đã làm sạch (`provider_http_404`…), không bao giờ là thông điệp của nhà cung cấp. */
+  last_error_code?: string | null;
+  /** Enum lỗi của nhà cung cấp (`NOT_FOUND`, `PERMISSION_DENIED:SERVICE_DISABLED`, `model_not_found`). */
+  last_error_category?: string | null;
+  last_error_at?: string | null;
 }
 
 export interface AiSlot {
@@ -330,4 +335,20 @@ export const aiControl = {
     requestAi<{ ok: boolean }>(`/api/admin/ai/slots/${encodeURIComponent(slotId)}/reset-cooldown`, {
       method: "POST",
     }),
+
+  /** OWNER: MỘT request tối thiểu thật qua slot (chạy được khi slot tắt / công tắc tổng tắt). */
+  probeSlot: (slotId: string) =>
+    requestAi<{ probe: AiProbeResult }>(`/api/admin/ai/slots/${encodeURIComponent(slotId)}/probe`, {
+      method: "POST",
+    }),
 };
+
+/** Kết quả kiểm slot — chỉ ok, độ trễ và mã lỗi ĐÃ LÀM SẠCH; không bao giờ có văn bản của nhà cung cấp. */
+export interface AiProbeResult {
+  slot_id: string;
+  model: string;
+  ok: boolean;
+  latency_ms: number | null;
+  code: string | null;
+  category: string | null;
+}

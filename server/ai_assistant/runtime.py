@@ -9,7 +9,7 @@ import logging
 import os
 import secrets
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Optional, Tuple
 
 from server.ai_assistant.config import resolve_provider_chain
 from server.ai_assistant.ephemeral import EphemeralConversationStore
@@ -59,6 +59,14 @@ class AiRuntime:
     #: a restart, which is fine: this value is abuse-tracking-only, never
     #: looked up by us, never persisted).
     user_ref_salt: str = field(default_factory=lambda: secrets.token_hex(32))
+    #: Khan gia (`AiAssistantSettings.resolved_audience`): "all" | "canary".
+    #: "canary" -> CHI `audience_users` (Owner + `FAS_AI_CANARY_USERS`) dung
+    #: duoc `/api/ai/*`; nguoi khac: availability `enabled:false`, route khac 403.
+    audience: str = "all"
+    audience_users: FrozenSet[str] = field(default_factory=frozenset)
+
+    def allows(self, user_id: str) -> bool:
+        return self.audience == "all" or (bool(user_id) and user_id in self.audience_users)
 
     def describe(self) -> dict:
         return {"enabled": self.enabled, "reason": self.reason or None,
@@ -102,6 +110,16 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
     if not ai.enabled:
         return AiRuntime(False, reason="FAS_AI_ASSISTANT_V1 chưa bật", control=control)
 
+    data_backend = str(getattr(settings, "data_backend", "mock")).lower()
+    resolve_audience = getattr(ai, "resolved_audience", None)
+    # Thieu `resolved_audience` (settings gia/cu) -> "" -> AI TAT: khong bao gio mo cong vi thieu cau hinh.
+    audience = resolve_audience(data_backend) if callable(resolve_audience) else ""
+    if not audience:
+        return AiRuntime(False, reason=f"FAS_AI_AUDIENCE={getattr(ai, 'audience', '')!r} không hợp lệ (canary | all)",
+                         control=control)
+    audience_users = (frozenset(getattr(settings, "owner_user_ids", ()) or ())
+                      | frozenset(getattr(ai, "canary_users", ()) or ()))
+
     if control is not None:
         from server.ai_assistant.control.router import ControlledGateway
         gateway: Any = ControlledGateway(control)
@@ -121,7 +139,6 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
 
         gateway = AiGateway(providers=providers, provider_chain=usable_chain)
 
-    data_backend = str(getattr(settings, "data_backend", "mock")).lower()
     if data_backend == "appwrite":
         try:
             repo: AiRepo = AppwriteAiRepo(settings)
@@ -146,4 +163,5 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
         daily_tokens_free=ai.daily_tokens_free, daily_tokens_premium=ai.daily_tokens_premium,
         rpm=ai.rpm, web_search_enabled=(ai.web_search_provider or "off") != "off",
         heartbeat_s=float(getattr(ai, "heartbeat_s", 15)),
-        stream_guard=StreamGuard(max_streams_per_instance=ai.max_streams), **kwargs)
+        stream_guard=StreamGuard(max_streams_per_instance=ai.max_streams),
+        audience=audience, audience_users=audience_users, **kwargs)

@@ -30,6 +30,19 @@ Bảng điều khiển cho **Owner/Admin** để định tuyến provider, đặ
 
 **Gemini project pool** = nhiều slot `provider_type=gemini`, mỗi slot một `secret_ref` riêng (`GEMINI_PROJECT_01`…). Cooldown, bộ đếm, sức khoẻ tính **theo slot**, nên project 03 bị 429 không kéo project 01 xuống.
 
+**Cân bằng trong một pool:** `priority` vẫn là **tầng** (tầng nhỏ thử trước). Trong cùng một priority, thứ tự là ngẫu nhiên có trọng số: `weight × hệ số cân bằng` (`ControlPlane.balance_factor`).
+- `phần còn = 1 − max(yêu cầu/ngày, token/ngày, yêu cầu/phút RPM mềm, token/phút TPM mềm)`. Trần 0 nghĩa là không giới hạn và được bỏ qua. Hệ số là `phần còn²`.
+- Hệ số ×0,25 nếu slot đang lỗi liên tiếp, và ×0,25 nếu slot bị 429 trong 10 phút gần nhất. Sàn của hệ số là 0,01, để slot gần đầy vẫn làm được phương án cuối.
+- Hệ quả: các slot **cùng priority** tiêu đều nhau, không project nào cạn trước. Test mô phỏng 200 lượt qua 9 slot: không slot nào chạm trần 30, chênh lệch ≤8 lượt. Pool vẫn dùng hết được 100% tổng hạn mức.
+- Muốn thử tuần tự kiểu cũ thì đặt priority khác nhau.
+- Cooldown, hết trần, tắt và thiếu khoá vẫn bị **bỏ qua hẳn** như trước; hệ số chỉ sắp thứ tự các slot đủ điều kiện.
+
+**Kiểm slot (Owner):** `POST /api/admin/ai/slots/{id}/probe` gửi **một** request tối thiểu thật qua khoá, endpoint và model của slot. Gọi được cả khi slot đang tắt và công tắc tổng TẮT, nên kiểm được project mới trước khi cho phục vụ người dùng.
+- Kết quả chỉ gồm `ok`, `latency_ms`, `code`, `category` đã làm sạch; không bao giờ có văn bản của nhà cung cấp.
+- Được tính như một lượt thật: usage của slot, breaker, cooldown 429, `last_error_*`.
+- Ghi audit `slot:<id>.probe`. Mỗi slot tối đa 1 lần / 20 giây (409 nếu gọi dồn).
+- Quy trình mở rộng: tạo slot TẮT → cài khoá → deploy → **Kiểm tra** → chỉ bật slot trả `ok`.
+
 ### Hồ sơ định tuyến
 
 | Hồ sơ | Thứ tự mặc định |
@@ -49,12 +62,33 @@ Mỗi **bước** là một loại provider (cả pool: xếp theo `priority`, c
 
 `ai_enabled` (công tắc tổng), bật/tắt theo loại provider, trần request/token toàn cục mỗi ngày, trần request/token mỗi người dùng mỗi ngày, trần chi phí ngày (tuỳ chọn), `max_output_tokens`, `max_context_tokens`, ánh xạ chế độ → hồ sơ, `web_search_profile`, `web_search_tool`, `version` (khoá lạc quan).
 
+### Khán giả (`FAS_AI_AUDIENCE`, env — không nằm trong kho)
+
+Cùng mẫu với `FAS_CHAT_V1_AUDIENCE`. Quyết định **ai** gọi được `/api/ai/*` khi `FAS_AI_ASSISTANT_V1=1`. Cờ giao diện `NEXT_PUBLIC_AI_ASSISTANT_ENABLED` chỉ ẩn/hiện UI, không phải rào chặn.
+
+| `FAS_AI_AUDIENCE` | Ai dùng được |
+|---|---|
+| rỗng + `DATA_BACKEND=appwrite` (production) | như `canary` — **đóng theo mặc định** |
+| rỗng + backend khác (dev/test) | như `all` |
+| `canary` | chỉ Owner (`FAS_OWNER_USER_IDS`) + `FAS_AI_CANARY_USERS` (phân tách bằng dấu phẩy; mục không giống user ID bị bỏ) |
+| `all` | mọi người đã đăng nhập |
+| giá trị khác | AI TẮT (`reason` nêu biến sai) |
+
+Người ngoài khán giả nhận `GET /api/ai/availability` → `enabled:false, reason:"not_in_audience"` (không lộ hạn mức). Mọi route khác trả 403 `ai_not_enabled`. Thứ tự kiểm: AI tắt → 503 như cũ; AI bật thì chưa đăng nhập 401 → ngoài khán giả 403 → mới tới hạn mức/công tắc tổng. `/api/health` công khai hiện `ai_assistant.audience` (chỉ giá trị đã phân giải, không có ID nào).
+
 ## 3. Thứ tự kiểm một lượt chat
 
+0. Khán giả (ở trên): ngoài khán giả → 403 trước mọi bước dưới.
 1. `admission()` (trước khi stream): công tắc tổng → 503 `ai_not_enabled`; trần toàn cục/chi phí → 429 `ai_budget_exhausted`; trần theo người dùng → 429 `ai_budget_exhausted`. **Không đọc được bộ đếm** (kho sập, hôm nay chưa có số nào trong bộ nhớ) → 503 `ai_storage_unavailable`: số không biết không bao giờ được coi là 0. Ngân sách token theo tier cũ vẫn áp dụng.
 2. `plan()`: dựng danh sách slot theo hồ sơ, mỗi slot kèm lý do bỏ qua hoặc "đủ điều kiện": `slot_disabled`, `type_disabled`, `workload_not_allowed`, `missing_secret`, `cooldown`, `request_cap`, `token_cap`, `rpm_soft_cap`, `tpm_soft_cap`.
 3. `ControlledGateway.stream()`: thử lần lượt. 429 → cooldown theo `Retry-After` (1–600 s, mặc định 30 s); lỗi khác → circuit breaker theo slot. Không còn slot nào → sự kiện lỗi thân thiện (`ai_budget_exhausted` nếu do trần, `ai_no_provider` nếu không có gì bật/cấu hình).
 4. Kết thúc lượt: cộng usage/chi phí cho **đúng slot đã phục vụ** (`ai_provider_usage_daily`), cùng lúc với ledger theo người dùng như trước.
+
+**Lỗi gần nhất của slot** (health: `last_error_code`, `last_error_category`, `last_error_at`):
+- `last_error_code` là mã máy ổn định: `provider_http_<status>`, `provider_network_error`, `provider_unexpected_error`…
+- `last_error_category` là enum của nhà cung cấp: `error.status` của Google (`NOT_FOUND`, `PERMISSION_DENIED`…), kèm `ErrorInfo.reason` nếu có (`PERMISSION_DENIED:SERVICE_DISABLED`); hoặc `error.code`/`error.type` kiểu OpenAI (`model_not_found`…).
+- Server đọc tối đa 16 KB thân lỗi, parse trong bộ nhớ rồi bỏ. Chỉ giữ giá trị nằm trong danh sách cho phép đóng hoặc khớp mẫu UPPER_SNAKE (không có chữ số, không có chữ thường). **Không bao giờ lưu `message`, request echo, project hay khoá.**
+- Ghi ở mọi pha, kể cả khi đứt giữa stream. Dữ liệu nằm trong tiến trình giống breaker, nên khởi động lại là mất.
 
 ## 4. Schema (bổ sung thuần — CHƯA áp lên production)
 
@@ -80,6 +114,7 @@ Tất cả `permissions=[]`, `documentSecurity=true` (chỉ backend đọc/ghi).
 | POST | `/api/admin/ai/slots` | OWNER |
 | PUT / DELETE | `/api/admin/ai/slots/{slot_id}` | OWNER |
 | POST | `/api/admin/ai/slots/{slot_id}/reset-cooldown` | OWNER |
+| POST | `/api/admin/ai/slots/{slot_id}/probe` (1 request thật; 409 nếu < 20 s) | OWNER |
 | PUT | `/api/admin/ai/profiles/{name}` | OWNER |
 
 Lỗi: 422 `ai_admin_invalid` (kèm danh sách `{field, message}`), 409 `ai_admin_conflict` (trùng id, slot đang được hồ sơ dùng, version cũ, kho hỏng), 404, 503.
@@ -111,4 +146,5 @@ Mọi thay đổi ghi từng **trường**: admin_id, thời điểm, entity (`g
 3. Đặt `FAS_AI_SECRET_<ref>` cho các slot sẽ dùng (Render / host mới).
 4. Bật `FAS_AI_ADMIN_V1=1` (AI vẫn tắt: công tắc tổng mặc định TẮT, mọi loại provider TẮT).
 5. Owner tạo slot, chọn hồ sơ, đặt trần trên `/admin/ai`, kiểm sức khoẻ.
-6. Chỉ sau đó mới bật `FAS_AI_ASSISTANT_V1` và công tắc tổng.
+6. Chỉ sau đó mới bật `FAS_AI_ASSISTANT_V1` và công tắc tổng — để `FAS_AI_AUDIENCE` trống (production = `canary`, chỉ Owner) cho canary; kiểm `/api/health` → `ai_assistant.audience == "canary"` trước khi bật công tắc tổng.
+7. Mở rộng: thêm ID vào `FAS_AI_CANARY_USERS`, rồi `FAS_AI_AUDIENCE=all` + `NEXT_PUBLIC_AI_ASSISTANT_ENABLED=1` khi ra công chúng.

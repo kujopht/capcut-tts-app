@@ -7,7 +7,11 @@ with a skip reason or None (eligible):
   profile = web_search_profile if workload == "web_search" else mode_profiles[mode]
   for step in profile.steps:
       provider type -> that type's slots, by priority (lower first), and within
-                       one priority a weighted random order (rng injectable ->
+                       one priority a BALANCED weighted random order: weight x
+                       the plane's balance factor (remaining daily/minute
+                       headroom, penalised after recent 429s / failures) — so a
+                       pool of equal-priority slots drains evenly instead of one
+                       project being exhausted first (rng injectable ->
                        deterministic in tests)
       slot id       -> that slot
 
@@ -44,27 +48,40 @@ SKIP_TPM = "tpm_soft_cap"
 CAP_REASONS = frozenset({SKIP_REQUEST_CAP, SKIP_TOKEN_CAP, SKIP_RPM, SKIP_TPM})
 
 
-def weighted_order(slots: Sequence[ProviderSlot], rng: random.Random) -> List[ProviderSlot]:
+BalanceFn = Callable[[ProviderSlot], float]
+#: A factor never reaches 0: a nearly-full or penalised slot stays reachable
+#: as a late fallback (caps/cooldown skip it outright when they apply).
+MIN_BALANCE_FACTOR = 0.01
+
+
+def weighted_order(slots: Sequence[ProviderSlot], rng: random.Random,
+                   balance: Optional[BalanceFn] = None) -> List[ProviderSlot]:
     """Priority ascending; inside one priority, a weighted random permutation
-    (each pick proportional to `weight`). Stable input order breaks ties so a
-    seeded rng gives the same answer every run."""
+    (each pick proportional to `weight` x `balance(slot)`, the factor in
+    (0, 1] that the control plane derives from live headroom). Stable input
+    order breaks ties so a seeded rng gives the same answer every run."""
     out: List[ProviderSlot] = []
     by_prio: Dict[int, List[ProviderSlot]] = {}
     for s in sorted(slots, key=lambda x: (x.priority, x.slot_id)):
         by_prio.setdefault(s.priority, []).append(s)
+
+    def eff(s: ProviderSlot) -> float:
+        f = 1.0 if balance is None else balance(s)
+        return max(1, s.weight) * min(1.0, max(MIN_BALANCE_FACTOR, f))
+
     for prio in sorted(by_prio):
-        pool = list(by_prio[prio])
+        pool = [(s, eff(s)) for s in by_prio[prio]]
         while pool:
-            total = sum(max(1, s.weight) for s in pool)
+            total = sum(w for _, w in pool)
             r = rng.uniform(0, total)
             acc = 0.0
-            for i, s in enumerate(pool):
-                acc += max(1, s.weight)
+            for i, (s, w) in enumerate(pool):
+                acc += w
                 if r <= acc:
-                    out.append(pool.pop(i))
+                    out.append(pool.pop(i)[0])
                     break
             else:  # float edge: take the last
-                out.append(pool.pop())
+                out.append(pool.pop()[0])
     return out
 
 
@@ -72,7 +89,8 @@ SkipFn = Callable[[ProviderSlot, str, int], Optional[str]]
 
 
 def plan(cfg: ControlConfig, *, mode: str, workload: str, rng: random.Random,
-         skip_reason: SkipFn, est_tokens: int = 0) -> List[Tuple[ProviderSlot, Optional[str]]]:
+         skip_reason: SkipFn, est_tokens: int = 0,
+         balance: Optional[BalanceFn] = None) -> List[Tuple[ProviderSlot, Optional[str]]]:
     c = cfg.controls
     if not c.ai_enabled:
         return []
@@ -84,7 +102,7 @@ def plan(cfg: ControlConfig, *, mode: str, workload: str, rng: random.Random,
     out: List[Tuple[ProviderSlot, Optional[str]]] = []
     for step in profile.steps:
         if step in PROVIDER_TYPES:
-            group = weighted_order([s for s in cfg.slots.values() if s.provider_type == step], rng)
+            group = weighted_order([s for s in cfg.slots.values() if s.provider_type == step], rng, balance)
         else:
             group = [cfg.slots[step]] if step in cfg.slots else []
         for s in group:
@@ -134,14 +152,19 @@ class ControlledGateway:
                 plane.breaker.record_success(slot.slot_id)  # type: ignore[attr-defined]
                 return
             except ProviderError as exc:
+                category = getattr(exc, "category", None)
                 if exc.code == "provider_http_429" or exc.retry_after_s is not None:
                     plane.breaker.cool_down(  # type: ignore[attr-defined]
                         slot.slot_id, exc.retry_after_s if exc.retry_after_s is not None else DEFAULT_429_COOLDOWN_S)
-                    plane.note_rate_limited(slot)  # type: ignore[attr-defined]
+                    plane.note_rate_limited(slot, exc.code, category)  # type: ignore[attr-defined]
                 else:
                     plane.breaker.record_failure(slot.slot_id)  # type: ignore[attr-defined]
                     if not started:
-                        plane.note_error(slot)  # type: ignore[attr-defined]
+                        plane.note_error(slot, exc.code, category)  # type: ignore[attr-defined]
+                    else:
+                        # Mid-stream: not counted as a request error (usage is billed), but
+                        # the slot's health still shows WHY the stream broke.
+                        plane.note_failure(slot, exc.code, category)  # type: ignore[attr-defined]
                 if started:
                     yield ErrorEvent(code="ai_provider_interrupted",
                                      message="Kết nối tới nhà cung cấp AI bị gián đoạn giữa chừng — thử lại sau.")
@@ -151,9 +174,10 @@ class ControlledGateway:
                 log.warning("ai_control: slot %s raised an unexpected error", slot.slot_id, exc_info=True)
                 plane.breaker.record_failure(slot.slot_id)  # type: ignore[attr-defined]
                 if started:
+                    plane.note_failure(slot, "provider_unexpected_error")  # type: ignore[attr-defined]
                     yield ErrorEvent(code="ai_provider_interrupted", message="Nhà cung cấp AI gặp sự cố không mong đợi.")
                     return
-                plane.note_error(slot)  # type: ignore[attr-defined]
+                plane.note_error(slot, "provider_unexpected_error")  # type: ignore[attr-defined]
                 continue
         if tried_any:
             yield ErrorEvent(code="ai_provider_unavailable",

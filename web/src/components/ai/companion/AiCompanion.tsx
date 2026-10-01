@@ -140,28 +140,43 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
     return () => window.clearTimeout(t);
   }, [mounted, wanted, needNow]);
 
+  // `reduced` lúc TẠO runtime: đọc qua ref (effect tạo instance chỉ chạy lại theo `load`).
+  const reducedRef = useRef(reduced);
+  useEffect(() => { reducedRef.current = reduced; }, [reduced]);
+
   // ---- tạo MỘT instance; huỷ khi unmount / bị ẩn hẳn (tuỳ chọn "Ẩn").
   useEffect(() => {
     if (!load) return;
     const host = hostRef.current;
     if (!host) return;
     let cancelled = false;
+    let off: (() => void) | null = null;
     loadInkScout()
-      .then(({ Ctor, manifest }) => {
+      .then(async ({ Ctor, manifest }) => {
         if (cancelled || !hostRef.current) return;
         const rt = new Ctor(hostRef.current, { manifest, assetBase: INK_SCOUT_BASE, size, state: "idle" });
         rtRef.current = rt;
         const dir = new CompanionDirector(rt, () => { /* lỗi tải ảnh: runtime đã phát `mascoterror` */ });
         dirRef.current = dir;
-        rt.host.addEventListener("statechange", (e) => dir.notifyRuntimeState((e as CustomEvent).detail?.state));
-        rt.host.addEventListener("animationcomplete", (e) => {
-          if ((e as CustomEvent).detail?.state === "success") setFlash(null);
-        });
+        const onState = (e: Event) => dir.notifyRuntimeState((e as CustomEvent).detail?.state);
+        const onDone = (e: Event) => { if ((e as CustomEvent).detail?.state === "success") setFlash(null); };
+        rt.host.addEventListener("statechange", onState);
+        rt.host.addEventListener("animationcomplete", onDone);
+        // Gỡ đúng listener của instance NÀY khi huỷ (review Codex #4: host là div React, sống lâu hơn runtime).
+        off = () => {
+          rt.host.removeEventListener("statechange", onState);
+          rt.host.removeEventListener("animationcomplete", onDone);
+        };
+        // Giảm chuyển động áp TRƯỚC khi hiện (Codex #3): runtime gọi setState trong constructor
+        // theo media query hệ điều hành, chưa biết tuỳ chọn "Giảm chuyển động" của người dùng.
+        if (reducedRef.current) await rt.setReducedMotion(true);
+        if (cancelled) return;
         setReady(true);
       })
       .catch(() => { /* runtime/manifest không tải được → không linh vật, trợ lý vẫn chạy */ });
     return () => {
       cancelled = true;
+      off?.();
       dirRef.current?.destroy();
       dirRef.current = null;
       rtRef.current = null;
@@ -213,12 +228,14 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
         open,
         streaming: ai.streaming,
         hasStreamText: ai.streamingText.length > 0,
+        responseStarted: ai.responseStarted,
         mode: ai.mode,
         errorCode: ai.error?.code ?? null,
         hovering,
         flash,
       }),
-    [variant, available, networkOffline, open, ai.streaming, ai.streamingText, ai.mode, ai.error, hovering, flash],
+    [variant, available, networkOffline, open, ai.streaming, ai.streamingText, ai.responseStarted, ai.mode, ai.error,
+      hovering, flash],
   );
 
   useEffect(() => {
@@ -268,23 +285,35 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
     };
   }, [ready, variant, ai.open, dockOffset, size]);
 
+  // ---- "hover": con trỏ trên NÚT MỞ TRỢ LÝ ngay cạnh (linh vật không bắt con trỏ — Codex #5).
+  const atHomeNow = variant === "floating" && !ai.open;
+  useEffect(() => {
+    if (!ready || !atHomeNow) return;
+    const btn = document.querySelector(".ai-launcher");
+    if (!btn) return;
+    const on = () => setHovering(true);
+    const offHover = () => setHovering(false);
+    btn.addEventListener("pointerenter", on);
+    btn.addEventListener("pointerleave", offHover);
+    return () => {
+      btn.removeEventListener("pointerenter", on);
+      btn.removeEventListener("pointerleave", offHover);
+      setHovering(false);
+    };
+  }, [ready, atHomeNow]);
+
   if (!mounted) return null;
 
-  const atHome = variant === "floating" && !ai.open;
+  const atHome = atHomeNow;
   return (
     <div
-      className={`ai-companion ai-companion-${variant}${visible ? "" : " ai-companion-an"}${atHome ? " ai-companion-nha" : ""}`}
+      className={`ai-companion ai-companion-${variant}${visible ? "" : " ai-companion-an"}${atHome ? " ai-companion-nha" : ""}${ready ? "" : " ai-companion-cho"}`}
       style={variant === "floating" && dockOffset ? ({ ["--ai-dock-offset" as string]: `${dockOffset}px` } as React.CSSProperties) : undefined}
       data-state={state}
       data-reduced={reduced ? "1" : undefined}
       aria-hidden="true"
     >
-      <div
-        ref={hostRef}
-        className="ai-companion-host"
-        onPointerEnter={atHome ? () => setHovering(true) : undefined}
-        onPointerLeave={() => setHovering(false)}
-      />
+      <div ref={hostRef} className="ai-companion-host" />
     </div>
   );
 }

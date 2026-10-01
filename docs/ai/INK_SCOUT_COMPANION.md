@@ -50,19 +50,27 @@ Theo loại: sprite trạng thái 750 KB · sprite chuyển động 870 KB · po
 | Trạng thái trợ lý (`AiProvider`) | Ink Scout |
 |---|---|
 | `availability=false` / `!enabled` / mất mạng / lỗi `network_error`,`ai_not_enabled`,`disabled_by_admin`,`ai_no_provider` | offline |
-| `streaming` + chưa có token + chế độ Truyện (máy chủ đang truy chương/thư viện) hoặc có tìm web | searching |
-| `streaming` + chưa có token | thinking |
+| `streaming` + chế độ Truyện + **chưa nhận `meta`** (máy chủ đang dựng ngữ cảnh: truy chương/thư viện, `_prepare`) hoặc có tìm web | searching |
+| `streaming` + chưa có token (sau `meta`: chờ nhà cung cấp, **kể cả failover giữa các slot**) | thinking |
 | `streaming` + có token + chế độ Viết | writing |
 | `streaming` + có token | answering |
 | lỗi lượt vừa rồi (panel mở) | error |
 | lượt vừa xong `status:"complete"` (sự kiện) | success → phát một lần → listening/idle (`animationcomplete`; giảm chuyển động: 1,5 s) |
-| con trỏ trên linh vật ở vị trí nhà | hover (phát một lần) |
+| con trỏ trên **nút mở trợ lý** khi linh vật đứng nhà (linh vật không bắt con trỏ) | hover (phát một lần) |
 | panel mở / đang ở `/assistant` / đang gõ | listening |
 | đóng | idle |
 | Dừng tạo sinh | listening (không success) |
 | Hội thoại mới | listening (không giả thành công) |
 
-"searching": frontend V1 không gửi `use_web_search` → không có tín hiệu tìm web thật; dùng pha trước token của chế độ Truyện (tín hiệu thật: máy chủ đang dựng ngữ cảnh từ chương). Tham số `webSearch` để sẵn.
+**Failover phía máy chủ không bao giờ hiện thành lỗi.** Server chuyển slot trước token đầu, nên client chỉ nhận `meta > delta… > usage > done` (có thể có nhịp `: ping`). Linh vật đi `thinking → answering → success`. Chỉ sự kiện `error` cuối cùng (mọi slot đều hỏng, hết hạn mức…) mới hiện `error`; riêng `ai_no_provider` hiện `offline`. Có test chạy bộ tách SSE thật trên đúng chuỗi byte của một lượt failover đã quan sát trên production (`web/tests/ai-companion.test.mjs`).
+
+"searching": frontend V1 không gửi `use_web_search`. Tín hiệu thật là khoảng **trước `meta`** ở chế độ Truyện, lúc máy chủ đang dựng ngữ cảnh: `AiProvider.responseStarted` đổi thành `true` khi `meta` về. Tham số `webSearch` để sẵn.
+
+Sửa theo review Codex (2026-10-01):
+- (#2) Trạng thái một-lần đã phát xong thì không phát lại.
+- (#3) Giảm chuyển động áp **trước** khi hiện linh vật.
+- (#4) Listener được gỡ khi huỷ runtime.
+- (#5) Linh vật không bắt con trỏ; hover lấy từ nút mở trợ lý.
 
 ## 4. Hành vi
 

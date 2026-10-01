@@ -402,8 +402,11 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
 }
 body:has(.mini) .ai-companion-floating { bottom: 152px; }
 @media (max-width: 1023px) { .ai-companion-floating { display: none; } }
-.ai-companion-nha .ai-companion-host { pointer-events: auto; }
+/* KHÔNG bắt con trỏ ở bất cứ đâu (review Codex #5: ô 96×96 từng chặn cú bấm vào trang
+   bên dưới). "hover" lấy từ chính nút mở trợ lý ngay cạnh (sự kiện thật của UI). */
 .ai-companion-an { opacity: 0; visibility: hidden; }
+/* Chưa sẵn sàng (giảm chuyển động chưa áp xong) → không để lộ khung hình động đầu (Codex #3). */
+.ai-companion-cho .ai-companion-host { visibility: hidden; }
 .ai-companion-inline {
   display: flex;
   justify-content: center;

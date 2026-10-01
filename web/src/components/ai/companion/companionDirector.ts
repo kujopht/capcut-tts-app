@@ -13,6 +13,11 @@
  */
 import type { CompanionState } from "./companionState";
 
+/** = `companionState.isOnceState` (test khoá hai danh sách khớp nhau). Giữ bản sao ở đây vì
+ *  file này chạy thẳng bằng strip-types của Node, vốn không phân giải import giá trị
+ *  không đuôi `.ts` (import KIỂU thì được xoá nên không sao). */
+const ONCE_STATES: ReadonlySet<string> = new Set(["success", "hover"]);
+
 export interface RuntimeLike {
   setState(state: string): Promise<boolean>;
   transition(name: string, options?: Record<string, unknown>): Promise<{ cancelled?: boolean }>;
@@ -36,6 +41,9 @@ function samePlace(a: Place, b: Place): boolean {
 export class CompanionDirector {
   private desired: CompanionState = "idle";
   private applied: CompanionState | "seated" | null = null;
+  /** Trạng thái MỘT-LẦN (success/hover) runtime đã phát xong và tự rời — không phát lại
+   *  chừng nào trạng thái mong muốn còn là nó (review Codex #2: React chưa kịp đổi `desired`). */
+  private consumed: CompanionState | null = null;
   private place: Place = HOME;
   private target: Place | null = null;
   private running = false;
@@ -60,6 +68,7 @@ export class CompanionDirector {
 
   /** Trạng thái mong muốn MỚI NHẤT (ghi đè; không xếp hàng). */
   setState(state: CompanionState): void {
+    if (state !== this.desired) this.consumed = null;
     this.desired = state;
     void this.pump();
   }
@@ -92,6 +101,8 @@ export class CompanionDirector {
   /** Runtime đã tự đổi trạng thái (ví dụ `success` phát xong → `after:"idle"`). */
   notifyRuntimeState(state: string): void {
     if (state !== this.applied) {
+      const prev = this.applied;
+      if (prev && prev !== "seated" && ONCE_STATES.has(prev)) this.consumed = prev;
       this.applied = null;
       void this.pump();
     }
@@ -124,6 +135,7 @@ export class CompanionDirector {
           }
           break;
         }
+        if (want === this.consumed) break; // một-lần đã phát xong: chờ trạng thái mong muốn mới
         if (want !== this.applied) {
           this.applied = want;
           await this.rt.setState(want);

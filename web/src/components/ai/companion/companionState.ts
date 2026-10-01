@@ -11,10 +11,13 @@
  *   * `flash === "success"`               → lượt vừa xong trọn vẹn (sự kiện, do component đặt)
  *   * `open`                              → listening
  *
- * "searching": frontend V1 KHÔNG gửi `use_web_search`, nên không có tín hiệu
- * tìm web thật. Tín hiệu thật gần nhất là chế độ Truyện ở pha trước token đầu —
- * máy chủ đang truy chương/thư viện để dựng ngữ cảnh (`build_context`). Khi có
- * cờ tìm web ở frontend, truyền `webSearch: true`.
+ * "searching" CHỈ khi máy chủ thật sự đang truy dữ liệu: chế độ Truyện và CHƯA nhận
+ * `meta` (`responseStarted=false`). Máy chủ dựng ngữ cảnh (truy chương / thư viện,
+ * `_prepare` trong `server/ai_assistant/routes.py`) TRƯỚC khi mở luồng phản hồi; khi
+ * `meta` về thì phần truy đã XONG — khoảng chờ sau đó (kể cả failover giữa các slot,
+ * vốn diễn ra trước token đầu và không bao giờ lộ ra client) là "thinking", không phải
+ * "searching" (review Codex #1). Tìm web: frontend V1 chưa gửi `use_web_search`; khi
+ * có thì truyền `webSearch: true`.
  */
 
 export type CompanionState =
@@ -54,6 +57,8 @@ export interface CompanionInput {
   flash: "success" | null;
   /** Lượt đang chạy có tìm web (chưa có trong V1 — để sẵn chỗ nối). */
   webSearch?: boolean;
+  /** Máy chủ đã nhận lượt và mở luồng (`meta` đã về) — phần truy ngữ cảnh đã xong. */
+  responseStarted?: boolean;
 }
 
 /** Lỗi nghĩa là "không có AI để hỏi" → linh vật nghỉ (offline), không phải "bối rối" (error). */
@@ -70,7 +75,7 @@ export function isOfflineError(code: string | null | undefined): boolean {
 export function mapCompanionState(i: CompanionInput): CompanionState {
   if (i.available === false || i.networkOffline) return "offline";
   if (i.streaming) {
-    if (!i.hasStreamText) return i.webSearch || i.mode === "story" ? "searching" : "thinking";
+    if (!i.hasStreamText) return i.webSearch || (i.mode === "story" && !i.responseStarted) ? "searching" : "thinking";
     return i.mode === "writer" ? "writing" : "answering";
   }
   if (i.open && i.errorCode) return isOfflineError(i.errorCode) ? "offline" : "error";

@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { COMPANION_STATES, isOfflineError, mapCompanionState } from "../src/components/ai/companion/companionState.ts";
+import { COMPANION_STATES, isOfflineError, isOnceState, mapCompanionState } from "../src/components/ai/companion/companionState.ts";
 import { CompanionDirector } from "../src/components/ai/companion/companionDirector.ts";
 import { boundsFor, computeSeat } from "../src/components/ai/companion/companionGeometry.ts";
 
@@ -96,6 +96,48 @@ test("failover thanh cong phia may chu KHONG BAO GIO hien loi (byte giong luot t
   assert.equal(seq.at(-1), "success");
 });
 
+test("searching CHI truoc `meta` o che do Truyen; sau meta (cho provider/failover) la thinking (Codex #1)", () => {
+  assert.equal(st({ open: true, streaming: true, mode: "story" }), "searching", "may chu dang truy chuong");
+  assert.equal(st({ open: true, streaming: true, mode: "story", responseStarted: true }), "thinking");
+  assert.equal(st({ open: true, streaming: true, mode: "general", responseStarted: false }), "thinking");
+  const src = codeOnly(read("../src/components/ai/AiProvider.tsx"));
+  assert.match(src, /ev\.type === "meta"\)[\s\S]{0,200}responseStarted: true/, "meta that dat responseStarted");
+  assert.match(src, /streaming: true, streamingText: "", responseStarted: false/, "luot moi dat lai");
+});
+
+test("mot-lan (success/hover) da phat xong thi KHONG phat lai khi React chua doi desired (Codex #2)", async () => {
+  const rt = fakeRuntime();
+  const d = new CompanionDirector(rt);
+  d.setState("success");
+  await tick(); await tick();
+  d.notifyRuntimeState("idle"); // runtime tu ve `after` sau khi phat xong
+  await tick(); await tick();
+  assert.equal(rt.calls.filter((c) => c[0] === "state" && c[1] === "success").length, 1);
+  d.setState("listening");
+  await tick(); await tick();
+  assert.equal(rt.calls.at(-1)[1], "listening");
+  d.setState("success"); // luot moi xong -> duoc phat lai
+  await tick(); await tick();
+  assert.equal(rt.calls.filter((c) => c[0] === "state" && c[1] === "success").length, 2);
+  const dirSrc = read(COMP + "companionDirector.ts");
+  const once = COMPANION_STATES.filter((s) => isOnceState(s));
+  assert.deepEqual(once, ["hover", "success"]);
+  for (const s of once) assert.match(dirSrc, new RegExp(`ONCE_STATES[^;]*"${s}"`), `ONCE_STATES thieu ${s}`);
+});
+
+test("giam chuyen dong ap TRUOC khi hien; listener go khi huy; linh vat khong bat con tro (Codex #3/#4/#5)", () => {
+  const src = codeOnly(read(COMP + "AiCompanion.tsx"));
+  assert.match(src, /if \(reducedRef\.current\) await rt\.setReducedMotion\(true\);[\s\S]{0,60}setReady\(true\)/);
+  assert.match(src, /ai-companion-cho/);
+  assert.match(src, /removeEventListener\("statechange"/);
+  assert.match(src, /removeEventListener\("animationcomplete"/);
+  assert.ok(!/onPointerEnter/.test(src), "host khong bat con tro");
+  assert.match(src, /querySelector\("\.ai-launcher"\)/, "hover lay tu nut mo tro ly");
+  const css = codeOnly(read("../src/components/ai/ai.css"));
+  assert.ok(!/ai-companion[^{]*\{[^}]*pointer-events:\s*auto/.test(css), "khong co vung chet bat con tro");
+  assert.match(css, /\.ai-companion-cho \.ai-companion-host \{ visibility: hidden; \}/);
+});
+
 test("su kien la (vd 'fallback' tuong lai) va nhip tim bi bo qua, khong thanh loi", async () => {
   const raw = 'event: fallback\ndata: {"slot":"gemini-02"}\n\n: ping\n\n'
     + 'event: delta\ndata: {"text":"OK"}\n\nevent: done\ndata: {"status":"complete"}\n\n';
@@ -120,7 +162,7 @@ test("AiProvider chi dat `error` o nhanh su kien error / ngoai le, va xoa no khi
     const truoc = src.slice(Math.max(0, i - 900), i);
     assert.ok(/ev\.type === "error"|catch \(e\)/.test(truoc), "error chi dat khi may chu bao loi that");
   }
-  assert.match(src, /streaming: true, streamingText: "", error: null/, "luot moi xoa loi cu");
+  assert.match(src, /streaming: true, streamingText: "", responseStarted: false, error: null/, "luot moi xoa loi cu");
   for (const t of ["meta", "delta", "done", "citations"]) {
     const m = src.match(new RegExp(`ev\\.type === "${t}"\\)[\\s\\S]*?\\} else if`));
     assert.ok(m && !/error: \{/.test(m[0]), `nhanh ${t} khong duoc dat error`);

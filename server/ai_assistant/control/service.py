@@ -258,7 +258,8 @@ class ControlPlane:
         return None
 
     def balance_factor(self, slot: ProviderSlot, usage: Optional[Dict[str, UsageCounters]] = None) -> float:
-        """How much of this slot is left, in (0, 1] — the multiplier on its routing weight.
+        """How much of this slot is left, in [0, 1] — the multiplier on its routing weight
+        (`router.weighted_order` floors it at MIN_BALANCE_FACTOR, so 0 never starves a slot).
 
         headroom = 1 - max(requests/day cap, tokens/day cap, last-minute requests/RPM cap,
         last-minute tokens/TPM cap) (a 0 cap = unlimited, ignored), squared so a nearly

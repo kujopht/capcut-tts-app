@@ -308,6 +308,22 @@ class TestQaLane(unittest.TestCase):
         self.assertEqual(usage["lane"], "user")
         self.assertNotIn("qa", e.avail("owner"))
 
+    def test_an_account_id_in_the_reserved_qa_prefix_can_never_share_the_qa_ledger(self) -> None:
+        """Id thật do Appwrite sinh nên không có chuyện này; nếu có thì bị coi là ngoài khán giả ở MỌI route."""
+        e = _Env()
+        squatter = qa_ledger_user(OWNER)  # đúng khoá sổ QA của Owner
+        self.assertFalse(e.rt.allows(squatter))
+        self.assertTrue(e.rt.allows(OWNER))
+        # `_resolve_profile` của test đặt tiền tố `user_` nên dựng đúng id bằng một hàm resolve riêng.
+        from server.tests.test_ai_audience import _Profile
+        app = FastAPI()
+        app.include_router(build_ai_router(e.rt, resolve_profile=lambda a: _Profile(user_id=squatter)))
+        c = TestClient(app)
+        hdr = {"Authorization": "Bearer x"}
+        self.assertEqual(c.post("/api/ai/conversations", json={"mode": "general"}, headers=hdr).status_code, 403)
+        self.assertEqual(c.get("/api/ai/access", headers=hdr).json(), {"eligible": False})
+        self.assertEqual(c.get("/api/ai/availability", headers=hdr).json()["reason"], "not_in_audience")
+
     def test_runtime_qa_lane_requires_owner_and_control_plane_and_the_request(self) -> None:
         plane = make_plane([slot("gemini-01")])
         rt = AiRuntime(True, owner_users=frozenset({OWNER}), control=plane)

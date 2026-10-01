@@ -14,7 +14,7 @@ from typing import Any, Dict, FrozenSet, Optional, Tuple
 from server.ai_assistant.config import resolve_provider_chain
 from server.ai_assistant.ephemeral import EphemeralConversationStore
 from server.ai_assistant.gateway import AiGateway
-from server.ai_assistant.limits import RpmLimiter, StreamGuard, qa_ledger_user
+from server.ai_assistant.limits import QA_LEDGER_PREFIX, RpmLimiter, StreamGuard, qa_ledger_user
 from server.ai_assistant.memory import AiRepo, AiUnavailable, AppwriteAiRepo, InMemoryAiRepo
 from server.ai_assistant.tools import ToolContext
 from server.llm_gateway.chat_providers import (
@@ -72,6 +72,10 @@ class AiRuntime:
     owner_qa_daily_requests: int = 20
 
     def allows(self, user_id: str) -> bool:
+        # Tiền tố của khoá sổ QA (`limits.qa_ledger_user`) là của riêng sổ đó: id tài khoản thật do Appwrite sinh
+        # (`unique()`) nên không bao giờ mang nó, nhưng nếu có thì KHÔNG được vào, kẻo dùng chung sổ QA của Owner.
+        if user_id and user_id.startswith(QA_LEDGER_PREFIX):
+            return False
         return self.audience == "all" or (bool(user_id) and user_id in self.audience_users)
 
     def is_owner(self, user_id: str) -> bool:

@@ -177,7 +177,6 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   const uidRef = useRef<string | null>(null);
   uidRef.current = profile?.user_id ?? null;
   const assistantIdRef = useRef<string | null>(null);
-  const lastUserTextRef = useRef<string>("");
 
   // ĐỔI NGƯỜI DÙNG trong cùng trang (đăng xuất, đăng nhập tài khoản khác — `SessionProvider` không tải lại trang) thì
   // BỎ SẠCH trạng thái của người trước: tin nhắn, lịch sử, hạn mức, dự án, bản nháp. Trước đây Provider (gắn ở layout)
@@ -190,13 +189,12 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     setUidDaThay(uidHienTai);
     setState(TRANG_THAI_DAU);
   }
-  // Huỷ luồng đang chạy + quên dữ liệu "lượt trước" khi đổi người (cleanup chạy ngay trước khi uid mới có hiệu lực).
+  // Huỷ luồng đang chạy khi đổi người (cleanup chạy ngay trước khi uid mới có hiệu lực).
   useEffect(() => {
     return () => {
       ctrlRef.current?.abort();
       ctrlRef.current = null;
       assistantIdRef.current = null;
-      lastUserTextRef.current = "";
     };
   }, [uidHienTai]);
   /**
@@ -436,10 +434,6 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         }
         if (!cn.conHieuLuc()) return;
       }
-      // Khôi phục nếu lượt này bị từ chối trước khi máy chủ nhận: "Tạo lại" phải nhắm vào lượt đã GỬI được, không phải
-      // vào tin chưa gửi.
-      const vanBanTruoc = lastUserTextRef.current;
-      lastUserTextRef.current = trimmed;
       const clientId = taoClientId();
       const userMsgId = `local_${clientId}`;
       if (!regenerateOf) {
@@ -574,7 +568,6 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           // có trong hội thoại thật, nên phải hiện "Chưa gửi" thay vì trông như đã gửi. Đã có `meta` mà luồng đứt
           // giữa chừng thì tin ĐÃ ở máy chủ — giữ nguyên.
           const chuaNhan = assistantIdRef.current === null;
-          if (chuaNhan) lastUserTextRef.current = vanBanTruoc;
           cn((s) => ({
             ...s,
             streaming: false,
@@ -603,10 +596,11 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
    * bong bóng trợ lý cuối mới xoá nó trước khi gửi lại.
    */
   const regenerate = useCallback(async () => {
-    // Sau khi tải lại trang / mở một hội thoại cũ từ lịch sử thì chưa gửi lượt nào trong phiên này: lấy câu hỏi cuối
-    // của người dùng từ chính hội thoại đang hiện (trước đây nút "Tạo lại" hiện ra nhưng bấm vào không làm gì).
-    const cuoiCuaNguoi = [...state.messages].reverse().find((m) => m.role === "user" && m.status !== "not_sent")?.content ?? "";
-    const vanBan = lastUserTextRef.current || cuoiCuaNguoi;
+    // Câu hỏi được gửi lại LUÔN lấy từ chính hội thoại đang hiện: câu hỏi cuối của người dùng đã được máy chủ nhận (bỏ qua
+    // tin "Chưa gửi", vì tin đó không có trong hội thoại thật). Trước đây dùng một ref "lượt gửi gần nhất của phiên": sau khi
+    // tải lại trang nó rỗng (nút hiện ra mà bấm không làm gì) và sau khi chuyển sang hội thoại khác nó là câu hỏi của hội
+    // thoại KIA — "Tạo lại" gửi nhầm câu hỏi đó vào hội thoại này và xoá câu trả lời đúng.
+    const vanBan = [...state.messages].reverse().find((m) => m.role === "user" && m.status !== "not_sent")?.content ?? "";
     if (!vanBan) return;
     const lastAssistant = [...state.messages].reverse().find((m) => m.role === "assistant");
     // KHÔNG xoá câu trả lời cũ ở đây: `guiVanBan` chỉ bỏ nó khi máy chủ đã nhận lượt mới (`meta`), để một lượt tạo

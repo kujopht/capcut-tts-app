@@ -80,6 +80,9 @@ export function installFakeServer(): void {
     cap: 5,
     token: null as string | null,
     log: [] as string[],
+    /** Nội dung + hội thoại của lượt gửi GẦN NHẤT mà máy chủ giả nhận được (để kiểm "Tạo lại" gửi đúng câu hỏi). */
+    lastContent: "",
+    lastConv: "",
     calls: [] as { method: string; path: string; user: string | null }[],
     /** Số lần gọi `/api/ai/availability` v.v. — để kiểm "idle gần như zero mạng". */
     count: (needle: string) => qa.calls.filter((c) => c.path.includes(needle)).length,
@@ -170,6 +173,8 @@ export function installFakeServer(): void {
   function streamMessage(c: Conv, user: string, body: { content: string }, signal: AbortSignal | null,
                          allowance: () => unknown): Response | Promise<Response> {
     const step: Step = qa.script.shift() ?? { kind: "ok" };
+    qa.lastContent = body.content;
+    qa.lastConv = c.conversation_id;
     if ((used.get(user) ?? 0) >= qa.cap) {
       return jsonResponse(429, { detail: { code: "ai_budget_exhausted", scope: "user", reset_at: nextMidnightUtc(),
                                            message: "Bạn đã dùng hết lượt hỏi hôm nay." } });

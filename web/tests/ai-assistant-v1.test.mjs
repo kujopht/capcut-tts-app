@@ -284,7 +284,9 @@ test("F2. Tạo lại luôn nhắm vào lượt người dùng CUỐI CÙNG, kh�
   assert.ok(doanRegen, "không tìm thấy regenerate()");
   assert.ok(!/if \(!lastAssistant \|\|/.test(doanRegen), "regenerate không được bắt buộc phải có bong bóng trợ lý mới chạy");
   // Sau khi tải lại trang / mở hội thoại cũ từ lịch sử, ref "lượt trước" còn rỗng: lấy câu hỏi cuối từ chính hội thoại.
-  assert.match(doanRegen, /const vanBan = lastUserTextRef\.current \|\| cuoiCuaNguoi;/);
+  assert.match(doanRegen, /const vanBan = \[\.\.\.state\.messages\]\.reverse\(\)\.find\(\(m\) => m\.role === "user" && m\.status !== "not_sent"\)\?\.content \?\? "";/);
+  // KHÔNG dùng ref "lượt gửi gần nhất": nó là câu hỏi của hội thoại KHÁC sau khi chuyển hội thoại.
+  assert.doesNotMatch(doanRegen, /lastUserTextRef/);
   assert.match(doanRegen, /if \(!vanBan\) return;/);
 });
 

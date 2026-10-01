@@ -174,7 +174,8 @@ test("AiProvider: luồng đóng sạch không có done/error không được k�
   assert.match(src, /let ketThuc = false/);
   assert.match(src, /if \(!ketThuc && cn\.conHieuLuc\(\) && !ctrl\.signal\.aborted\)/);
   assert.match(src, /code: "ai_provider_interrupted"/);
-  assert.match(src, /lastUserTextRef\.current \|\| cuoiCuaNguoi/);
+  assert.doesNotMatch(src, /lastUserTextRef/, "ref 'lượt gửi gần nhất' gửi nhầm câu hỏi của hội thoại khác sau khi chuyển hội thoại");
+  assert.match(src, /find\(\(m\) => m\.role === "user" && m\.status !== "not_sent"\)\?\.content/);
 });
 
 test("AiComposer: Enter trong lúc IME đang soạn không gửi", () => {

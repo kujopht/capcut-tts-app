@@ -438,6 +438,10 @@ scenario("behaviour-resilience", async (page, vp) => {
   await page.click(".ai-nut-tao-lai");
   await sleep(800);
   check("'Tạo lại' trên hội thoại vừa mở từ lịch sử gửi lại câu hỏi cũ", vp.name, (await page.ev(`__qa.count('/messages')`)) === before + 1, "bấm Tạo lại mà không có request nào");
+  // Chống hồi quy (reviewer): trước đó trong PHIÊN này đã gửi "hỏi rồi bị cắt" ở một hội thoại KHÁC. "Tạo lại" ở hội thoại cũ
+  // phải gửi câu hỏi CỦA hội thoại cũ vào ĐÚNG hội thoại cũ, không phải câu hỏi của hội thoại kia.
+  const gui = await page.ev(`({ content: __qa.lastContent, conv: __qa.lastConv })`);
+  check("'Tạo lại' gửi câu hỏi của hội thoại đang xem vào đúng hội thoại đó", vp.name, gui.content === "câu hỏi cũ" && String(gui.conv).startsWith("s"), JSON.stringify(gui));
 });
 
 scenario("behaviour-account-switch", async (page, vp) => {

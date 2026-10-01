@@ -224,7 +224,10 @@ test("giao diện người dùng không còn đường nào hiện phần trăm 
 test("AiProvider: tin bị từ chối trước `meta` -> 'chưa gửi'; 'Tạo lại' không xoá câu cũ trước khi máy chủ nhận", () => {
   const p = codeOnly(read("components/ai/AiProvider.tsx"));
   assert.match(p, /const chuaNhan = assistantIdRef\.current === null;/);
-  assert.match(p, /if \(chuaNhan\) lastUserTextRef\.current = vanBanTruoc;/);
+  // "Tạo lại" nhắm vào câu hỏi cuối ĐÃ ĐƯỢC GỬI của chính hội thoại đang hiện (bỏ qua tin "Chưa gửi") — không còn ref
+  // "lượt gửi gần nhất của phiên", vốn rỗng sau khi tải lại trang và sai hội thoại sau khi chuyển hội thoại.
+  assert.doesNotMatch(p, /lastUserTextRef/);
+  assert.match(p, /find\(\(m\) => m\.role === "user" && m\.status !== "not_sent"\)/);
   assert.match(p, /messages: chuaNhan && !regenerateOf \? danhDauChuaGui\(s\.messages, userMsgId\) : s\.messages/);
   assert.match(p, /apDungHetLuot\(s\.availability, loi\.scope, loi\.reset_at\)/);
   assert.match(p, /ev\.type === "usage"[\s\S]{0,260}docHanMuc\(ev\.allowance\)/, "hạn mức cập nhật sau mỗi lượt từ sự kiện usage");

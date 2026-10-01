@@ -400,7 +400,8 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
   .ai-trang .ai-panel-dau-nut { flex: 0 0 auto; margin-left: auto; gap: 8px; }
   .ai-trang .ai-nut { width: 44px; height: 44px; }
   .ai-trang .ai-nut-nho { position: relative; width: 32px; height: 32px; }
-  .ai-trang .ai-nut-nho::after { content: ""; position: absolute; inset: -4px; }
+  /* CHỈ ở nhóm nút đầu trang (khe 8px): mở rộng vùng chạm của nút xoá trong danh sách lịch sử sẽ đè lên nút mở hội thoại bên cạnh. */
+  .ai-trang .ai-panel-dau-nut .ai-nut-nho::after { content: ""; position: absolute; inset: -4px; }
   .ai-trang .ai-mode { height: 40px; padding: 0 var(--s2); font-size: 16px; }
   .ai-trang .ai-o,
   .ai-trang .ai-writerbar-input,

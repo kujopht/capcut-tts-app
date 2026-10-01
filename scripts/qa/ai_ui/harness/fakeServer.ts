@@ -80,6 +80,10 @@ export function installFakeServer(): void {
     cap: 5,
     token: null as string | null,
     log: [] as string[],
+    /** Công tắc tổng TẮT (kill switch): access `eligible:false`, availability `disabled_by_admin`, gửi tin 503 `ai_not_enabled`. */
+    killed: false,
+    /** Người có id bắt đầu bằng "outsider" là NGOÀI khán giả: access `eligible:false`, availability `not_in_audience`, mọi route khác 403. */
+    isOutsider: (u: string) => u.startsWith("outsider"),
     /** Nội dung + hội thoại của lượt gửi GẦN NHẤT mà máy chủ giả nhận được (để kiểm "Tạo lại" gửi đúng câu hỏi). */
     lastContent: "",
     lastConv: "",
@@ -125,13 +129,19 @@ export function installFakeServer(): void {
                exhausted: n >= qa.cap, reset_at: nextMidnightUtc() };
     };
 
-    if (path === "/api/ai/access") return jsonResponse(200, { eligible: true });
+    if (path === "/api/ai/access") return jsonResponse(200, { eligible: !qa.killed && !qa.isOutsider(tok) });
     if (path === "/api/ai/availability") {
+      if (qa.isOutsider(tok)) return jsonResponse(200, { enabled: false, reason: "not_in_audience", name: "Fanfic AI", modes: [], web_search: false });
+      if (qa.killed) return jsonResponse(200, { enabled: false, reason: "disabled_by_admin", name: "Fanfic AI", modes: [], web_search: false });
       return jsonResponse(200, {
         enabled: true, reason: null, name: "Fanfic AI", modes: ["general", "story", "support", "writer"],
         web_search: false, memory_enabled: true,
         limits: { used_today: usedNow * 400, limit_today: 30000, ...allowance() },
       });
+    }
+    // Mọi route khác: người ngoài khán giả bị 403 như máy chủ thật (`_profile` -> 403 ai_not_enabled).
+    if (qa.isOutsider(tok)) {
+      return jsonResponse(403, { detail: { code: "ai_not_enabled", message: "Trợ lý AI chưa mở cho tài khoản này." } });
     }
     if (path === "/api/ai/preferences") return jsonResponse(200, { memory_enabled: true, preferences: {} });
     if (path === "/api/ai/projects") return jsonResponse(200, { items: [] });
@@ -172,6 +182,7 @@ export function installFakeServer(): void {
 
   function streamMessage(c: Conv, user: string, body: { content: string }, signal: AbortSignal | null,
                          allowance: () => unknown): Response | Promise<Response> {
+    if (qa.killed) return jsonResponse(503, { detail: { code: "ai_not_enabled", message: "Trợ lý AI đang tạm tắt." } });
     const step: Step = qa.script.shift() ?? { kind: "ok" };
     qa.lastContent = body.content;
     qa.lastConv = c.conversation_id;

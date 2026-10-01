@@ -308,7 +308,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       if (!AI_ASSISTANT_ENABLED || !profile) return;
       const cn = giuNguoi();
       const av = await xinAvailability();
-      if (!av) return;
+      // Máy chủ báo KHÔNG dùng được (ngoài khán giả, tắt khẩn cấp…): dừng ở đây. Trước đây vẫn nạp lịch sử -> thêm một
+      // request chắc chắn bị từ chối (403) cho mọi người ngoài khán giả vào /assistant.
+      if (!av || !av.enabled) return;
       void taiLichSu();
       if (opts?.mode || opts?.context) {
         try {

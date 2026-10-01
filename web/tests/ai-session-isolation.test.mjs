@@ -227,6 +227,15 @@ test("AiProvider: khoá ĐỒNG BỘ chống gửi đôi trong cùng một nhị
   assert.match(src, /assistantIdRef\.current = null;\s*dangGuiRef\.current = false;/);
 });
 
+test("AiProvider.ensureReady dừng khi máy chủ báo không dùng được (không nạp lịch sử vào một route chắc chắn bị từ chối)", () => {
+  const src = codeOnly(read("components/ai/AiProvider.tsx"));
+  const ensure = src.match(/const ensureReady = useCallback\([\s\S]*?\n {2}\);/)?.[0] ?? "";
+  assert.ok(ensure, "không tìm thấy ensureReady");
+  const dung = ensure.indexOf("if (!av || !av.enabled) return;");
+  const lichSu = ensure.indexOf("void taiLichSu();");
+  assert.ok(dung > 0 && lichSu > dung, "kiểm av.enabled phải đứng TRƯỚC khi nạp lịch sử");
+});
+
 test("AiConversation: mốc cuộn đi theo sự kiện scroll (khung cao lên thì trình duyệt tự kẹp scrollTop)", () => {
   const src = codeOnly(read("components/ai/AiConversation.tsx"));
   const khiCuon = src.match(/const khiCuon = \(\) => \{[\s\S]*?\n {2}\};/)?.[0] ?? "";

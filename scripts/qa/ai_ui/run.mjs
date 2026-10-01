@@ -420,6 +420,37 @@ scenario("behaviour-quota-and-errors", async (page, vp) => {
   check("ai_busy hiện 'đang bận'", vp.name, /bận/i.test(b), b);
 });
 
+scenario("behaviour-entry-visibility", async (page, vp) => {
+  // Khách: không lối vào, KHÔNG một request /api/ai/* nào (idle zero mạng) — kể cả /api/ai/access.
+  await sleep(500);
+  check("khách: không nút mở / ô soạn AI", vp.name, !(await page.ev(`!!document.querySelector('.ai-launcher, textarea.ai-o')`)));
+  check("khách: 0 request /api/ai/*", vp.name, (await page.ev(`__qa.calls.length`)) === 0, `calls=${await page.ev("__qa.calls.length")}`);
+  if (isPageView(vp)) check("khách trên /assistant: mời đăng nhập, không có ô soạn", vp.name, /Đăng nhập/.test(await page.ev(`document.body.innerText`)));
+
+  // Người NGOÀI khán giả: máy chủ nói eligible:false -> không nút mở; /assistant báo chưa khả dụng, không ô soạn.
+  await login(page, "outsider1");
+  await sleep(700);
+  check("ngoài khán giả: không nút mở", vp.name, !(await page.ev(`!!document.querySelector('.ai-launcher')`)));
+  if (isPageView(vp)) {
+    await page.wait("/chưa khả dụng/i.test(document.body.innerText)", 5000, "thông báo chưa khả dụng");
+    check("ngoài khán giả trên /assistant: không ô soạn", vp.name, !(await page.ev(`!!document.querySelector('textarea.ai-o')`)));
+  }
+  const rapKhac = await page.ev(`__qa.calls.filter((c) => !c.path.endsWith('/access') && !c.path.endsWith('/availability')).length`);
+  check("ngoài khán giả: không gọi route nào ngoài access/availability", vp.name, rapKhac === 0, `calls=${rapKhac}`);
+
+  // Công tắc khẩn cấp BẬT trong lúc người dùng đang mở panel: lượt gửi bị 503 -> 'Chưa gửi' + báo lỗi rõ ràng.
+  await login(page, "tho");
+  if (!isPageView(vp)) await openDesktop(page);
+  await page.wait("document.querySelector('textarea.ai-o')", 5000, "ô soạn");
+  await page.ev(`__qa.killed = true`);
+  await send(page, "hỏi khi đã tắt khẩn cấp", { wait: "none" });
+  await page.wait("document.querySelector('.ai-loi')", 5000, "khung báo lỗi");
+  const t = await page.ev(`document.querySelector('.ai-loi').innerText`);
+  check("tắt khẩn cấp giữa chừng: báo 'chưa được bật'", vp.name, /chưa được bật/i.test(t), t);
+  check("tắt khẩn cấp giữa chừng: tin hiện 'Chưa gửi'", vp.name, await page.ev(`!!document.querySelector('.ai-bong-chua-gui-nhan')`));
+  await page.ev(`__qa.killed = false`);
+});
+
 scenario("behaviour-double-submit", async (page, vp) => {
   await ready(page, vp, "lan");
   // Hai lần Enter CÙNG MỘT nhịp (trước khi React kịp vẽ lại `streaming: true`): chỉ một request được gửi đi.

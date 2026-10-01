@@ -128,6 +128,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       deployed_sha: ${{ steps.resolve.outputs.sha }}
+      ai_assistant_flag: ${{ steps.ui_flags.outputs.assistant }}
+      ai_companion_flag: ${{ steps.ui_flags.outputs.companion }}
     steps:
       - name: Refuse to run from a non-main workflow ref
         run: |
@@ -166,6 +168,41 @@ jobs:
           fi
           echo "sha=$RESOLVED_SHA" >> "$GITHUB_OUTPUT"
 
+      # Co giao dien AI la DAU VAO TUONG MINH cua ban build frontend (Next.js
+      # nhung `NEXT_PUBLIC_*` vao bundle LUC BUILD). Truoc day workflow khong
+      # truyen chung, nen MOI deploy tu dong lang le build UI AI TAT — mot lan
+      # bat tay se bi lan deploy ke tiep tat lai. Nay doc tu BIEN REPOSITORY
+      # (khong phai secret: gia tri 0/1, cong khai trong bundle) va BAT BUOC
+      # dung "0" hoac "1": thieu hay sai thi DUNG o day, TRUOC khi Render hay
+      # Cloudflare bi cham (khong co deploy nua voi). Job `deploy` chi doc lai
+      # output cua buoc nay, khong doc `vars.*` lan nua — mot nguon duy nhat.
+      # Day chi la cong HIEN THI: ai goi duoc `/api/ai/*` do backend quyet
+      # (`FAS_AI_AUDIENCE`, `FAS_AI_BETA_USERS`, cong tac khan cap).
+      - name: Resolve AI UI build flags (repository variables, never secrets)
+        id: ui_flags
+        env:
+          AI_ASSISTANT_FLAG: ${{ vars.PRODUCTION_AI_ASSISTANT_ENABLED }}
+          AI_COMPANION_FLAG: ${{ vars.PRODUCTION_AI_COMPANION_ENABLED }}
+        run: |
+          set -euo pipefail
+          bad=0
+          for name in PRODUCTION_AI_ASSISTANT_ENABLED PRODUCTION_AI_COMPANION_ENABLED; do
+            if [ "$name" = "PRODUCTION_AI_ASSISTANT_ENABLED" ]; then value="${AI_ASSISTANT_FLAG:-}"; else value="${AI_COMPANION_FLAG:-}"; fi
+            if [ "$value" != "0" ] && [ "$value" != "1" ]; then
+              if [ -z "$value" ]; then shown="unset"; else shown="not 0/1"; fi
+              echo "::error::Repository variable $name must be exactly 0 or 1 (it is $shown). Set it under Settings -> Secrets and variables -> Actions -> Variables; refusing to build the frontend with an implicit AI UI flag."
+              bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          if [ "$AI_COMPANION_FLAG" = "1" ] && [ "$AI_ASSISTANT_FLAG" != "1" ]; then
+            echo "::error::PRODUCTION_AI_COMPANION_ENABLED=1 requires PRODUCTION_AI_ASSISTANT_ENABLED=1 (Ink Scout only exists inside the assistant)."
+            exit 1
+          fi
+          echo "assistant=$AI_ASSISTANT_FLAG" >> "$GITHUB_OUTPUT"
+          echo "companion=$AI_COMPANION_FLAG" >> "$GITHUB_OUTPUT"
+          echo "AI UI build flags: NEXT_PUBLIC_AI_ASSISTANT_ENABLED=$AI_ASSISTANT_FLAG NEXT_PUBLIC_AI_COMPANION_ENABLED=$AI_COMPANION_FLAG"
+
   deploy:
     name: Deploy (Render + Cloudflare)
     needs: validate
@@ -178,6 +215,31 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.deployed_sha }}
+
+      # Job nay chay trong `environment: production`, noi `vars.*` uu tien bien CAP MOI
+      # TRUONG; `validate` khong co moi truong nen chi thay bien CAP REPOSITORY. Hai cap
+      # lech nhau = cau hinh mo ho -> DUNG. Kiem o DAU job, TRUOC Render hook — de lech
+      # cap khong the gay deploy nua voi (backend da len, frontend dung lai).
+      - name: Refuse environment-level AI UI flag overrides
+        env:
+          AI_ASSISTANT_FLAG: ${{ needs.validate.outputs.ai_assistant_flag }}
+          AI_COMPANION_FLAG: ${{ needs.validate.outputs.ai_companion_flag }}
+          AI_ASSISTANT_FLAG_ENV_VIEW: ${{ vars.PRODUCTION_AI_ASSISTANT_ENABLED }}
+          AI_COMPANION_FLAG_ENV_VIEW: ${{ vars.PRODUCTION_AI_COMPANION_ENABLED }}
+        run: |
+          set -euo pipefail
+          for flag in "${AI_ASSISTANT_FLAG:-}" "${AI_COMPANION_FLAG:-}"; do
+            if [ "$flag" != "0" ] && [ "$flag" != "1" ]; then
+              echo "::error::AI UI build flag missing from the validate job outputs — refusing to deploy."
+              exit 1
+            fi
+          done
+          if [ "${AI_ASSISTANT_FLAG_ENV_VIEW:-}" != "$AI_ASSISTANT_FLAG" ] || \
+             [ "${AI_COMPANION_FLAG_ENV_VIEW:-}" != "$AI_COMPANION_FLAG" ]; then
+            echo "::error::PRODUCTION_AI_*_ENABLED differs between the 'production' environment variables and the repository variables. Keep them ONLY as repository variables (delete the environment-level copy) — refusing to deploy with an ambiguous AI UI flag."
+            exit 1
+          fi
+          echo "AI UI build flags confirmed at both levels: assistant=$AI_ASSISTANT_FLAG companion=$AI_COMPANION_FLAG"
 
       # Render: khong co API deploy-mot-commit-cu-the o day co chu dich
       # (yeu cau nhiem vu chi de nghi RENDER_DEPLOY_HOOK_URL, pham vi toi
@@ -217,6 +279,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           NEXT_PUBLIC_API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
+          # Da kiem 0/1 o `validate` (buoc "Resolve AI UI build flags") va kiem lech cap o
+          # dau job nay ("Refuse environment-level AI UI flag overrides").
+          NEXT_PUBLIC_AI_ASSISTANT_ENABLED: ${{ needs.validate.outputs.ai_assistant_flag }}
+          NEXT_PUBLIC_AI_COMPANION_ENABLED: ${{ needs.validate.outputs.ai_companion_flag }}
         run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
@@ -227,6 +293,13 @@ jobs:
             echo "::error::PRODUCTION_API_BASE_URL variable is not set — required to bake the correct API URL into the build."
             exit 1
           fi
+          for flag in "$NEXT_PUBLIC_AI_ASSISTANT_ENABLED" "$NEXT_PUBLIC_AI_COMPANION_ENABLED"; do
+            if [ "$flag" != "0" ] && [ "$flag" != "1" ]; then
+              echo "::error::AI UI build flag missing from the validate job outputs — refusing to build."
+              exit 1
+            fi
+          done
+          echo "Building with NEXT_PUBLIC_AI_ASSISTANT_ENABLED=$NEXT_PUBLIC_AI_ASSISTANT_ENABLED NEXT_PUBLIC_AI_COMPANION_ENABLED=$NEXT_PUBLIC_AI_COMPANION_ENABLED"
           npm ci
           npm run cf:deploy:production
 
@@ -234,29 +307,48 @@ jobs:
     name: Post-deploy health checks
     needs: [validate, deploy]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Wait for health (tolerates Render free-tier cold start, ~50s)
+      # Render deploy hook chi XEP HANG mot ban build; instance CU van tra loi
+      # `/api/health` trong vai phut sau do. Truoc day buoc nay dung o phan hoi
+      # 200 DAU TIEN -> thuong la instance cu -> "commit_sha matches" hong du
+      # deploy that ra van thanh cong (2026-10-01, run 36859518425 + 36867838397).
+      # Nay doi den khi `commit_sha` KHOP ref da validate (toi da ~10 phut), con
+      # cold start / 5xx thi van thu lai nhu cu. Het han -> giu phan hoi cuoi de
+      # buoc ben duoi bao loi voi day du truong.
+      - name: Wait for health on the deployed commit (tolerates cold start + Render build)
         env:
           API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
+          EXPECTED_SHA: ${{ needs.validate.outputs.deployed_sha }}
         run: |
           set -euo pipefail
           if [ -z "${API_BASE:-}" ]; then
             echo "::error::PRODUCTION_API_BASE_URL variable is not set."
             exit 1
           fi
-          for i in $(seq 1 8); do
+          for i in $(seq 1 40); do
             if BODY=$(curl -sS --max-time 20 -f "$API_BASE/api/health"); then
-              echo "$BODY"
               echo "$BODY" > /tmp/health.json
-              break
+              SERVER_SHA=$(python3 -c "import json; print(json.load(open('/tmp/health.json')).get('commit_sha') or '')" 2>/dev/null || true)
+              if [ -n "$SERVER_SHA" ] && [ "${EXPECTED_SHA#"$SERVER_SHA"}" != "$EXPECTED_SHA" ]; then
+                echo "$BODY"
+                echo "Deployed commit is live after attempt $i."
+                break
+              fi
+              echo "Attempt $i: health OK but still serving ${SERVER_SHA:-<none>} (expected ${EXPECTED_SHA:0:12}); Render build not live yet, retrying in 15s..."
+            else
+              echo "Attempt $i: /api/health failed (cold start?), retrying in 15s..."
             fi
-            echo "Attempt $i failed (cold start?), retrying in 15s..."
-            sleep 15
-            if [ "$i" -eq 8 ]; then
+            if [ "$i" -eq 40 ]; then
+              if [ -f /tmp/health.json ]; then
+                echo "::warning::deployed commit never became live within ~10 minutes; verifying the last response below."
+                cat /tmp/health.json
+                break
+              fi
               echo "::error::/api/health never responded successfully."
               exit 1
             fi
+            sleep 15
           done
 
       # `commit_sha` (server/main.py, added alongside this workflow) exposes
@@ -398,12 +490,15 @@ jobs:
       - name: Print redacted summary
         env:
           DEPLOYED_SHA: ${{ needs.validate.outputs.deployed_sha }}
+          AI_ASSISTANT_FLAG: ${{ needs.validate.outputs.ai_assistant_flag }}
+          AI_COMPANION_FLAG: ${{ needs.validate.outputs.ai_companion_flag }}
         run: |
           SHA_DISPLAY="${DEPLOYED_SHA:-N/A (validation failed)}"
           {
             echo "## Production Deploy Summary"
             echo ""
             echo "- Deployed SHA: \`$SHA_DISPLAY\`"
+            echo "- AI UI build flags: assistant=\`${AI_ASSISTANT_FLAG:-N/A}\` companion=\`${AI_COMPANION_FLAG:-N/A}\` (repository variables PRODUCTION_AI_*_ENABLED)"
             echo "- Validate: ${{ needs.validate.result }}"
             echo "- Deploy (Render + Cloudflare): ${{ needs.deploy.result }}"
             echo "- Post-deploy health checks: ${{ needs.post_deploy_checks.result }}"

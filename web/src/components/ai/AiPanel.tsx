@@ -21,13 +21,15 @@ import { AiComposer } from "./AiComposer";
 import { AiWriterBar } from "./AiWriterBar";
 
 export function AiPanel() {
-  const { enabled, availability, open } = useAi();
+  const { enabled, access, availability, open } = useAi();
   const dockOffset = useChatDockOffset();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
 
   if (pathname === "/assistant") return null;
   if (!enabled || !open) return null;
+  // Panel khôi phục từ phiên (tải lại trang) nhưng máy chủ nay báo không đủ quyền -> đóng.
+  if (access === false) return null;
   if (availability === false || (availability && !availability.enabled)) return null;
 
   return (

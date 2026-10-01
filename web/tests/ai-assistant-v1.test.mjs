@@ -135,10 +135,10 @@ test("9. /assistant tồn tại, an toàn vùng-an-toàn, và là lối vào ch�
   assert.match(khoiTrang, /env\(safe-area-inset-right/);
 });
 
-test("10. Mục \"Trợ lý AI\" trong menu tài khoản chỉ hiện khi cờ bật, dùng FanficIcon", () => {
+test("10. Mục \"Trợ lý AI\" trong menu tài khoản chỉ hiện khi cờ bật VÀ máy chủ xác nhận, dùng FanficIcon", () => {
   const nav = read("components/NavAuth.tsx");
-  const doan = nav.match(/\{AI_ASSISTANT_ENABLED \? \([\s\S]*?Trợ lý AI[\s\S]*?\) : null\}/)?.[0];
-  assert.ok(doan, "không tìm thấy khối mục menu Trợ lý AI được gate bởi cờ");
+  const doan = nav.match(/\{AI_ASSISTANT_ENABLED && ai\?\.eligible \? \([\s\S]*?Trợ lý AI[\s\S]*?\) : null\}/)?.[0];
+  assert.ok(doan, "không tìm thấy khối mục menu Trợ lý AI được gate bởi cờ + `/api/ai/access`");
   assert.match(doan, /href="\/assistant"/);
   assert.match(doan, /<FanficIcon name="ai"/);
 });

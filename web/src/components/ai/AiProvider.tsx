@@ -10,7 +10,11 @@
  * LƯỜI (lazy): đăng nhập KHÔNG mở trợ lý, KHÔNG gọi `/api/ai/availability`
  * ngay lúc mount. Chỉ khi `openAssistant()` (nút nổi) hoặc `ensureReady()`
  * (`/assistant`, lối vào Story trên di động) được gọi lần đầu mới xin
- * `availability` — giữ đúng nguyên tắc "idle gần như zero mạng". Panel nổi đã
+ * `availability` — giữ đúng nguyên tắc "idle gần như zero mạng". NGOẠI LỆ DUY
+ * NHẤT: cổng hiển thị `/api/ai/access` (một bit, xem `lib/ai/quyenTruyCap.ts`)
+ * — MỘT request mỗi người đăng nhập mỗi lần tải trang, CHỈ khi bản build bật cờ.
+ * Không có nó thì nút nổi/menu/lối vào trang truyện hiện cho MỌI người đăng
+ * nhập, kể cả người ngoài nhóm beta. Panel nổi đã
  * được NGƯỜI DÙNG mở trong TAB này thì tải lại trang sẽ tự mở lại
  * (`sessionStorage`), giống hành vi Chat V1 — còn `/assistant` thì KHÔNG bao
  * giờ bật panel nổi (xem `lib/ai/phienMo.ts`).
@@ -32,6 +36,7 @@ import { AiApiError, aiApi, docVanBanTruongDuAn, ghepBodyDuAn, taoClientId } fro
 import {
   CO_HOI_THOAI, apDungHanhDongMo, docNhap, docPhien, ghiNhap, ghiPhien, khoiPhucMo, openSauKhiPhucHoi,
 } from "@/lib/ai/phienMo";
+import { type AiAccess, type AiAccessKetQua, hienLoiVao, nenHoiQuyen, quyenHienTai } from "@/lib/ai/quyenTruyCap";
 import { AI_ASSISTANT_ENABLED } from "@/lib/features";
 import { useSession } from "@/lib/session";
 import type {
@@ -87,6 +92,10 @@ interface AiState {
 
 interface AiContextValue extends AiState {
   enabled: boolean;
+  /** Máy chủ đã xác nhận người ĐANG đăng nhập dùng được AI chưa (`null` = chưa biết). */
+  access: AiAccess;
+  /** Được VẼ lối vào (nút nổi, menu, trang truyện): cờ bật + đăng nhập + máy chủ xác nhận. */
+  eligible: boolean;
   /** Người dùng MỞ panel nổi (tường minh) — ghi cờ phiên, rồi `ensureReady`. */
   openAssistant: (opts?: { mode?: AiMode; context?: AiConversationContext }) => Promise<void>;
   /** Nạp availability + lịch sử + hội thoại (tạo mới nếu có `mode`/`context`) — KHÔNG đổi `open`. */
@@ -160,6 +169,24 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   uidRef.current = profile?.user_id ?? null;
   const assistantIdRef = useRef<string | null>(null);
   const lastUserTextRef = useRef<string>("");
+  /** Kết quả `/api/ai/access` GẮN với user_id đã hỏi — đổi tài khoản thì `quyenHienTai` trả `null`. */
+  const [quyen, setQuyen] = useState<AiAccessKetQua | null>(null);
+  const access = quyenHienTai(quyen, profile?.user_id);
+  const eligible = hienLoiVao(AI_ASSISTANT_ENABLED, profile?.user_id, access);
+
+  // Cổng hiển thị: hỏi máy chủ MỘT lần cho mỗi người đăng nhập (xem docstring đầu tệp).
+  // Cờ tắt hoặc khách: không request. setState chỉ trong callback của promise.
+  useEffect(() => {
+    const uid = profile?.user_id ?? null;
+    if (!nenHoiQuyen(AI_ASSISTANT_ENABLED, uid) || !uid) return;
+    let alive = true;
+    void aiApi.access().then((ok) => {
+      if (alive) setQuyen({ userId: uid, eligible: ok });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [profile?.user_id]);
 
   // Khôi phục trạng thái mở/hội thoại của tab (chỉ khi đã đăng nhập).
   useEffect(() => {
@@ -626,6 +653,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       enabled: AI_ASSISTANT_ENABLED,
+      access,
+      eligible,
       openAssistant,
       ensureReady,
       enterFullscreen,
@@ -652,6 +681,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       state,
+      access,
+      eligible,
       openAssistant,
       ensureReady,
       enterFullscreen,

@@ -27,11 +27,12 @@ export function AiCompanionGate({ variant }: { variant: CompanionVariant }) {
   const { profile } = useSession();
   const [Comp, setComp] = useState<CompanionComponent | null>(null);
   // Chỉ tải mã linh vật khi nó CÓ THỂ hiện: đã đăng nhập, trợ lý bật, và (nổi)
-  // nút mở trợ lý đang hiện — cùng điều kiện với `AiLauncher` (`availability`
-  // `null` = chưa hỏi máy chủ, vẫn hiện; `false`/`enabled:false` = ẩn).
+  // nút mở trợ lý đang hiện — cùng điều kiện với `AiLauncher` (máy chủ xác nhận
+  // `eligible`; `availability` `null` = chưa hỏi, vẫn hiện; `false`/`enabled:false` = ẩn).
   // `/assistant` (inline) tải cả khi không khả dụng để hiện trạng thái offline.
   const canShow = !!loader && !!ai?.enabled && !!profile &&
-    (variant === "inline" || (ai.availability !== false && !(ai.availability && !ai.availability.enabled)));
+    (variant === "inline" ||
+      (ai.eligible && ai.availability !== false && !(ai.availability && !ai.availability.enabled)));
   useEffect(() => {
     if (!loader || !canShow || Comp) return;
     let alive = true;

@@ -59,14 +59,33 @@ class AiRuntime:
     #: a restart, which is fine: this value is abuse-tracking-only, never
     #: looked up by us, never persisted).
     user_ref_salt: str = field(default_factory=lambda: secrets.token_hex(32))
-    #: Khan gia (`AiAssistantSettings.resolved_audience`): "all" | "canary".
-    #: "canary" -> CHI `audience_users` (Owner + `FAS_AI_CANARY_USERS`) dung
-    #: duoc `/api/ai/*`; nguoi khac: availability `enabled:false`, route khac 403.
+    #: Khan gia (`AiAssistantSettings.resolved_audience`): "all" | "beta" | "canary".
+    #: "canary"/"beta" -> CHI `audience_users` (Owner + `FAS_AI_CANARY_USERS`, beta them
+    #: `FAS_AI_BETA_USERS`) dung duoc `/api/ai/*`; nguoi khac: availability
+    #: `enabled:false`, `/api/ai/access` `eligible:false`, route khac 403.
     audience: str = "all"
     audience_users: FrozenSet[str] = field(default_factory=frozenset)
 
     def allows(self, user_id: str) -> bool:
         return self.audience == "all" or (bool(user_id) and user_id in self.audience_users)
+
+    def serving(self) -> bool:
+        """Runtime dựng xong và phục vụ được (cờ bật, khán giả hợp lệ, có repo + gateway)."""
+        return self.enabled and self.repo is not None and self.gateway is not None
+
+    def access_state(self, user_id: str) -> str:
+        """NGUỒN DUY NHẤT cho câu hỏi "người này dùng được Trợ lý AI LÚC NÀY không":
+        `ok` | `off` | `not_in_audience` | `disabled_by_admin`. Availability và `/api/ai/access`
+        đều đọc từ đây. Các route còn lại vẫn TỰ chặn ở mọi request bằng chính `serving()` +
+        `allows()` (`routes._bat`/`_profile`); tắt khẩn cấp thì lượt gửi bị chặn ở admission
+        của control plane. UI có sai thì backend vẫn không mở."""
+        if not self.serving():
+            return "off"
+        if not self.allows(user_id):
+            return "not_in_audience"
+        if self.control is not None and not self.control.enabled():
+            return "disabled_by_admin"
+        return "ok"
 
     def describe(self) -> dict:
         return {"enabled": self.enabled, "reason": self.reason or None,

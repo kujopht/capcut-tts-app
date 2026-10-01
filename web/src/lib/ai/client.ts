@@ -11,6 +11,7 @@
  */
 import { API_BASE, ApiError, getToken } from "@/lib/api";
 import { docLoiApi } from "./loiApi";
+import { docQuyen } from "./quyenTruyCap";
 import { tachKhungSse, dienDichKhungAi } from "./sse";
 import type {
   AiAvailability,
@@ -101,6 +102,17 @@ async function doc<T>(res: Response): Promise<T> {
 }
 
 export const aiApi = {
+  /** Cổng HIỂN THỊ (một bit, xem `quyenTruyCap.ts`). Lỗi mạng / 401 / 5xx = không vẽ lối vào. */
+  async access(): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/access`, { headers: headers(false), cache: "no-store" });
+      if (!res.ok) return false;
+      return docQuyen(await res.json());
+    } catch {
+      return false;
+    }
+  },
+
   async availability(): Promise<AiAvailability> {
     const res = await fetch(`${API_BASE}/api/ai/availability`, { headers: headers(false), cache: "no-store" });
     return doc<AiAvailability>(res);

@@ -28,10 +28,10 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Deque, Dict, List, Mapping, Optional, Tuple
 
 from server.ai_assistant.control.model import (
-    DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, WORKLOADS,
-    ConfigValidationError, ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, controls_to_dict,
-    controls_with, slot_from_dict, slot_to_dict, validate_config, validate_controls, validate_profile,
-    validate_slot,
+    DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS,
+    WORKLOADS, ConfigValidationError, ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, controls_to_dict,
+    controls_with, preset_matching, slot_from_dict, slot_to_dict, validate_config, validate_controls,
+    validate_profile, validate_slot,
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import (
@@ -74,6 +74,13 @@ RECENT_429_WINDOW_S = 600.0
 #: Owner probe (`ControlPlane.probe`): one real minimal request per slot at most this often.
 PROBE_MIN_INTERVAL_S = 20.0
 PROBE_MAX_OUTPUT_TOKENS = 64
+#: Probe budget, SEPARATE from user traffic: at most this many probes per slot per UTC day.
+PROBE_DAILY_CAP_PER_SLOT = 30
+#: Safe re-probe path: health keeps the last PROBE_HISTORY probes; a slot is "probe_stable"
+#: once its last PROBE_STABLE_RUN probes all succeeded within PROBE_STABLE_MAX_MS each.
+PROBE_HISTORY = 5
+PROBE_STABLE_RUN = 3
+PROBE_STABLE_MAX_MS = 5000
 
 
 def today_utc() -> str:
@@ -144,6 +151,12 @@ class ControlPlane:
         self._last_error: Dict[str, Tuple[str, Optional[str], str]] = {}
         #: slot_id -> monotonic time of the last owner probe (rate limit, in-process).
         self._probe_at: Dict[str, float] = {}
+        #: Probe accounting, SEPARATE from the usage ledger (in-process; durable trail = audit).
+        #: _probe_counts: slot_id -> [probes today, ok today, tokens today]; resets at UTC midnight.
+        self._probe_day = ""
+        self._probe_counts: Dict[str, List[int]] = {}
+        #: slot_id -> last PROBE_HISTORY probes: (at_iso, ok, latency_ms, code).
+        self._probe_log: Dict[str, Deque[Tuple[str, bool, Optional[int], Optional[str]]]] = {}
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                              user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None) -> None:
@@ -414,6 +427,7 @@ class ControlPlane:
                                 "output_tokens": u.output_tokens, "errors": u.errors,
                                 "rate_limited": u.rate_limited, "cost_micro_usd": u.cost_micro_usd},
                 "last_success_at": u.last_success_at or None,
+                **self.probe_view(slot.slot_id),
                 **self._last_error_fields(slot.slot_id)}
 
     def _last_error_fields(self, slot_id: str) -> Dict[str, Optional[str]]:
@@ -431,6 +445,10 @@ class ControlPlane:
         return {
             "state": self.state,
             "controls": controls_to_dict(cfg.controls),
+            "rollout": {"active_preset": preset_matching(cfg.controls),
+                        "presets": {n: dict(v) for n, v in ROLLOUT_PRESETS.items()},
+                        "probe_daily_cap_per_slot": PROBE_DAILY_CAP_PER_SLOT,
+                        "probe_stable_rule": {"run": PROBE_STABLE_RUN, "max_latency_ms": PROBE_STABLE_MAX_MS}},
             "provider_types": [{"type": t, "label": PROVIDER_LABELS[t],
                                 "enabled": bool(cfg.controls.provider_types.get(t, False)),
                                 "slot_count": sum(1 for s in cfg.slots.values() if s.provider_type == t)}
@@ -483,6 +501,9 @@ class ControlPlane:
             "caps": {"global_daily_request_cap": c.global_daily_request_cap,
                      "global_daily_token_cap": c.global_daily_token_cap,
                      "daily_cost_cap_micro_usd": c.daily_cost_cap_micro_usd},
+            "rollout_preset": preset_matching(c),
+            # Operational probes, counted APART from the user budget above (never in `requests`).
+            "probes_today": self._probes_total(),
             "slots_by_status": statuses,
             "providers": [{"type": t, "label": PROVIDER_LABELS[t], "enabled": bool(c.provider_types.get(t)),
                            "healthy_slots": sum(1 for s in cfg.slots.values() if s.provider_type == t
@@ -648,16 +669,69 @@ class ControlPlane:
         self._commit([AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="cooldown",
                                  old_value=f"{round(before, 1)}s", new_value="0s (reset)")])
 
+    def _roll_probe_day(self) -> None:
+        """Caller holds self._lock. Probe counters are per UTC day, like the usage ledger."""
+        day = today_utc()
+        if day != self._probe_day:
+            self._probe_day, self._probe_counts = day, {}
+
+    def _note_probe(self, slot_id: str, out: Mapping[str, Any]) -> None:
+        with self._lock:
+            self._roll_probe_day()
+            c = self._probe_counts.setdefault(slot_id, [0, 0, 0])
+            c[0] += 1
+            if out.get("ok"):
+                c[1] += 1
+                c[2] += int(out.get("tokens") or 0)
+            self._probe_log.setdefault(slot_id, deque(maxlen=PROBE_HISTORY)).append(
+                (now_iso(), bool(out.get("ok")), out.get("latency_ms"), out.get("code")))
+
+    def _probes_total(self) -> Dict[str, int]:
+        with self._lock:
+            self._roll_probe_day()
+            vals = list(self._probe_counts.values())
+        return {"count": sum(v[0] for v in vals), "ok": sum(v[1] for v in vals), "tokens": sum(v[2] for v in vals)}
+
+    def probe_view(self, slot_id: str) -> Dict[str, Any]:
+        """Separate, visible probe accounting + the re-probe stability verdict for one slot."""
+        with self._lock:
+            self._roll_probe_day()
+            n, ok, tok = self._probe_counts.get(slot_id, [0, 0, 0])
+            hist = list(self._probe_log.get(slot_id, ()))
+        last = hist[-PROBE_STABLE_RUN:]
+        stable = (len(last) == PROBE_STABLE_RUN and all(h[1] for h in last)
+                  and all((h[2] or 0) <= PROBE_STABLE_MAX_MS for h in last))
+        return {"probes_today": {"count": n, "ok": ok, "tokens": tok, "cap": PROBE_DAILY_CAP_PER_SLOT},
+                "probe_history": [{"at": a, "ok": o, "latency_ms": ms, "code": c} for a, o, ms, c in reversed(hist)],
+                "probe_stable": stable}
+
+    @_serialized
+    def apply_preset(self, actor: str, name: str, expected_version: Optional[int] = None) -> Dict[str, Any]:
+        """Apply a ROLLOUT_PRESETS cap bundle in one audited, versioned step. Never touches
+        `ai_enabled`: the emergency kill switch is independent and always wins."""
+        if name not in ROLLOUT_PRESETS:
+            raise KeyError(name)
+        cfg = self._fresh()
+        before = preset_matching(cfg.controls)
+        out = self.update_controls(actor, dict(ROLLOUT_PRESETS[name]), expected_version)
+        self._commit([AuditEntry(admin_id=actor, entity="global", field="rollout_preset",
+                                 old_value=before, new_value=name)])
+        return out
+
     def probe(self, actor: str, slot_id: str) -> Dict[str, Any]:
         """Owner health check: ONE real minimal request through this slot's own key, endpoint
         and model — works while the slot is disabled and the global switch is off, so a new
         project can be verified before it ever serves a user.
 
-        Not `_serialized` (it waits on the network); rate-limited per slot instead. The call
-        is real, so it is accounted like any turn: success -> slot usage + breaker success;
-        failure -> sanitized last_error, breaker failure / 429 cooldown, slot error counter.
-        The provider's text is never returned — only ok, latency and the sanitized enums.
-        Audited as `slot:<id>.probe`."""
+        Not `_serialized` (it waits on the network); rate-limited per slot instead.
+
+        ACCOUNTED SEPARATELY from user traffic: a probe never writes the usage ledger, so it
+        can never consume the global / per-user / slot budget that admission enforces. It
+        has its own visible counters (`probes_today` per slot, `probes_today` in overview),
+        its own daily cap (PROBE_DAILY_CAP_PER_SLOT) and the durable audit row. It still
+        feeds HEALTH like real traffic: breaker success/failure, 429 cooldown + recent-429
+        penalty, sanitized last_error. The provider's text is never returned — only ok,
+        latency and the sanitized enums. Audited as `slot:<id>.probe`."""
         cfg = self._fresh(repair=True)
         slot = cfg.slots.get(slot_id)
         if slot is None:
@@ -666,6 +740,10 @@ class ControlPlane:
         with self._lock:
             if now - self._probe_at.get(slot_id, -1e9) < PROBE_MIN_INTERVAL_S:
                 raise ControlConflict(f"Vừa kiểm slot {slot_id} — đợi {int(PROBE_MIN_INTERVAL_S)} giây rồi thử lại.")
+            self._roll_probe_day()
+            if self._probe_counts.get(slot_id, [0, 0])[0] >= PROBE_DAILY_CAP_PER_SLOT:
+                raise ControlConflict(f"Slot {slot_id} đã được kiểm {PROBE_DAILY_CAP_PER_SLOT} lần hôm nay "
+                                      "(ngân sách kiểm riêng) — thử lại ngày mai.")
             self._probe_at[slot_id] = now
         out: Dict[str, Any] = {"slot_id": slot_id, "model": slot.model, "ok": False, "latency_ms": None,
                                "code": None, "category": None}
@@ -681,24 +759,27 @@ class ControlPlane:
                 res = self.provider_for(slot, key).generate(req)
                 out.update(ok=True, latency_ms=int((time.monotonic() - t0) * 1000))
                 self.breaker.record_success(slot_id)
-                self.record_turn(slot_id, res.input_tokens, res.output_tokens, "complete")
+                out["tokens"] = int(res.input_tokens or 0) + int(res.output_tokens or 0)
             except ProviderError as exc:
                 cat = getattr(exc, "category", None)
                 out["latency_ms"] = int((time.monotonic() - t0) * 1000)
                 if exc.code == "provider_http_429" or exc.retry_after_s is not None:
                     self.breaker.cool_down(slot_id, exc.retry_after_s if exc.retry_after_s is not None
                                            else DEFAULT_429_COOLDOWN_S)
-                    self.note_rate_limited(slot, exc.code, cat)
+                    with self._lock:
+                        self._recent_429.setdefault(slot_id, deque()).append(self._clock())
                 else:
                     self.breaker.record_failure(slot_id)
-                    self.note_error(slot, exc.code, cat)
+                self.note_failure(slot, exc.code, cat)
                 e = self.last_error(slot_id) or {}
                 out.update(code=e.get("code"), category=e.get("category"))
             except Exception:  # noqa: BLE001 — same R1 backstop as the router
                 log.warning("ai_control: probe of slot %s raised an unexpected error", slot_id, exc_info=True)
                 self.breaker.record_failure(slot_id)
-                self.note_error(slot, "provider_unexpected_error")
+                self.note_failure(slot, "provider_unexpected_error")
                 out.update(code="provider_unexpected_error")
+        self._note_probe(slot_id, out)
+        out.pop("tokens", None)
         result = (f"ok {out['latency_ms']}ms" if out["ok"]
                   else f"{out['code']}" + (f"/{out['category']}" if out["category"] else ""))
         self._commit([AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="probe",

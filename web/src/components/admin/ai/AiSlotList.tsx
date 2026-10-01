@@ -109,6 +109,18 @@ function DongSlot({
             </>
           ) : "chưa có"}
         </dd>
+        <dt>Kiểm hôm nay</dt>
+        <dd>
+          {h.probes_today ? `${h.probes_today.count}/${h.probes_today.cap} (đạt ${h.probes_today.ok})` : "—"}
+          {h.probe_stable ? <span className="tt tt-duyet"> ổn định</span> : null}
+          {h.probe_history && h.probe_history.length ? (
+            <span className="hint">
+              {" · "}
+              {h.probe_history.map((p) => (p.ok ? `ok ${p.latency_ms ?? "?"}ms` : (p.code ?? "lỗi"))).join(" → ")}
+            </span>
+          ) : null}
+          <span className="hint"> · không trừ hạn mức người dùng</span>
+        </dd>
         <dt>Workload</dt><dd>{slot.workloads.length ? slot.workloads.join(", ") : "—"}</dd>
         <dt>Secret ref</dt>
         <dd>

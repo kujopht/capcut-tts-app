@@ -88,6 +88,21 @@ export interface AiSlotHealth {
   /** Enum lỗi của nhà cung cấp (`NOT_FOUND`, `PERMISSION_DENIED:SERVICE_DISABLED`, `model_not_found`). */
   last_error_category?: string | null;
   last_error_at?: string | null;
+  /** Ngân sách KIỂM riêng — không bao giờ cộng vào `usage_today` / hạn mức người dùng. */
+  probes_today?: { count: number; ok: number; tokens: number; cap: number };
+  /** Các lần kiểm gần nhất, mới nhất trước. */
+  probe_history?: { at: string; ok: boolean; latency_ms: number | null; code: string | null }[];
+  /** `true` khi các lần kiểm gần nhất đều đạt và đủ nhanh — gợi ý có thể bật (không tự bật). */
+  probe_stable?: boolean;
+}
+
+export type AiPresetName = "canary" | "beta";
+
+export interface AiRollout {
+  active_preset: AiPresetName | "custom";
+  presets: Record<AiPresetName, Record<string, number>>;
+  probe_daily_cap_per_slot: number;
+  probe_stable_rule: { run: number; max_latency_ms: number };
 }
 
 export interface AiSlot {
@@ -165,6 +180,7 @@ export interface AiConfigMeta {
 export interface AiConfig {
   state: AiConfigState;
   controls: AiControls;
+  rollout?: AiRollout;
   provider_types: AiProviderTypeInfo[];
   slots: AiSlot[];
   profiles: AiRoutingProfile[];
@@ -298,6 +314,13 @@ export const aiControl = {
     requestAi<{ controls: AiControls }>("/api/admin/ai/global", {
       method: "PUT",
       body: JSON.stringify(patch),
+    }),
+
+  /** OWNER: áp preset rollout (chỉ hạn mức — KHÔNG đụng công tắc khẩn cấp). */
+  applyPreset: (name: AiPresetName, expectedVersion: number) =>
+    requestAi<{ controls: AiControls }>(`/api/admin/ai/presets/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   /** `expectedVersion`: bật một loại cần bản cấu hình hiện tại (409 nếu cũ);

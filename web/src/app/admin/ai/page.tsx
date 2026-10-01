@@ -22,6 +22,7 @@ import {
   type AiConfig,
   type AiGlobalPatch,
   type AiOverview,
+  type AiPresetName,
   type AiProviderType,
   type AiSlotInput,
 } from "@/lib/admin/aiControl";
@@ -33,6 +34,7 @@ import { AiProviderTypes } from "@/components/admin/ai/AiProviderTypes";
 import { AiSlotList } from "@/components/admin/ai/AiSlotList";
 import { AiRoutingProfiles } from "@/components/admin/ai/AiRoutingProfiles";
 import { AiGlobalCaps } from "@/components/admin/ai/AiGlobalCaps";
+import { AiRolloutPresets } from "@/components/admin/ai/AiRolloutPresets";
 import { AiAuditTable } from "@/components/admin/ai/AiAuditTable";
 
 type LoiTruong = { field: string; message: string }[];
@@ -289,6 +291,15 @@ export default function AdminAi() {
 
       <section id="han-muc" className="stack-2 ai-admin-muc">
         <h2 className="section-title">Hạn mức &amp; chế độ</h2>
+        {config.rollout ? (
+          <AiRolloutPresets
+            rollout={config.rollout}
+            laOwner={laOwner}
+            dangGui={dangGui}
+            onApDung={(name: AiPresetName) =>
+              chay(() => aiControl.applyPreset(name, c.version), { loai: "global" }, `Đã áp preset ${name}.`)}
+          />
+        ) : null}
         {/* `key` theo phiên bản: người khác vừa lưu (hoặc ta vừa lưu) thì form
             dựng lại từ giá trị mới — không cần effect sao chép prop vào state. */}
         <AiGlobalCaps

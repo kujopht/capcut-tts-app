@@ -348,6 +348,35 @@ CONTROL_FIELDS: Tuple[str, ...] = (
 )
 
 
+#: Rollout presets — named cap bundles the owner applies in one audited step
+#: (`PUT /api/admin/ai/presets/{name}`). They set ONLY these budget fields: never
+#: `ai_enabled` (the emergency kill switch stays independent and always wins),
+#: never routing, profiles, slots or the audience. Every value is still editable
+#: one by one afterwards; the config view reports which preset (if any) matches.
+#:   canary — owner-only canary values in use since 2026-10-01
+#:   beta   — public-beta proposal: 5 requests / user / day, 150 / day overall
+PRESET_FIELDS: Tuple[str, ...] = (
+    "per_user_daily_request_cap", "per_user_daily_token_cap", "global_daily_request_cap",
+    "global_daily_token_cap", "max_output_tokens", "max_context_tokens",
+)
+ROLLOUT_PRESETS: Dict[str, Dict[str, int]] = {
+    "canary": {"per_user_daily_request_cap": 20, "per_user_daily_token_cap": 40_000,
+               "global_daily_request_cap": 40, "global_daily_token_cap": 80_000,
+               "max_output_tokens": 400, "max_context_tokens": 4000},
+    "beta": {"per_user_daily_request_cap": 5, "per_user_daily_token_cap": 15_000,
+             "global_daily_request_cap": 150, "global_daily_token_cap": 450_000,
+             "max_output_tokens": 400, "max_context_tokens": 4000},
+}
+
+
+def preset_matching(c: GlobalControls) -> str:
+    """Name of the preset the current caps equal exactly, else "custom"."""
+    for name, values in ROLLOUT_PRESETS.items():
+        if all(getattr(c, k) == v for k, v in values.items()):
+            return name
+    return "custom"
+
+
 def controls_with(c: GlobalControls, patch: Mapping[str, Any]) -> GlobalControls:
     unknown = [k for k in patch if k not in CONTROL_FIELDS]
     if unknown:

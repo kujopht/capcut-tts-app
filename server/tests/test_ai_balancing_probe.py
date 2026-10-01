@@ -130,7 +130,9 @@ class TestProbe(unittest.TestCase):
         out = plane.probe("owner", "gemini-03")
         self.assertTrue(out["ok"])
         self.assertEqual(p.gen_calls, 1)
-        self.assertEqual(out["health"]["usage_today"]["requests"], 1)
+        # Probe budget is SEPARATE from the user/global usage ledger (rollout presets PR).
+        self.assertEqual(out["health"]["usage_today"]["requests"], 0)
+        self.assertEqual(out["health"]["probes_today"]["count"], 1)
         self.assertNotIn(FAKE_KEY, json.dumps(out), "provider text is never returned")
         audit = plane.audit(10)
         self.assertEqual((audit[0]["entity"], audit[0]["field"]), ("slot:gemini-03", "probe"))
@@ -142,7 +144,8 @@ class TestProbe(unittest.TestCase):
         out = plane.probe("owner", "gemini-03")
         self.assertEqual((out["ok"], out["code"], out["category"]), (False, "provider_http_404", "NOT_FOUND"))
         self.assertEqual(out["health"]["last_error_code"], "provider_http_404")
-        self.assertEqual(out["health"]["usage_today"]["errors"], 1)
+        self.assertEqual(out["health"]["usage_today"]["errors"], 0)
+        self.assertEqual((out["health"]["probes_today"]["count"], out["health"]["probes_today"]["ok"]), (1, 0))
         self.assertEqual(plane.audit(10)[0]["new_value"], "provider_http_404/NOT_FOUND")
 
     def test_429_cools_the_slot_down(self) -> None:
@@ -150,7 +153,8 @@ class TestProbe(unittest.TestCase):
         plane, _ = self._plane(Gen("gemini-03", fail=rl), enabled=True, ai_enabled=True)
         out = plane.probe("owner", "gemini-03")
         self.assertEqual(out["health"]["status"], "COOLDOWN")
-        self.assertEqual(out["health"]["usage_today"]["rate_limited"], 1)
+        self.assertEqual(out["health"]["usage_today"]["rate_limited"], 0)
+        self.assertEqual(out["health"]["recent_429"], 1, "a probe 429 still penalises the slot in routing")
 
     def test_rate_limited_per_slot(self) -> None:
         clk = Clock()

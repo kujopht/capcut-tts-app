@@ -88,6 +88,14 @@ def build_ai_admin_router(plane: Optional[ControlPlane], *, reader: Callable[...
         expected = _expected_version(b)
         return {"controls": _run(lambda: _plane().update_controls(p.user_id, b, expected))}
 
+    @r.put("/api/admin/ai/presets/{name}")
+    def put_preset(name: str, body: Any = Body(default=None), p: Any = Depends(owner)) -> Dict[str, Any]:
+        """OWNER: apply a named rollout preset (caps only; never the kill switch). 404 unknown
+        name, 409 stale `expected_version`."""
+        b = dict(_body(body)) if body is not None else {}
+        expected = _expected_version(b)
+        return {"controls": _run(lambda: _plane().apply_preset(p.user_id, name, expected))}
+
     @r.put("/api/admin/ai/provider-types/{provider_type}")
     def put_type(provider_type: str, body: Any = Body(...), p: Any = Depends(owner)) -> Dict[str, Any]:
         b = dict(_body(body))

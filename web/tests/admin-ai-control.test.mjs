@@ -83,6 +83,16 @@ test("client goi dung cac route /api/admin/ai/* kem Bearer token", () => {
   assert.match(src, /encodeURIComponent\(slotId\)/);
 });
 
+test("preset rollout: route /presets/, khong dung den cong tac khan cap, hien preset dang dung", () => {
+  assert.ok(client().includes("/api/admin/ai/presets/"), "thiếu route preset");
+  const ui = codeOnly(read("../src/components/admin/ai/AiRolloutPresets.tsx"));
+  assert.match(ui, /active_preset/);
+  assert.ok(!/ai_enabled/.test(ui), "preset UI không được đụng công tắc khẩn cấp");
+  const list = read("../src/components/admin/ai/AiSlotList.tsx");
+  assert.match(list, /probes_today/);
+  assert.match(list, /không trừ hạn mức người dùng/);
+});
+
 test("ket qua kiem slot chi co ok/do tre/ma loi da lam sach — khong co van ban nha cung cap", () => {
   const src = client();
   const m = src.match(/export interface AiProbeResult \{([\s\S]*?)\}/);

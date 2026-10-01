@@ -39,9 +39,26 @@ Bảng điều khiển cho **Owner/Admin** để định tuyến provider, đặ
 
 **Kiểm slot (Owner):** `POST /api/admin/ai/slots/{id}/probe` gửi **một** request tối thiểu thật qua khoá, endpoint và model của slot. Gọi được cả khi slot đang tắt và công tắc tổng TẮT, nên kiểm được project mới trước khi cho phục vụ người dùng.
 - Kết quả chỉ gồm `ok`, `latency_ms`, `code`, `category` đã làm sạch; không bao giờ có văn bản của nhà cung cấp.
-- Được tính như một lượt thật: usage của slot, breaker, cooldown 429, `last_error_*`.
-- Ghi audit `slot:<id>.probe`. Mỗi slot tối đa 1 lần / 20 giây (409 nếu gọi dồn).
-- Quy trình mở rộng: tạo slot TẮT → cài khoá → deploy → **Kiểm tra** → chỉ bật slot trả `ok`.
+- **Ngân sách kiểm tách riêng:** probe **không bao giờ** ghi vào sổ usage, nên không trừ vào hạn mức toàn cục, hạn mức mỗi người hay hạn mức slot mà bước admission áp.
+  - Probe có bộ đếm riêng hiển thị công khai trên admin (`health.probes_today`, `overview.probes_today`) và trần riêng: 30 lần / slot / ngày UTC.
+  - Bản ghi bền là audit `slot:<id>.probe`.
+  - Probe vẫn nuôi **health** như lưu lượng thật: breaker, cooldown 429 và phạt 429 khi cân bằng, `last_error_*`.
+- Mỗi slot tối đa 1 lần / 20 giây (409 nếu gọi dồn).
+- **Kiểm lại an toàn:** health giữ 5 lần kiểm gần nhất (`probe_history`).
+  - `probe_stable = true` khi 3 lần gần nhất đều đạt và mỗi lần ≤ 5 giây.
+  - Probe **không bao giờ tự bật slot**: slot chập chờn (ví dụ `gemini-05`) cứ để TẮT và kiểm lại khi tiện, rollout không phải chờ nó.
+- Quy trình mở rộng: tạo slot TẮT → cài khoá → deploy → **Kiểm tra** (3 lần, cách ≥ 20 giây) → chỉ bật slot `ổn định`.
+
+### Preset rollout (`model.ROLLOUT_PRESETS`)
+
+Áp bằng `PUT /api/admin/ai/presets/{name}` (OWNER, kèm `expected_version`). Mỗi lần áp ghi audit từng trường cộng một dòng `global.rollout_preset`. Preset **chỉ đặt hạn mức**: không bao giờ đụng `ai_enabled` (công tắc khẩn cấp độc lập và luôn thắng, kể cả khi `expected_version` cũ), cũng không đụng định tuyến hay khán giả. `config.rollout.active_preset` cho biết preset nào đang khớp; đã sửa tay thì hiện `custom`.
+
+| Preset | Mỗi người / ngày | Toàn cục / ngày | Token mỗi người | Token toàn cục | Token ra / ngữ cảnh mỗi lượt |
+|---|---|---|---|---|---|
+| `canary` (đang dùng) | 20 request | 40 request | 40.000 | 80.000 | 400 / 4000 |
+| `beta` (đề xuất) | **5 request** | **150 request** | 15.000 | 450.000 | 400 / 4000 |
+
+Với beta, 8 slot × 30 = 240 request/ngày và 8 × 60.000 token. Cả hai đều vượt trần toàn cục, nên **trần toàn cục là giới hạn thật** và còn dư khi một vài slot lỗi.
 
 ### Hồ sơ định tuyến
 

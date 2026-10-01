@@ -143,8 +143,11 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
     from the stored control config, and an absent/corrupt config means AI off
     (fail-closed) — `FAS_AI_PROVIDERS` and the `AI_*` keys are ignored."""
     ai = settings.ai_assistant
+    #: Cả runtime TẮT cũng mang danh sách Owner: `/api/ai/availability` chỉ trả `reason` chi tiết (tên biến môi trường…)
+    #: cho Owner, nên Owner phải nhận ra mình ngay cả khi AI đang tắt — nếu không chẩn đoán "vì sao tắt" mất hẳn.
+    owners = frozenset(getattr(settings, "owner_user_ids", ()) or ())
     if not ai.enabled:
-        return AiRuntime(False, reason="FAS_AI_ASSISTANT_V1 chưa bật", control=control)
+        return AiRuntime(False, reason="FAS_AI_ASSISTANT_V1 chưa bật", control=control, owner_users=owners)
 
     data_backend = str(getattr(settings, "data_backend", "mock")).lower()
     resolve_audience = getattr(ai, "resolved_audience", None)
@@ -154,7 +157,7 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
         # KHÔNG lặp lại giá trị env: `reason` đi ra client qua /api/ai/availability (review).
         return AiRuntime(False, reason="FAS_AI_AUDIENCE không hợp lệ "
                                        "(canary | beta | all; beta tối đa 50 ID trong FAS_AI_BETA_USERS)",
-                         control=control)
+                         control=control, owner_users=owners)
     audience_users = (frozenset(getattr(settings, "owner_user_ids", ()) or ())
                       | frozenset(getattr(ai, "canary_users", ()) or ()))
     if audience == "beta":
@@ -170,7 +173,7 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
     else:
         chain = resolve_provider_chain(ai, environment=settings.environment)
         if not chain:
-            return AiRuntime(False, reason="no_provider")
+            return AiRuntime(False, reason="no_provider", owner_users=owners)
 
         providers: Dict[str, ChatProvider] = {}
         for name in chain:
@@ -179,7 +182,7 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
                 providers[name] = p
         usable_chain = [n for n in chain if n in providers]
         if not usable_chain:
-            return AiRuntime(False, reason="no_provider")
+            return AiRuntime(False, reason="no_provider", owner_users=owners)
 
         gateway = AiGateway(providers=providers, provider_chain=usable_chain)
 
@@ -187,7 +190,7 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
         try:
             repo: AiRepo = AppwriteAiRepo(settings)
         except AiUnavailable as exc:
-            return AiRuntime(False, reason=f"appwrite_not_configured: {exc}")
+            return AiRuntime(False, reason=f"appwrite_not_configured: {exc}", owner_users=owners)
     else:
         repo = InMemoryAiRepo()
 
@@ -195,7 +198,7 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
     if getattr(ai, "user_ref_salt", ""):
         kwargs["user_ref_salt"] = ai.user_ref_salt
 
-    owner_users = frozenset(getattr(settings, "owner_user_ids", ()) or ())
+    owner_users = owners
     owner_qa_daily_requests = max(0, int(getattr(ai, "owner_qa_daily_requests", 20)))
 
     if control is not None:

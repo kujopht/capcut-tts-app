@@ -167,13 +167,28 @@ class TestSameSourceOfTruth(unittest.TestCase):
         """Refactor sang `access_state` khong doi hop dong availability da co."""
         c = _client(_runtime("canary", {OWNER}))
         self.assertEqual(c.get("/api/ai/availability", headers=_auth(STRANGER)).json()["reason"], "not_in_audience")
-        off = _client(AiRuntime(False, reason="FAS_AI_ASSISTANT_V1 chưa bật"))
+        off = _client(AiRuntime(False, reason="FAS_AI_ASSISTANT_V1 chưa bật", owner_users=frozenset({OWNER})))
+        # Chi tiết cấu hình (tên biến môi trường) chỉ dành cho Owner; mọi tài khoản khác nhận mã ổn định "off".
         self.assertEqual(off.get("/api/ai/availability", headers=_auth(OWNER)).json()["reason"],
                          "FAS_AI_ASSISTANT_V1 chưa bật")
+        for who in (STRANGER, CANARY, TESTER):
+            self.assertEqual(off.get("/api/ai/availability", headers=_auth(who)).json()["reason"], "off", who)
         ok = c.get("/api/ai/availability", headers=_auth(OWNER)).json()
         self.assertTrue(ok["enabled"])
         self.assertIn("limits", ok)
         self.assertIsNone(json.loads(json.dumps(ok))["reason"])
+
+    def test_runtimes_built_while_disabled_still_know_the_owner_so_the_owner_keeps_the_diagnosis(self) -> None:
+        """`reason` chi tiết chỉ dành cho Owner; nếu runtime tắt không mang danh sách Owner thì chính Owner cũng chỉ
+        còn thấy "off" và mất khả năng chẩn đoán vì sao AI tắt."""
+        for label, ai in (("flag tắt", {"enabled": False}), ("khán giả hỏng", {"audience": "khong-hop-le"})):
+            with self.subTest(label):
+                rt = build_ai_runtime(_settings(**ai))
+                self.assertFalse(rt.serving())
+                self.assertTrue(rt.is_owner(OWNER))
+                c = _client(rt)
+                self.assertNotEqual(c.get("/api/ai/availability", headers=_auth(OWNER)).json()["reason"], "off")
+                self.assertEqual(c.get("/api/ai/availability", headers=_auth(STRANGER)).json()["reason"], "off")
 
 
 if __name__ == "__main__":

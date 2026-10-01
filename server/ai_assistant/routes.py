@@ -24,16 +24,18 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
+from starlette.background import BackgroundTask
 from typing_extensions import Annotated
 
 from server.ai_assistant.config import (
-    MAX_CONVERSATIONS_PER_USER, MAX_USER_MESSAGE_CHARS, MODES, estimate_tokens,
+    ESCALATION_RPM, LIST_LIMIT_MAX, MAX_CONVERSATIONS_PER_USER, MAX_PROJECTS_PER_USER, MAX_USER_MESSAGE_CHARS, MODES,
+    PROJECT_TEXT_MAX, PROJECT_TITLE_MAX, WRITE_RPM, estimate_tokens,
 )
 from server.ai_assistant.context_builder import build_context
 from server.ai_assistant.gateway import ErrorEvent, ProviderServed
 from server.ai_assistant.limits import (
-    AiBudgetExceeded, AiBusy, AiRateLimited, budget_status, compute_allowance, enforce_budget, qa_allowance,
-    qa_ledger_user, record_usage,
+    AiBudgetExceeded, AiBusy, AiRateLimited, StreamTicket, budget_status, compute_allowance, enforce_budget,
+    qa_allowance, qa_ledger_user, record_usage,
 )
 from server.ai_assistant.scopes import SCOPE_GLOBAL
 from server.ai_assistant.memory import (
@@ -53,7 +55,10 @@ log = logging.getLogger("fanfic.ai_assistant")
 
 ConvId = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
 ProjectId = ConvId
-UserContent = Annotated[str, StringConstraints(max_length=MAX_USER_MESSAGE_CHARS)]
+#: Tin rỗng / toàn khoảng trắng bị từ chối Ở API (422), không chỉ ở giao diện: trước đây `content=""` vẫn qua, tốn một
+#: lượt gọi nhà cung cấp + một lượt hạn mức cho một câu hỏi không có gì. `strip_whitespace` cũng cắt khoảng trắng đầu/cuối
+#: (giao diện vốn đã gửi bản đã cắt); độ dài tối đa tính theo KÝ TỰ sau khi cắt.
+UserContent = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_USER_MESSAGE_CHARS)]
 
 
 class ContextIn(BaseModel):
@@ -92,18 +97,24 @@ class PreferencesIn(BaseModel):
 
 class ProjectIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    title: str = ""
-    premise: str = ""
+    #: Trần độ dài ở API (khớp `AppwriteAiRepo._PROJECT_TEXT_LIMITS`): trước đây chỉ repo âm thầm cắt, còn API nhận mọi kích thước.
+    title: Annotated[str, StringConstraints(max_length=PROJECT_TITLE_MAX)] = ""
+    premise: Annotated[str, StringConstraints(max_length=PROJECT_TEXT_MAX)] = ""
     outline: Dict[str, Any] = {}
     characters: Dict[str, Any] = {}
     world: Dict[str, Any] = {}
-    notes: str = ""
+    notes: Annotated[str, StringConstraints(max_length=PROJECT_TEXT_MAX)] = ""
 
 
 class EscalationIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[ConvId] = None
     summary: Annotated[str, StringConstraints(max_length=2000)]
+
+
+def _clamp_limit(limit: int) -> int:
+    """`limit=0` làm `[-0:]` trả TOÀN BỘ danh sách; số âm làm Appwrite trả 400 (thành 503); số lớn kéo về một trang khổng lồ."""
+    return max(1, min(int(limit), LIST_LIMIT_MAX))
 
 
 def _new_id() -> str:
@@ -180,6 +191,10 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                                 {"code": "ai_not_enabled",
                                  "message": "Trợ lý AI chưa mở cho tài khoản này."})
         return profile
+
+    def _write_guard(user_id: str, *, rpm: int = WRITE_RPM, scope: str = "aiw") -> None:
+        """Trần tốc độ cho route GHI không gọi LLM (dự án, sở thích, yêu cầu hỗ trợ…): khoá riêng, không dùng chung nhịp gửi tin."""
+        _run(lambda: rt.rpm_limiter.check(user_id, rpm=rpm, scope=scope))
 
     def _run(f: Callable[[], Any]) -> Any:
         try:
@@ -293,7 +308,10 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         response.headers["Cache-Control"] = "no-store"
         profile, state = _access(authorization)
         if state == "off":
-            return {"enabled": False, "reason": rt.reason or "off", "name": rt.assistant_name,
+            # `rt.reason` có tên biến môi trường (FAS_AI_ASSISTANT_V1, FAS_AI_AUDIENCE…) — chỉ Owner cần thấy để
+            # chẩn đoán; người dùng thường nhận mã ổn định "off" (không lộ cấu hình ra mọi tài khoản đã đăng nhập).
+            reason = (rt.reason or "off") if rt.is_owner(getattr(profile, "user_id", "") or "") else "off"
+            return {"enabled": False, "reason": reason, "name": rt.assistant_name,
                     "modes": [], "web_search": False}
         # Ngoai khan gia, hoac tat khan cap (`/admin/ai`, fail-closed): nhu AI tat — khong lo
         # han muc/cau hinh.
@@ -333,6 +351,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                            authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = _profile(authorization)
+        limit = _clamp_limit(limit)
         durable = _run(lambda: rt.repo.list_conversations(profile.user_id, limit=limit, cursor=cursor))
         # Ephemeral (memory-off) conversations are ALWAYS flagged
         # `ephemeral: true` — the UI must be able to tell a user this
@@ -391,7 +410,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         _bat()
         profile = _profile(authorization)
         conv, is_ephemeral = _own_conversation(profile.user_id, conversation_id)
-        msgs = _recent_messages_combined(conversation_id, limit=limit)
+        msgs = _recent_messages_combined(conversation_id, limit=_clamp_limit(limit))
         return {
             "conversation_id": conv.conversation_id, "mode": conv.mode, "title": conv.title,
             "ephemeral": is_ephemeral,
@@ -406,6 +425,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         _bat()
         profile = _profile(authorization)
         _own_conversation(profile.user_id, conversation_id)
+        _write_guard(profile.user_id)
         # Harmless no-op on whichever store the conversation ISN'T in.
         _run(lambda: rt.repo.delete_conversation(conversation_id))
         rt.ephemeral.delete_conversation(conversation_id)
@@ -457,6 +477,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             await run_in_threadpool(
                 lambda: _run(lambda: enforce_budget(rt.repo, user_id=profile.user_id, daily_limit=daily_limit)))
         _run(lambda: rt.stream_guard.acquire(profile.user_id))
+        ticket = StreamTicket(rt.stream_guard, profile.user_id)
 
         def _prepare():
             memory_enabled = _memory_enabled(profile.user_id)
@@ -574,8 +595,9 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
 
         try:
             turns, citations, memory_enabled = await run_in_threadpool(_prepare)
-        except Exception:
-            rt.stream_guard.release(profile.user_id)
+        except BaseException:
+            # BaseException: một client ngắt (CancelledError) trong lúc chuẩn bị cũng phải nhả khoá luồng.
+            ticket.release()
             raise
 
         assistant_message_id = _new_id()
@@ -588,6 +610,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             error_payload: Optional[Dict[str, Any]] = None
             finalize_result: Dict[str, Any] = {}
             served: Dict[str, str] = {"provider_name": "", "model": ""}
+            pump: Optional[StreamPump] = None
 
             async def _finalize() -> None:
                 """Records usage + persists the assistant message — MUST run
@@ -614,18 +637,34 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 # conservative chars/3.5 estimator) covering the prompt
                 # actually sent plus whatever text was actually generated.
                 # Nothing is charged for a turn that produced NEITHER real
-                # usage NOR any text (a pure before-first-delta failure).
+                # usage NOR any text (a pure before-first-delta failure) —
+                # EXCEPT a turn the CLIENT abandoned after the provider had
+                # already been called (`pump` started): that cost the
+                # provider a request, so it costs the user one too. Without
+                # this, a script that POSTs, reads `meta` and hangs up could
+                # loop at the RPM limit, drain provider quota and never reach
+                # the daily cap (audit finding F1). A provider-side failure
+                # (`final_status == "error"`) stays free for the user.
+                abandoned_after_call = final_status == "stopped" and pump is not None
                 estimated_in = estimate_tokens(prompt_text)
                 estimated_out = estimate_tokens(final_text)
-                counted_in = in_tok or estimated_in
-                counted_out = out_tok or estimated_out
-                if final_text or in_tok or out_tok:
+                charge = bool(final_text or in_tok or out_tok or abandoned_after_call)
+                counted_in = (in_tok or estimated_in) if charge else 0
+                counted_out = (out_tok or estimated_out) if charge else 0
+                # Hạch toán theo SLOT trước tiên và trong `try` riêng (audit F20): trước đây nó nằm SAU các lần ghi kho
+                # tin nhắn/sổ người dùng, nên một lần ghi hỏng làm mất luôn bộ đếm slot (rồi tới trần toàn cục).
+                if rt.control is not None and served["provider_name"]:
+                    try:
+                        await run_in_threadpool(rt.control.record_turn, served["provider_name"],
+                                                counted_in, counted_out, final_status)
+                    except Exception:  # noqa: BLE001
+                        log.warning("ai_assistant: control-plane usage record failed", exc_info=True)
+                if charge:
                     budget = await run_in_threadpool(
                         lambda: record_usage(
                             rt.repo, user_id=ledger_user, input_tokens=counted_in,
                             output_tokens=counted_out, daily_limit=daily_limit))
                 else:
-                    counted_in = counted_out = 0
                     budget = await run_in_threadpool(
                         lambda: budget_status(rt.repo, user_id=ledger_user, daily_limit=daily_limit))
 
@@ -662,18 +701,11 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                         else await run_in_threadpool(_user_allowance, budget))
                 except Exception:  # noqa: BLE001
                     log.warning("ai_assistant: allowance for the usage event failed", exc_info=True)
-                if rt.control is not None and served["provider_name"]:
-                    # Per-SLOT usage/cost for the control plane (provider_name
-                    # is the slot id there). Never allowed to fail the turn.
-                    try:
-                        await run_in_threadpool(rt.control.record_turn, served["provider_name"],
-                                                counted_in, counted_out, final_status)
-                    except Exception:  # noqa: BLE001
-                        log.warning("ai_assistant: control-plane usage record failed", exc_info=True)
 
-            yield _sse("meta", {"message_id": assistant_message_id, "conversation_id": conversation_id})
-            pump: Optional[StreamPump] = None
             try:
+                # `meta` PHẢI nằm trong `try`: nếu client ngắt đúng lúc generator đang dừng ở `yield` này, `finally`
+                # bên dưới vẫn phải chạy (nhả khoá luồng). Đặt nó ngoài `try` (như trước) thì khoá rò vĩnh viễn.
+                yield _sse("meta", {"message_id": assistant_message_id, "conversation_id": conversation_id})
                 # Web-search turns route through their own profile (control
                 # plane `web_search_profile`); `AiGateway` ignores `workload`.
                 workload = "web_search" if (payload.use_web_search and rt.web_search_enabled) else None
@@ -697,6 +729,12 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                         continue
                     if ev is END:
                         break
+                    if isinstance(ev, ProviderServed):
+                        # Server-side only (persisted for per-provider usage counting); NEVER forwarded over SSE
+                        # (§0.3). Xử lý TRƯỚC phép kiểm ngắt kết nối: một client ngắt giữa lúc nhà cung cấp trả lời
+                        # vẫn phải ghi nhận ĐÚNG slot đã bị gọi vào bộ đếm slot/toàn cục.
+                        served["provider_name"], served["model"] = ev.provider_name, ev.model
+                        continue
                     if await request.is_disconnected():
                         final_status = "stopped"
                         break
@@ -713,10 +751,6 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                     if isinstance(ev, Delta):
                         text_parts.append(ev.text)
                         yield _sse("delta", {"text": ev.text})
-                    elif isinstance(ev, ProviderServed):
-                        # Server-side only (persisted for per-provider usage
-                        # counting); NEVER forwarded over SSE (§0.3).
-                        served["provider_name"], served["model"] = ev.provider_name, ev.model
                     elif isinstance(ev, UsageEvent):
                         in_tok, out_tok = ev.input_tokens, ev.output_tokens
                     elif isinstance(ev, ErrorEvent):
@@ -746,7 +780,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                     with anyio.CancelScope(shield=True):
                         await _finalize()
                 finally:
-                    rt.stream_guard.release(profile.user_id)
+                    ticket.release()
 
             # Everything below is unreachable when the `except BaseException`
             # branch above re-raised (i.e. on a real disconnect) — Starlette
@@ -776,8 +810,11 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             else:
                 yield _sse("done", {"status": final_status})
 
+        # `background=ticket.release`: lưới thứ hai cho trường hợp generator CHƯA BAO GIỜ được chạy (client ngắt trước khi
+        # stream bắt đầu thì `finally` của generator không tồn tại để chạy). Vé nhả đúng một lần nên không lo nhả đôi.
         return StreamingResponse(_generate(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+                                 background=BackgroundTask(ticket.release))
 
     # ---------------------------------------------------------------- preferences
     @r.get("/api/ai/preferences")
@@ -795,6 +832,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                         authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = _profile(authorization)
+        _write_guard(profile.user_id)
         # L12/M7 (review finding): this used to silently `[:2000]`-truncate
         # the serialized JSON — truncating a JSON string mid-structure
         # produces INVALID JSON, so `get_preferences`'s own
@@ -821,6 +859,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                       authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = _profile(authorization)
+        _write_guard(profile.user_id)
         _run(lambda: rt.repo.delete_all_memory(profile.user_id, include_projects=include_projects))
         # Also clears any live ephemeral (memory-off) entries for this
         # user — a superset of the ≤1h TTL guarantee, not a requirement of
@@ -858,6 +897,13 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                        authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = _profile(authorization)
+        _write_guard(profile.user_id)
+        if len(_run(lambda: rt.repo.list_projects(profile.user_id))) >= MAX_PROJECTS_PER_USER:
+            # Trước đây tạo dự án KHÔNG có trần số lượng: một vòng lặp tạo hàng nghìn dòng Appwrite (mỗi dòng tới ~28k
+            # ký tự) rồi `list_projects` tốn N+1 lần đọc cho mỗi lần liệt kê.
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                {"code": "ai_context_too_large",
+                                 "message": f"Đã đạt tối đa {MAX_PROJECTS_PER_USER} dự án."})
         proj = AiProject(
             project_id=_new_id(), user_id=profile.user_id, title=payload.title,
             premise=payload.premise,
@@ -885,6 +931,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         _bat()
         profile = _profile(authorization)
         _own_project(profile.user_id, project_id)
+        _write_guard(profile.user_id)
         p = _run(lambda: rt.repo.update_project(project_id, {
             "title": payload.title, "premise": payload.premise,
             "outline_json": _bounded_json(payload.outline, limit=8000, field_name="outline"),
@@ -899,6 +946,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         _bat()
         profile = _profile(authorization)
         _own_project(profile.user_id, project_id)
+        _write_guard(profile.user_id)
         _run(lambda: rt.repo.delete_project(project_id))
         return {"deleted": True}
 
@@ -908,6 +956,11 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                           authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
         profile = _profile(authorization)
+        _write_guard(profile.user_id, rpm=ESCALATION_RPM, scope="aie")
+        if payload.conversation_id:
+            # Chỉ được gắn yêu cầu hỗ trợ vào hội thoại CỦA MÌNH: nếu công cụ hỗ trợ sau này mở hội thoại theo id này,
+            # một id của người khác sẽ lộ nội dung của họ dưới danh nghĩa người gửi.
+            _own_conversation(profile.user_id, payload.conversation_id)
         esc = AiEscalation(
             escalation_id=_new_id(), user_id=profile.user_id,
             conversation_id=payload.conversation_id or "", summary=payload.summary)

@@ -89,7 +89,10 @@ class TestFlagOff(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertFalse(body["enabled"])
-        self.assertEqual(body["reason"], "FAS_AI_ASSISTANT_V1 chưa bật")
+        # Người dùng thường chỉ nhận mã ổn định "off" — chi tiết cấu hình (tên biến môi trường) chỉ dành cho Owner
+        # (xem `test_ai_access.py`), để mọi tài khoản đã đăng nhập không đọc được cấu hình máy chủ.
+        self.assertEqual(body["reason"], "off")
+        self.assertNotIn("FAS_AI", json.dumps(body))
 
     def test_conversations_list_returns_503_ai_not_enabled(self) -> None:
         r = self.client.get("/api/ai/conversations", headers=_auth("u1"))

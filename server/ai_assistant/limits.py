@@ -14,7 +14,7 @@ import hashlib
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from server.ai_assistant.memory import AiRepo
 from server.ai_assistant.scopes import SCOPE_GLOBAL, SCOPE_QA, SCOPE_USER  # noqa: F401 — re-export cho route/test
@@ -111,6 +111,11 @@ class StreamGuard:
             else:
                 self._per_user.pop(user_id, None)
             self._total = max(0, self._total - 1)
+
+    def snapshot(self) -> Tuple[int, int]:
+        """(luồng đang chạy, tối đa) của instance này — chỉ để HIỂN THỊ ở `/admin/ai` (không có ID người dùng nào)."""
+        with self._lock:
+            return self._total, self._max
 
 
 class StreamTicket:

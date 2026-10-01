@@ -154,7 +154,7 @@ Tất cả `permissions=[]`, `documentSecurity=true` (chỉ backend đọc/ghi).
 
 | Phương thức | Đường | Quyền |
 |---|---|---|
-| GET | `/api/admin/ai/overview` | ADMIN, OWNER |
+| GET | `/api/admin/ai/overview` (kèm `runtime`: khán giả, RPM/người, luồng đang chạy/tối đa — không ID, không khoá) | ADMIN, OWNER |
 | GET | `/api/admin/ai/config` | ADMIN, OWNER |
 | GET | `/api/admin/ai/audit?limit=` | ADMIN, OWNER |
 | PUT | `/api/admin/ai/global` (+ `expected_version`) | OWNER |

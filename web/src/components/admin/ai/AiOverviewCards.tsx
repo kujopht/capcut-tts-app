@@ -20,6 +20,22 @@ function gioDiaPhuong(iso: string): string {
   return Number.isNaN(t.getTime()) ? iso : t.toLocaleString("vi-VN");
 }
 
+/** Nhãn dễ hiểu của khán giả (`FAS_AI_AUDIENCE` đã phân giải). Chuỗi rỗng = cấu hình sai và AI đang tắt cho mọi người. */
+export function nhanKhanGia(audience: string): string {
+  switch (audience) {
+    case "all":
+      return "Mọi người đã đăng nhập";
+    case "beta":
+      return "Nhóm beta (Owner + canary + tester có tên)";
+    case "canary":
+      return "Chỉ Owner + canary";
+    case "":
+      return "KHÔNG AI (khán giả cấu hình sai)";
+    default:
+      return audience;
+  }
+}
+
 /** Ngày UTC của server (`YYYYMMDD`) → `DD/MM/YYYY`. */
 export function ngayUtc(day: string): string {
   return /^\d{8}$/.test(day) ? `${day.slice(6, 8)}/${day.slice(4, 6)}/${day.slice(0, 4)}` : day;
@@ -61,9 +77,34 @@ export function AiOverviewCards({ overview, config }: { overview: AiOverview; co
         <OSo nhan="Bị giới hạn tốc độ (429)" so={overview.rate_limited} />
       </div>
 
+      {overview.runtime ? (
+        <div className="card stack-2">
+          <h3 className="section-title-sm">Ai đang dùng được · hàng đợi luồng</h3>
+          <div className="stat-grid admin-luoi">
+            <div className="stat admin-o">
+              <span className="stat-value">{nhanKhanGia(overview.runtime.audience)}</span>
+              <span className="stat-label">Đối tượng được dùng AI</span>
+              <span className="hint admin-o-ghi">Đặt bằng biến môi trường, đổi cần deploy backend</span>
+            </div>
+            <OSo
+              nhan="Luồng đang chạy"
+              so={overview.runtime.streams_active}
+              ghi_chu={`Tối đa ${overview.runtime.streams_max}/instance · đầy thì người dùng nhận "đang bận"`}
+            />
+            <OSo nhan="Giới hạn tốc độ mỗi người" so={overview.runtime.rpm_per_user} ghi_chu="lượt gửi / phút" />
+          </div>
+        </div>
+      ) : null}
+
       <div className="card stack-2">
         <h3 className="section-title-sm">Hạn mức toàn cục hôm nay</h3>
         <AiQuotaBar nhan="Yêu cầu" daDung={overview.requests} tran={overview.caps.global_daily_request_cap} />
+        {overview.caps.global_daily_request_cap > 0 ? (
+          <p className="hint">
+            Còn lại hôm nay: {Math.max(0, overview.caps.global_daily_request_cap - overview.requests).toLocaleString("vi-VN")} yêu cầu
+            (đặt lại lúc 00:00 UTC = 07:00 giờ Việt Nam)
+          </p>
+        ) : null}
         <AiQuotaBar nhan="Token" daDung={overview.input_tokens + overview.output_tokens} tran={overview.caps.global_daily_token_cap} />
         <AiQuotaBar
           nhan="Chi phí"

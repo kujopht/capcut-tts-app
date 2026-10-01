@@ -200,6 +200,7 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
 
     owner_users = owners
     owner_qa_daily_requests = max(0, int(getattr(ai, "owner_qa_daily_requests", 20)))
+    stream_guard = StreamGuard(max_streams_per_instance=ai.max_streams)
 
     if control is not None:
         def _user_usage(user_id: str, day: str) -> Tuple[int, int]:
@@ -224,8 +225,13 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
             return {"requests": used_req, "tokens": used_tok, "owners": len(owner_users),
                     "per_owner_daily_cap": owner_qa_daily_requests}
 
+        def _runtime_info() -> Dict[str, Any]:
+            """Cho `/admin/ai`: khán giả đang áp, RPM/người, số luồng SSE đang chạy trên instance này. Không ID, không khoá."""
+            active, cap = stream_guard.snapshot()
+            return {"audience": audience, "rpm_per_user": int(ai.rpm), "streams_active": active, "streams_max": cap}
+
         control.attach_usage_sources(active_users_fn=_active_users, user_usage_fn=_user_usage,
-                                     qa_overview_fn=_qa_overview)
+                                     qa_overview_fn=_qa_overview, runtime_info_fn=_runtime_info)
 
     return AiRuntime(
         True, repo=repo, gateway=gateway, control=control, tool_ctx=tool_ctx or ToolContext(),
@@ -233,6 +239,6 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
         daily_tokens_free=ai.daily_tokens_free, daily_tokens_premium=ai.daily_tokens_premium,
         rpm=ai.rpm, web_search_enabled=(ai.web_search_provider or "off") != "off",
         heartbeat_s=float(getattr(ai, "heartbeat_s", 15)),
-        stream_guard=StreamGuard(max_streams_per_instance=ai.max_streams),
+        stream_guard=stream_guard,
         audience=audience, audience_users=audience_users, owner_users=owner_users,
         owner_qa_daily_requests=owner_qa_daily_requests, **kwargs)

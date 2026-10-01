@@ -60,6 +60,12 @@ export interface AiOverview {
    * `requests` ở trên và trong các trần toàn cục. `null` = không đo được.
    */
   qa?: { requests: number; tokens: number; owners: number; per_owner_daily_cap: number } | null;
+  /**
+   * Thông tin RUNTIME không nằm trong kho cấu hình: khán giả đang áp (`FAS_AI_AUDIENCE`), RPM/người và số luồng SSE đang
+   * chạy trên instance (chạm `streams_max` thì người dùng nhận 503 "đang bận"). Không có ID/danh sách nào. `null` = runtime
+   * AI chưa dựng (backend tắt) hoặc không đo được.
+   */
+  runtime?: { audience: string; rpm_per_user: number; streams_active: number; streams_max: number } | null;
   slots_by_status: Record<string, number>;
   providers: AiProviderSummary[];
 }

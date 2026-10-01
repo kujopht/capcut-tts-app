@@ -59,7 +59,7 @@ Những điều dễ hiểu nhầm:
 * **Giao diện người dùng chỉ hiện hạn mức RIÊNG** ("Hôm nay còn 3/5 lượt hỏi · làm mới lúc 07:00"). Mức dùng toàn cục, công suất nhà cung cấp, phần trăm: **chỉ ở `/admin/ai`**.
 * Một lượt được **tính** khi có văn bản/token, hoặc khi client bỏ đi *sau khi* nhà cung cấp đã bị gọi (chống vòng lặp gửi-rồi-ngắt). **Lỗi phía nhà cung cấp trước token đầu là miễn phí**. "Tạo lại" là một lượt mới (tốn thêm 1 lượt, và nhân đôi câu hỏi trong lịch sử — hành vi V1 có chủ ý).
 * Tin bị từ chối trước khi lưu (429/503) **không** nằm trong hội thoại; giao diện hiện "Chưa gửi".
-* Một lượt bị client bỏ đi *trước khi nhà cung cấp trả byte nào* vẫn tính cho người dùng nhưng **không gán được cho slot** (chưa biết slot nào). Mỗi tài khoản vẫn bị chặn ở 5/ngày.
+* Một lượt bị client bỏ đi *trước khi nhà cung cấp trả byte nào* vẫn tính cho người dùng **và** cho slot đang được gọi (gateway báo `on_attempt` ngay trước mỗi lời gọi), nên cũng vào trần toàn cục. Trước đây chỉ trừ người dùng, và N tài khoản × 5 lượt "gửi rồi ngắt" gọi nhà cung cấp mà không bao giờ chạm trần 150.
 * Nhiều tài khoản có thể cùng đốt trần toàn cục (30 tài khoản × 5 lượt = 150). Đây là đánh đổi của trần toàn cục, không phải lỗi.
 
 ---
@@ -138,6 +138,8 @@ Hội thoại đã lưu không cần xoá khi rút lui; người dùng tự xoá
 | Slot MISSING_SECRET | | thiếu `FAS_AI_SECRET_<REF>` trên host | `h.secret.present=false` | Owner đặt biến trên Render rồi khởi động lại |
 
 Kiểm nhanh chỉ-đọc: `GET /api/health` (`commit_sha`, `ai_assistant`), `/admin/ai` (tổng quan, từng slot, audit), `GET /api/ai/availability` bằng phiên của chính bạn (không lộ cấu hình cho người thường: `reason:"off"`; Owner thấy chi tiết).
+
+Khối **"Ai đang dùng được · hàng đợi luồng"** ở đầu `/admin/ai` (từ `overview.runtime`) cho biết ngay: khán giả đang áp (`all` / `beta` / `canary`; rỗng = cấu hình sai, AI tắt cho mọi người), số **luồng SSE đang chạy / tối đa** trên instance (đầy thì người dùng nhận 503 `ai_busy`; kẹt ở mức cao khi hầu như không ai dùng = nghi khoá luồng rò), và RPM/người. Dòng **"Còn lại hôm nay"** dưới thanh trần toàn cục cho biết còn bao nhiêu lượt trước khi người dùng nhận 429 `scope:"global"`.
 
 ---
 

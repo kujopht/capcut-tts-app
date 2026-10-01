@@ -30,12 +30,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type SetStateAction,
 } from "react";
 import { ApiError } from "@/lib/api";
 import { AiApiError, aiApi, docVanBanTruongDuAn, ghepBodyDuAn, taoClientId } from "@/lib/ai/client";
 import { apDungHetLuot, boTinTraLoiCu, danhDauChuaGui, docHanMuc } from "@/lib/ai/hanMuc";
 import {
-  CO_HOI_THOAI, apDungHanhDongMo, docNhap, docPhien, ghiNhap, ghiPhien, khoiPhucMo, openSauKhiPhucHoi,
+  CO_HOI_THOAI, apDungHanhDongMo, docHoiThoaiLuu, docNhap, ghiNhap, ghiPhien, khoiPhucMoChoNguoi, openSauKhiPhucHoi,
 } from "@/lib/ai/phienMo";
 import { type AiAccess, type AiAccessKetQua, hienLoiVao, nenHoiQuyen, quyenHienTai } from "@/lib/ai/quyenTruyCap";
 import { AI_ASSISTANT_ENABLED } from "@/lib/features";
@@ -92,6 +93,33 @@ interface AiState {
   draft: string;
 }
 
+/** Hàm cập nhật state gắn với MỘT người dùng: bỏ qua cập nhật nếu người đó đã đăng xuất (xem `giuNguoi`). */
+type BoCapNhat = ((f: SetStateAction<AiState>) => void) & { conHieuLuc: () => boolean };
+
+/** Trạng thái của một người dùng MỚI (hoặc khách): dùng làm giá trị đầu và để bỏ sạch trạng thái người trước khi đổi tài khoản. */
+const TRANG_THAI_DAU: AiState = {
+  availability: null,
+  loadingAvailability: false,
+  open: false,
+  conversationId: null,
+  mode: "general",
+  messages: [],
+  streaming: false,
+  streamingText: "",
+  responseStarted: false,
+  conversations: [],
+  historyOpen: false,
+  error: null,
+  loadingConversation: false,
+  ephemeral: false,
+  preferences: null,
+  projects: [],
+  activeProjectId: null,
+  activeProject: null,
+  loadingProject: false,
+  draft: "",
+};
+
 interface AiContextValue extends AiState {
   enabled: boolean;
   /** Máy chủ đã xác nhận người ĐANG đăng nhập dùng được AI chưa (`null` = chưa biết). */
@@ -110,7 +138,8 @@ interface AiContextValue extends AiState {
   newConversation: (mode?: AiMode) => Promise<void>;
   deleteConversationById: (id: string) => Promise<void>;
   setMode: (mode: AiMode) => void;
-  sendMessage: (text: string) => Promise<void>;
+  /** `false` = đang có lượt giữ khoá gửi, tin KHÔNG được nhận: nơi gọi giữ nguyên bản nháp (xem cài đặt). */
+  sendMessage: (text: string) => boolean;
   loadPreferences: () => Promise<void>;
   setMemoryEnabled: (value: boolean) => Promise<void>;
   deleteAllMemory: (includeProjects?: boolean) => Promise<void>;
@@ -143,34 +172,50 @@ export function useAiSafe(): AiContextValue | null {
 
 export function AiProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useSession();
-  const [state, setState] = useState<AiState>({
-    availability: null,
-    loadingAvailability: false,
-    open: false,
-    conversationId: null,
-    mode: "general",
-    messages: [],
-    streaming: false,
-    streamingText: "",
-    responseStarted: false,
-    conversations: [],
-    historyOpen: false,
-    error: null,
-    loadingConversation: false,
-    ephemeral: false,
-    preferences: null,
-    projects: [],
-    activeProjectId: null,
-    activeProject: null,
-    loadingProject: false,
-    draft: "",
-  });
+  const [state, setState] = useState<AiState>(TRANG_THAI_DAU);
   const ctrlRef = useRef<AbortController | null>(null);
   /** user_id hiện tại cho các trình xử lý không phụ thuộc render (bản nháp theo người dùng). */
   const uidRef = useRef<string | null>(null);
   uidRef.current = profile?.user_id ?? null;
   const assistantIdRef = useRef<string | null>(null);
-  const lastUserTextRef = useRef<string>("");
+  /** ID của lượt gửi đang giữ khoá đồng bộ (0 = rảnh) và bộ đếm cấp ID — xem `guiVanBan`. */
+  const khoaGuiRef = useRef(0);
+  const demLuotRef = useRef(0);
+
+  // ĐỔI NGƯỜI DÙNG trong cùng trang (đăng xuất, đăng nhập tài khoản khác — `SessionProvider` không tải lại trang) thì
+  // BỎ SẠCH trạng thái của người trước: tin nhắn, lịch sử, hạn mức, dự án, bản nháp. Trước đây Provider (gắn ở layout)
+  // giữ nguyên tất cả: người sau mở panel là thấy hội thoại và hạn mức "đã hết lượt" của người trước, và một luồng đang
+  // chạy của người trước vẫn ghi vào màn hình của người sau. Điều chỉnh state NGAY TRONG lúc render (khi giá trị theo dõi
+  // đổi) là cách React khuyến nghị cho trường hợp này — render lại tức thì, không có khung hình nào lộ trạng thái cũ.
+  const uidHienTai = profile?.user_id ?? null;
+  const [uidDaThay, setUidDaThay] = useState<string | null>(uidHienTai);
+  if (uidDaThay !== uidHienTai) {
+    setUidDaThay(uidHienTai);
+    setState(TRANG_THAI_DAU);
+  }
+  // Huỷ luồng đang chạy khi đổi người (cleanup chạy ngay trước khi uid mới có hiệu lực).
+  useEffect(() => {
+    return () => {
+      ctrlRef.current?.abort();
+      ctrlRef.current = null;
+      assistantIdRef.current = null;
+      khoaGuiRef.current = 0;
+    };
+  }, [uidHienTai]);
+  /**
+   * Hàm cập nhật chỉ có tác dụng nếu NGƯỜI DÙNG VẪN LÀ người lúc hành động bắt đầu. Mọi hành động bất đồng bộ lấy nó ở
+   * đầu và dùng sau mỗi `await`: một phản hồi (hạn mức, lịch sử, luồng trả lời) của người đã đăng xuất đến muộn sẽ bị bỏ,
+   * không ghi vào màn hình của người đăng nhập sau.
+   */
+  const giuNguoi = useCallback((): BoCapNhat => {
+    const uid0 = uidRef.current;
+    const conHieuLuc = () => uidRef.current === uid0;
+    const cn = ((f: SetStateAction<AiState>) => {
+      if (conHieuLuc()) setState(f);
+    }) as BoCapNhat;
+    cn.conHieuLuc = conHieuLuc;
+    return cn;
+  }, []);
   /** Kết quả `/api/ai/access` GẮN với user_id đã hỏi — đổi tài khoản thì `quyenHienTai` trả `null`. */
   const [quyen, setQuyen] = useState<AiAccessKetQua | null>(null);
   const access = quyenHienTai(quyen, profile?.user_id);
@@ -193,7 +238,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   // Khôi phục trạng thái mở/hội thoại của tab (chỉ khi đã đăng nhập).
   useEffect(() => {
     if (!AI_ASSISTANT_ENABLED || !profile) return;
-    const { open, conversationId } = khoiPhucMo();
+    const { open, conversationId } = khoiPhucMoChoNguoi(profile.user_id);
     const draft = docNhap(profile.user_id);
     if (open) {
       setState((s) => ({ ...s, open: true, conversationId, draft: s.draft || draft }));
@@ -218,22 +263,24 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
 
   const xinAvailability = useCallback(async (): Promise<AiAvailability | false> => {
     if (state.availability) return state.availability;
-    setState((s) => ({ ...s, loadingAvailability: true }));
+    const cn = giuNguoi();
+    cn((s) => ({ ...s, loadingAvailability: true }));
     try {
       const av = await aiApi.availability();
-      setState((s) => ({ ...s, availability: av, loadingAvailability: false }));
+      cn((s) => ({ ...s, availability: av, loadingAvailability: false }));
       return av;
     } catch {
-      setState((s) => ({ ...s, availability: false, loadingAvailability: false }));
+      cn((s) => ({ ...s, availability: false, loadingAvailability: false }));
       return false;
     }
-  }, [state.availability]);
+  }, [state.availability, giuNguoi]);
 
   const taiHoiThoai = useCallback(async (id: string) => {
-    setState((s) => ({ ...s, loadingConversation: true, error: null }));
+    const cn = giuNguoi();
+    cn((s) => ({ ...s, loadingConversation: true, error: null }));
     try {
       const detail = await aiApi.getConversation(id);
-      setState((s) => ({
+      cn((s) => ({
         ...s,
         conversationId: id,
         messages: detail.messages,
@@ -241,42 +288,48 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         ephemeral: Boolean(detail.ephemeral),
         loadingConversation: false,
       }));
-      ghiPhien(CO_HOI_THOAI, id);
+      // Cờ phiên chỉ được ghi cho CHÍNH người đã mở hội thoại này (không ghi id của người vừa đăng xuất cho người sau).
+      if (cn.conHieuLuc()) ghiPhien(CO_HOI_THOAI, id);
     } catch (e) {
-      setState((s) => ({ ...s, loadingConversation: false, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, loadingConversation: false, error: loiTuApiError(e) }));
     }
-  }, []);
+  }, [giuNguoi]);
 
   const taiLichSu = useCallback(async () => {
+    const cn = giuNguoi();
     try {
       const r = await aiApi.listConversations();
-      setState((s) => ({ ...s, conversations: r.items }));
+      cn((s) => ({ ...s, conversations: r.items }));
     } catch {
       // Lịch sử là phụ — lỗi ở đây không chặn cuộc hội thoại hiện tại.
     }
-  }, []);
+  }, [giuNguoi]);
 
   const ensureReady = useCallback(
     async (opts?: { mode?: AiMode; context?: AiConversationContext }) => {
       if (!AI_ASSISTANT_ENABLED || !profile) return;
+      const cn = giuNguoi();
       const av = await xinAvailability();
-      if (!av) return;
+      // Máy chủ báo KHÔNG dùng được (ngoài khán giả, tắt khẩn cấp…): dừng ở đây. Trước đây vẫn nạp lịch sử -> thêm một
+      // request chắc chắn bị từ chối (403) cho mọi người ngoài khán giả vào /assistant.
+      if (!av || !av.enabled) return;
       void taiLichSu();
       if (opts?.mode || opts?.context) {
         try {
           const conv = await aiApi.createConversation(opts.mode ?? "general", { context: opts.context });
           await taiHoiThoai(conv.conversation_id);
         } catch (e) {
-          setState((s) => ({ ...s, error: loiTuApiError(e) }));
+          cn((s) => ({ ...s, error: loiTuApiError(e) }));
         }
         return;
       }
-      const hoiThoaiLuu = docPhien(CO_HOI_THOAI);
+      // Chỉ nhận id hội thoại đã lưu nếu cờ phiên thuộc về CHÍNH người này (không thừa kế của người trước).
+      const hoiThoaiLuu = docHoiThoaiLuu(profile.user_id);
       if (hoiThoaiLuu && !state.conversationId) {
         await taiHoiThoai(hoiThoaiLuu);
       }
     },
-    [profile, xinAvailability, taiLichSu, taiHoiThoai, state.conversationId],
+    [profile, xinAvailability, taiLichSu, taiHoiThoai, state.conversationId, giuNguoi],
   );
 
   const openAssistant = useCallback(
@@ -307,24 +360,26 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
 
   const selectConversation = useCallback(
     async (id: string) => {
+      const cn = giuNguoi();
       ctrlRef.current?.abort();
       await taiHoiThoai(id);
-      setState((s) => ({ ...s, historyOpen: false }));
+      cn((s) => ({ ...s, historyOpen: false }));
     },
-    [taiHoiThoai],
+    [taiHoiThoai, giuNguoi],
   );
 
   const newConversation = useCallback(
     async (mode?: AiMode) => {
+      const cn = giuNguoi();
       ctrlRef.current?.abort();
-      setState((s) => ({ ...s, error: null }));
+      cn((s) => ({ ...s, error: null }));
       const modeThat = mode ?? state.mode;
       try {
         const conv = await aiApi.createConversation(
           modeThat,
           modeThat === "writer" && state.activeProjectId ? { context: { project_id: state.activeProjectId } } : undefined,
         );
-        setState((s) => ({
+        cn((s) => ({
           ...s,
           conversationId: conv.conversation_id,
           messages: [],
@@ -332,40 +387,44 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           historyOpen: false,
           ephemeral: s.preferences ? !s.preferences.memory_enabled : false,
         }));
-        ghiPhien(CO_HOI_THOAI, conv.conversation_id);
+        if (cn.conHieuLuc()) ghiPhien(CO_HOI_THOAI, conv.conversation_id);
         void taiLichSu();
       } catch (e) {
-        setState((s) => ({ ...s, error: loiTuApiError(e) }));
+        cn((s) => ({ ...s, error: loiTuApiError(e) }));
       }
     },
-    [state.mode, state.activeProjectId, taiLichSu],
+    [state.mode, state.activeProjectId, taiLichSu, giuNguoi],
   );
 
   const deleteConversationById = useCallback(
     async (id: string) => {
+      const cn = giuNguoi();
       try {
         await aiApi.deleteConversation(id);
-        setState((s) => ({
+        cn((s) => ({
           ...s,
           conversations: s.conversations.filter((c) => c.conversation_id !== id),
           ...(s.conversationId === id ? { conversationId: null, messages: [] } : {}),
         }));
-        if (state.conversationId === id) ghiPhien(CO_HOI_THOAI, null);
+        if (cn.conHieuLuc() && state.conversationId === id) ghiPhien(CO_HOI_THOAI, null);
       } catch (e) {
-        setState((s) => ({ ...s, error: loiTuApiError(e) }));
+        cn((s) => ({ ...s, error: loiTuApiError(e) }));
       }
     },
-    [state.conversationId],
+    [state.conversationId, giuNguoi],
   );
 
   const setMode = useCallback((mode: AiMode) => {
     setState((s) => ({ ...s, mode }));
   }, []);
 
-  const guiVanBan = useCallback(
-    async (text: string, regenerateOf?: string) => {
+  const chayLuotGui = useCallback(
+    async (text: string, regenerateOf: string | undefined, nhaKhoa: () => void) => {
       const trimmed = text.trim();
       if (!trimmed || state.streaming) return;
+      // Mọi cập nhật trong lượt này đi qua `cn`: nếu người dùng đăng xuất/đổi tài khoản giữa chừng thì luồng đang chạy
+      // (đã bị huỷ ở cleanup) KHÔNG được ghi gì vào màn hình của người sau.
+      const cn = giuNguoi();
       let convId = state.conversationId;
       if (!convId) {
         try {
@@ -374,17 +433,14 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
             state.mode === "writer" && state.activeProjectId ? { context: { project_id: state.activeProjectId } } : undefined,
           );
           convId = conv.conversation_id;
-          setState((s) => ({ ...s, conversationId: convId }));
-          ghiPhien(CO_HOI_THOAI, convId);
+          cn((s) => ({ ...s, conversationId: convId }));
+          if (cn.conHieuLuc()) ghiPhien(CO_HOI_THOAI, convId);
         } catch (e) {
-          setState((s) => ({ ...s, error: loiTuApiError(e) }));
+          cn((s) => ({ ...s, error: loiTuApiError(e) }));
           return;
         }
+        if (!cn.conHieuLuc()) return;
       }
-      // Khôi phục nếu lượt này bị từ chối trước khi máy chủ nhận: "Tạo lại" phải nhắm vào lượt đã GỬI được, không phải
-      // vào tin chưa gửi.
-      const vanBanTruoc = lastUserTextRef.current;
-      lastUserTextRef.current = trimmed;
       const clientId = taoClientId();
       const userMsgId = `local_${clientId}`;
       if (!regenerateOf) {
@@ -396,36 +452,39 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           citations: [],
           created_at: new Date().toISOString(),
         };
-        setState((s) => ({ ...s, messages: [...s.messages, userMsg], streaming: true, streamingText: "", responseStarted: false, error: null }));
+        cn((s) => ({ ...s, messages: [...s.messages, userMsg], streaming: true, streamingText: "", responseStarted: false, error: null }));
       } else {
-        setState((s) => ({ ...s, streaming: true, streamingText: "", responseStarted: false, error: null }));
+        cn((s) => ({ ...s, streaming: true, streamingText: "", responseStarted: false, error: null }));
       }
       const ctrl = new AbortController();
       ctrlRef.current = ctrl;
       assistantIdRef.current = null;
+      let ketThuc = false; // đã nhận khung `done`/`error` từ máy chủ
       try {
         await aiApi.streamMessage(
           convId,
           { content: trimmed, client_id: clientId, regenerate_of: regenerateOf },
           (ev) => {
+            if (!cn.conHieuLuc()) return;
             if (ev.type === "meta") {
               assistantIdRef.current = ev.message_id;
-              setState((s) => ({ ...s, responseStarted: true, messages: boTinTraLoiCu(s.messages, regenerateOf) }));
+              cn((s) => ({ ...s, responseStarted: true, messages: boTinTraLoiCu(s.messages, regenerateOf) }));
             } else if (ev.type === "usage") {
               // Hạn mức RIÊNG sau lượt này (lượt QA của Owner báo hạn mức QA, không phải của người dùng).
               const hanMuc = ev.lane === "qa" ? null : docHanMuc(ev.allowance);
-              if (hanMuc) setState((s) => (s.availability ? { ...s, availability: { ...s.availability, limits: hanMuc } } : s));
+              if (hanMuc) cn((s) => (s.availability ? { ...s, availability: { ...s.availability, limits: hanMuc } } : s));
             } else if (ev.type === "delta") {
-              setState((s) => ({ ...s, streamingText: s.streamingText + ev.text }));
+              cn((s) => ({ ...s, streamingText: s.streamingText + ev.text }));
             } else if (ev.type === "citations") {
-              setState((s) => ({
+              cn((s) => ({
                 ...s,
                 messages: s.messages.map((m) =>
                   m.message_id === assistantIdRef.current ? { ...m, citations: ev.items } : m,
                 ),
               }));
             } else if (ev.type === "done") {
-              setState((s) => {
+              ketThuc = true;
+              cn((s) => {
                 const assistantMsg: AiMessage = {
                   message_id: assistantIdRef.current ?? `local_asst_${clientId}`,
                   role: "assistant",
@@ -436,13 +495,17 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
                 };
                 return { ...s, messages: [...s.messages, assistantMsg], streaming: false, streamingText: "" };
               });
+              // Lượt đã XONG về mặt logic (ô soạn mở lại): nhả khoá NGAY, không đợi luồng mạng đóng hẳn — nếu không, tin
+              // gửi liền sau đó (vài ms trước khi `reader.read()` trả `done`) bị nuốt mà ô soạn đã bị xoá.
+              nhaKhoa();
             } else if (ev.type === "error") {
+              ketThuc = true;
               // F2: LUÔN thêm một bong bóng trợ lý — kể cả khi CHƯA có token
               // nào (`streamingText` rỗng) — để không có lượt hỏi nào "biến
               // mất" (tin người dùng hiện ra mà không có gì nối theo, và
               // "Tạo lại" trước đây nhắm nhầm vào câu trả lời TRƯỚC ĐÓ vì
               // không tìm thấy bong bóng trợ lý nào của lượt này).
-              setState((s) => ({
+              cn((s) => ({
                 ...s,
                 streaming: false,
                 streamingText: "",
@@ -459,18 +522,47 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
                   },
                 ],
               }));
+              nhaKhoa();
             }
           },
           ctrl.signal,
         );
+        // Luồng đóng SẠCH (EOF) mà không có khung `done`/`error` nào — vd. một lớp trung gian cắt kết nối êm khi máy chủ
+        // khởi động lại. Trước đây `streaming` kẹt ở true mãi: nút Dừng quay vòng, không gửi được tin mới cho tới khi tải
+        // lại trang. Coi như phản hồi bị ngắt giữa chừng (giữ phần đã nhận + mời "Tạo lại").
+        if (!ketThuc && cn.conHieuLuc() && !ctrl.signal.aborted) {
+          cn((s) => ({
+            ...s,
+            streaming: false,
+            streamingText: "",
+            error: { code: "ai_provider_interrupted", message: "Phản hồi bị ngắt giữa chừng." },
+            messages: [
+              ...s.messages,
+              {
+                message_id: assistantIdRef.current ?? `local_asst_${clientId}`,
+                role: "assistant" as const,
+                content: s.streamingText,
+                status: "error" as const,
+                citations: [],
+                created_at: new Date().toISOString(),
+              },
+            ],
+          }));
+        }
       } catch (e) {
+        if (!cn.conHieuLuc()) return;
+        // Đã nhận khung kết thúc (`done`/`error`) thì lượt này XONG và khoá gửi đã nhả: một lỗi vận chuyển đến SAU đó (đứt
+        // mạng đúng lúc đóng luồng) không còn ý nghĩa với lượt này, và lượt kế có thể đang chạy — nếu xử lý, nó dùng chung
+        // `assistantIdRef` đã bị lượt mới đặt lại: tắt "đang trả lời" của lượt mới, cắt mất phần đầu câu trả lời, hiện biểu
+        // ngữ lỗi thừa hoặc đánh dấu "Chưa gửi" lên một tin đã được trả lời.
+        if (ketThuc) return;
         if (ctrl.signal.aborted) {
           // F2: người dùng bấm Dừng TRƯỚC token đầu tiên — trước đây không
           // để lại dấu vết gì (không bong bóng trợ lý, không "Đã dừng"), nên
           // lượt hỏi trông như biến mất và "Tạo lại" nhắm nhầm câu trả lời
           // trước. Luôn thêm một bong bóng `status:"stopped"` (nội dung rỗng
           // nếu chưa có token nào — `AiConversation` tự hiện chú thích).
-          setState((s) => ({
+          cn((s) => ({
             ...s,
             streaming: false,
             streamingText: "",
@@ -492,8 +584,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           // có trong hội thoại thật, nên phải hiện "Chưa gửi" thay vì trông như đã gửi. Đã có `meta` mà luồng đứt
           // giữa chừng thì tin ĐÃ ở máy chủ — giữ nguyên.
           const chuaNhan = assistantIdRef.current === null;
-          if (chuaNhan) lastUserTextRef.current = vanBanTruoc;
-          setState((s) => ({
+          cn((s) => ({
             ...s,
             streaming: false,
             streamingText: "",
@@ -504,10 +595,50 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [state.streaming, state.conversationId, state.mode, state.activeProjectId],
+    [state.streaming, state.conversationId, state.mode, state.activeProjectId, giuNguoi],
   );
 
-  const sendMessage = useCallback((text: string) => guiVanBan(text), [guiVanBan]);
+  /**
+   * Khoá ĐỒNG BỘ: chỉ một lượt gửi chạy tại một thời điểm. `state.streaming` chỉ đổi sau lần vẽ lại, nên hai lần Enter /
+   * hai lần bấm Gửi trong CÙNG một nhịp (nhấn đúp, phím lặp) đều thấy `streaming=false` và gửi hai request: máy chủ từ chối
+   * cái thứ hai (một luồng/người) và giao diện tắt trạng thái "đang trả lời" giữa lúc câu trả lời của cái thứ nhất còn
+   * đang chạy, làm mất chữ đang hiện.
+   *
+   * Khoá mang ID của lượt giữ nó và được nhả ngay khi lượt XONG về mặt logic (`done`/`error`, ô soạn mở lại), không đợi luồng
+   * mạng đóng hẳn: ngược lại, tin gửi liền sau khi câu trả lời vừa hiện xong sẽ bị nuốt (và ô soạn đã bị xoá). ID đảm bảo lượt
+   * cũ nhả muộn không nhả nhầm khoá của lượt mới.
+   */
+  const guiVanBan = useCallback(
+    async (text: string, regenerateOf?: string) => {
+      if (khoaGuiRef.current !== 0) return;
+      demLuotRef.current += 1;
+      const id = demLuotRef.current;
+      khoaGuiRef.current = id;
+      const nhaKhoa = () => {
+        if (khoaGuiRef.current === id) khoaGuiRef.current = 0;
+      };
+      try {
+        await chayLuotGui(text, regenerateOf, nhaKhoa);
+      } finally {
+        nhaKhoa();
+      }
+    },
+    [chayLuotGui],
+  );
+
+  /**
+   * `true`: tin được nhận (khoá rảnh, lượt bắt đầu — `guiVanBan` lấy khoá ĐỒNG BỘ trước `await` đầu tiên). `false`: đang có
+   * một lượt giữ khoá — vd. lượt đầu của hội thoại mới còn đang chờ máy chủ tạo hội thoại, lúc `streaming` chưa bật nên ô soạn
+   * vẫn mở. Tin KHÔNG được gửi; nơi gọi phải GIỮ NGUYÊN bản nháp, nếu không chữ người dùng vừa gõ biến mất không báo gì.
+   */
+  const sendMessage = useCallback(
+    (text: string): boolean => {
+      if (khoaGuiRef.current !== 0) return false;
+      void guiVanBan(text);
+      return true;
+    },
+    [guiVanBan],
+  );
 
   const stopStreaming = useCallback(() => {
     ctrlRef.current?.abort();
@@ -521,46 +652,54 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
    * bong bóng trợ lý cuối mới xoá nó trước khi gửi lại.
    */
   const regenerate = useCallback(async () => {
-    if (!lastUserTextRef.current) return;
+    // Câu hỏi được gửi lại LUÔN lấy từ chính hội thoại đang hiện: câu hỏi cuối của người dùng đã được máy chủ nhận (bỏ qua
+    // tin "Chưa gửi", vì tin đó không có trong hội thoại thật). Trước đây dùng một ref "lượt gửi gần nhất của phiên": sau khi
+    // tải lại trang nó rỗng (nút hiện ra mà bấm không làm gì) và sau khi chuyển sang hội thoại khác nó là câu hỏi của hội
+    // thoại KIA — "Tạo lại" gửi nhầm câu hỏi đó vào hội thoại này và xoá câu trả lời đúng.
+    const vanBan = [...state.messages].reverse().find((m) => m.role === "user" && m.status !== "not_sent")?.content ?? "";
+    if (!vanBan) return;
     const lastAssistant = [...state.messages].reverse().find((m) => m.role === "assistant");
     // KHÔNG xoá câu trả lời cũ ở đây: `guiVanBan` chỉ bỏ nó khi máy chủ đã nhận lượt mới (`meta`), để một lượt tạo
     // lại bị từ chối (hết hạn mức…) không làm câu trả lời cũ biến mất.
-    await guiVanBan(lastUserTextRef.current, lastAssistant?.message_id);
+    await guiVanBan(vanBan, lastAssistant?.message_id);
   }, [state.messages, guiVanBan]);
 
   /** Tải sở thích (bật/tắt ghi nhớ) — gọi khi mở popover cài đặt, KHÔNG lúc mount (idle gần như zero mạng). */
   const loadPreferences = useCallback(async () => {
+    const cn = giuNguoi();
     try {
       const prefs = await aiApi.getPreferences();
-      setState((s) => ({ ...s, preferences: prefs }));
+      cn((s) => ({ ...s, preferences: prefs }));
     } catch (e) {
-      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-  }, []);
+  }, [giuNguoi]);
 
   const setMemoryEnabled = useCallback(async (value: boolean) => {
-    setState((s) => ({
+    const cn = giuNguoi();
+    cn((s) => ({
       ...s,
       preferences: s.preferences ? { ...s.preferences, memory_enabled: value } : { memory_enabled: value, preferences: {} },
     }));
     try {
       const prefs = await aiApi.putPreferences({ memory_enabled: value, preferences: {} });
-      setState((s) => ({ ...s, preferences: prefs }));
+      cn((s) => ({ ...s, preferences: prefs }));
     } catch (e) {
-      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-  }, []);
+  }, [giuNguoi]);
 
   /** "Xoá toàn bộ ký ức AI" (§5) — hội thoại + tóm tắt + sở thích; KHÔNG xoá dự án viết trừ khi `includeProjects`. */
   const deleteAllMemory = useCallback(async (includeProjects = false) => {
+    const cn = giuNguoi();
     try {
       await aiApi.deleteMemory(includeProjects);
-      setState((s) => ({ ...s, conversations: [], conversationId: null, messages: [] }));
-      ghiPhien(CO_HOI_THOAI, null);
+      cn((s) => ({ ...s, conversations: [], conversationId: null, messages: [] }));
+      if (cn.conHieuLuc()) ghiPhien(CO_HOI_THOAI, null);
     } catch (e) {
-      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-  }, []);
+  }, [giuNguoi]);
 
   const setDraft = useCallback((text: string) => {
     setState((s) => ({ ...s, draft: text }));
@@ -569,41 +708,45 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
 
   /** Tải danh sách dự án viết — gọi khi vào mode `writer`/mở thanh dự án, KHÔNG lúc mount. */
   const loadProjects = useCallback(async () => {
+    const cn = giuNguoi();
     try {
       const r = await aiApi.listProjects();
-      setState((s) => ({ ...s, projects: r.items }));
+      cn((s) => ({ ...s, projects: r.items }));
     } catch (e) {
-      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-  }, []);
+  }, [giuNguoi]);
 
   const createProject = useCallback(async (title: string) => {
+    const cn = giuNguoi();
     try {
       const body = ghepBodyDuAn(null, { title });
       const { project_id } = await aiApi.createProject(body);
       await loadProjects();
       const detail = await aiApi.getProject(project_id);
-      setState((s) => ({ ...s, activeProjectId: project_id, activeProject: detail }));
+      cn((s) => ({ ...s, activeProjectId: project_id, activeProject: detail }));
     } catch (e) {
-      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-  }, [loadProjects]);
+  }, [loadProjects, giuNguoi]);
 
   const selectProject = useCallback(async (id: string | null) => {
+    const cn = giuNguoi();
     if (!id) {
-      setState((s) => ({ ...s, activeProjectId: null, activeProject: null }));
+      cn((s) => ({ ...s, activeProjectId: null, activeProject: null }));
       return;
     }
-    setState((s) => ({ ...s, loadingProject: true }));
+    cn((s) => ({ ...s, loadingProject: true }));
     try {
       const detail = await aiApi.getProject(id);
-      setState((s) => ({ ...s, activeProjectId: id, activeProject: detail, loadingProject: false }));
+      cn((s) => ({ ...s, activeProjectId: id, activeProject: detail, loadingProject: false }));
     } catch (e) {
-      setState((s) => ({ ...s, loadingProject: false, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, loadingProject: false, error: loiTuApiError(e) }));
     }
-  }, []);
+  }, [giuNguoi]);
 
   const renameProject = useCallback(async (id: string, title: string) => {
+    const cn = giuNguoi();
     try {
       const hienTai = state.activeProjectId === id ? state.activeProject : await aiApi.getProject(id);
       const body = ghepBodyDuAn(hienTai, { title });
@@ -611,25 +754,26 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       await loadProjects();
       if (state.activeProjectId === id) {
         const detail = await aiApi.getProject(id);
-        setState((s) => ({ ...s, activeProject: detail }));
+        cn((s) => ({ ...s, activeProject: detail }));
       }
     } catch (e) {
-      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-  }, [state.activeProjectId, state.activeProject, loadProjects]);
+  }, [state.activeProjectId, state.activeProject, loadProjects, giuNguoi]);
 
   const deleteProjectById = useCallback(async (id: string) => {
+    const cn = giuNguoi();
     try {
       await aiApi.deleteProject(id);
-      setState((s) => ({
+      cn((s) => ({
         ...s,
         projects: s.projects.filter((p) => p.project_id !== id),
         ...(s.activeProjectId === id ? { activeProjectId: null, activeProject: null } : {}),
       }));
     } catch (e) {
-      setState((s) => ({ ...s, error: loiTuApiError(e) }));
+      cn((s) => ({ ...s, error: loiTuApiError(e) }));
     }
-  }, []);
+  }, [giuNguoi]);
 
   /**
    * "Lưu vào dự án" — LUÔN do người dùng bấm (nút trên mỗi tin nhắn trợ lý
@@ -639,6 +783,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   const saveToProjectField = useCallback(
     async (field: AiProjectField, text: string, appendMode: "replace" | "append" = "append") => {
       if (!state.activeProjectId) return;
+      const cn = giuNguoi();
       try {
         const hienTai = state.activeProject ?? (await aiApi.getProject(state.activeProjectId));
         const cu = docVanBanTruongDuAn(field, hienTai[field]);
@@ -646,29 +791,30 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         const body = ghepBodyDuAn(hienTai, { [field]: moi } as Partial<Record<AiProjectField, string>>);
         await aiApi.updateProject(state.activeProjectId, body);
         const detail = await aiApi.getProject(state.activeProjectId);
-        setState((s) => ({ ...s, activeProject: detail }));
+        cn((s) => ({ ...s, activeProject: detail }));
       } catch (e) {
-        setState((s) => ({ ...s, error: loiTuApiError(e) }));
+        cn((s) => ({ ...s, error: loiTuApiError(e) }));
       }
     },
-    [state.activeProjectId, state.activeProject],
+    [state.activeProjectId, state.activeProject, giuNguoi],
   );
 
   /** Lưu từ trình soạn dự án (`AiProjectEditor`) — GHI ĐÈ một hoặc nhiều trường trong MỘT lượt PUT. */
   const saveProjectFields = useCallback(
     async (patch: Partial<Record<AiProjectField, string>>) => {
       if (!state.activeProjectId) return;
+      const cn = giuNguoi();
       try {
         const hienTai = state.activeProject ?? (await aiApi.getProject(state.activeProjectId));
         const body = ghepBodyDuAn(hienTai, patch);
         await aiApi.updateProject(state.activeProjectId, body);
         const detail = await aiApi.getProject(state.activeProjectId);
-        setState((s) => ({ ...s, activeProject: detail }));
+        cn((s) => ({ ...s, activeProject: detail }));
       } catch (e) {
-        setState((s) => ({ ...s, error: loiTuApiError(e) }));
+        cn((s) => ({ ...s, error: loiTuApiError(e) }));
       }
     },
-    [state.activeProjectId, state.activeProject],
+    [state.activeProjectId, state.activeProject, giuNguoi],
   );
 
   const value = useMemo<AiContextValue>(

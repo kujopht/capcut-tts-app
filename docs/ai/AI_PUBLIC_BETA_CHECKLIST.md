@@ -1,5 +1,7 @@
 # Checklist public beta: Trợ lý AI (Gemini pool)
 
+> **Trạng thái hiện hành, ngưỡng sự cố, chẩn đoán và quy trình an toàn: xem [`AI_OPERATIONS_RUNBOOK.md`](AI_OPERATIONS_RUNBOOK.md).** Phần dưới là ảnh chụp lúc chuẩn bị beta (2026-10-01) và danh sách bước mở rộng; AI hiện đã mở cho mọi người đã đăng nhập.
+
 Trạng thái lúc viết (2026-10-01, production `5cd8727`, #258–#262 đã merge):
 - `FAS_AI_ASSISTANT_V1=1` và `FAS_AI_ADMIN_V1=1`. `FAS_AI_AUDIENCE` trống, nghĩa là production ở chế độ **canary: chỉ Owner**.
 - Công tắc tổng **TẮT**. Preset **`beta`** đang áp: 5 request/người/ngày, 150 request/ngày toàn cục, 15.000 / 450.000 token, 400 token ra, 4.000 token ngữ cảnh.

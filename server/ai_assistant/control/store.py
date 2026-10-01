@@ -198,6 +198,14 @@ class AppwriteControlStore:
         self._headers = {"X-Appwrite-Project": aw.project_id, "X-Appwrite-Key": aw.api_key,
                          "Content-Type": "application/json"}
         self._client = client or httpx.Client(timeout=_TIMEOUT)
+        #: Mỗi (slot, ngày) một khoá: `add_usage` là đọc-rồi-ghi hai lần gọi mạng, nên hai lượt cùng slot kết thúc cùng lúc
+        #: (tối đa 4 luồng SSE/instance) mất một lần đếm — và bộ đếm này CHÍNH là trần toàn cục 150/ngày.
+        self._usage_guard = threading.Lock()
+        self._usage_locks: Dict[str, threading.Lock] = {}
+
+    def _usage_lock(self, doc_id: str) -> threading.Lock:
+        with self._usage_guard:
+            return self._usage_locks.setdefault(doc_id, threading.Lock())
 
     # ---- plumbing (same shape as AppwriteAiRepo) ----
     def _call(self, method: str, path: str, *, body: Any = None, queries: Optional[List[str]] = None) -> Any:
@@ -347,23 +355,24 @@ class AppwriteControlStore:
                            field=str(r.get("field") or ""), old_value=str(r.get("old_value") or ""),
                            new_value=str(r.get("new_value") or ""), at=str(r.get("at") or "")) for r in rows]
 
-    # ---- usage (read-modify-write; small races accepted, same as ai_usage_daily) ----
+    # ---- usage (read-modify-write; serialized per slot-day inside this process) ----
     def add_usage(self, slot_id: str, day: str, *, requests: int = 0, input_tokens: int = 0,
                   output_tokens: int = 0, errors: int = 0, rate_limited: int = 0,
                   cost_micro_usd: int = 0, success_at: str = "") -> None:
         doc_id = f"{slot_id}_{day}"
-        cur = self._get(T_USAGE, doc_id) or {}
-        data = {"slot_id": slot_id, "day": day,
-                "requests": int(cur.get("requests") or 0) + requests,
-                "input_tokens": int(cur.get("input_tokens") or 0) + input_tokens,
-                "output_tokens": int(cur.get("output_tokens") or 0) + output_tokens,
-                "errors": int(cur.get("errors") or 0) + errors,
-                "rate_limited": int(cur.get("rate_limited") or 0) + rate_limited,
-                "cost_micro_usd": int(cur.get("cost_micro_usd") or 0) + cost_micro_usd,
-                "updated_at": now_iso()}
-        if success_at:
-            data["last_success_at"] = success_at
-        self._put(T_USAGE, doc_id, data)
+        with self._usage_lock(doc_id):
+            cur = self._get(T_USAGE, doc_id) or {}
+            data = {"slot_id": slot_id, "day": day,
+                    "requests": int(cur.get("requests") or 0) + requests,
+                    "input_tokens": int(cur.get("input_tokens") or 0) + input_tokens,
+                    "output_tokens": int(cur.get("output_tokens") or 0) + output_tokens,
+                    "errors": int(cur.get("errors") or 0) + errors,
+                    "rate_limited": int(cur.get("rate_limited") or 0) + rate_limited,
+                    "cost_micro_usd": int(cur.get("cost_micro_usd") or 0) + cost_micro_usd,
+                    "updated_at": now_iso()}
+            if success_at:
+                data["last_success_at"] = success_at
+            self._put(T_USAGE, doc_id, data)
 
     def usage_for_day(self, day: str) -> Dict[str, UsageCounters]:
         out: Dict[str, UsageCounters] = {}

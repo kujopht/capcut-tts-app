@@ -61,22 +61,64 @@ function AiSaveToProjectMenu({ content }: { content: string }) {
   );
 }
 
+/** Còn cách đáy bao nhiêu px thì vẫn coi là "đang ở đáy" (đủ rộng cho một dòng chữ mới, đủ hẹp để cuộn lên 1 vuốt là thoát). */
+const NGUONG_DAY_PX = 80;
+
 export function AiConversation() {
   const { messages, streaming, streamingText, conversationId, mode, regenerate, availability } = useAi();
-  const cuoiRef = useRef<HTMLDivElement | null>(null);
+  const danhSachRef = useRef<HTMLDivElement | null>(null);
+  /** Người dùng đang ở (gần) đáy => tin mới/chữ mới tự cuộn theo; cuộn lên đọc thì KHÔNG bị giật xuống nữa. */
+  const batDay = useRef(true);
+  const soTinTruoc = useRef(0);
+  const hoiThoaiTruoc = useRef<string | null>(null);
+  /** Vị trí cuộn + chiều cao nội dung ngay sau lần vẽ trước: để phát hiện người dùng vừa kéo lên NGAY CẢ KHI sự kiện
+   *  `scroll` (bắn ở khung hình kế tiếp) chưa kịp báo trước lần cập nhật chữ kế — không thì lần đó vẫn giật xuống đáy. */
+  const viTriTruoc = useRef({ top: 0, height: 0 });
   // Hết lượt của chính người này: "Tạo lại" chắc chắn bị từ chối, nên không mời bấm.
   const hetLuot = daHetLuot(availability ? availability.limits : undefined);
   // "Tao lai" la dieu khien THUONG cho tin tra loi CUOI (ke ca da dung/loi) — khong chi trong banner loi.
   const idCuoi = [...messages].reverse().find((m) => m.role === "assistant")?.message_id;
 
+  const khiCuon = () => {
+    const el = danhSachRef.current;
+    if (!el) return;
+    batDay.current = el.scrollHeight - el.scrollTop - el.clientHeight < NGUONG_DAY_PX;
+    // Mốc so sánh đi theo CHÍNH các sự kiện cuộn: khi khung cao lên (xoay màn hình, đổi cỡ cửa sổ) trình duyệt tự kẹp
+    // `scrollTop` xuống và bắn sự kiện này — nếu mốc cũ giữ nguyên, lần cập nhật chữ kế bị hiểu nhầm là "người dùng kéo lên"
+    // và việc bám đáy tắt luôn cho cả câu trả lời đang chạy.
+    viTriTruoc.current = { top: el.scrollTop, height: el.scrollHeight };
+  };
+
   useEffect(() => {
-    cuoiRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, streamingText]);
+    const el = danhSachRef.current;
+    if (!el) return;
+    // Nội dung KHÔNG co lại mà vị trí cuộn lại nhỏ đi so với lần trước => người dùng vừa kéo lên: thôi bám đáy.
+    // (Nội dung co lại, vd. bỏ câu trả lời cũ khi "Tạo lại", làm trình duyệt tự kẹp scrollTop — không phải do người dùng.)
+    const truoc = viTriTruoc.current;
+    if (el.scrollHeight >= truoc.height - 1 && el.scrollTop < truoc.top - 8) batDay.current = false;
+    // Đổi hội thoại, hoặc người dùng vừa gửi tin mới: luôn xuống đáy. Chữ đang stream: chỉ theo khi đang ở đáy.
+    const cuoi = messages[messages.length - 1];
+    if (hoiThoaiTruoc.current !== conversationId) batDay.current = true;
+    else if (messages.length > soTinTruoc.current && cuoi?.role === "user") batDay.current = true;
+    hoiThoaiTruoc.current = conversationId;
+    soTinTruoc.current = messages.length;
+    // `scrollTop` của CHÍNH khung này, KHÔNG `scrollIntoView`: cái sau còn cuộn cả trang phía sau panel nổi.
+    if (batDay.current) el.scrollTop = el.scrollHeight;
+    viTriTruoc.current = { top: el.scrollTop, height: el.scrollHeight };
+  }, [messages, streamingText, conversationId]);
 
   const trong = messages.length === 0 && !streaming;
 
   return (
-    <div className="ai-panel-tin" aria-live="polite" aria-label="Cuộc trò chuyện với trợ lý AI">
+    // `aria-busy` khi đang stream: trình đọc màn hình đợi câu trả lời xong rồi mới đọc, thay vì đọc từng mẩu chữ mới.
+    <div
+      ref={danhSachRef}
+      className="ai-panel-tin"
+      aria-live="polite"
+      aria-busy={streaming}
+      aria-label="Cuộc trò chuyện với trợ lý AI"
+      onScroll={khiCuon}
+    >
       {trong ? (
         <div className="ai-trong">
           <FanficIcon name="ai" size={28} />
@@ -151,7 +193,6 @@ export function AiConversation() {
           <span />
         </div>
       ) : null}
-      <div ref={cuoiRef} />
     </div>
   );
 }

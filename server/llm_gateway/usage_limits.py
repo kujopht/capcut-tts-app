@@ -18,6 +18,7 @@ if it is not already ready").
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -117,40 +118,49 @@ class CircuitBreaker:
         self._open_seconds = open_seconds
         self._clock = clock_fn
         self._state: Dict[str, _BreakerState] = {}
+        #: Bộ ngắt được dùng chung bởi nhiều luồng (mỗi luồng SSE chạy trên luồng bơm riêng, cộng luồng yêu cầu của probe
+        #: Owner): `consecutive_failures += 1` là đọc-sửa-ghi nên mất lần đếm nếu hai luồng chen nhau, và `record_success`
+        #: thay hẳn đối tượng trạng thái nên có thể nuốt cả một `open_until` vừa đặt bởi luồng khác.
+        self._lock = threading.RLock()
 
     def is_open(self, provider_name: str) -> bool:
-        state = self._state.get(provider_name)
-        if state is None or state.open_until is None:
-            return False
-        return self._clock() < state.open_until
+        with self._lock:
+            state = self._state.get(provider_name)
+            if state is None or state.open_until is None:
+                return False
+            return self._clock() < state.open_until
 
     def record_success(self, provider_name: str) -> None:
-        self._state[provider_name] = _BreakerState()
+        with self._lock:
+            self._state[provider_name] = _BreakerState()
 
     def record_failure(self, provider_name: str) -> None:
-        state = self._state.setdefault(provider_name, _BreakerState())
-        state.consecutive_failures += 1
-        if state.consecutive_failures >= self._threshold:
-            until = self._clock() + self._open_seconds
-            # Never SHORTEN a longer window already opened by `cool_down` (a
-            # 429's Retry-After) — a concurrent stream's 5xx must not cut it.
-            state.open_until = until if state.open_until is None else max(state.open_until, until)
+        with self._lock:
+            state = self._state.setdefault(provider_name, _BreakerState())
+            state.consecutive_failures += 1
+            if state.consecutive_failures >= self._threshold:
+                until = self._clock() + self._open_seconds
+                # Never SHORTEN a longer window already opened by `cool_down` (a
+                # 429's Retry-After) — a concurrent stream's 5xx must not cut it.
+                state.open_until = until if state.open_until is None else max(state.open_until, until)
 
     def cool_down(self, provider_name: str, seconds: float) -> None:
         """Open NOW for `seconds` (a 429 is an explicit "stop", not one of
         `failure_threshold` random failures). Never SHORTENS an existing
         open window; counts as a failure too."""
-        state = self._state.setdefault(provider_name, _BreakerState())
-        state.consecutive_failures += 1
-        until = self._clock() + max(0.0, float(seconds))
-        state.open_until = until if state.open_until is None else max(state.open_until, until)
+        with self._lock:
+            state = self._state.setdefault(provider_name, _BreakerState())
+            state.consecutive_failures += 1
+            until = self._clock() + max(0.0, float(seconds))
+            state.open_until = until if state.open_until is None else max(state.open_until, until)
 
     def snapshot(self) -> Dict[str, Dict[str, float]]:
         """Read model for health/admin views: per provider, consecutive
         failures and seconds left in the open window (0 = closed)."""
-        now = self._clock()
-        return {
-            name: {"consecutive_failures": s.consecutive_failures,
-                   "open_for_s": max(0.0, (s.open_until or now) - now)}
-            for name, s in self._state.items()
-        }
+        with self._lock:
+            now = self._clock()
+            return {
+                name: {"consecutive_failures": s.consecutive_failures,
+                       "open_for_s": max(0.0, (s.open_until or now) - now)}
+                for name, s in self._state.items()
+            }

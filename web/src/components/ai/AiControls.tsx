@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAi } from "./AiProvider";
 import { AI_MODES, AI_MODE_LABELS, type AiBudgetScope, type AiErrorCode } from "@/lib/ai/types";
 import { daHetLuot, dinhDangGio, nhanHanMuc, thongDiepHetLuot } from "@/lib/ai/hanMuc";
+import { focusNutMoAi, sauKhiVe } from "@/lib/ai/tieuDiem";
 import { FanficIcon } from "@/components/icons/FanficIcon";
 import { AI_COMPANION_ENABLED } from "@/lib/features";
 import { CompanionSettings } from "./companion/CompanionSettings";
@@ -209,7 +210,9 @@ export function AiControls({ onClose }: { onClose?: () => void } = {}) {
             aria-label="Đóng trợ lý AI"
             onClick={() => {
               closeAssistant();
-              onClose?.();
+              if (onClose) onClose();
+              // Panel nổi: nút mở hiện lại ngay khi panel đóng — trả focus về đó (trang /assistant có `onClose` riêng).
+              else sauKhiVe(() => focusNutMoAi());
             }}
           >
             <FanficIcon name="close" size={16} />

@@ -29,6 +29,17 @@ MODE_LIMITS: Dict[str, Dict[str, int]] = {
 
 MAX_USER_MESSAGE_CHARS = 4000
 MAX_CONVERSATIONS_PER_USER = 200
+#: Khớp `AppwriteAiRepo.list_projects` (limit 100): dự án thứ 101 sẽ vô hình trong danh sách nên không cho tạo.
+MAX_PROJECTS_PER_USER = 100
+#: Các route GHI không gọi LLM (dự án, sở thích, xoá ký ức, yêu cầu hỗ trợ) không tốn hạn mức lượt, nên cần trần tốc
+#: độ riêng: trước đây một vòng lặp tạo dự án/escalation không bị giới hạn gì ngoài kích thước từng dòng.
+WRITE_RPM = 30
+ESCALATION_RPM = 3
+#: Trần độ dài API cho dự án — khớp `AppwriteAiRepo._PROJECT_TEXT_LIMITS` (repo vẫn cắt, nhưng API giờ từ chối rõ ràng).
+PROJECT_TITLE_MAX = 120
+PROJECT_TEXT_MAX = 4000
+#: Kẹp tham số `limit` của các route danh sách (0 làm `[-0:]` trả TOÀN BỘ, số âm làm Appwrite 400 -> 503).
+LIST_LIMIT_MAX = 100
 #: Conservative chars-per-token estimate (never exact) — §3.
 CHARS_PER_TOKEN_ESTIMATE = 3.5
 

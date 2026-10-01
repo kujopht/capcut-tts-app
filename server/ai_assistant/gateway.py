@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from server.ai_assistant.config import MODE_LIMITS, estimate_tokens
 from server.llm_gateway.chat_provider import (
@@ -115,14 +115,19 @@ class AiGateway:
         return out
 
     def stream(self, messages: List[ChatTurn], *, mode: str,
-              user_ref: str = "", workload: Optional[str] = None) -> Iterator[StreamEvent]:
+              user_ref: str = "", workload: Optional[str] = None,
+              cancel: Optional[Callable[[], bool]] = None,
+              on_attempt: Optional[Callable[[str, str], None]] = None) -> Iterator[StreamEvent]:
         # `workload` exists for signature parity with the control plane's
         # `ControlledGateway`; the env-configured chain has one route only.
+        # `cancel()` -> True: nobody is reading any more (client gone) — start no further provider call.
         limits = MODE_LIMITS.get(mode, MODE_LIMITS["general"])
         trimmed = trim_context(messages, max_tokens=limits["max_context_tokens"])
         tried_any = False
         # Snapshot: a runtime policy change mid-stream affects the NEXT turn only.
         for name in list(self.provider_chain):
+            if cancel is not None and cancel():
+                return
             if self.circuit_breaker.is_open(name):
                 continue
             provider = self.providers.get(name)
@@ -130,6 +135,14 @@ class AiGateway:
                 continue
             tried_any = True
             model = self._model_for(mode, name, provider)
+            if on_attempt is not None:
+                try:
+                    on_attempt(name, model)
+                except Exception:  # noqa: BLE001 — phép đo phụ, không bao giờ làm hỏng lượt
+                    pass
+            if cancel is not None and cancel():
+                # Xem `ControlledGateway.stream`: kiểm lại SAU `on_attempt` để một lời gọi không còn ai đếm không được phát đi.
+                return
             req = GenerateRequest(
                 messages=trimmed, model=model, max_output_tokens=limits["max_output_tokens"],
                 user_ref=user_ref)

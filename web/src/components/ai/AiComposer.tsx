@@ -28,8 +28,9 @@ export function AiComposer() {
   const gui = () => {
     const trimmed = draft.trim();
     if (!trimmed || streaming || khoa) return;
-    void sendMessage(trimmed);
-    setDraft("");
+    // `false`: một lượt khác đang giữ khoá gửi (vd. hội thoại mới còn đang được tạo, `streaming` chưa bật) — tin KHÔNG được
+    // nhận, nên GIỮ bản nháp thay vì xoá: nếu không, chữ người dùng vừa gõ biến mất mà không có gì báo.
+    if (sendMessage(trimmed)) setDraft("");
   };
 
   return (
@@ -56,6 +57,9 @@ export function AiComposer() {
         aria-label="Nội dung gửi trợ lý AI"
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
+          // Đang gõ dấu bằng IME (Telex/VNI của hệ điều hành, bộ gõ CJK…): Enter chỉ CHỐT chữ đang soạn, không phải
+          // "gửi" — nếu không, tin bị gửi dở dang giữa lúc gõ. Safari báo `keyCode 229` thay vì `isComposing`.
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             gui();

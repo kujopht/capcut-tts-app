@@ -14,7 +14,7 @@ import hashlib
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from server.ai_assistant.memory import AiRepo
 from server.ai_assistant.scopes import SCOPE_GLOBAL, SCOPE_QA, SCOPE_USER  # noqa: F401 — re-export cho route/test
@@ -71,8 +71,10 @@ class RpmLimiter:
     def __init__(self, *, limiter: Optional[SlidingWindowRateLimiter] = None):
         self._limiter = limiter or SlidingWindowRateLimiter()
 
-    def check(self, user_id: str, *, rpm: int) -> None:
-        ok, _, retry_after = self._limiter.check(f"ai:{user_id}", rpm, window=60.0)
+    def check(self, user_id: str, *, rpm: int, scope: str = "ai") -> None:
+        """`scope` tách các bộ đếm: lượt chat dùng `ai:` (mặc định, đúng khoá hợp đồng), các route ghi không gọi LLM dùng
+        khoá riêng để một người lưu dự án liên tục không bị tính vào nhịp gửi tin."""
+        ok, _, retry_after = self._limiter.check(f"{scope}:{user_id}", rpm, window=60.0)
         if not ok:
             raise AiRateLimited(f"Bạn thao tác hơi nhanh — thử lại sau {retry_after}s.")
 
@@ -109,6 +111,31 @@ class StreamGuard:
             else:
                 self._per_user.pop(user_id, None)
             self._total = max(0, self._total - 1)
+
+    def snapshot(self) -> Tuple[int, int]:
+        """(luồng đang chạy, tối đa) của instance này — chỉ để HIỂN THỊ ở `/admin/ai` (không có ID người dùng nào)."""
+        with self._lock:
+            return self._total, self._max
+
+
+class StreamTicket:
+    """Một lần giữ khoá luồng (`StreamGuard.acquire`), nhả ĐÚNG MỘT LẦN dù được gọi từ nhiều đường: `finally` của
+    generator SSE, một `BackgroundTask` của response (phòng generator chưa bao giờ được chạy vì client ngắt trước khi
+    stream bắt đầu), hay lỗi ở bước chuẩn bị. Không có vé thì một lần nhả thừa có thể trừ nhầm luồng KẾ TIẾP của cùng
+    người dùng; thiếu lần nhả thì khoá rò vĩnh viễn (người đó, rồi sau vài lần cả instance, nhận `ai_busy`)."""
+
+    def __init__(self, guard: StreamGuard, user_id: str) -> None:
+        self._guard = guard
+        self._user_id = user_id
+        self._released = False
+        self._lock = threading.Lock()
+
+    def release(self) -> None:
+        with self._lock:
+            if self._released:
+                return
+            self._released = True
+        self._guard.release(self._user_id)
 
 
 @dataclass(frozen=True)

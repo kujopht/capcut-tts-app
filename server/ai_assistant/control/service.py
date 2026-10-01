@@ -141,6 +141,9 @@ class ControlPlane:
         self._user_usage_fn = user_usage_fn
         #: day -> {"requests", "tokens", ...} của lần QA Owner (chỉ để HIỂN THỊ ở /admin/ai; không phải rào chặn).
         self._qa_overview_fn: Optional[Callable[[str], Dict[str, Any]]] = None
+        #: () -> {"audience", "rpm_per_user", "streams_active", "streams_max"}: thông tin của RUNTIME (không có ID, khoá,
+        #: danh sách người dùng) để Owner thấy ai đang được dùng AI và hàng đợi luồng ngay trên /admin/ai.
+        self._runtime_info_fn: Optional[Callable[[], Dict[str, Any]]] = None
         self._lock = threading.Lock()
         self._mut_lock = threading.RLock()
         self._cfg: Optional[ControlConfig] = None
@@ -166,7 +169,8 @@ class ControlPlane:
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                              user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
-                             qa_overview_fn: Optional[Callable[[str], Dict[str, Any]]] = None) -> None:
+                             qa_overview_fn: Optional[Callable[[str], Dict[str, Any]]] = None,
+                             runtime_info_fn: Optional[Callable[[], Dict[str, Any]]] = None) -> None:
         """Wired by `build_ai_runtime` once the AI repo exists (the plane itself
         is built earlier so `/admin/ai` works even while the assistant is off)."""
         if active_users_fn is not None:
@@ -175,6 +179,8 @@ class ControlPlane:
             self._user_usage_fn = user_usage_fn
         if qa_overview_fn is not None:
             self._qa_overview_fn = qa_overview_fn
+        if runtime_info_fn is not None:
+            self._runtime_info_fn = runtime_info_fn
 
     # ------------------------------------------------------------ config
     def invalidate(self) -> None:
@@ -533,8 +539,16 @@ class ControlPlane:
                 qa = self._qa_overview_fn(today_utc())
             except Exception:  # noqa: BLE001 — a metric, never a failure
                 qa = None
+        runtime: Optional[Dict[str, Any]] = None
+        if self._runtime_info_fn is not None:
+            try:
+                runtime = self._runtime_info_fn()
+            except Exception:  # noqa: BLE001 — a metric, never a failure
+                runtime = None
         return {
             "state": self.state, "day": today_utc(), "ai_enabled": c.ai_enabled,
+            #: Thông tin runtime không nằm trong kho cấu hình: khán giả (`FAS_AI_AUDIENCE`), RPM/người, số luồng đang chạy.
+            "runtime": runtime,
             #: Lần QA của Owner đã NẰM TRONG `requests` ở trên (đi qua cùng slot, cùng trần toàn cục); đây chỉ là
             #: phần tách riêng để Owner thấy QA đã dùng bao nhiêu so với hạn mức QA.
             "qa": qa,

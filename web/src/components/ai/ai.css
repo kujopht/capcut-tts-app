@@ -385,6 +385,35 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
   }
 }
 
+/*
+  Di động (/assistant, <= 1023px) — đo bằng Chrome thật ở 320/360/390/430/768 (scripts/qa/ai_ui):
+  1) Ô nhập phải >= 16px: iOS Safari tự PHÓNG TO cả trang khi focus một ô có chữ nhỏ hơn 16px (ô soạn đang 15px, ô chọn
+     chế độ 12px) và không tự thu lại, làm lệch bố cục sau mỗi lần bấm vào ô.
+  2) Điều khiển chạm: nút gửi/dừng 44px; nút biểu tượng ở đầu trang giữ kích thước nhìn thấy 32px nhưng vùng chạm 40px
+     (::after mở rộng, khe 8px nên các vùng không chồng nhau) — không đổi hình dáng, chỉ dễ bấm hơn.
+  3) Đầu trang cho phép xuống hàng: khi chữ 16px + nút lớn hơn không còn vừa một hàng (<= ~420px) thì nhóm nút xuống hàng
+     dưới, thay vì tràn ngang hoặc bị cắt (`.ai-trang` có overflow:hidden nên phần tràn sẽ biến mất, kể cả nút Đóng).
+*/
+@media (max-width: 1023px) {
+  .ai-trang .ai-panel-dau { flex-wrap: wrap; row-gap: var(--s1); }
+  .ai-trang .ai-panel-ten { flex: 1 1 auto; min-width: 0; white-space: nowrap; }
+  .ai-trang .ai-panel-dau-nut { flex: 0 0 auto; margin-left: auto; gap: 8px; }
+  .ai-trang .ai-nut { width: 44px; height: 44px; }
+  .ai-trang .ai-nut-nho { position: relative; width: 32px; height: 32px; }
+  /* CHỈ ở nhóm nút đầu trang (khe 8px): mở rộng vùng chạm của nút xoá trong danh sách lịch sử sẽ đè lên nút mở hội thoại bên cạnh. */
+  .ai-trang .ai-panel-dau-nut .ai-nut-nho::after { content: ""; position: absolute; inset: -4px; }
+  .ai-trang .ai-mode { height: 40px; padding: 0 var(--s2); font-size: 16px; }
+  .ai-trang .ai-o,
+  .ai-trang .ai-writerbar-input,
+  .ai-trang .ai-writerbar-editor-truong textarea { font-size: 16px; }
+  .ai-trang .ai-o { min-height: 48px; }
+  .ai-trang .ai-nut-tao-lai { min-height: 36px; padding: 4px var(--s3); font-size: 13px; }
+  .ai-trang .ai-chip { min-height: 36px; font-size: 13px; }
+  .ai-trang .ai-lichsu-mo { min-height: 40px; }
+  .ai-trang .ai-caidat-dong { min-height: 44px; }
+  .ai-trang .ai-caidat-dong input[type="checkbox"] { width: 22px; height: 22px; }
+}
+
 /* --------------------------------------------------------- Ink Scout (cờ NEXT_PUBLIC_AI_COMPANION_ENABLED)
   Linh vật là trang trí: KHÔNG nhận focus, KHÔNG bắt con trỏ (chỉ bật ở vị trí nhà
   để có trạng thái hover). z-index 54 — DƯỚI Chat Dock (55), nút mở + panel AI

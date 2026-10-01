@@ -19,9 +19,16 @@ export function useChatDockOffset(): number {
   useEffect(() => {
     if (typeof document === "undefined") return;
     let ro: ResizeObserver | null = null;
+    let dangDo: HTMLElement | null = null;
     const capNhat = () => {
       const el = document.querySelector<HTMLElement>(".chat-dock");
+      // `MutationObserver` bên dưới nổ MỖI LẦN bất kỳ phần tử nào trong trang đổi (mỗi mẩu chữ AI đang stream, mỗi nhịp
+      // thanh tiến độ audio…). Nếu dock vẫn là CÙNG một phần tử đang được `ResizeObserver` theo dõi thì không làm gì:
+      // trước đây mỗi lần như vậy huỷ + tạo lại ResizeObserver và đọc `getBoundingClientRect()` (ép tính lại bố cục).
+      if (el === dangDo && (el === null || ro !== null)) return;
+      dangDo = el;
       ro?.disconnect();
+      ro = null;
       if (el) {
         ro = new ResizeObserver((entries) => {
           for (const e of entries) setOffset(e.contentRect.width > 0 ? e.contentRect.width + 12 : 0);

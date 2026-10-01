@@ -83,6 +83,45 @@ export function khoiPhucMo(kho: KhoPhien | null = khoPhien()): { open: boolean; 
   return { open: docPhien(CO_MO, kho) === "1", conversationId: docPhien(CO_HOI_THOAI, kho) };
 }
 
+/** Người dùng mà cờ phiên (`CO_MO`, `CO_HOI_THOAI`) đang thuộc về. */
+export const CO_CHU = "fas.ai.owner";
+
+/**
+ * Cờ phiên là của MỘT người dùng. Đăng xuất rồi đăng nhập TÀI KHOẢN KHÁC trong cùng tab (SPA, không tải lại trang) thì
+ * người sau KHÔNG được thừa kế panel đang mở hay id hội thoại của người trước: nó sẽ đòi mở hội thoại không phải của mình
+ * (máy chủ trả 403 "không thuộc về bạn") và panel bật sẵn dù họ chưa mở. Gọi ở mọi chỗ ĐỌC cờ.
+ *
+ * - khách (không có `userId`): không đụng gì;
+ * - cờ chưa có chủ (bản cũ, hoặc lần đầu): người này nhận làm chủ, giữ nguyên cờ;
+ * - cờ thuộc người khác: xoá cờ rồi nhận chủ mới.
+ * Đăng nhập lại CHÍNH tài khoản cũ vẫn khôi phục được như trước.
+ */
+export function lamSachNeuDoiNguoi(userId: string | null | undefined, kho: KhoPhien | null = khoPhien()): void {
+  if (!userId) return;
+  const chu = docPhien(CO_CHU, kho);
+  if (chu === userId) return;
+  if (chu !== null) {
+    ghiPhien(CO_MO, null, kho);
+    ghiPhien(CO_HOI_THOAI, null, kho);
+  }
+  ghiPhien(CO_CHU, userId, kho);
+}
+
+/** `khoiPhucMo` có kiểm chủ cờ — dùng khi người dùng đã đăng nhập. */
+export function khoiPhucMoChoNguoi(
+  userId: string | null | undefined,
+  kho: KhoPhien | null = khoPhien(),
+): { open: boolean; conversationId: string | null } {
+  lamSachNeuDoiNguoi(userId, kho);
+  return khoiPhucMo(kho);
+}
+
+/** Id hội thoại đã lưu trong tab — chỉ trả về nếu nó thuộc `userId`. */
+export function docHoiThoaiLuu(userId: string | null | undefined, kho: KhoPhien | null = khoPhien()): string | null {
+  lamSachNeuDoiNguoi(userId, kho);
+  return docPhien(CO_HOI_THOAI, kho);
+}
+
 /**
  * Trang được trình duyệt PHỤC HỒI từ bfcache (Back sau một điều hướng cứng):
  * bộ nhớ JS là ảnh chụp lúc rời trang — có thể panel đang mở, trong khi

@@ -251,6 +251,7 @@ from server.image_service import (
     UnknownOrDisabledModel,
 )
 from server.rate_limit import RateLimitMiddleware, SlidingWindowRateLimiter
+from server.body_limit import BODY_LIMIT_RULES, MaxBodyMiddleware
 # Nhan tin (Chat V1, phan chu): Appwrite so huu du lieu + Realtime — xem `server/messaging/`.
 # Tencent Chat KHONG con can cho tin nhan chu (Tencent/TRTC de danh cho goi thoai/video).
 from server.messaging.ids import chat_user_id, fanfic_user_id_from_chat as fanfic_user_id_tu_chat
@@ -267,6 +268,9 @@ settings.validate()   # FAIL FAST neu chon che do cloud ma cau hinh sai
 # bat voi sai dich (vd project production) thi CHET o day. Xem `server/appwrite_tablesdb_compat.py`.
 from server.appwrite_tablesdb_compat import kich_hoat_neu_staging as _kich_hoat_lop_dich_staging  # noqa: E402
 _kich_hoat_lop_dich_staging(settings)
+# Tran kich thuoc than yeu cau cho `/api/ai/*` (xem `server/body_limit.py`). Them TRUOC CORS/RateLimit de nam o LOP TRONG
+# CUNG: phan hoi 413 van di qua CORS (trinh duyet doc duoc) va van tinh vao han muc toc do.
+app.add_middleware(MaxBodyMiddleware, rules=BODY_LIMIT_RULES)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins or ["http://localhost:3000"],

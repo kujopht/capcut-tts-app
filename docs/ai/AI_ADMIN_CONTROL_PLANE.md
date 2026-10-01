@@ -71,6 +71,12 @@ Người ngoài khán giả nhận `GET /api/ai/availability` → `enabled:false
 3. `ControlledGateway.stream()`: thử lần lượt. 429 → cooldown theo `Retry-After` (1–600 s, mặc định 30 s); lỗi khác → circuit breaker theo slot. Không còn slot nào → sự kiện lỗi thân thiện (`ai_budget_exhausted` nếu do trần, `ai_no_provider` nếu không có gì bật/cấu hình).
 4. Kết thúc lượt: cộng usage/chi phí cho **đúng slot đã phục vụ** (`ai_provider_usage_daily`), cùng lúc với ledger theo người dùng như trước.
 
+**Lỗi gần nhất của slot** (health: `last_error_code`, `last_error_category`, `last_error_at`):
+- `last_error_code` là mã máy ổn định: `provider_http_<status>`, `provider_network_error`, `provider_unexpected_error`…
+- `last_error_category` là enum của nhà cung cấp: `error.status` của Google (`NOT_FOUND`, `PERMISSION_DENIED`…), kèm `ErrorInfo.reason` nếu có (`PERMISSION_DENIED:SERVICE_DISABLED`); hoặc `error.code`/`error.type` kiểu OpenAI (`model_not_found`…).
+- Server đọc tối đa 16 KB thân lỗi, parse trong bộ nhớ rồi bỏ. Chỉ giữ giá trị nằm trong danh sách cho phép đóng hoặc khớp mẫu UPPER_SNAKE (không có chữ số, không có chữ thường). **Không bao giờ lưu `message`, request echo, project hay khoá.**
+- Ghi ở mọi pha, kể cả khi đứt giữa stream. Dữ liệu nằm trong tiến trình giống breaker, nên khởi động lại là mất.
+
 ## 4. Schema (bổ sung thuần — CHƯA áp lên production)
 
 | Collection | Khoá | Nội dung |

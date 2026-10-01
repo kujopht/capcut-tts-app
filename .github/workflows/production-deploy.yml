@@ -234,29 +234,48 @@ jobs:
     name: Post-deploy health checks
     needs: [validate, deploy]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Wait for health (tolerates Render free-tier cold start, ~50s)
+      # Render deploy hook chi XEP HANG mot ban build; instance CU van tra loi
+      # `/api/health` trong vai phut sau do. Truoc day buoc nay dung o phan hoi
+      # 200 DAU TIEN -> thuong la instance cu -> "commit_sha matches" hong du
+      # deploy that ra van thanh cong (2026-10-01, run 36859518425 + 36867838397).
+      # Nay doi den khi `commit_sha` KHOP ref da validate (toi da ~10 phut), con
+      # cold start / 5xx thi van thu lai nhu cu. Het han -> giu phan hoi cuoi de
+      # buoc ben duoi bao loi voi day du truong.
+      - name: Wait for health on the deployed commit (tolerates cold start + Render build)
         env:
           API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
+          EXPECTED_SHA: ${{ needs.validate.outputs.deployed_sha }}
         run: |
           set -euo pipefail
           if [ -z "${API_BASE:-}" ]; then
             echo "::error::PRODUCTION_API_BASE_URL variable is not set."
             exit 1
           fi
-          for i in $(seq 1 8); do
+          for i in $(seq 1 40); do
             if BODY=$(curl -sS --max-time 20 -f "$API_BASE/api/health"); then
-              echo "$BODY"
               echo "$BODY" > /tmp/health.json
-              break
+              SERVER_SHA=$(python3 -c "import json; print(json.load(open('/tmp/health.json')).get('commit_sha') or '')" 2>/dev/null || true)
+              if [ -n "$SERVER_SHA" ] && [ "${EXPECTED_SHA#"$SERVER_SHA"}" != "$EXPECTED_SHA" ]; then
+                echo "$BODY"
+                echo "Deployed commit is live after attempt $i."
+                break
+              fi
+              echo "Attempt $i: health OK but still serving ${SERVER_SHA:-<none>} (expected ${EXPECTED_SHA:0:12}); Render build not live yet, retrying in 15s..."
+            else
+              echo "Attempt $i: /api/health failed (cold start?), retrying in 15s..."
             fi
-            echo "Attempt $i failed (cold start?), retrying in 15s..."
-            sleep 15
-            if [ "$i" -eq 8 ]; then
+            if [ "$i" -eq 40 ]; then
+              if [ -f /tmp/health.json ]; then
+                echo "::warning::deployed commit never became live within ~10 minutes; verifying the last response below."
+                cat /tmp/health.json
+                break
+              fi
               echo "::error::/api/health never responded successfully."
               exit 1
             fi
+            sleep 15
           done
 
       # `commit_sha` (server/main.py, added alongside this workflow) exposes

@@ -116,7 +116,7 @@ Người ngoài khán giả nhận `GET /api/ai/availability` → `enabled:false
 0. Khán giả (ở trên): ngoài khán giả → 403 trước mọi bước dưới.
 1. `admission()` (trước khi stream): công tắc tổng → 503 `ai_not_enabled`; trần toàn cục/chi phí → 429 `ai_budget_exhausted` `scope:"global"`; trần theo người dùng → 429 `ai_budget_exhausted` `scope:"user"` (lối QA của Owner: hạn mức QA → `scope:"qa"`, xem "Hạn mức người dùng và lối QA"). **Không đọc được bộ đếm** (kho sập, hôm nay chưa có số nào trong bộ nhớ) → 503 `ai_storage_unavailable`: số không biết không bao giờ được coi là 0. Ngân sách token theo tier cũ vẫn áp dụng (cũng `scope:"user"`). Tất cả các từ chối này xảy ra TRƯỚC khi tin nhắn được lưu.
 2. `plan()`: dựng danh sách slot theo hồ sơ, mỗi slot kèm lý do bỏ qua hoặc "đủ điều kiện": `slot_disabled`, `type_disabled`, `workload_not_allowed`, `missing_secret`, `cooldown`, `request_cap`, `token_cap`, `rpm_soft_cap`, `tpm_soft_cap`.
-3. `ControlledGateway.stream()`: thử lần lượt. 429 → cooldown theo `Retry-After` (1–600 s, mặc định 30 s); lỗi khác → circuit breaker theo slot. Không còn slot nào → sự kiện lỗi thân thiện (`ai_budget_exhausted` nếu do trần, `ai_no_provider` nếu không có gì bật/cấu hình).
+3. `ControlledGateway.stream()`: thử lần lượt, mỗi slot tối đa một lần. 429 → cooldown theo `Retry-After` (kẹp 1–600 s, mặc định 30 s); lỗi khác → circuit breaker theo slot (3 lần liên tiếp mở 60 s). Không bắt đầu lần thử mới sau **45 s** kể từ lần thử đầu (`FAILOVER_BUDGET_S`), và không bắt đầu lần thử nào khi client đã bỏ đi (`cancel`). Không còn slot nào → sự kiện lỗi theo NGUYÊN NHÂN THẬT (`router.exhausted_event`): đã thử mà đều lỗi → `ai_provider_unavailable`; chỉ chạm cửa sổ RPM/TPM mềm → `ai_busy`; có slot đang cooldown → `ai_provider_unavailable`; mọi slot chạm trần NGÀY → `ai_budget_exhausted` (`scope:"global"` + giờ reset); không có gì bật/cấu hình → `ai_no_provider`. Trước đây RPM/TPM bị báo như hết hạn ngày (kèm giờ reset nửa đêm) và cooldown bị báo như `ai_no_provider`.
 4. Kết thúc lượt: cộng usage/chi phí cho **đúng slot đã phục vụ** (`ai_provider_usage_daily`), cùng lúc với ledger theo người dùng như trước.
 
 **Lỗi gần nhất của slot** (health: `last_error_code`, `last_error_category`, `last_error_at`):
@@ -181,7 +181,8 @@ Mọi thay đổi ghi từng **trường**: admin_id, thời điểm, entity (`g
 ## 7. Giới hạn đã biết
 
 - Cooldown, cửa sổ RPM/TPM mềm và đếm 429 gần đây nằm **trong tiến trình** (một instance). Bộ đếm ngày và cấu hình thì bền (Appwrite).
-- Bộ đếm dùng đọc-sửa-ghi như `ai_usage_daily` — có thể lệch nhỏ khi hai lượt ghi cùng lúc.
+- Bộ đếm slot (`ai_provider_usage_daily`, chính là trần toàn cục) dùng đọc-sửa-ghi nhưng được **khoá theo (slot, ngày)** trong một tiến trình; giữa HAI instance vẫn có thể lệch nhỏ (Render đang chạy một instance). Bộ đếm người dùng (`ai_usage_daily`) không cần khoá vì mỗi người chỉ có một luồng tại một thời điểm.
+- Thân yêu cầu tới `/api/ai/*` bị cắt ở **256 KB** (`server/body_limit.py`, 413 `request_too_large`) trước khi FastAPI đọc vào bộ nhớ.
 - Cấu hình được cache 15 s: đổi cấu hình có hiệu lực trong ≤15 s trên mọi instance.
 - Chi phí là **ước tính** theo giá Owner nhập, không phải hoá đơn thật.
 - Ghi tuần tự chỉ trong một instance: hai instance cùng ghi dòng `global` có thể đè nhau (Render hiện chạy một instance).

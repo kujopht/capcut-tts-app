@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import threading
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -611,6 +612,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             finalize_result: Dict[str, Any] = {}
             served: Dict[str, str] = {"provider_name": "", "model": ""}
             pump: Optional[StreamPump] = None
+            gateway_cancel = threading.Event()
 
             async def _finalize() -> None:
                 """Records usage + persists the assistant message — MUST run
@@ -709,8 +711,11 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 # Web-search turns route through their own profile (control
                 # plane `web_search_profile`); `AiGateway` ignores `workload`.
                 workload = "web_search" if (payload.use_web_search and rt.web_search_enabled) else None
+                # `cancel` cho gateway biết không còn ai đọc nữa: nó không bắt đầu thêm lời gọi nhà cung cấp nào cho một
+                # lượt đã bị bỏ (xem `ControlledGateway.stream`). Đặt ở `finally` bên dưới trên MỌI đường thoát.
                 gen = rt.gateway.stream(turns, mode=conv.mode,
-                                       user_ref=_hashed_user_ref(rt, profile.user_id), workload=workload)
+                                       user_ref=_hashed_user_ref(rt, profile.user_id), workload=workload,
+                                       cancel=gateway_cancel.is_set)
                 # The provider generator runs on the pump's own thread
                 # (never on the event loop, contract §0.2) and is closed
                 # THERE under `contextlib.closing` (R3) the moment
@@ -771,6 +776,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 final_status = "stopped"
                 raise
             finally:
+                gateway_cancel.set()
                 if pump is not None:
                     # Every exit path (end, error, disconnect/cancel): the
                     # pump thread exits at the provider's next event and

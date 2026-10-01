@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import random
+import time
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from server.ai_assistant.config import MODE_LIMITS, estimate_tokens
@@ -46,6 +47,48 @@ SKIP_TOKEN_CAP = "token_cap"
 SKIP_RPM = "rpm_soft_cap"
 SKIP_TPM = "tpm_soft_cap"
 CAP_REASONS = frozenset({SKIP_REQUEST_CAP, SKIP_TOKEN_CAP, SKIP_RPM, SKIP_TPM})
+#: Hết MỖI NGÀY: chỉ sang ngày mới (UTC) mới có lại -> báo `ai_budget_exhausted` kèm giờ reset.
+DAILY_CAP_REASONS = frozenset({SKIP_REQUEST_CAP, SKIP_TOKEN_CAP})
+#: Tạm thời: hết trong vài giây (cửa sổ RPM/TPM trượt 60 s) hoặc vài phút (cooldown) -> KHÔNG được báo như hết hạn ngày,
+#: nếu không giao diện nói "công suất chung đã hết, chờ tới ngày mai" cho một tình trạng tự hết sau một phút.
+WINDOW_REASONS = frozenset({SKIP_RPM, SKIP_TPM})
+TRANSIENT_REASONS = WINDOW_REASONS | {SKIP_COOLDOWN}
+
+#: Tổng thời gian tối đa (giây) cho CHUỖI thử slot trước token đầu tiên của một lượt: sau mức này không bắt đầu thêm
+#: lần thử nào. Mỗi slot vẫn chỉ thử tối đa một lần, nhưng trước đây 8 slot cùng treo là 8 x 60 s giữ một luồng SSE (1 trong
+#: 4 luồng của instance) hàng chục phút; lúc đó chính người dùng đã bỏ đi từ lâu.
+FAILOVER_BUDGET_S = 45.0
+#: `Retry-After` do nhà cung cấp gửi bị kẹp lại ở đây (provider đã kẹp, đây là lớp phòng thủ thứ hai cho provider tương lai).
+COOLDOWN_MIN_S = 1.0
+COOLDOWN_MAX_S = 600.0
+
+
+def _clamp_cooldown(seconds: Optional[float]) -> float:
+    if seconds is None:
+        return DEFAULT_429_COOLDOWN_S
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return DEFAULT_429_COOLDOWN_S
+    if value != value:  # NaN
+        return DEFAULT_429_COOLDOWN_S
+    return max(COOLDOWN_MIN_S, min(COOLDOWN_MAX_S, value))
+
+
+def exhausted_event(candidates: Sequence[Tuple[ProviderSlot, Optional[str]]]) -> ErrorEvent:
+    """Lỗi cuối cùng khi KHÔNG slot nào được thử. Chọn mã theo nguyên nhân THẬT để giao diện nói đúng điều gì sắp xảy ra:
+    tạm thời (RPM/TPM/cooldown) -> thử lại sau ít giây/phút; hết hạn ngày -> chờ reset; không có gì cấu hình -> không có nhà
+    cung cấp. Có bất kỳ slot nào chỉ TẠM bị chặn thì tình trạng sẽ tự hết, nên ưu tiên báo tạm thời."""
+    reasons = {r for _, r in candidates if r}
+    transient = reasons & TRANSIENT_REASONS
+    if transient:
+        if transient <= WINDOW_REASONS:
+            return ErrorEvent(code="ai_busy", message="Trợ lý AI đang bận — thử lại sau ít giây.")
+        return ErrorEvent(code="ai_provider_unavailable",
+                          message="Các nhà cung cấp AI đang tạm nghỉ — thử lại sau ít phút.")
+    if reasons & DAILY_CAP_REASONS:
+        return ErrorEvent(code="ai_budget_exhausted", message="Trợ lý AI đã dùng hết hạn mức hiện có — thử lại sau.")
+    return ErrorEvent(code="ai_no_provider", message="Chưa có nhà cung cấp AI nào khả dụng.")
 
 
 BalanceFn = Callable[[ProviderSlot], float]
@@ -120,8 +163,12 @@ class ControlledGateway:
         self._plane = plane
 
     def stream(self, messages: List[ChatTurn], *, mode: str, user_ref: str = "",
-               workload: Optional[str] = None) -> Iterator[StreamEvent]:
+               workload: Optional[str] = None, cancel: Optional[Callable[[], bool]] = None) -> Iterator[StreamEvent]:
+        """`cancel()` -> True nghĩa là không còn ai đọc kết quả (client đã ngắt/dừng): không được BẮT ĐẦU thêm lời gọi nhà
+        cung cấp nào nữa. Nó chỉ chặn được lần thử KẾ TIẾP — một lần thử đang chờ mạng thì tự hết hạn theo timeout của chính
+        nó — nhưng đủ để một lượt bị bỏ không đi hết cả chuỗi slot, mỗi slot tốn một lượt quota thật."""
         plane = self._plane
+        clock = getattr(plane, "_clock", None) or time.monotonic
         cfg = plane.snapshot()  # type: ignore[attr-defined]
         limits = MODE_LIMITS.get(mode, MODE_LIMITS["general"])
         max_ctx = min(limits["max_context_tokens"], cfg.controls.max_context_tokens)
@@ -131,13 +178,21 @@ class ControlledGateway:
         wl = workload or mode
         candidates = plane.plan(cfg, mode=mode, workload=wl, est_tokens=est)  # type: ignore[attr-defined]
         tried_any = False
+        first_attempt_at = 0.0
         for slot, reason in candidates:
             if reason is not None:
                 continue
+            if cancel is not None and cancel():
+                return
+            if tried_any and clock() - first_attempt_at >= FAILOVER_BUDGET_S:
+                log.warning("ai_control: failover budget (%ss) spent — not trying further slots", FAILOVER_BUDGET_S)
+                break
             key = plane.secret_for(slot)  # type: ignore[attr-defined]
             if not key:
                 continue
             provider = plane.provider_for(slot, key)  # type: ignore[attr-defined]
+            if not tried_any:
+                first_attempt_at = clock()
             tried_any = True
             plane.note_attempt(slot, est)  # type: ignore[attr-defined]
             req = GenerateRequest(messages=trimmed, model=slot.model, max_output_tokens=max_out, user_ref=user_ref)
@@ -155,7 +210,7 @@ class ControlledGateway:
                 category = getattr(exc, "category", None)
                 if exc.code == "provider_http_429" or exc.retry_after_s is not None:
                     plane.breaker.cool_down(  # type: ignore[attr-defined]
-                        slot.slot_id, exc.retry_after_s if exc.retry_after_s is not None else DEFAULT_429_COOLDOWN_S)
+                        slot.slot_id, _clamp_cooldown(exc.retry_after_s))
                     plane.note_rate_limited(slot, exc.code, category)  # type: ignore[attr-defined]
                 else:
                     plane.breaker.record_failure(slot.slot_id)  # type: ignore[attr-defined]
@@ -182,7 +237,5 @@ class ControlledGateway:
         if tried_any:
             yield ErrorEvent(code="ai_provider_unavailable",
                              message="Tất cả nhà cung cấp AI đều đang gặp sự cố — thử lại sau.")
-        elif any(r in CAP_REASONS for _, r in candidates):
-            yield ErrorEvent(code="ai_budget_exhausted", message="Trợ lý AI đã dùng hết hạn mức hiện có — thử lại sau.")
         else:
-            yield ErrorEvent(code="ai_no_provider", message="Chưa có nhà cung cấp AI nào khả dụng.")
+            yield exhausted_event(candidates)

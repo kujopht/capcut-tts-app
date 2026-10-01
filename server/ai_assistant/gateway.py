@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from server.ai_assistant.config import MODE_LIMITS, estimate_tokens
 from server.llm_gateway.chat_provider import (
@@ -115,14 +115,18 @@ class AiGateway:
         return out
 
     def stream(self, messages: List[ChatTurn], *, mode: str,
-              user_ref: str = "", workload: Optional[str] = None) -> Iterator[StreamEvent]:
+              user_ref: str = "", workload: Optional[str] = None,
+              cancel: Optional[Callable[[], bool]] = None) -> Iterator[StreamEvent]:
         # `workload` exists for signature parity with the control plane's
         # `ControlledGateway`; the env-configured chain has one route only.
+        # `cancel()` -> True: nobody is reading any more (client gone) — start no further provider call.
         limits = MODE_LIMITS.get(mode, MODE_LIMITS["general"])
         trimmed = trim_context(messages, max_tokens=limits["max_context_tokens"])
         tried_any = False
         # Snapshot: a runtime policy change mid-stream affects the NEXT turn only.
         for name in list(self.provider_chain):
+            if cancel is not None and cancel():
+                return
             if self.circuit_breaker.is_open(name):
                 continue
             provider = self.providers.get(name)

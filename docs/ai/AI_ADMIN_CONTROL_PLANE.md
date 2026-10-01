@@ -49,8 +49,23 @@ Mỗi **bước** là một loại provider (cả pool: xếp theo `priority`, c
 
 `ai_enabled` (công tắc tổng), bật/tắt theo loại provider, trần request/token toàn cục mỗi ngày, trần request/token mỗi người dùng mỗi ngày, trần chi phí ngày (tuỳ chọn), `max_output_tokens`, `max_context_tokens`, ánh xạ chế độ → hồ sơ, `web_search_profile`, `web_search_tool`, `version` (khoá lạc quan).
 
+### Khán giả (`FAS_AI_AUDIENCE`, env — không nằm trong kho)
+
+Cùng mẫu với `FAS_CHAT_V1_AUDIENCE`. Quyết định **ai** gọi được `/api/ai/*` khi `FAS_AI_ASSISTANT_V1=1`. Cờ giao diện `NEXT_PUBLIC_AI_ASSISTANT_ENABLED` chỉ ẩn/hiện UI, không phải rào chặn.
+
+| `FAS_AI_AUDIENCE` | Ai dùng được |
+|---|---|
+| rỗng + `DATA_BACKEND=appwrite` (production) | như `canary` — **đóng theo mặc định** |
+| rỗng + backend khác (dev/test) | như `all` |
+| `canary` | chỉ Owner (`FAS_OWNER_USER_IDS`) + `FAS_AI_CANARY_USERS` (phân tách bằng dấu phẩy; mục không giống user ID bị bỏ) |
+| `all` | mọi người đã đăng nhập |
+| giá trị khác | AI TẮT (`reason` nêu biến sai) |
+
+Người ngoài khán giả nhận `GET /api/ai/availability` → `enabled:false, reason:"not_in_audience"` (không lộ hạn mức). Mọi route khác trả 403 `ai_not_enabled`. Thứ tự kiểm: AI tắt → 503 như cũ; AI bật thì chưa đăng nhập 401 → ngoài khán giả 403 → mới tới hạn mức/công tắc tổng. `/api/health` công khai hiện `ai_assistant.audience` (chỉ giá trị đã phân giải, không có ID nào).
+
 ## 3. Thứ tự kiểm một lượt chat
 
+0. Khán giả (ở trên): ngoài khán giả → 403 trước mọi bước dưới.
 1. `admission()` (trước khi stream): công tắc tổng → 503 `ai_not_enabled`; trần toàn cục/chi phí → 429 `ai_budget_exhausted`; trần theo người dùng → 429 `ai_budget_exhausted`. **Không đọc được bộ đếm** (kho sập, hôm nay chưa có số nào trong bộ nhớ) → 503 `ai_storage_unavailable`: số không biết không bao giờ được coi là 0. Ngân sách token theo tier cũ vẫn áp dụng.
 2. `plan()`: dựng danh sách slot theo hồ sơ, mỗi slot kèm lý do bỏ qua hoặc "đủ điều kiện": `slot_disabled`, `type_disabled`, `workload_not_allowed`, `missing_secret`, `cooldown`, `request_cap`, `token_cap`, `rpm_soft_cap`, `tpm_soft_cap`.
 3. `ControlledGateway.stream()`: thử lần lượt. 429 → cooldown theo `Retry-After` (1–600 s, mặc định 30 s); lỗi khác → circuit breaker theo slot. Không còn slot nào → sự kiện lỗi thân thiện (`ai_budget_exhausted` nếu do trần, `ai_no_provider` nếu không có gì bật/cấu hình).
@@ -111,4 +126,5 @@ Mọi thay đổi ghi từng **trường**: admin_id, thời điểm, entity (`g
 3. Đặt `FAS_AI_SECRET_<ref>` cho các slot sẽ dùng (Render / host mới).
 4. Bật `FAS_AI_ADMIN_V1=1` (AI vẫn tắt: công tắc tổng mặc định TẮT, mọi loại provider TẮT).
 5. Owner tạo slot, chọn hồ sơ, đặt trần trên `/admin/ai`, kiểm sức khoẻ.
-6. Chỉ sau đó mới bật `FAS_AI_ASSISTANT_V1` và công tắc tổng.
+6. Chỉ sau đó mới bật `FAS_AI_ASSISTANT_V1` và công tắc tổng — để `FAS_AI_AUDIENCE` trống (production = `canary`, chỉ Owner) cho canary; kiểm `/api/health` → `ai_assistant.audience == "canary"` trước khi bật công tắc tổng.
+7. Mở rộng: thêm ID vào `FAS_AI_CANARY_USERS`, rồi `FAS_AI_AUDIENCE=all` + `NEXT_PUBLIC_AI_ASSISTANT_ENABLED=1` khi ra công chúng.

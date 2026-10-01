@@ -12,6 +12,7 @@ lap trinh duoc ngay tu dau.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -257,6 +258,12 @@ class LlmGatewaySettings:
         }
 
 
+#: Gia tri hop le cua `FAS_AI_AUDIENCE` (xem `AiAssistantSettings.audience`).
+AI_AUDIENCES = ("canary", "all")
+#: Mot user ID Appwrite (chu, so, `.`, `_`, `-`; toi da 36 ky tu).
+_AI_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$")
+
+
 @dataclass(frozen=True)
 class AiAssistantSettings:
     """Fanfic AI Assistant V1 (`docs/ai/AI_ASSISTANT_V1.md`) — a SEPARATE
@@ -309,6 +316,20 @@ class AiAssistantSettings:
     #: `server/ai_assistant/runtime.py::AiRuntime.user_ref_salt` for the
     #: documented per-process-random fallback when this is unset.
     user_ref_salt: str = ""
+    #: Ai dung duoc `/api/ai/*` khi bat — cung mau `FAS_CHAT_V1_AUDIENCE`.
+    #: "canary" = CHI Owner (`FAS_OWNER_USER_IDS`) + `FAS_AI_CANARY_USERS`;
+    #: "all" = moi nguoi da dang nhap. Rong = tu chon theo `DATA_BACKEND`:
+    #: appwrite -> "canary" (production dong theo mac dinh), con lai -> "all".
+    #: Gia tri la -> AI TAT (fail-closed), xem `resolved_audience`.
+    audience: str = ""
+    canary_users: Tuple[str, ...] = ()
+
+    def resolved_audience(self, data_backend: str) -> str:
+        """"canary" | "all"; chuoi RONG khi `FAS_AI_AUDIENCE` co gia tri la."""
+        raw = (self.audience or "").strip().lower()
+        if not raw:
+            return "canary" if str(data_backend or "").lower() == "appwrite" else "all"
+        return raw if raw in AI_AUDIENCES else ""
 
     def describe(self) -> dict:
         """KHONG BAO GIO chua API key that — cung quy uoc voi
@@ -316,6 +337,8 @@ class AiAssistantSettings:
         return {
             "enabled": self.enabled,
             "admin_v1": self.admin_v1,
+            "audience": self.audience or "auto",
+            "canary_users": len(self.canary_users),
             "assistant_name": self.assistant_name,
             "providers": list(self.providers),
             "qwen_configured": bool(self.qwen_api_key),
@@ -859,9 +882,11 @@ class Settings:
                 and self.translation_model),
             "image_studio": self.image_studio.describe(),
             "llm_gateway": self.llm_gateway.describe(),
-            # CHI hai co bat/tat (khong ten provider, khong khoa): de kiem mot lan
-            # deploy "toi" (AI tat) tu `/api/health` cong khai ma khong can dang nhap.
-            "ai_assistant": {"enabled": self.ai_assistant.enabled, "admin_v1": self.ai_assistant.admin_v1},
+            # CHI hai co bat/tat + khan gia (khong ten provider, khong khoa, KHONG ID
+            # nao): de kiem mot lan deploy "toi" (AI tat / chi canary) tu `/api/health`
+            # cong khai ma khong can dang nhap.
+            "ai_assistant": {"enabled": self.ai_assistant.enabled, "admin_v1": self.ai_assistant.admin_v1,
+                             "audience": self.ai_assistant.resolved_audience(self.data_backend) or "invalid"},
         }
 
 
@@ -1079,6 +1104,9 @@ def _ai_assistant_settings() -> AiAssistantSettings:
         heartbeat_s=max(15, min(25, _int("FAS_AI_HEARTBEAT_S", 15))),
         admin_v1=_env_bool("FAS_AI_ADMIN_V1", False),
         user_ref_salt=_env("FAS_AI_USER_REF_SALT"),
+        audience=_env("FAS_AI_AUDIENCE", "").strip().lower(),
+        # Muc khong giong user ID bi BO (khong bao gio mo rong khan gia vi mot dong go nham).
+        canary_users=tuple(x for x in _env_list("FAS_AI_CANARY_USERS", "") if _AI_USER_ID.match(x)),
     )
 
 

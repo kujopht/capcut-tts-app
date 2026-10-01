@@ -254,7 +254,7 @@ class TestMainWiring(unittest.TestCase):
         c = TestClient(server_main.app)
         self.assertEqual(c.get("/api/admin/ai/config").status_code, 401)
         health = c.get("/api/health").json()
-        self.assertEqual(health["ai_assistant"], {"enabled": False, "admin_v1": False})
+        self.assertEqual(health["ai_assistant"], {"enabled": False, "admin_v1": False, "audience": "all"})
 
 
 if __name__ == "__main__":

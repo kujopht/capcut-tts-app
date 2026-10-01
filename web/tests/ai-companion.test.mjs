@@ -58,6 +58,75 @@ test("dung tao sinh: dung lai -> listening (khong flash thanh cong)", () => {
   assert.ok(!/status === "stopped"[^;]*setFlash\("success"\)/.test(src));
 });
 
+// ------------------------------------------------------------------ failover phía máy chủ
+
+/** Chay DUNG bo tach SSE that (`lib/ai/sse.ts`) tren byte cua mot luot, roi ap cung luat
+ *  `AiProvider` dung cho cac truong ma companion doc (streaming / streamingText / error /
+ *  messages[-1].status). Tra ve chuoi trang thai Ink Scout theo tung su kien. */
+async function songTrangThai(raw, { mode = "general" } = {}) {
+  const { tachKhungSse, dienDichKhungAi } = await import("../src/lib/ai/sse.ts");
+  let s = { streaming: true, text: "", error: null, last: null };
+  const seq = [st({ open: true, streaming: true, mode })];
+  const { khung } = tachKhungSse(raw);
+  for (const k of khung) {
+    const ev = dienDichKhungAi(k);
+    if (!ev) continue;
+    if (ev.type === "delta") s = { ...s, text: s.text + ev.text };
+    else if (ev.type === "done") s = { ...s, streaming: false, last: ev.status };
+    else if (ev.type === "error") s = { ...s, streaming: false, error: ev.code, last: "error" };
+    seq.push(st({ open: true, mode, streaming: s.streaming, hasStreamText: !!s.text, errorCode: s.error,
+                  flash: !s.streaming && s.last === "complete" ? "success" : null }));
+  }
+  return seq;
+}
+
+test("failover thanh cong phia may chu KHONG BAO GIO hien loi (byte giong luot that T4 canary)", async () => {
+  // Slot dau tra 404/503 -> may chu chuyen slot TRUOC token dau; client chi thay meta/delta/usage/done
+  // (+ nhip tim). Khong co su kien nao mang thong tin slot/loi trung gian.
+  const raw = 'event: meta\ndata: {"message_id":"m1","conversation_id":"c1"}\n\n'
+    + ": ping\n\n"
+    + 'event: delta\ndata: {"text":"Xanh"}\n\n'
+    + 'event: delta\ndata: {"text":" dương"}\n\n'
+    + 'event: usage\ndata: {"input_tokens":245,"output_tokens":2,"used_today":900,"limit_today":30000}\n\n'
+    + 'event: done\ndata: {"status":"complete"}\n\n';
+  const seq = await songTrangThai(raw);
+  assert.ok(!seq.includes("error") && !seq.includes("offline"), seq.join(" > "));
+  assert.equal(seq[0], "thinking");
+  assert.ok(seq.includes("answering"));
+  assert.equal(seq.at(-1), "success");
+});
+
+test("su kien la (vd 'fallback' tuong lai) va nhip tim bi bo qua, khong thanh loi", async () => {
+  const raw = 'event: fallback\ndata: {"slot":"gemini-02"}\n\n: ping\n\n'
+    + 'event: delta\ndata: {"text":"OK"}\n\nevent: done\ndata: {"status":"complete"}\n\n';
+  const seq = await songTrangThai(raw);
+  assert.deepEqual([...new Set(seq)], ["thinking", "answering", "success"]);
+});
+
+test("chi loi CUOI CUNG cua may chu (moi slot deu hong) moi hien error", async () => {
+  const raw = 'event: meta\ndata: {"message_id":"m2","conversation_id":"c1"}\n\n'
+    + 'event: usage\ndata: {"input_tokens":0,"output_tokens":0}\n\n'
+    + 'event: error\ndata: {"code":"ai_provider_unavailable","message":"x"}\n\n';
+  assert.equal((await songTrangThai(raw)).at(-1), "error");
+  const off = 'event: error\ndata: {"code":"ai_no_provider","message":"x"}\n\n';
+  assert.equal((await songTrangThai(off)).at(-1), "offline");
+});
+
+test("AiProvider chi dat `error` o nhanh su kien error / ngoai le, va xoa no khi gui luot moi", () => {
+  const src = codeOnly(read("../src/components/ai/AiProvider.tsx"));
+  const at = [...src.matchAll(/error: \{ code:/g)].map((m) => m.index);
+  assert.ok(at.length >= 1);
+  for (const i of at) {
+    const truoc = src.slice(Math.max(0, i - 900), i);
+    assert.ok(/ev\.type === "error"|catch \(e\)/.test(truoc), "error chi dat khi may chu bao loi that");
+  }
+  assert.match(src, /streaming: true, streamingText: "", error: null/, "luot moi xoa loi cu");
+  for (const t of ["meta", "delta", "done", "citations"]) {
+    const m = src.match(new RegExp(`ev\\.type === "${t}"\\)[\\s\\S]*?\\} else if`));
+    assert.ok(m && !/error: \{/.test(m[0]), `nhanh ${t} khong duoc dat error`);
+  }
+});
+
 // ------------------------------------------------------------------ bộ điều phối
 
 function fakeRuntime({ reduced = false } = {}) {

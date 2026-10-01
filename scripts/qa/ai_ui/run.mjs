@@ -420,6 +420,28 @@ scenario("behaviour-quota-and-errors", async (page, vp) => {
   check("ai_busy hiện 'đang bận'", vp.name, /bận/i.test(b), b);
 });
 
+scenario("behaviour-double-submit", async (page, vp) => {
+  await ready(page, vp, "lan");
+  // Hai lần Enter CÙNG MỘT nhịp (trước khi React kịp vẽ lại `streaming: true`): chỉ một request được gửi đi.
+  const before = await page.ev(`__qa.count('/messages')`);
+  await page.focus("textarea.ai-o");
+  await page.type("gửi hai lần");
+  await page.ev(`(() => { const ta = document.querySelector('textarea.ai-o'); for (let i = 0; i < 2; i += 1) ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); })()`);
+  await page.wait(`__qa.count('/messages') > ${before} && !document.querySelector('.ai-nut-dung')`, 12000, "xong lượt gửi");
+  await sleep(300);
+  check("Enter hai lần cùng nhịp chỉ gửi MỘT lần", vp.name, (await page.ev(`__qa.count('/messages')`)) === before + 1, `requests=${(await page.ev(`__qa.count('/messages')`)) - before}`);
+  const users = await page.ev(`document.querySelectorAll('.ai-bong-user').length`);
+  check("không có bong bóng người dùng bị nhân đôi", vp.name, users === 1, `users=${users}`);
+  // Hai lần bấm nút Gửi cùng nhịp.
+  const b2 = await page.ev(`__qa.count('/messages')`);
+  await page.focus("textarea.ai-o");
+  await page.type("bấm hai lần");
+  await page.ev(`(() => { const f = document.querySelector('form.ai-panel-soan'); const btn = f.querySelector('button[type=submit]'); btn.click(); btn.click(); })()`);
+  await page.wait(`__qa.count('/messages') > ${b2} && !document.querySelector('.ai-nut-dung')`, 12000, "xong lượt thứ hai");
+  await sleep(300);
+  check("bấm Gửi hai lần cùng nhịp chỉ gửi MỘT lần", vp.name, (await page.ev(`__qa.count('/messages')`)) === b2 + 1, `requests=${(await page.ev(`__qa.count('/messages')`)) - b2}`);
+}, { viewports: VIEWPORTS.filter((v) => ["390", "desktop"].includes(v.name)) });
+
 scenario("behaviour-resilience", async (page, vp) => {
   // Gieo trước khi đăng nhập: danh sách lịch sử được nạp một lần lúc mở panel.
   await page.ev(`__qa.seed('kim', { title: 'Cuộc trò chuyện cũ', messages: [{ role: 'user', content: 'câu hỏi cũ' }, { role: 'assistant', content: 'trả lời cũ' }] })`);
@@ -485,6 +507,34 @@ scenario("behaviour-focus", async (page, vp) => {
   const onLauncher = await page.ev(`document.activeElement?.classList?.contains('ai-launcher')`);
   check("đóng panel: focus trả về nút mở", vp.name, onLauncher, `activeElement=${await page.ev("document.activeElement?.tagName + '.' + document.activeElement?.className")}`);
 }, { viewports: VIEWPORTS.filter((v) => !isPageView(v)) });
+
+scenario("behaviour-scroll-follow", async (page, vp) => {
+  // Hai điều mà bài kiểm "cuộn lên thì không bị giật xuống" KHÔNG phủ (reviewer): vẫn bám đáy khi người dùng không cuộn,
+  // và mở một hội thoại dài từ lịch sử thì nhảy xuống đáy; cộng với khung cao lên giữa chừng thì không mất bám đáy.
+  const msgs = Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `tin số ${i + 1} ` + "nội dung dài ".repeat(12) }));
+  await page.ev(`__qa.seed('mai', { title: 'Hội thoại rất dài', messages: ${JSON.stringify(msgs)} })`);
+  await ready(page, vp, "mai");
+  const gan = `(() => { const el = document.querySelector('.ai-panel-tin'); return el.scrollHeight - el.scrollTop - el.clientHeight; })()`;
+  await page.click("button[aria-label='Lịch sử hội thoại']");
+  await page.wait("document.querySelector('.ai-lichsu')", 4000, "lịch sử");
+  await page.ev(`[...document.querySelectorAll('.ai-lichsu-mo')].find((b) => b.innerText.includes('Hội thoại rất dài')).click()`);
+  await page.wait("document.body.innerText.includes('tin số 30')", 4000, "mở hội thoại dài");
+  await sleep(200);
+  const khoang = await page.ev(gan);
+  check("mở hội thoại dài từ lịch sử: nhảy xuống đáy", vp.name, khoang < 80, `còn cách đáy ${khoang}px`);
+  await page.ev(`__qa.script.push({ kind: 'ok', words: 300, delay: 10 })`);
+  await page.focus("textarea.ai-o");
+  await page.type("viết dài đi");
+  await page.key("Enter");
+  await page.wait("document.querySelector('.ai-nut-dung')", 4000, "bắt đầu stream");
+  await sleep(500);
+  // Khung cao lên giữa chừng (như xoay màn hình): việc bám đáy KHÔNG được tắt.
+  await page.s("Emulation.setDeviceMetricsOverride", { width: vp.width, height: vp.height + 120, deviceScaleFactor: vp.mobile ? 2 : 1, mobile: vp.mobile });
+  await page.wait("!document.querySelector('.ai-nut-dung')", 20000, "stream xong");
+  await sleep(150);
+  const sau = await page.ev(gan);
+  check("không cuộn gì + khung cao lên giữa chừng: vẫn ở đáy khi stream xong", vp.name, sau < 80, `còn cách đáy ${sau}px`);
+}, { viewports: VIEWPORTS.filter((v) => ["390", "desktop"].includes(v.name)) });
 
 scenario("behaviour-scroll-anchor", async (page, vp) => {
   await ready(page, vp, "hana");
@@ -590,6 +640,10 @@ async function main() {
     server.close();
     await sleep(300);
     try { fs.rmSync(chrome.userDir, { recursive: true, force: true }); } catch { /* Chrome còn giữ tệp: bỏ qua */ }
+  }
+  if (results.length === 0) {
+    console.error(ONLY ? `Không kịch bản nào khớp --only ${ONLY}` : "Không chạy được kiểm tra nào");
+    process.exit(2);
   }
   const fail = results.filter((r) => r.status === "FAIL");
   console.log(`\n${results.filter((r) => r.status === "PASS").length} PASS, ${fail.length} FAIL, ${results.filter((r) => r.status === "INFO").length} INFO`);

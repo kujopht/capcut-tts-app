@@ -81,7 +81,12 @@ export function AiConversation() {
 
   const khiCuon = () => {
     const el = danhSachRef.current;
-    if (el) batDay.current = el.scrollHeight - el.scrollTop - el.clientHeight < NGUONG_DAY_PX;
+    if (!el) return;
+    batDay.current = el.scrollHeight - el.scrollTop - el.clientHeight < NGUONG_DAY_PX;
+    // Mốc so sánh đi theo CHÍNH các sự kiện cuộn: khi khung cao lên (xoay màn hình, đổi cỡ cửa sổ) trình duyệt tự kẹp
+    // `scrollTop` xuống và bắn sự kiện này — nếu mốc cũ giữ nguyên, lần cập nhật chữ kế bị hiểu nhầm là "người dùng kéo lên"
+    // và việc bám đáy tắt luôn cho cả câu trả lời đang chạy.
+    viTriTruoc.current = { top: el.scrollTop, height: el.scrollHeight };
   };
 
   useEffect(() => {

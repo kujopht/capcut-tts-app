@@ -177,6 +177,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   const uidRef = useRef<string | null>(null);
   uidRef.current = profile?.user_id ?? null;
   const assistantIdRef = useRef<string | null>(null);
+  /** Đang có một lượt gửi chạy (khoá đồng bộ, xem `guiVanBan`). */
+  const dangGuiRef = useRef(false);
 
   // ĐỔI NGƯỜI DÙNG trong cùng trang (đăng xuất, đăng nhập tài khoản khác — `SessionProvider` không tải lại trang) thì
   // BỎ SẠCH trạng thái của người trước: tin nhắn, lịch sử, hạn mức, dự án, bản nháp. Trước đây Provider (gắn ở layout)
@@ -195,6 +197,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       ctrlRef.current?.abort();
       ctrlRef.current = null;
       assistantIdRef.current = null;
+      dangGuiRef.current = false;
     };
   }, [uidHienTai]);
   /**
@@ -411,7 +414,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, mode }));
   }, []);
 
-  const guiVanBan = useCallback(
+  const chayLuotGui = useCallback(
     async (text: string, regenerateOf?: string) => {
       const trimmed = text.trim();
       if (!trimmed || state.streaming) return;
@@ -580,6 +583,25 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       }
     },
     [state.streaming, state.conversationId, state.mode, state.activeProjectId, giuNguoi],
+  );
+
+  /**
+   * Khoá ĐỒNG BỘ: chỉ một lượt gửi chạy tại một thời điểm. `state.streaming` chỉ đổi sau lần vẽ lại, nên hai lần Enter /
+   * hai lần bấm Gửi trong CÙNG một nhịp (nhấn đúp, phím lặp) đều thấy `streaming=false` và gửi hai request: máy chủ từ chối
+   * cái thứ hai (một luồng/người) và giao diện tắt trạng thái "đang trả lời" giữa lúc câu trả lời của cái thứ nhất còn
+   * đang chạy, làm mất chữ đang hiện.
+   */
+  const guiVanBan = useCallback(
+    async (text: string, regenerateOf?: string) => {
+      if (dangGuiRef.current) return;
+      dangGuiRef.current = true;
+      try {
+        await chayLuotGui(text, regenerateOf);
+      } finally {
+        dangGuiRef.current = false;
+      }
+    },
+    [chayLuotGui],
   );
 
   const sendMessage = useCallback((text: string) => guiVanBan(text), [guiVanBan]);

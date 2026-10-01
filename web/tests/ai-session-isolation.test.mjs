@@ -217,3 +217,19 @@ test("useChatDockOffset: không dựng lại ResizeObserver mỗi lần DOM đ�
   const src = codeOnly(read("components/ai/useChatDockOffset.ts"));
   assert.match(src, /if \(el === dangDo && \(el === null \|\| ro !== null\)\) return;/);
 });
+
+test("AiProvider: khoá ĐỒNG BỘ chống gửi đôi trong cùng một nhịp (Enter lặp, nhấn đúp nút Gửi)", () => {
+  const src = codeOnly(read("components/ai/AiProvider.tsx"));
+  assert.match(src, /const dangGuiRef = useRef\(false\)/);
+  assert.match(src, /if \(dangGuiRef\.current\) return;\s*dangGuiRef\.current = true;\s*try \{\s*await chayLuotGui\(text, regenerateOf\);\s*\} finally \{\s*dangGuiRef\.current = false;/);
+  assert.match(src, /const sendMessage = useCallback\(\(text: string\) => guiVanBan\(text\)/);
+  // đổi người dùng cũng nhả khoá (luồng cũ đã bị huỷ)
+  assert.match(src, /assistantIdRef\.current = null;\s*dangGuiRef\.current = false;/);
+});
+
+test("AiConversation: mốc cuộn đi theo sự kiện scroll (khung cao lên thì trình duyệt tự kẹp scrollTop)", () => {
+  const src = codeOnly(read("components/ai/AiConversation.tsx"));
+  const khiCuon = src.match(/const khiCuon = \(\) => \{[\s\S]*?\n {2}\};/)?.[0] ?? "";
+  assert.ok(khiCuon, "không tìm thấy khiCuon");
+  assert.match(khiCuon, /viTriTruoc\.current = \{ top: el\.scrollTop, height: el\.scrollHeight \}/);
+});

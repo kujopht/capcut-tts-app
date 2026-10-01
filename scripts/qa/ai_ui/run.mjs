@@ -539,6 +539,33 @@ scenario("behaviour-late-transport-error", async (page, vp) => {
   await page.ev(`__qa.failAfterDone = false; __qa.closeDelayMs = 60`);
 }, { viewports: VIEWPORTS.filter((v) => ["390", "desktop"].includes(v.name)) });
 
+scenario("behaviour-second-message-while-creating", async (page, vp) => {
+  await ready(page, vp, "noi");
+  // Hội thoại MỚI: lượt đầu còn chờ máy chủ tạo hội thoại (chậm), `streaming` CHƯA bật nên ô soạn vẫn mở. Tin thứ hai gõ + Enter
+  // trong khoảng đó bị khoá gửi từ chối — ô soạn KHÔNG được xoá bản nháp (trước đây chữ biến mất mà không có gì báo).
+  await page.ev(`__qa.createDelayMs = 1500; __qa.script.push({ kind: 'ok', words: 6, delay: 20 }, { kind: 'ok', words: 6, delay: 20 })`);
+  const b0 = await page.ev(`__qa.count('/messages')`);
+  await page.focus("textarea.ai-o");
+  await page.type("tin thứ nhất");
+  await page.key("Enter");
+  await page.wait("__qa.calls.some((c) => c.method === 'POST' && c.path === '/api/ai/conversations')", 3000, "đang tạo hội thoại");
+  const dangTao = await page.ev(`({ dung: !!document.querySelector('.ai-nut-dung'), msgs: __qa.count('/messages') })`);
+  check("tiền đề: đang tạo hội thoại, chưa stream, ô soạn còn mở", vp.name, !dangTao.dung && dangTao.msgs === b0, JSON.stringify(dangTao));
+  await page.focus("textarea.ai-o");
+  await page.type("tin thứ hai");
+  await page.key("Enter");
+  const giu = await page.ev(`document.querySelector('textarea.ai-o').value`);
+  check("khoá gửi từ chối tin thứ hai: bản nháp được GIỮ nguyên (không nuốt chữ)", vp.name, giu === "tin thứ hai", JSON.stringify(giu));
+  await page.wait(`__qa.count('/messages') >= ${b0 + 1} && __qa.inflight === 0 && !document.querySelector('.ai-nut-dung')`, 15000, "lượt đầu xong");
+  await sleep(150);
+  check("lượt đầu vẫn đi đúng một request", vp.name, (await page.ev(`__qa.count('/messages')`)) === b0 + 1, `requests=${(await page.ev(`__qa.count('/messages')`)) - b0}`);
+  await page.focus("textarea.ai-o");
+  await page.key("Enter");
+  await page.wait(`__qa.count('/messages') >= ${b0 + 2} && __qa.inflight === 0 && !document.querySelector('.ai-nut-dung')`, 15000, "tin thứ hai được gửi lại");
+  check("gửi lại bản nháp đã giữ: tin thứ hai đến máy chủ nguyên văn", vp.name, (await page.ev(`__qa.lastContent`)) === "tin thứ hai", `last=${await page.ev("__qa.lastContent")}`);
+  await page.ev(`__qa.createDelayMs = 0`);
+}, { viewports: VIEWPORTS.filter((v) => ["390", "desktop"].includes(v.name)) });
+
 scenario("behaviour-resilience", async (page, vp) => {
   // Gieo trước khi đăng nhập: danh sách lịch sử được nạp một lần lúc mở panel.
   await page.ev(`__qa.seed('kim', { title: 'Cuộc trò chuyện cũ', messages: [{ role: 'user', content: 'câu hỏi cũ' }, { role: 'assistant', content: 'trả lời cũ' }] })`);

@@ -677,10 +677,15 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 counted_out = (out_tok or estimated_out) if charge else 0
                 # Hạch toán theo SLOT trước tiên và trong `try` riêng (audit F20): trước đây nó nằm SAU các lần ghi kho
                 # tin nhắn/sổ người dùng, nên một lần ghi hỏng làm mất luôn bộ đếm slot (rồi tới trần toàn cục).
-                # Lượt bị client bỏ ngang TRƯỚC token đầu (`served` rỗng) vẫn đã tốn một request thật ở slot đang được
-                # gọi: ghi nó vào slot đó, nếu không bộ đếm slot — chính là trần toàn cục 150 — đếm thiếu, và N tài khoản x
-                # 5 lượt "gửi rồi ngắt" gọi nhà cung cấp mà không bao giờ chạm trần toàn cục.
-                slot_tinh_phi = served["provider_name"] or (tried["provider_name"] if abandoned_after_call else "")
+                # Gateway chỉ phát `ProviderServed` ở token CHỮ đầu tiên, nên `served` rỗng dù nhà cung cấp đã tốn một request
+                # thật ở slot đang được gọi (`tried`) trong hai trường hợp: (a) client bỏ ngang TRƯỚC token đầu (`stopped`);
+                # (b) nhà cung cấp trả lời THÀNH CÔNG nhưng RỖNG — vd. bị lọc nội dung, chỉ có `usage` + `finish_reason` — kết
+                # thúc `complete` mà người dùng vẫn bị trừ lượt. Ghi cả hai vào slot đó, nếu không bộ đếm slot — chính là trần
+                # toàn cục 150 — đếm thiếu, và N tài khoản x 5 lượt "gửi rồi ngắt"/"bị lọc" gọi nhà cung cấp mà không bao giờ
+                # chạm trần. Lỗi phía nhà cung cấp trước token (`error`) cố ý KHÔNG vào đây: nó chỉ vào `errors` của slot (do
+                # gateway ghi) và không trừ lượt người dùng (xem runbook, "Chính sách đếm").
+                called_without_text = pump is not None and final_status in ("stopped", "complete")
+                slot_tinh_phi = served["provider_name"] or (tried["provider_name"] if called_without_text else "")
                 if rt.control is not None and slot_tinh_phi:
                     try:
                         await run_in_threadpool(rt.control.record_turn, slot_tinh_phi,

@@ -2,7 +2,7 @@
 Trần kích thước thân yêu cầu (request body) theo tiền tố đường dẫn — ASGI thuần, KHÔNG đọc/đệm thân trước.
 
 Vì sao cần: FastAPI đọc TOÀN BỘ thân JSON vào bộ nhớ rồi mới kiểm hợp lệ (422) và rồi mới tới xác thực trong thân route,
-nên trước đây một client (kể cả KHÔNG đăng nhập) gửi vài trăm MB tới `/api/ai/*` vẫn bắt máy chủ đọc hết vào RAM — trên
+nên trước đây một client (kể cả KHÔNG đăng nhập) gửi vài trăm MB tới `/api/ai/*` (hay `/api/admin/ai/*`) vẫn bắt máy chủ đọc hết vào RAM — trên
 instance 512 MB chỉ vài kết nối như vậy là OOM, kéo sập cả site. Giới hạn ở rìa, trước khi ai đó đọc thân:
 
 * có `Content-Length` lớn hơn trần  -> 413 NGAY, thân không bị đọc;
@@ -27,7 +27,10 @@ BODY_METHODS = frozenset({"POST", "PUT", "PATCH"})
 #: Tiếng Việt UTF-8 tối đa 3 byte/ký tự, `\uXXXX` 6 byte/ký tự -> 256 KB là trần rộng rãi cho mọi thân hợp lệ.
 AI_PREFIX = "/api/ai/"
 AI_MAX_BODY_BYTES = 256 * 1024
-BODY_LIMIT_RULES: Tuple[Tuple[str, int], ...] = ((AI_PREFIX, AI_MAX_BODY_BYTES),)
+#: `/api/admin/ai/*` (control plane: slot, preset, profile, global): JSON nhỏ cỡ vài KB. Cùng họ tính năng và cùng nguy cơ —
+#: FastAPI đọc hết thân vào RAM TRƯỚC khi tới bước xác thực, nên một client chưa đăng nhập cũng làm được — nên cùng trần.
+AI_ADMIN_PREFIX = "/api/admin/ai/"
+BODY_LIMIT_RULES: Tuple[Tuple[str, int], ...] = ((AI_PREFIX, AI_MAX_BODY_BYTES), (AI_ADMIN_PREFIX, AI_MAX_BODY_BYTES))
 
 
 def _declared_length(scope: Scope) -> Optional[int]:

@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from server.body_limit import AI_MAX_BODY_BYTES, AI_PREFIX, BODY_LIMIT_RULES, MaxBodyMiddleware
+from server.body_limit import AI_ADMIN_PREFIX, AI_MAX_BODY_BYTES, AI_PREFIX, BODY_LIMIT_RULES, MaxBodyMiddleware
 
 
 class _Msg(BaseModel):
@@ -106,8 +106,8 @@ class TestBodyLimitUnit(unittest.TestCase):
         self.assertIn(r.status_code, (200, 400, 413, 422))
 
     def test_defaults_cover_the_ai_prefix_with_room_for_the_largest_legitimate_body(self) -> None:
-        self.assertEqual(BODY_LIMIT_RULES, ((AI_PREFIX, AI_MAX_BODY_BYTES),))
-        self.assertEqual(AI_PREFIX, "/api/ai/")
+        self.assertEqual(BODY_LIMIT_RULES, ((AI_PREFIX, AI_MAX_BODY_BYTES), (AI_ADMIN_PREFIX, AI_MAX_BODY_BYTES)))
+        self.assertEqual((AI_PREFIX, AI_ADMIN_PREFIX), ("/api/ai/", "/api/admin/ai/"))
         # Dự án lớn nhất hợp lệ: 120 + 4000 + 4000 + 3 x 8000 ký tự, mỗi ký tự tối đa 6 byte (\uXXXX).
         self.assertGreater(AI_MAX_BODY_BYTES, (120 + 4000 + 4000 + 3 * 8000) * 6 // 2)
         self.assertLessEqual(AI_MAX_BODY_BYTES, 1024 * 1024, "trần phải nhỏ hơn nhiều so với RAM của instance")
@@ -270,7 +270,10 @@ class TestWiredIntoTheRealApp(unittest.TestCase):
         big = {"content": "x" * (AI_MAX_BODY_BYTES + 10), "client_id": "c"}
         for method, path in (("post", "/api/ai/conversations/abc/messages"), ("post", "/api/ai/projects"),
                              ("put", "/api/ai/preferences"), ("post", "/api/ai/support/escalations"),
-                             ("post", "/api/ai/conversations")):
+                             ("post", "/api/ai/conversations"),
+                             # control plane của Owner: cùng họ tính năng, cùng nguy cơ (thân bị đọc hết TRƯỚC khi xác thực)
+                             ("put", "/api/admin/ai/global"), ("post", "/api/admin/ai/slots"),
+                             ("put", "/api/admin/ai/presets/beta"), ("post", "/api/admin/ai/slots/gemini-01/probe")):
             with self.subTest(path=path):
                 r = getattr(self.c, method)(path, json=big)
                 self.assertEqual(r.status_code, 413, r.text)
@@ -288,7 +291,9 @@ class TestWiredIntoTheRealApp(unittest.TestCase):
         self.assertIn(r.status_code, (401, 403, 503), "chưa đăng nhập / AI tắt trong test, nhưng không phải 413")
 
     def test_the_rest_of_the_api_has_no_new_limit(self) -> None:
-        self.assertEqual([p for p, _ in BODY_LIMIT_RULES], ["/api/ai/"])
+        self.assertEqual([p for p, _ in BODY_LIMIT_RULES], ["/api/ai/", "/api/admin/ai/"])
+        r = self.c.post("/api/admin/users", json={"x": "y" * (AI_MAX_BODY_BYTES + 10)})
+        self.assertNotEqual(r.status_code, 413, "chỉ hai tiền tố AI có trần mới; phần còn lại của API giữ nguyên")
 
 
 if __name__ == "__main__":

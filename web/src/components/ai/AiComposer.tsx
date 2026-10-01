@@ -28,8 +28,9 @@ export function AiComposer() {
   const gui = () => {
     const trimmed = draft.trim();
     if (!trimmed || streaming || khoa) return;
-    void sendMessage(trimmed);
-    setDraft("");
+    // `false`: một lượt khác đang giữ khoá gửi (vd. hội thoại mới còn đang được tạo, `streaming` chưa bật) — tin KHÔNG được
+    // nhận, nên GIỮ bản nháp thay vì xoá: nếu không, chữ người dùng vừa gõ biến mất mà không có gì báo.
+    if (sendMessage(trimmed)) setDraft("");
   };
 
   return (

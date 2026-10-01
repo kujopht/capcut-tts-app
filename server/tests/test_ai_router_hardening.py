@@ -21,7 +21,7 @@ from server.ai_assistant.gateway import AiGateway, ErrorEvent, ProviderServed
 from server.llm_gateway.chat_provider import Delta, ProviderError
 from server.llm_gateway.usage_limits import CircuitBreaker
 from server.tests.test_ai_control_plane import Clock, Scripted, _FakeAppwrite, plane_with, run, slot, turns
-from server.tests.test_ai_e2e_regression import World, _LiveServer, ev
+from server.tests.test_ai_e2e_regression import World, _LiveServer, detail, ev
 
 
 def last_error(events: List[Any]) -> Optional[ErrorEvent]:
@@ -249,6 +249,70 @@ class TestOnAttemptReporting(unittest.TestCase):
         gw = AiGateway(providers={"b": Scripted("b")}, provider_chain=["b"])
         list(gw.stream(turns(), mode="general", on_attempt=lambda s, m: seen.append((s, m))))
         self.assertEqual([s for s, _ in seen], ["b"])
+
+
+class TestCancelRaisedBetweenTheCheckAndTheProviderCall(unittest.TestCase):
+    """Đua do reviewer (lượt 3) tìm ra: `cancel()` được kiểm ở đầu vòng, rồi gateway còn tra khoá/dựng provider/báo `on_attempt`.
+    Client ngắt đúng khoảng đó thì route đọc `tried` (còn rỗng) và không đếm slot, trong khi gateway VẪN gọi nhà cung cấp. Kiểm
+    lại SAU `on_attempt` đóng khoảng hở: hoặc lời gọi không được phát đi (không có gì để đếm), hoặc `tried` đã có trước khi cờ
+    huỷ được đặt (route đếm đúng)."""
+
+    def test_control_plane_gateway_makes_no_call_when_cancel_fires_inside_the_attempt_callback(self) -> None:
+        gone, prov = threading.Event(), Scripted("gemini-01")
+        plane = plane_with([slot("gemini-01")], providers={"gemini-01": prov})
+        events = list(ControlledGateway(plane).stream(turns(), mode="general", cancel=gone.is_set,
+                                                      on_attempt=lambda s, m: gone.set()))
+        self.assertEqual((events, prov.calls), ([], 0))
+
+    def test_legacy_gateway_too(self) -> None:
+        gone, prov = threading.Event(), Scripted("a")
+        gw = AiGateway(providers={"a": prov}, provider_chain=["a"])
+        events = list(gw.stream(turns(), mode="general", cancel=gone.is_set, on_attempt=lambda s, m: gone.set()))
+        self.assertEqual((events, prov.calls), ([], 0))
+
+    def test_a_cancel_that_arrives_after_the_provider_call_started_is_still_attributed(self) -> None:
+        """Hướng ngược lại (đúng): cờ huỷ đặt SAU phép kiểm thứ hai thì `on_attempt` đã chạy trước đó, nên route thấy slot."""
+        gone, seen = threading.Event(), []
+
+        class SetsCancelWhileStreaming(Scripted):
+            def stream(self, req):  # type: ignore[override]
+                gone.set()  # client ngắt ngay khi lời gọi bắt đầu
+                yield from super().stream(req)
+
+        prov = SetsCancelWhileStreaming("gemini-01")
+        plane = plane_with([slot("gemini-01")], providers={"gemini-01": prov})
+        list(ControlledGateway(plane).stream(turns(), mode="general", cancel=gone.is_set,
+                                             on_attempt=lambda s, m: seen.append(s)))
+        self.assertEqual((prov.calls, seen), (1, ["gemini-01"]))
+
+
+class TestEmptyCompletionStillCountsAsAProviderRequest(unittest.TestCase):
+    """Lỗ hổng do reviewer (lượt 3) tìm ra: nhà cung cấp trả lời THÀNH CÔNG nhưng RỖNG (vd. bị lọc nội dung: chỉ `usage` +
+    `finish_reason`, không token chữ nào). Gateway chỉ phát `ProviderServed` ở token chữ đầu nên slot không được đếm — trong khi
+    người dùng vẫn bị trừ lượt — và N tài khoản x 5 lượt kiểu này gọi nhà cung cấp mà không bao giờ chạm trần toàn cục."""
+
+    def test_the_slot_and_the_global_ceiling_count_it_and_the_user_is_charged(self) -> None:
+        w = World(slots=1, global_cap=3, per_user=5, scripts={"gemini-01": ["empty", "empty", "empty"]})
+        for i in range(3):
+            _, r = w.ask(f"u{i}")
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(ev(r, "delta"), [])
+            self.assertEqual(ev(r, "done")[0]["status"], "complete")
+            self.assertEqual(w.avail(f"u{i}")["limits"]["requests_used"], 1, "lượt rỗng vẫn trừ lượt của người dùng")
+        self.assertEqual(w.per_slot(), {"gemini-01": 3}, "mỗi lượt rỗng là một request thật ở slot")
+        _, r = w.ask("u3")
+        self.assertEqual((r.status_code, detail(r)["scope"]), (429, "global"), "trần toàn cục phải chạm nhờ các lượt rỗng")
+        self.assertEqual(len(w.provs["gemini-01"].requests), 3, "lượt thứ tư bị chặn TRƯỚC khi gọi nhà cung cấp")
+
+    def test_a_provider_failure_before_the_first_token_stays_an_error_not_a_request(self) -> None:
+        """Chính sách (ghi trong runbook): lỗi phía nhà cung cấp TRƯỚC token chỉ vào `errors` của slot — không vào `requests`
+        (= trần toàn cục) và không trừ lượt người dùng. Ghim lại để đổi chính sách này là một quyết định có chủ ý."""
+        w = World(slots=1, scripts={"gemini-01": [ProviderError("5xx", code="provider_http_500")]})
+        _, r = w.ask("alice")
+        self.assertEqual(ev(r, "error")[0]["code"], "ai_provider_unavailable")
+        self.assertEqual(w.per_slot(), {})
+        self.assertEqual(w.plane.usage_today()["gemini-01"].errors, 1)
+        self.assertEqual(w.avail("alice")["limits"]["requests_used"], 0)
 
 
 class TestAbandonedTurnsDoNotKeepHittingProviders(unittest.TestCase):

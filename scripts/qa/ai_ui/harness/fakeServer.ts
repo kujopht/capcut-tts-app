@@ -89,6 +89,9 @@ export function installFakeServer(): void {
      *  luồng). `lateErrors` đếm số lần điều đó đã xảy ra. */
     failAfterDone: false,
     lateErrors: 0,
+    /** Làm chậm `POST /conversations` (máy chủ chậm / Render vừa thức dậy): khoảng chờ này `streaming` CHƯA bật nên ô soạn
+     *  vẫn mở — chỗ để lộ lỗi nuốt tin thứ hai. */
+    createDelayMs: 0,
     /** Công tắc tổng TẮT (kill switch): access `eligible:false`, availability `disabled_by_admin`, gửi tin 503 `ai_not_enabled`. */
     killed: false,
     /** Người có id bắt đầu bằng "outsider" là NGOÀI khán giả: access `eligible:false`, availability `not_in_audience`, mọi route khác 403. */
@@ -164,6 +167,7 @@ export function installFakeServer(): void {
     }
     if (path === "/api/ai/conversations" && method === "POST") {
       const body = JSON.parse(String(init?.body ?? "{}"));
+      if (qa.createDelayMs) await sleep(qa.createDelayMs, init?.signal ?? null);
       counter += 1;
       const c: Conv = { conversation_id: `c${counter}_${tok}`, owner: tok, mode: body.mode ?? "general",
                         title: body.title ?? "", created_at: now(), updated_at: now(), messages: [] };

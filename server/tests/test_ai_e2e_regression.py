@@ -53,7 +53,8 @@ DAY_1, DAY_2 = "20261002", "20261003"
 class Prov(ChatProvider):
     """Nhà cung cấp giả có kịch bản. Mỗi lần gọi lấy một bước từ `script` (hết thì dùng `default`):
     "ok" | một ngoại lệ (lỗi TRƯỚC delta đầu) | ("after", err) (một delta rồi lỗi) | ("slow_fail", giây, err) (treo
-    `giây` giây rồi lỗi trước delta đầu)."""
+    `giây` giây rồi lỗi trước delta đầu) | "empty" (trả lời THÀNH CÔNG nhưng RỖNG, vd. bị lọc nội dung: chỉ `usage` +
+    `Done`, không có token chữ nào)."""
 
     def __init__(self, name: str, *, script: Sequence[Any] = (), default: Any = "ok", words: int = 3,
                  delay: float = 0.0) -> None:
@@ -95,6 +96,10 @@ class Prov(ChatProvider):
             if isinstance(step, tuple) and step[0] == "after":
                 yield Delta(text=f"từ {self.name} ")
                 raise step[1]
+            if step == "empty":
+                yield UsageEvent(input_tokens=10, output_tokens=0)
+                yield Done()
+                return
             for i in range(self.words):
                 if self.delay:
                     time.sleep(self.delay)

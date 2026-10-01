@@ -138,7 +138,8 @@ interface AiContextValue extends AiState {
   newConversation: (mode?: AiMode) => Promise<void>;
   deleteConversationById: (id: string) => Promise<void>;
   setMode: (mode: AiMode) => void;
-  sendMessage: (text: string) => Promise<void>;
+  /** `false` = đang có lượt giữ khoá gửi, tin KHÔNG được nhận: nơi gọi giữ nguyên bản nháp (xem cài đặt). */
+  sendMessage: (text: string) => boolean;
   loadPreferences: () => Promise<void>;
   setMemoryEnabled: (value: boolean) => Promise<void>;
   deleteAllMemory: (includeProjects?: boolean) => Promise<void>;
@@ -625,7 +626,19 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
     [chayLuotGui],
   );
 
-  const sendMessage = useCallback((text: string) => guiVanBan(text), [guiVanBan]);
+  /**
+   * `true`: tin được nhận (khoá rảnh, lượt bắt đầu — `guiVanBan` lấy khoá ĐỒNG BỘ trước `await` đầu tiên). `false`: đang có
+   * một lượt giữ khoá — vd. lượt đầu của hội thoại mới còn đang chờ máy chủ tạo hội thoại, lúc `streaming` chưa bật nên ô soạn
+   * vẫn mở. Tin KHÔNG được gửi; nơi gọi phải GIỮ NGUYÊN bản nháp, nếu không chữ người dùng vừa gõ biến mất không báo gì.
+   */
+  const sendMessage = useCallback(
+    (text: string): boolean => {
+      if (khoaGuiRef.current !== 0) return false;
+      void guiVanBan(text);
+      return true;
+    },
+    [guiVanBan],
+  );
 
   const stopStreaming = useCallback(() => {
     ctrlRef.current?.abort();

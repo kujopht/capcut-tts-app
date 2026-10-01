@@ -140,6 +140,9 @@ class AiGateway:
                     on_attempt(name, model)
                 except Exception:  # noqa: BLE001 — phép đo phụ, không bao giờ làm hỏng lượt
                     pass
+            if cancel is not None and cancel():
+                # Xem `ControlledGateway.stream`: kiểm lại SAU `on_attempt` để một lời gọi không còn ai đếm không được phát đi.
+                return
             req = GenerateRequest(
                 messages=trimmed, model=model, max_output_tokens=limits["max_output_tokens"],
                 user_ref=user_ref)

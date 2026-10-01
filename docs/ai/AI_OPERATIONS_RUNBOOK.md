@@ -17,7 +17,7 @@ Trình duyệt (Next.js trên Cloudflare Workers)
         │  Authorization: Bearer <phiên>   (khoá nhà cung cấp KHÔNG BAO GIỜ xuống trình duyệt)
         ▼
 Render `fas-prod-api` (FastAPI, một tiến trình, gói free: có thể ngủ/chậm)
-   MaxBodyMiddleware (/api/ai/*: thân tối đa 256 KB -> 413)
+   MaxBodyMiddleware (/api/ai/* và /api/admin/ai/*: thân tối đa 256 KB -> 413, trước cả bước xác thực)
    RateLimitMiddleware (toàn app, theo băm token; POST/PUT Tier B 120/phút)
    build_ai_router  /api/ai/*     xác thực -> khán giả -> RPM 8/người/phút -> admission -> StreamGuard
         admission (control plane): công tắc tổng -> trần toàn cục -> trần theo người (hoặc trần QA)
@@ -59,8 +59,23 @@ Những điều dễ hiểu nhầm:
 * **Giao diện người dùng chỉ hiện hạn mức RIÊNG** ("Hôm nay còn 3/5 lượt hỏi · làm mới lúc 07:00"). Mức dùng toàn cục, công suất nhà cung cấp, phần trăm: **chỉ ở `/admin/ai`**.
 * Một lượt được **tính** khi có văn bản/token, hoặc khi client bỏ đi *sau khi* nhà cung cấp đã bị gọi (chống vòng lặp gửi-rồi-ngắt). **Lỗi phía nhà cung cấp trước token đầu là miễn phí**. "Tạo lại" là một lượt mới (tốn thêm 1 lượt, và nhân đôi câu hỏi trong lịch sử — hành vi V1 có chủ ý).
 * Tin bị từ chối trước khi lưu (429/503) **không** nằm trong hội thoại; giao diện hiện "Chưa gửi".
-* Một lượt bị client bỏ đi *trước khi nhà cung cấp trả byte nào* vẫn tính cho người dùng **và** cho slot đang được gọi (gateway báo `on_attempt` ngay trước mỗi lời gọi), nên cũng vào trần toàn cục. Trước đây chỉ trừ người dùng, và N tài khoản × 5 lượt "gửi rồi ngắt" gọi nhà cung cấp mà không bao giờ chạm trần 150.
+* Một lượt bị client bỏ đi *trước khi nhà cung cấp trả byte nào* vẫn tính cho người dùng **và** cho slot đang được gọi (gateway báo `on_attempt` ngay trước mỗi lời gọi), nên cũng vào trần toàn cục. Trước đây chỉ trừ người dùng, và N tài khoản × 5 lượt "gửi rồi ngắt" gọi nhà cung cấp mà không bao giờ chạm trần 150. Gateway kiểm lại cờ huỷ NGAY SAU `on_attempt`: client ngắt đúng khoảng đó thì lời gọi không được phát đi (không có gì để đếm).
+* Nhà cung cấp trả lời **thành công nhưng rỗng** (vd. bị lọc nội dung: chỉ có `usage` + `finish_reason`, không token chữ nào) là một lượt thật: trừ lượt người dùng (nếu nhà cung cấp báo usage) **và** tính vào slot/trần toàn cục. Trước đây slot bị bỏ sót vì `ProviderServed` chỉ phát ở token chữ đầu tiên.
 * Nhiều tài khoản có thể cùng đốt trần toàn cục (30 tài khoản × 5 lượt = 150). Đây là đánh đổi của trần toàn cục, không phải lỗi.
+
+### Chính sách đếm (có chủ ý — đổi nó là một quyết định, không phải sửa lỗi; có test ghim lại)
+
+| Tình huống | Lượt của người dùng (`ai_usage_daily`) | `requests` của slot (= trần 150) | Bộ đếm khác của slot |
+|---|---|---|---|
+| Có token chữ, kết thúc bình thường | +1 | +1 (slot đã phục vụ) | — |
+| Thành công nhưng rỗng (lọc nội dung) | +1 nếu nhà cung cấp báo usage | +1 (slot đang được gọi) | — |
+| Client bỏ đi trước token đầu | +1 | +1 (slot đang được gọi) | — |
+| Lỗi nhà cung cấp **trước** token đầu (5xx, timeout…) rồi chuyển slot | 0 | 0 | `errors` +1 cho MỖI slot đã lỗi |
+| 429 từ nhà cung cấp trước token đầu | 0 | 0 | `rate_limited` +1, slot nghỉ theo `Retry-After` (kẹp 1–600 s) |
+| Lỗi **giữa chừng** (đã có token) | +1 | +1 | `errors` +1 |
+| Probe của Owner | không ghi sổ | 0 | `probes_today` (tối đa 30/slot/ngày) |
+
+Lý do để lỗi-trước-token không vào `requests`: trần 150 đo lượt được PHỤC VỤ; người dùng không bị phạt vì lỗi của nhà cung cấp. Rủi ro đã biết: lỗi lặp lại có thể gọi nhà cung cấp nhiều lần mà không chạm trần. Giới hạn: RPM 8/người/phút, breaker 3 lỗi → cooldown 60 s, ngân sách chuyển slot 45 s/lượt.
 
 ---
 
@@ -132,7 +147,7 @@ Hội thoại đã lưu không cần xoá khi rút lui; người dùng tự xoá
 | SSE `ai_busy` | | mọi slot vừa chạm RPM/TPM mềm | slot `rpm_soft_cap`/`tpm_soft_cap` | tự hết ≤ 60 s; nới RPM mềm nếu thường xuyên |
 | "Trợ lý AI đang tạm gián đoạn" | SSE `ai_provider_unavailable` / `ai_no_provider` | tất cả slot lỗi/cooldown; hoặc không slot nào bật | `slots_by_status`, `last_error_code/category` từng slot, nút Kiểm tra | xem §3; kiểm khoá (`PERMISSION_DENIED`, `API_KEY_INVALID`), model (`NOT_FOUND`), 503 phía Google |
 | "Phản hồi bị ngắt giữa chừng" | SSE `ai_provider_interrupted` hoặc luồng đóng không có `done` | nhà cung cấp đứt giữa chừng; proxy cắt kết nối | `last_error_*` | "Tạo lại" (tốn 1 lượt) |
-| 413 `request_too_large` | | thân > 256 KB gửi tới `/api/ai/*` | — | không phải lỗi người dùng thường; xem log |
+| 413 `request_too_large` | | thân > 256 KB gửi tới `/api/ai/*` hoặc `/api/admin/ai/*` | — | không phải lỗi người dùng thường; xem log |
 | Stream không chạy dần | | Render free vừa ngủ dậy (chậm 30–60 s); proxy đệm | heartbeat `: ping` 15 s trong Network; `GET /api/health` | chờ; nếu lặp lại, kiểm gói Render |
 | Slot COOLDOWN mãi | | 429 từ Google (hạn mức/ngày của khoá hết) | `recent_429`, `last_error_code=provider_http_429` | để cooldown tự hết; Reset cooldown chỉ khi chắc khoá đã hồi |
 | Slot MISSING_SECRET | | thiếu `FAS_AI_SECRET_<REF>` trên host | `h.secret.present=false` | Owner đặt biến trên Render rồi khởi động lại |
@@ -187,5 +202,8 @@ Không dùng khoá/nhà cung cấp thật trong các test trên: nhà cung cấp
 * Một instance Render gói free: ngủ/chậm; trần luồng 4/instance.
 * Hai lượt kết thúc cùng lúc trên **hai instance** vẫn có thể ghi đè bộ đếm (khoá hiện chỉ trong một tiến trình); Render đang chạy một instance.
 * Cửa sổ vài mili-giây giữa kiểm hạn mức và nhận khoá luồng có thể cho một người đi quá trần **thêm 1 lượt** trong tình huống hiếm (người đó phải gửi đúng lúc lượt trước vừa kết thúc).
+* Client chậm đọc rồi ngắt kết nối khi uvicorn đang bị chặn ở backpressure: vé luồng được nhả ngay ở response, còn `_finalize` (ghi hạn mức) chạy khi vòng lặp dọn generator — vài mili-giây, có thể lâu hơn nếu có vòng tham chiếu. Lượt kế của cùng người có thể qua bước kiểm hạn mức trước khi lượt cũ được ghi (tối đa +1–2 lượt, bị RPM 8/phút kìm). Không sửa: `aclose()` trong lúc huỷ có rủi ro cao hơn lợi ích.
+* Lớp `GeminiProvider` cũ (khoá trong tham số URL `key=`) KHÔNG được pool control plane dùng: slot Gemini đi qua endpoint tương thích OpenAI với khoá ở header `Authorization`. Đừng gắn lớp cũ vào slot — ngoại lệ httpx có thể in cả URL vào log.
+* Các route POST/PUT khác của API (ngoài `/api/ai/*` và `/api/admin/ai/*`) chưa có trần thân riêng: FastAPI đọc hết thân vào RAM trước khi xác thực. Ngoài phạm vi tính năng AI; cân nhắc một trần toàn app trong lần làm cứng sau.
 * Khoá FFW1–FFW7 bị lộ tiền tố ngày 2026-10-01: **Owner hoãn xoay** (bước và công cụ đã sẵn); cân nhắc lại khi beta ổn định.
 * Hành vi bàn phím ảo trên điện thoại thật chưa được kiểm (xem §8).

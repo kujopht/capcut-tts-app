@@ -205,6 +205,11 @@ class ControlledGateway:
                     on_attempt(slot.slot_id, slot.model)
                 except Exception:  # noqa: BLE001 — phép đo phụ, không bao giờ làm hỏng lượt
                     log.warning("ai_control: on_attempt callback failed", exc_info=True)
+            if cancel is not None and cancel():
+                # Client ngắt đúng giữa phép kiểm đầu vòng và đây: route có thể đã đọc `tried` (khi đó còn rỗng) nên một lời
+                # gọi phát đi từ giờ sẽ KHÔNG BAO GIỜ được đếm vào slot/trần toàn cục. Chưa gọi thì chưa tốn quota: dừng hẳn.
+                # Cờ huỷ đặt SAU phép kiểm này thì `on_attempt` ở trên đã chạy trước, nên route vẫn thấy slot và đếm đúng.
+                return
             req = GenerateRequest(messages=trimmed, model=slot.model, max_output_tokens=max_out, user_ref=user_ref)
             started = False
             try:

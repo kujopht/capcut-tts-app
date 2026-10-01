@@ -182,7 +182,7 @@ Mọi thay đổi ghi từng **trường**: admin_id, thời điểm, entity (`g
 
 - Cooldown, cửa sổ RPM/TPM mềm và đếm 429 gần đây nằm **trong tiến trình** (một instance). Bộ đếm ngày và cấu hình thì bền (Appwrite).
 - Bộ đếm slot (`ai_provider_usage_daily`, chính là trần toàn cục) dùng đọc-sửa-ghi nhưng được **khoá theo (slot, ngày)** trong một tiến trình; giữa HAI instance vẫn có thể lệch nhỏ (Render đang chạy một instance). Bộ đếm người dùng (`ai_usage_daily`) không cần khoá vì mỗi người chỉ có một luồng tại một thời điểm.
-- Thân yêu cầu tới `/api/ai/*` bị cắt ở **256 KB** (`server/body_limit.py`, 413 `request_too_large`) trước khi FastAPI đọc vào bộ nhớ.
+- Thân yêu cầu tới `/api/ai/*` và `/api/admin/ai/*` bị cắt ở **256 KB** (`server/body_limit.py`, 413 `request_too_large`) trước khi FastAPI đọc vào bộ nhớ — kể cả khi chưa đăng nhập.
 - Cấu hình được cache 15 s: đổi cấu hình có hiệu lực trong ≤15 s trên mọi instance.
 - Chi phí là **ước tính** theo giá Owner nhập, không phải hoá đơn thật.
 - Ghi tuần tự chỉ trong một instance: hai instance cùng ghi dòng `global` có thể đè nhau (Render hiện chạy một instance).

@@ -225,7 +225,13 @@ test("AiProvider: khoá ĐỒNG BỘ chống gửi đôi trong cùng một nhị
   assert.match(src, /try \{\s*await chayLuotGui\(text, regenerateOf, nhaKhoa\);\s*\} finally \{\s*nhaKhoa\(\);/);
   // khoá mang ID của lượt giữ nó: lượt cũ nhả muộn không nhả nhầm khoá của lượt mới
   assert.match(src, /if \(khoaGuiRef\.current === id\) khoaGuiRef\.current = 0;/);
-  assert.match(src, /const sendMessage = useCallback\(\(text: string\) => guiVanBan\(text\)/);
+  // `sendMessage` trả về boolean ĐỒNG BỘ (false = khoá đang bị giữ, tin KHÔNG được nhận) để ô soạn GIỮ bản nháp thay vì nuốt
+  // chữ: lượt đầu của hội thoại mới còn chờ máy chủ tạo hội thoại thì `streaming` chưa bật, ô soạn vẫn mở.
+  assert.match(src, /sendMessage: \(text: string\) => boolean;/);
+  assert.match(src, /\(text: string\): boolean => \{\s*if \(khoaGuiRef\.current !== 0\) return false;\s*void guiVanBan\(text\);\s*return true;/);
+  const composer = codeOnly(read("components/ai/AiComposer.tsx"));
+  assert.match(composer, /if \(sendMessage\(trimmed\)\) setDraft\(""\);/);
+  assert.ok(!/void sendMessage\(/.test(composer), "ô soạn không được bỏ qua kết quả của sendMessage");
   // nhả NGAY khi lượt xong về mặt logic (done / error), không đợi luồng mạng đóng — nếu không tin gửi liền sau đó bị nuốt
   const handlers = src.match(/ev\.type === "done"\) \{[\s\S]*?ctrl\.signal,/)?.[0] ?? "";
   assert.equal((handlers.match(/nhaKhoa\(\);/g) ?? []).length, 2, "done và error đều phải nhả khoá ngay");

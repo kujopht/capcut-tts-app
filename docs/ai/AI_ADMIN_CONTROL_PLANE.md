@@ -68,7 +68,7 @@ Với beta, 8 slot × 30 = 240 request/ngày và 8 × 60.000 token. Cả hai đ�
 | `QUALITY_FIRST` | qwen → azure_openai → gemini → openrouter |
 | `WRITER` | qwen → azure_openai → gemini |
 | `STORY` | gemini → groq → qwen |
-| `SUPPORT_SAFE` | azure_openai → qwen (chỉ slot có workload `support`) |
+| `SUPPORT_SAFE` | azure_openai → qwen → **gemini** (chỉ slot có workload `support`). Gemini ở cuối: khi chỉ có pool Gemini, chế độ Hỗ trợ không rơi vào `ai_no_provider` |
 | `WEB_SEARCH` | gemini → qwen (LLM cho lượt có tìm web). Công cụ tìm web THẬT vẫn do cấu hình `web_search_provider` hiện có quyết định; `web_search_tool` trong control plane hiện chỉ nhận `off` và để dành cho bước sau |
 
 Chế độ → hồ sơ: `general→FREE_FIRST`, `story→STORY`, `writer→WRITER`, `support→SUPPORT_SAFE`; lượt tìm web → `web_search_profile`. Owner đổi được thứ tự, thêm/bớt bước, tắt hồ sơ.
@@ -88,8 +88,11 @@ Cùng mẫu với `FAS_CHAT_V1_AUDIENCE`. Quyết định **ai** gọi được 
 | rỗng + `DATA_BACKEND=appwrite` (production) | như `canary` — **đóng theo mặc định** |
 | rỗng + backend khác (dev/test) | như `all` |
 | `canary` | chỉ Owner (`FAS_OWNER_USER_IDS`) + `FAS_AI_CANARY_USERS` (phân tách bằng dấu phẩy; mục không giống user ID bị bỏ) |
+| `beta` | nhóm `canary` + **`FAS_AI_BETA_USERS`** (danh sách tester, tối đa **50** ID, mục trùng bị gộp). Vượt trần thì AI TẮT, không âm thầm cắt bớt. `/api/health` hiện thêm `beta_users` (chỉ số lượng) |
 | `all` | mọi người đã đăng nhập |
 | giá trị khác | AI TẮT (`reason` nêu biến sai) |
+
+Thứ tự mở rộng: `canary` (Owner) → `beta` (10–30 tester) → `all`. Thêm hoặc bớt tester là sửa `FAS_AI_BETA_USERS` rồi deploy backend.
 
 Người ngoài khán giả nhận `GET /api/ai/availability` → `enabled:false, reason:"not_in_audience"` (không lộ hạn mức). Mọi route khác trả 403 `ai_not_enabled`. Thứ tự kiểm: AI tắt → 503 như cũ; AI bật thì chưa đăng nhập 401 → ngoài khán giả 403 → mới tới hạn mức/công tắc tổng. `/api/health` công khai hiện `ai_assistant.audience` (chỉ giá trị đã phân giải, không có ID nào).
 

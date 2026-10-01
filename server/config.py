@@ -258,8 +258,11 @@ class LlmGatewaySettings:
         }
 
 
-#: Gia tri hop le cua `FAS_AI_AUDIENCE` (xem `AiAssistantSettings.audience`).
-AI_AUDIENCES = ("canary", "all")
+#: Gia tri hop le cua `FAS_AI_AUDIENCE` (xem `AiAssistantSettings.audience`) — theo thu tu MO RONG:
+#: canary (Owner) -> beta (nhom tester co danh sach) -> all.
+AI_AUDIENCES = ("canary", "beta", "all")
+#: Nhom beta toi da (dot dau 10–30 tester). Vuot tran -> AI TAT (fail-closed), khong cat bot am tham.
+AI_BETA_MAX_USERS = 50
 #: Mot user ID Appwrite (chu, so, `.`, `_`, `-`; toi da 36 ky tu).
 _AI_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$")
 
@@ -318,17 +321,22 @@ class AiAssistantSettings:
     user_ref_salt: str = ""
     #: Ai dung duoc `/api/ai/*` khi bat — cung mau `FAS_CHAT_V1_AUDIENCE`.
     #: "canary" = CHI Owner (`FAS_OWNER_USER_IDS`) + `FAS_AI_CANARY_USERS`;
+    #: "beta"   = nhom canary + `FAS_AI_BETA_USERS` (danh sach tester, toi da AI_BETA_MAX_USERS);
     #: "all" = moi nguoi da dang nhap. Rong = tu chon theo `DATA_BACKEND`:
     #: appwrite -> "canary" (production dong theo mac dinh), con lai -> "all".
     #: Gia tri la -> AI TAT (fail-closed), xem `resolved_audience`.
     audience: str = ""
     canary_users: Tuple[str, ...] = ()
+    beta_users: Tuple[str, ...] = ()
 
     def resolved_audience(self, data_backend: str) -> str:
-        """"canary" | "all"; chuoi RONG khi `FAS_AI_AUDIENCE` co gia tri la."""
+        """"canary" | "beta" | "all"; chuoi RONG (= AI tat) khi `FAS_AI_AUDIENCE` co gia tri la
+        hoac nhom beta vuot AI_BETA_MAX_USERS."""
         raw = (self.audience or "").strip().lower()
         if not raw:
             return "canary" if str(data_backend or "").lower() == "appwrite" else "all"
+        if raw == "beta" and len(self.beta_users) > AI_BETA_MAX_USERS:
+            return ""
         return raw if raw in AI_AUDIENCES else ""
 
     def describe(self) -> dict:
@@ -339,6 +347,7 @@ class AiAssistantSettings:
             "admin_v1": self.admin_v1,
             "audience": self.audience or "auto",
             "canary_users": len(self.canary_users),
+            "beta_users": len(self.beta_users),
             "assistant_name": self.assistant_name,
             "providers": list(self.providers),
             "qwen_configured": bool(self.qwen_api_key),
@@ -885,9 +894,16 @@ class Settings:
             # CHI hai co bat/tat + khan gia (khong ten provider, khong khoa, KHONG ID
             # nao): de kiem mot lan deploy "toi" (AI tat / chi canary) tu `/api/health`
             # cong khai ma khong can dang nhap.
-            "ai_assistant": {"enabled": self.ai_assistant.enabled, "admin_v1": self.ai_assistant.admin_v1,
-                             "audience": self.ai_assistant.resolved_audience(self.data_backend) or "invalid"},
+            "ai_assistant": self._ai_health(),
         }
+
+    def _ai_health(self) -> dict:
+        aud = self.ai_assistant.resolved_audience(self.data_backend) or "invalid"
+        out = {"enabled": self.ai_assistant.enabled, "admin_v1": self.ai_assistant.admin_v1, "audience": aud}
+        if aud == "beta":
+            # CHI so luong (khong ID): kiem nhanh danh sach tester da duoc doc dung bao nhieu muc.
+            out["beta_users"] = len(self.ai_assistant.beta_users)
+        return out
 
 
 def _social_limits() -> dict:
@@ -1107,6 +1123,7 @@ def _ai_assistant_settings() -> AiAssistantSettings:
         audience=_env("FAS_AI_AUDIENCE", "").strip().lower(),
         # Muc khong giong user ID bi BO (khong bao gio mo rong khan gia vi mot dong go nham).
         canary_users=tuple(x for x in _env_list("FAS_AI_CANARY_USERS", "") if _AI_USER_ID.match(x)),
+        beta_users=tuple(dict.fromkeys(x for x in _env_list("FAS_AI_BETA_USERS", "") if _AI_USER_ID.match(x))),
     )
 
 

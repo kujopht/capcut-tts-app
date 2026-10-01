@@ -115,10 +115,14 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
     # Thieu `resolved_audience` (settings gia/cu) -> "" -> AI TAT: khong bao gio mo cong vi thieu cau hinh.
     audience = resolve_audience(data_backend) if callable(resolve_audience) else ""
     if not audience:
-        return AiRuntime(False, reason=f"FAS_AI_AUDIENCE={getattr(ai, 'audience', '')!r} không hợp lệ (canary | all)",
+        return AiRuntime(False, reason=f"FAS_AI_AUDIENCE={getattr(ai, 'audience', '')!r} không hợp lệ "
+                                       "(canary | beta | all; beta tối đa 50 ID trong FAS_AI_BETA_USERS)",
                          control=control)
     audience_users = (frozenset(getattr(settings, "owner_user_ids", ()) or ())
                       | frozenset(getattr(ai, "canary_users", ()) or ()))
+    if audience == "beta":
+        # beta MỞ RỘNG canary: Owner + canary + nhóm tester. `allows()` coi "beta" như mọi khán giả có danh sách.
+        audience_users |= frozenset(getattr(ai, "beta_users", ()) or ())
 
     if control is not None:
         from server.ai_assistant.control.router import ControlledGateway

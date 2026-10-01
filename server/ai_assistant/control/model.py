@@ -53,7 +53,9 @@ DEFAULT_PROFILE_STEPS: Dict[str, Tuple[str, ...]] = {
     "QUALITY_FIRST": ("qwen", "azure_openai", "gemini", "openrouter"),
     "WRITER": ("qwen", "azure_openai", "gemini"),
     "STORY": ("gemini", "groq", "qwen"),
-    "SUPPORT_SAFE": ("azure_openai", "qwen"),
+    # Gemini ở CUỐI: hai provider ưu tiên cũ vẫn đứng trước khi được bật, còn khi chỉ có pool
+    # Gemini thì chế độ Hỗ trợ không bao giờ rơi vào `ai_no_provider` (beta 2026-10).
+    "SUPPORT_SAFE": ("azure_openai", "qwen", "gemini"),
     "WEB_SEARCH": ("gemini", "qwen"),
 }
 DEFAULT_MODE_PROFILES: Dict[str, str] = {

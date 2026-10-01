@@ -111,6 +111,39 @@ class TestBuildRuntime(unittest.TestCase):
         self.assertFalse(rt.enabled)
         self.assertIn("FAS_AI_AUDIENCE", rt.reason)
 
+    def test_beta_cohort_sits_between_canary_and_all(self) -> None:
+        tester = "tester_01"
+        rt = build_ai_runtime(self._settings(audience="beta", canary_users=(CANARY,), beta_users=(tester,)))
+        self.assertTrue(rt.enabled)
+        self.assertEqual(rt.audience, "beta")
+        for uid in (OWNER, CANARY, tester):
+            self.assertTrue(rt.allows(uid), uid)
+        self.assertFalse(rt.allows(STRANGER))
+        self.assertFalse(rt.allows(""))
+        # canary KHONG mo cho tester beta (danh sach beta chi co hieu luc o khan gia beta)
+        rt_c = build_ai_runtime(self._settings(audience="canary", beta_users=(tester,)))
+        self.assertFalse(rt_c.allows(tester))
+
+    def test_beta_over_cap_fails_closed(self) -> None:
+        from server.config import AI_BETA_MAX_USERS
+        many = tuple(f"t{i:03d}" for i in range(AI_BETA_MAX_USERS + 1))
+        rt = build_ai_runtime(self._settings(audience="beta", beta_users=many))
+        self.assertFalse(rt.enabled)
+        self.assertIn("50", rt.reason)
+        ok = build_ai_runtime(self._settings(audience="beta", beta_users=many[:AI_BETA_MAX_USERS]))
+        self.assertTrue(ok.enabled)
+
+    def test_beta_env_parsing_and_health_count_only(self) -> None:
+        env = {"FAS_AI_AUDIENCE": "beta", "FAS_AI_BETA_USERS": "u1,u2, u2 ,bad id!,u3"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            s = _ai_assistant_settings()
+        self.assertEqual(s.beta_users, ("u1", "u2", "u3"), "khu trung + bo muc khong giong ID")
+        st = replace(Settings(), data_backend="appwrite", ai_assistant=s)
+        h = st._ai_health()
+        self.assertEqual((h["audience"], h["beta_users"]), ("beta", 3))
+        self.assertNotIn("u1", repr(h))
+        self.assertNotIn("beta_users", replace(st, ai_assistant=replace(s, audience=""))._ai_health())
+
     def test_settings_without_audience_support_fail_closed(self) -> None:
         """Review (Antigravity Claude Opus, LOW #1): mot settings khong co `resolved_audience`
         khong duoc roi ve "all"."""

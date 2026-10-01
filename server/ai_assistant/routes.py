@@ -17,7 +17,7 @@ import json
 import logging
 import time
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import anyio
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
@@ -157,7 +157,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     r = APIRouter()
 
     def _bat() -> AiRuntime:
-        if not rt.enabled or rt.repo is None or rt.gateway is None:
+        if not rt.serving():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 {"code": "ai_not_enabled",
                                  "message": "Trợ lý AI chưa được bật trên máy chủ."})
@@ -253,22 +253,38 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                                 {"code": "ai_forbidden", "message": "Dự án này không thuộc về bạn."})
         return proj
 
+    def _access(authorization: Optional[str]) -> Tuple[Any, str]:
+        """Ho so (401 neu chua dang nhap) + `AiRuntime.access_state` — CUNG mot phan quyet cho
+        availability va `/api/ai/access`, de nut mo tro ly khong bao gio hien theo mot luat khac
+        luat cua route that."""
+        profile = resolve_profile(authorization)
+        return profile, rt.access_state(getattr(profile, "user_id", "") or "")
+
+    # ---------------------------------------------------------------- access (cong UI)
+    @r.get("/api/ai/access")
+    def access(response: Response,
+               authorization: Optional[str] = Header(default=None)) -> Dict[str, bool]:
+        """MOT bit cho frontend: co ve loi vao Tro ly AI cho nguoi dang dang nhap khong.
+        Co y KHONG tra ly do, khan gia, danh sach, han muc hay provider — chi `eligible`.
+        Day chi la cong HIEN THI: moi route `/api/ai/*` van tu chan o moi request."""
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Vary"] = "Authorization"
+        _, state = _access(authorization)
+        return {"eligible": state == "ok"}
+
     # ---------------------------------------------------------------- availability
     @r.get("/api/ai/availability")
     def availability(response: Response,
                      authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
-        profile = resolve_profile(authorization)
-        if not rt.enabled or rt.repo is None or rt.gateway is None:
+        profile, state = _access(authorization)
+        if state == "off":
             return {"enabled": False, "reason": rt.reason or "off", "name": rt.assistant_name,
                     "modes": [], "web_search": False}
-        # Ngoai khan gia (`FAS_AI_AUDIENCE=canary`): nhu AI tat — khong lo han muc/cau hinh.
-        if not rt.allows(getattr(profile, "user_id", "") or ""):
-            return {"enabled": False, "reason": "not_in_audience", "name": rt.assistant_name,
-                    "modes": [], "web_search": False}
-        # Control plane global kill switch (`/admin/ai`, fail-closed config).
-        if rt.control is not None and not rt.control.enabled():
-            return {"enabled": False, "reason": "disabled_by_admin", "name": rt.assistant_name,
+        # Ngoai khan gia, hoac tat khan cap (`/admin/ai`, fail-closed): nhu AI tat — khong lo
+        # han muc/cau hinh.
+        if state != "ok":
+            return {"enabled": False, "reason": state, "name": rt.assistant_name,
                     "modes": [], "web_search": False}
         tier = _tier_of(profile)
         status_ = budget_status(rt.repo, user_id=profile.user_id, daily_limit=_daily_limit(rt, tier))

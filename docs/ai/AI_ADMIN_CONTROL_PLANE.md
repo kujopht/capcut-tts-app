@@ -96,6 +96,21 @@ Thứ tự mở rộng: `canary` (Owner) → `beta` (10–30 tester) → `all`. 
 
 Người ngoài khán giả nhận `GET /api/ai/availability` → `enabled:false, reason:"not_in_audience"` (không lộ hạn mức). Mọi route khác trả 403 `ai_not_enabled`. Thứ tự kiểm: AI tắt → 503 như cũ; AI bật thì chưa đăng nhập 401 → ngoài khán giả 403 → mới tới hạn mức/công tắc tổng. `/api/health` công khai hiện `ai_assistant.audience` (chỉ giá trị đã phân giải, không có ID nào).
 
+**Cổng hiển thị `GET /api/ai/access`:**
+- **Phản hồi:** đúng một bit `{"eligible": bool}`, kèm `Cache-Control: no-store, private` và `Vary: Authorization`. Chưa đăng nhập thì 401.
+- **Ai vẽ lối vào:** frontend chỉ vẽ nút nổi, mục "Trợ lý AI" trong menu tài khoản, lối vào ở trang truyện và linh vật nổi khi bit này là `true`. Đang hỏi hoặc có lỗi đều tính là không vẽ.
+- **Một nguồn sự thật:** `AiRuntime.access_state()` cho ra `ok | off | not_in_audience | disabled_by_admin`. Availability và `/api/ai/access` cùng đọc nó; `eligible` chỉ là `true` khi kết quả là `ok`. Vì vậy cờ backend tắt, người ngoài khán giả, hay công tắc khẩn cấp đều ẩn lối vào.
+- **Client không thấy gì khác:** không ID, không danh sách, không lý do, không provider.
+- **Chỉ là cổng HIỂN THỊ:** mọi route `/api/ai/*` vẫn tự chặn ở mỗi request bằng chính `serving()` + `allows()`, nên sửa bit trong trình duyệt chỉ hiện ra một nút mà máy chủ vẫn từ chối.
+- **Bài kiểm:** `server/tests/test_ai_access.py` và `web/tests/ai-access-gate.test.mjs`.
+
+**Cờ build giao diện trên production:**
+- **Nguồn:** `production-deploy.yml` đọc `NEXT_PUBLIC_AI_ASSISTANT_ENABLED` và `NEXT_PUBLIC_AI_COMPANION_ENABLED` từ **biến repository** `PRODUCTION_AI_ASSISTANT_ENABLED` và `PRODUCTION_AI_COMPANION_ENABLED`.
+- **Kiểm tra:** cả hai phải đúng `"0"` hoặc `"1"`, và companion=1 đòi assistant=1. Việc kiểm diễn ra ở job `validate`, TRƯỚC khi chạm tới Render hay Cloudflare.
+- **Bản sao cấp môi trường `production` lệch giá trị:** workflow DỪNG.
+- **Kết quả:** lần deploy tự động sau không thể âm thầm lật cờ. Muốn đổi cờ thì đổi biến rồi deploy.
+- **Rollback frontend** (`wrangler rollback`) trả về bản build trước, kèm đúng cờ của bản đó.
+
 ## 3. Thứ tự kiểm một lượt chat
 
 0. Khán giả (ở trên): ngoài khán giả → 403 trước mọi bước dưới.

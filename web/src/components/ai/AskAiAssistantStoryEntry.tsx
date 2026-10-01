@@ -4,7 +4,8 @@
  * Lối vào mode `story` của trợ lý AI trên trang đọc chương — nút nhỏ CẠNH
  * `AskAiPanel` (không phải bên trong nó: `AskAiPanel` là "Hỏi AI" V1 cũ,
  * một cuộc hỏi-đáp trong bộ nhớ tạm cho phiên xem trang; đây là trợ lý AI
- * V1 MỚI, có lịch sử/nhiều mode). Tự ẩn khi cờ tắt (`useAi().enabled`).
+ * V1 MỚI, có lịch sử/nhiều mode). Tự ẩn khi cờ tắt (`useAi().enabled`) hoặc máy
+ * chủ chưa xác nhận người này dùng được AI (`useAi().eligible`, `/api/ai/access`).
  *
  * Desktop: mở `AiPanel` nổi ngay tại chỗ. Di động (≤1023px, cùng breakpoint
  * ẩn `AiLauncher`/`AiPanel`): chuyển sang `/assistant` — không có cửa sổ
@@ -25,10 +26,10 @@ export function AskAiAssistantStoryEntry({
   chapterId: string;
   chapterIndex: number;
 }) {
-  const { enabled, openAssistant, ensureReady } = useAi();
+  const { enabled, eligible, openAssistant, ensureReady } = useAi();
   const router = useRouter();
 
-  if (!enabled) return null;
+  if (!enabled || !eligible) return null;
 
   const bam = async () => {
     const opts = {

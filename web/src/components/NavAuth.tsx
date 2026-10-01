@@ -17,6 +17,7 @@ import { hoSoHref } from "@/lib/communityFeed";
 import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
 import { AI_ASSISTANT_ENABLED, MUSIC_ENABLED } from "@/lib/features";
 import { FanficIcon, type IconName } from "@/components/icons/FanficIcon";
+import { useAiSafe } from "@/components/ai/AiProvider";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -232,6 +233,7 @@ function StudioLink() {
 function AccountMenu() {
   const { profile, loading, signOut } = useSession();
   const { open, setOpen, close, boxRef, buttonRef } = useMenu();
+  const ai = useAiSafe();
 
   if (loading) {
     return <span className="sk" style={{ width: 92, height: 30 }} aria-hidden="true" />;
@@ -281,8 +283,9 @@ function AccountMenu() {
           </Link>
           {/* Trợ lý AI (V1, flag-gated — xem lib/features.ts). Route toàn màn
               hình `/assistant`: đây là lối vào CHÍNH trên di động (không có
-              nút nổi ở đó, xem AiLauncher.tsx). */}
-          {AI_ASSISTANT_ENABLED ? (
+              nút nổi ở đó, xem AiLauncher.tsx). Chỉ hiện khi MÁY CHỦ xác nhận
+              (`/api/ai/access`) — cùng kiểu với mục Quản trị bên dưới. */}
+          {AI_ASSISTANT_ENABLED && ai?.eligible ? (
             <Link href="/assistant" className="menu-item" role="menuitem" onClick={close} prefetch={false}>
               <FanficIcon name="ai" size={16} /> Trợ lý AI
             </Link>

@@ -25,12 +25,14 @@ import { FanficIcon } from "@/components/icons/FanficIcon";
 
 export function AiLauncher() {
   const { profile } = useSession();
-  const { enabled, availability, open, openAssistant } = useAi();
+  const { enabled, eligible, availability, open, openAssistant } = useAi();
   const dockOffset = useChatDockOffset();
   const pathname = usePathname();
 
   if (pathname === "/assistant") return null;
   if (!enabled || !profile) return null;
+  // Máy chủ chưa xác nhận người này thuộc khán giả (`/api/ai/access`) -> không vẽ, kể cả lúc đang hỏi.
+  if (!eligible) return null;
   // Đã xin availability và máy chủ báo tắt/không đủ nhà cung cấp -> không vẽ nút.
   if (availability === false || (availability && !availability.enabled)) return null;
   // Panel đang mở -> panel đã che đúng góc này và có nút Đóng riêng; launcher

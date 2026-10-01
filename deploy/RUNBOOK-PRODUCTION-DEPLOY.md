@@ -31,6 +31,8 @@ người duyệt trước khi job chạm tới secret thật.
 |---|---|---|
 | `PRODUCTION_API_BASE_URL` | `https://fas-prod-api.onrender.com` | Không bí mật (URL công khai) — cập nhật nếu sau này gắn domain riêng |
 | `CLOUDFLARE_ACCOUNT_ID` | ID tài khoản Cloudflare | Không bí mật |
+| `PRODUCTION_AI_ASSISTANT_ENABLED` | `0` | **Bắt buộc**, đúng `0` hoặc `1`. Cờ build `NEXT_PUBLIC_AI_ASSISTANT_ENABLED` (giao diện Trợ lý AI). Thiếu hoặc sai thì `validate` DỪNG trước mọi deploy. Chỉ đặt ở cấp **repository**: bản sao cấp môi trường `production` lệch giá trị thì job deploy DỪNG |
+| `PRODUCTION_AI_COMPANION_ENABLED` | `0` | **Bắt buộc**, đúng `0` hoặc `1`. Cờ build `NEXT_PUBLIC_AI_COMPANION_ENABLED` (Ink Scout). `1` đòi `PRODUCTION_AI_ASSISTANT_ENABLED=1` |
 
 ### 1c. Cloudflare API Token — least-privilege
 
@@ -125,7 +127,9 @@ GitHub → Actions → **Production Rollback** → Run workflow, gõ
 | Triệu chứng | Nguyên nhân khả dĩ |
 |---|---|
 | `validate` thất bại "Render's deploy hook always deploys..." | `ref` bạn chọn không phải tip hiện tại của `main` |
-| Health check thất bại sau ~2 phút retry | Render service không khởi động được, hoặc `PRODUCTION_API_BASE_URL` sai |
+| `validate` thất bại "Repository variable PRODUCTION_AI_… must be exactly 0 or 1" | Biến repository chưa tạo hoặc giá trị không phải `0`/`1` (Settings → Secrets and variables → Actions → Variables) |
+| Cloudflare deploy thất bại "PRODUCTION_AI_*_ENABLED differs between…" | Có bản sao cùng tên ở cấp môi trường `production` với giá trị khác. Xoá bản sao đó, chỉ giữ biến repository |
+| Health check thất bại sau ~10 phút | Render chưa lên đúng commit (bước chờ đợi `commit_sha` khớp), service không khởi động được, hoặc `PRODUCTION_API_BASE_URL` sai |
 | `/api/ready` trả 503 | Appwrite/R2 production không kết nối được — kiểm tra biến môi trường trên Render (không phải lỗi của workflow này) |
 | Phase 18/15 thất bại "FANFIC_CANARY_SERVICE_TOKEN... not set" | Chưa tạo secret, hoặc token đã hết hạn/bị thu hồi |
 | Cloudflare deploy thất bại "Authentication error" | `CLOUDFLARE_API_TOKEN` sai phạm vi hoặc đã hết hạn |

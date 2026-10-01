@@ -41,6 +41,15 @@ export const CHAT_V1_ENABLED = process.env.NEXT_PUBLIC_CHAT_V1_ENABLED === "1";
  * trả `enabled=false` và giao diện im lặng, không tự bật một tính năng
  * nửa vời trên production — cùng khuôn với `CHAT_V1_ENABLED`).
  *
+ * Cờ bật cũng CHƯA đủ để vẽ lối vào: nút nổi / menu / lối vào trang truyện chỉ
+ * hiện khi máy chủ xác nhận người đang đăng nhập thuộc khán giả
+ * (`GET /api/ai/access`, xem `lib/ai/quyenTruyCap.ts`).
+ *
+ * Production: giá trị do `production-deploy.yml` truyền TƯỜNG MINH từ biến
+ * GitHub `PRODUCTION_AI_ASSISTANT_ENABLED` / `PRODUCTION_AI_COMPANION_ENABLED`
+ * (bắt buộc "0" hoặc "1"; thiếu/sai là workflow DỪNG) — một lần deploy tự động
+ * sau không thể lặng lẽ đổi cờ.
+ *
  * Tên/model provider KHÔNG BAO GIỜ lộ ra người dùng thường — chỉ tên hiển thị
  * (`availability.name`) và mode.
  */

@@ -113,6 +113,14 @@ def build_ai_admin_router(plane: Optional[ControlPlane], *, reader: Callable[...
         _run(lambda: _plane().reset_cooldown(p.user_id, slot_id))
         return {"ok": True}
 
+    @r.post("/api/admin/ai/slots/{slot_id}/probe")
+    def probe_slot(slot_id: str, response: Response, p: Any = Depends(owner)) -> Dict[str, Any]:
+        """OWNER: one real minimal request through this slot (even disabled / switch off).
+        Returns ok, latency and the SANITIZED error enums only — never provider text.
+        409 when the same slot was probed in the last 20 s."""
+        response.headers["Cache-Control"] = "no-store"
+        return {"probe": _run(lambda: _plane().probe(p.user_id, slot_id))}
+
     @r.put("/api/admin/ai/profiles/{name}")
     def put_profile(name: str, body: Any = Body(...), p: Any = Depends(owner)) -> Dict[str, Any]:
         b = _body(body)

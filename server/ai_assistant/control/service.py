@@ -42,7 +42,8 @@ from server.ai_assistant.control.secrets import SecretResolver
 from server.ai_assistant.control.store import (
     AuditEntry, ControlConfigCorrupt, ControlStore, ControlStoreUnavailable, UsageCounters, now_iso,
 )
-from server.llm_gateway.chat_provider import ChatProvider
+from server.ai_assistant.gateway import DEFAULT_429_COOLDOWN_S
+from server.llm_gateway.chat_provider import ChatProvider, ChatTurn, GenerateRequest, ProviderError
 from server.llm_gateway.usage_limits import CircuitBreaker
 
 log = logging.getLogger("fanfic.ai_assistant")
@@ -66,6 +67,13 @@ USAGE_TTL_S = 10.0
 _ERROR_CODE_RE = re.compile(r"^provider_[a-z0-9_]{1,40}$")
 #: Vendor enums only: upper/lower letters, underscore, one optional ':' joiner. No digits.
 _ERROR_CATEGORY_RE = re.compile(r"^[A-Za-z_]{3,48}(:[A-Z_]{3,48})?$")
+#: Balancing (`ControlPlane.balance_factor`): weight multiplier for a slot that is failing
+#: or was rate-limited in the last RECENT_429_WINDOW_S.
+BALANCE_PENALTY = 0.25
+RECENT_429_WINDOW_S = 600.0
+#: Owner probe (`ControlPlane.probe`): one real minimal request per slot at most this often.
+PROBE_MIN_INTERVAL_S = 20.0
+PROBE_MAX_OUTPUT_TOKENS = 64
 
 
 def today_utc() -> str:
@@ -134,6 +142,8 @@ class ControlPlane:
         #: slot_id -> (code, category, at_iso) of the LAST provider failure. In-process like
         #: the breaker (a restart clears it); only sanitized enums, never a vendor message.
         self._last_error: Dict[str, Tuple[str, Optional[str], str]] = {}
+        #: slot_id -> monotonic time of the last owner probe (rate limit, in-process).
+        self._probe_at: Dict[str, float] = {}
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                              user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None) -> None:
@@ -247,10 +257,36 @@ class ControlPlane:
             return SKIP_TPM
         return None
 
+    def balance_factor(self, slot: ProviderSlot, usage: Optional[Dict[str, UsageCounters]] = None) -> float:
+        """How much of this slot is left, in (0, 1] — the multiplier on its routing weight.
+
+        headroom = 1 - max(requests/day cap, tokens/day cap, last-minute requests/RPM cap,
+        last-minute tokens/TPM cap) (a 0 cap = unlimited, ignored), squared so a nearly
+        full project is picked far less than a fresh one. Then x0.25 if the slot is
+        currently failing (breaker counting) and x0.25 if it hit a 429 in the last
+        RECENT_429_WINDOW_S. Cooldown / cap / disabled still skip the slot outright in
+        `skip_reason`; this only orders the eligible ones."""
+        u = (usage if usage is not None else self.usage_today()).get(slot.slot_id, UsageCounters())
+        now = self._clock()
+        with self._lock:
+            n, tok = self._windows.setdefault(slot.slot_id, _Window()).counts(now)
+        util = 0.0
+        for used, cap in ((u.requests, slot.daily_request_cap), (u.tokens, slot.daily_token_cap),
+                          (n, slot.rpm_soft_cap), (tok, slot.tpm_soft_cap)):
+            if cap:
+                util = max(util, used / cap)
+        factor = max(0.0, 1.0 - min(1.0, util)) ** 2
+        if self.breaker.snapshot().get(slot.slot_id, {}).get("consecutive_failures", 0) > 0:
+            factor *= BALANCE_PENALTY
+        if self.recent_429(slot.slot_id, RECENT_429_WINDOW_S) > 0:
+            factor *= BALANCE_PENALTY
+        return factor
+
     def plan(self, cfg: ControlConfig, *, mode: str, workload: str, est_tokens: int = 0):
         usage = self.usage_today()
         return _plan(cfg, mode=mode, workload=workload, rng=self._rng, est_tokens=est_tokens,
-                     skip_reason=lambda s, w, e: self.skip_reason(s, w, e, cfg=cfg, usage=usage))
+                     skip_reason=lambda s, w, e: self.skip_reason(s, w, e, cfg=cfg, usage=usage),
+                     balance=lambda s: self.balance_factor(s, usage))
 
     def secret_for(self, slot: ProviderSlot) -> Optional[str]:
         return self.secrets.resolve(slot.secret_ref)
@@ -610,3 +646,62 @@ class ControlPlane:
         self.breaker.record_success(slot_id)
         self._commit([AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="cooldown",
                                  old_value=f"{round(before, 1)}s", new_value="0s (reset)")])
+
+    def probe(self, actor: str, slot_id: str) -> Dict[str, Any]:
+        """Owner health check: ONE real minimal request through this slot's own key, endpoint
+        and model — works while the slot is disabled and the global switch is off, so a new
+        project can be verified before it ever serves a user.
+
+        Not `_serialized` (it waits on the network); rate-limited per slot instead. The call
+        is real, so it is accounted like any turn: success -> slot usage + breaker success;
+        failure -> sanitized last_error, breaker failure / 429 cooldown, slot error counter.
+        The provider's text is never returned — only ok, latency and the sanitized enums.
+        Audited as `slot:<id>.probe`."""
+        cfg = self._fresh(repair=True)
+        slot = cfg.slots.get(slot_id)
+        if slot is None:
+            raise KeyError(slot_id)
+        now = self._clock()
+        with self._lock:
+            if now - self._probe_at.get(slot_id, -1e9) < PROBE_MIN_INTERVAL_S:
+                raise ControlConflict(f"Vừa kiểm slot {slot_id} — đợi {int(PROBE_MIN_INTERVAL_S)} giây rồi thử lại.")
+            self._probe_at[slot_id] = now
+        out: Dict[str, Any] = {"slot_id": slot_id, "model": slot.model, "ok": False, "latency_ms": None,
+                               "code": None, "category": None}
+        key = self.secret_for(slot)
+        if not key:
+            out["code"] = "missing_secret"
+        else:
+            req = GenerateRequest(messages=[ChatTurn(role="user", content="Reply with the single word: OK")],
+                                  model=slot.model, max_output_tokens=PROBE_MAX_OUTPUT_TOKENS, user_ref="admin_probe",
+                                  timeout_s=30.0)
+            t0 = time.monotonic()
+            try:
+                res = self.provider_for(slot, key).generate(req)
+                out.update(ok=True, latency_ms=int((time.monotonic() - t0) * 1000))
+                self.breaker.record_success(slot_id)
+                self.record_turn(slot_id, res.input_tokens, res.output_tokens, "complete")
+            except ProviderError as exc:
+                cat = getattr(exc, "category", None)
+                out["latency_ms"] = int((time.monotonic() - t0) * 1000)
+                if exc.code == "provider_http_429" or exc.retry_after_s is not None:
+                    self.breaker.cool_down(slot_id, exc.retry_after_s if exc.retry_after_s is not None
+                                           else DEFAULT_429_COOLDOWN_S)
+                    self.note_rate_limited(slot, exc.code, cat)
+                else:
+                    self.breaker.record_failure(slot_id)
+                    self.note_error(slot, exc.code, cat)
+                e = self.last_error(slot_id) or {}
+                out.update(code=e.get("code"), category=e.get("category"))
+            except Exception:  # noqa: BLE001 — same R1 backstop as the router
+                log.warning("ai_control: probe of slot %s raised an unexpected error", slot_id, exc_info=True)
+                self.breaker.record_failure(slot_id)
+                self.note_error(slot, "provider_unexpected_error")
+                out.update(code="provider_unexpected_error")
+        result = (f"ok {out['latency_ms']}ms" if out["ok"]
+                  else f"{out['code']}" + (f"/{out['category']}" if out["category"] else ""))
+        self._commit([AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="probe",
+                                 old_value=slot.model[:120], new_value=result[:200])])
+        cur = self.snapshot()
+        out["health"] = self.slot_health(cur.slots.get(slot_id, slot), cur, self.usage_today())
+        return out

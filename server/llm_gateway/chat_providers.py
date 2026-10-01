@@ -28,6 +28,7 @@ exercised against a real, authenticated endpoint in this environment.
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -69,6 +70,74 @@ def _retry_after_s(resp: httpx.Response) -> Optional[float]:
     except ValueError:
         return None
     return max(RETRY_AFTER_MIN_S, min(RETRY_AFTER_MAX_S, value))
+
+
+#: Google canonical error statuses (google.rpc.Code names) — the ONLY values
+#: `error_category` returns for a Google-shaped body. Closed set: a status
+#: string outside it is dropped, never passed through.
+GOOGLE_ERROR_STATUSES = frozenset({
+    "INVALID_ARGUMENT", "FAILED_PRECONDITION", "OUT_OF_RANGE", "UNAUTHENTICATED", "PERMISSION_DENIED",
+    "NOT_FOUND", "ABORTED", "ALREADY_EXISTS", "RESOURCE_EXHAUSTED", "CANCELLED", "DATA_LOSS", "UNKNOWN",
+    "INTERNAL", "NOT_IMPLEMENTED", "UNAVAILABLE", "DEADLINE_EXCEEDED",
+})
+#: OpenAI-style `error.code` / `error.type` values (Groq, OpenRouter, Azure …).
+OPENAI_ERROR_CODES = frozenset({
+    "model_not_found", "insufficient_quota", "rate_limit_exceeded", "invalid_api_key", "invalid_request_error",
+    "authentication_error", "permission_error", "not_found_error", "rate_limit_error", "api_error",
+    "context_length_exceeded", "content_filter", "server_error",
+})
+#: Google `ErrorInfo.reason` is an UPPER_SNAKE enum (e.g. SERVICE_DISABLED). Letters and
+#: underscores only — no digits, no lower case — so no key, token or id can pass.
+_REASON_RE = re.compile(r"^[A-Z][A-Z_]{2,47}$")
+ERROR_BODY_PEEK_BYTES = 16384
+
+
+def error_category(raw: bytes) -> Optional[str]:
+    """Vendor error ENUM from a non-2xx body: "NOT_FOUND", "PERMISSION_DENIED:SERVICE_DISABLED",
+    "model_not_found" … or None. Parsed in memory and discarded; the message, the
+    request echo and every other field are never returned, stored or logged."""
+    try:
+        data = json.loads((raw or b"")[:ERROR_BODY_PEEK_BYTES].decode("utf-8", errors="replace"))
+    except ValueError:
+        return None
+    if isinstance(data, list) and data:  # Gemini's OpenAI-compat endpoint wraps it in a list
+        data = data[0]
+    err = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(err, dict):
+        return None
+    status = err.get("status")
+    if isinstance(status, str) and status in GOOGLE_ERROR_STATUSES:
+        for d in err.get("details") or ():
+            reason = d.get("reason") if isinstance(d, dict) else None
+            if isinstance(reason, str) and _REASON_RE.match(reason):
+                return f"{status}:{reason}"
+        return status
+    for k in ("code", "type"):
+        v = err.get(k)
+        if isinstance(v, str) and v in OPENAI_ERROR_CODES:
+            return v
+    return None
+
+
+#: Wall-clock budget for reading an error body: a slow-dripping vendor must not
+#: delay failover (review LOW #1). Checked between chunks; each chunk read is
+#: still bounded by the client's own read timeout.
+ERROR_BODY_PEEK_DEADLINE_S = 2.0
+
+
+def _peek_stream_error(resp: httpx.Response) -> bytes:
+    """At most ERROR_BODY_PEEK_BYTES of a streamed error body (never the whole thing),
+    within ERROR_BODY_PEEK_DEADLINE_S."""
+    buf = b""
+    deadline = time.monotonic() + ERROR_BODY_PEEK_DEADLINE_S
+    try:
+        for chunk in resp.iter_bytes():
+            buf += chunk
+            if len(buf) >= ERROR_BODY_PEEK_BYTES or time.monotonic() >= deadline:
+                break
+    except Exception:  # noqa: BLE001 — classification is best-effort, never a new failure
+        return b""
+    return buf[:ERROR_BODY_PEEK_BYTES]
 
 
 def _turn_to_openai_message(turn: ChatTurn) -> Dict[str, Any]:
@@ -179,7 +248,8 @@ class OpenAICompatChatProvider(ChatProvider):
             raise ProviderError(
                 f"'{self.name}' trả lỗi {resp.status_code}.",
                 transient=resp.status_code >= 500 or resp.status_code == 429,
-                code=f"provider_http_{resp.status_code}", retry_after_s=_retry_after_s(resp))
+                code=f"provider_http_{resp.status_code}", retry_after_s=_retry_after_s(resp),
+                category=error_category(resp.content))
         try:
             data = resp.json()
             choice = data["choices"][0]
@@ -236,7 +306,8 @@ class OpenAICompatChatProvider(ChatProvider):
                     raise ProviderError(
                         f"'{self.name}' trả lỗi {resp.status_code}.",
                         transient=resp.status_code >= 500 or resp.status_code == 429,
-                        code=f"provider_http_{resp.status_code}", retry_after_s=_retry_after_s(resp))
+                        code=f"provider_http_{resp.status_code}", retry_after_s=_retry_after_s(resp),
+                        category=error_category(_peek_stream_error(resp)))
                 finish_reason = "stop"
                 for line in resp.iter_lines():
                     if not line:

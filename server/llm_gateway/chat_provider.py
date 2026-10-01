@@ -37,14 +37,18 @@ class ProviderError(Exception):
     `server/secret_redaction.py`). `retry_after_s` is the provider's own
     `Retry-After` (seconds) on a 429, when it sent a usable one — the
     gateway cools that provider down for that long (`CircuitBreaker.
-    cool_down`) instead of hammering it on every request."""
+    cool_down`) instead of hammering it on every request. `category` is the
+    vendor's own canonical error ENUM (e.g. Google `NOT_FOUND`), taken only
+    from a closed allowlist (`chat_providers.error_category`) — never a
+    message, never free text."""
 
     def __init__(self, message: str, *, transient: bool = True, code: str = "provider_error",
-                 retry_after_s: Optional[float] = None):
+                 retry_after_s: Optional[float] = None, category: Optional[str] = None):
         super().__init__(message)
         self.transient = transient
         self.code = code
         self.retry_after_s = retry_after_s
+        self.category = category
 
 
 @dataclass(frozen=True)

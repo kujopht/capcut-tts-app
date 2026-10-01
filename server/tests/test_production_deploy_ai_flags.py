@@ -137,35 +137,58 @@ class TestFlagValidationBehaviour(unittest.TestCase):
         self.assertNotIn("value-that-should-not-be-printed", log)
 
 
-@unittest.skipUnless(BASH, "can bash de chay doan shell cua workflow")
-class TestFrontendStepGuards(unittest.TestCase):
-    """Chi chay PHAN KIEM dau buoc Cloudflare — cat TRUOC `npm ci`, khong bao gio build/deploy."""
+OVERRIDE_STEP = "Refuse environment-level AI UI flag overrides"
 
-    def _guard(self, **env: str) -> Tuple[int, str]:
+
+@unittest.skipUnless(BASH, "can bash de chay doan shell cua workflow")
+class TestDeployJobGuards(unittest.TestCase):
+    def test_override_check_runs_before_render_and_cloudflare(self) -> None:
+        """Lech cap moi truong phai chan TRUOC Render hook — neu khong la deploy nua voi."""
+        names = [s.get("name", "") for s in _wf()["jobs"]["deploy"]["steps"]]
+        self.assertLess(names.index(OVERRIDE_STEP), names.index("Trigger Render deploy (backend)"))
+        env = _step("deploy", OVERRIDE_STEP)["env"]
+        self.assertEqual(env["AI_ASSISTANT_FLAG_ENV_VIEW"], "${{ vars.PRODUCTION_AI_ASSISTANT_ENABLED }}")
+        self.assertEqual(env["AI_ASSISTANT_FLAG"], "${{ needs.validate.outputs.ai_assistant_flag }}")
+        self.assertNotIn("${{", _step("deploy", OVERRIDE_STEP)["run"])
+
+    def _override(self, **env: str) -> Tuple[int, str]:
+        return _run(_step("deploy", OVERRIDE_STEP)["run"], env)
+
+    def test_matching_levels_pass(self) -> None:
+        for a, c in (("0", "0"), ("1", "0"), ("1", "1")):
+            with self.subTest(a=a, c=c):
+                code, log = self._override(AI_ASSISTANT_FLAG=a, AI_COMPANION_FLAG=c,
+                                           AI_ASSISTANT_FLAG_ENV_VIEW=a, AI_COMPANION_FLAG_ENV_VIEW=c)
+                self.assertEqual(code, 0, log)
+                self.assertIn(f"assistant={a} companion={c}", log)
+
+    def test_environment_level_override_is_refused(self) -> None:
+        for env_a, env_c in (("1", "0"), ("0", "1"), ("", "0")):
+            with self.subTest(env_a=env_a, env_c=env_c):
+                code, log = self._override(AI_ASSISTANT_FLAG="0", AI_COMPANION_FLAG="0",
+                                           AI_ASSISTANT_FLAG_ENV_VIEW=env_a, AI_COMPANION_FLAG_ENV_VIEW=env_c)
+                self.assertEqual(code, 1)
+                self.assertIn("differs between the 'production' environment variables", log)
+
+    def test_missing_validated_output_is_refused(self) -> None:
+        code, log = self._override(AI_ASSISTANT_FLAG="", AI_COMPANION_FLAG="0",
+                                   AI_ASSISTANT_FLAG_ENV_VIEW="", AI_COMPANION_FLAG_ENV_VIEW="0")
+        self.assertEqual(code, 1)
+        self.assertIn("missing from the validate job outputs", log)
+
+    def test_frontend_step_rechecks_values_before_building(self) -> None:
+        """Chi chay PHAN KIEM dau buoc Cloudflare — cat TRUOC `npm ci`, khong bao gio build/deploy."""
         run = _step("deploy", "Cloudflare deploy (frontend)")["run"]
         prefix = run.split("\nnpm ci", 1)[0]
         self.assertNotEqual(prefix, run, "khong tim thay `npm ci` de cat")
         self.assertNotRegex(prefix, r"\bnpm\b|wrangler|cf:deploy")
         base = {"CLOUDFLARE_API_TOKEN": "x" * 8, "NEXT_PUBLIC_API_BASE": "https://api.example.test"}
-        return _run(prefix, {**base, **env})
-
-    def test_matching_levels_pass(self) -> None:
-        for a, c in (("0", "0"), ("1", "0"), ("1", "1")):
-            with self.subTest(a=a, c=c):
-                code, log = self._guard(NEXT_PUBLIC_AI_ASSISTANT_ENABLED=a, NEXT_PUBLIC_AI_COMPANION_ENABLED=c,
-                                        AI_ASSISTANT_FLAG_ENV_VIEW=a, AI_COMPANION_FLAG_ENV_VIEW=c)
-                self.assertEqual(code, 0, log)
-                self.assertIn(f"NEXT_PUBLIC_AI_ASSISTANT_ENABLED={a} NEXT_PUBLIC_AI_COMPANION_ENABLED={c}", log)
-
-    def test_environment_level_override_is_refused(self) -> None:
-        code, log = self._guard(NEXT_PUBLIC_AI_ASSISTANT_ENABLED="0", NEXT_PUBLIC_AI_COMPANION_ENABLED="0",
-                                AI_ASSISTANT_FLAG_ENV_VIEW="1", AI_COMPANION_FLAG_ENV_VIEW="0")
-        self.assertEqual(code, 1)
-        self.assertIn("differs between the 'production' environment variables", log)
-
-    def test_missing_validated_output_is_refused(self) -> None:
-        code, log = self._guard(NEXT_PUBLIC_AI_ASSISTANT_ENABLED="", NEXT_PUBLIC_AI_COMPANION_ENABLED="0",
-                                AI_ASSISTANT_FLAG_ENV_VIEW="", AI_COMPANION_FLAG_ENV_VIEW="0")
+        code, log = _run(prefix, {**base, "NEXT_PUBLIC_AI_ASSISTANT_ENABLED": "1",
+                                  "NEXT_PUBLIC_AI_COMPANION_ENABLED": "0"})
+        self.assertEqual(code, 0, log)
+        self.assertIn("NEXT_PUBLIC_AI_ASSISTANT_ENABLED=1 NEXT_PUBLIC_AI_COMPANION_ENABLED=0", log)
+        code, log = _run(prefix, {**base, "NEXT_PUBLIC_AI_ASSISTANT_ENABLED": "",
+                                  "NEXT_PUBLIC_AI_COMPANION_ENABLED": "0"})
         self.assertEqual(code, 1)
         self.assertIn("missing from the validate job outputs", log)
 

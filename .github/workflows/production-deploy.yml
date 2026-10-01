@@ -216,6 +216,31 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.deployed_sha }}
 
+      # Job nay chay trong `environment: production`, noi `vars.*` uu tien bien CAP MOI
+      # TRUONG; `validate` khong co moi truong nen chi thay bien CAP REPOSITORY. Hai cap
+      # lech nhau = cau hinh mo ho -> DUNG. Kiem o DAU job, TRUOC Render hook — de lech
+      # cap khong the gay deploy nua voi (backend da len, frontend dung lai).
+      - name: Refuse environment-level AI UI flag overrides
+        env:
+          AI_ASSISTANT_FLAG: ${{ needs.validate.outputs.ai_assistant_flag }}
+          AI_COMPANION_FLAG: ${{ needs.validate.outputs.ai_companion_flag }}
+          AI_ASSISTANT_FLAG_ENV_VIEW: ${{ vars.PRODUCTION_AI_ASSISTANT_ENABLED }}
+          AI_COMPANION_FLAG_ENV_VIEW: ${{ vars.PRODUCTION_AI_COMPANION_ENABLED }}
+        run: |
+          set -euo pipefail
+          for flag in "${AI_ASSISTANT_FLAG:-}" "${AI_COMPANION_FLAG:-}"; do
+            if [ "$flag" != "0" ] && [ "$flag" != "1" ]; then
+              echo "::error::AI UI build flag missing from the validate job outputs — refusing to deploy."
+              exit 1
+            fi
+          done
+          if [ "${AI_ASSISTANT_FLAG_ENV_VIEW:-}" != "$AI_ASSISTANT_FLAG" ] || \
+             [ "${AI_COMPANION_FLAG_ENV_VIEW:-}" != "$AI_COMPANION_FLAG" ]; then
+            echo "::error::PRODUCTION_AI_*_ENABLED differs between the 'production' environment variables and the repository variables. Keep them ONLY as repository variables (delete the environment-level copy) — refusing to deploy with an ambiguous AI UI flag."
+            exit 1
+          fi
+          echo "AI UI build flags confirmed at both levels: assistant=$AI_ASSISTANT_FLAG companion=$AI_COMPANION_FLAG"
+
       # Render: khong co API deploy-mot-commit-cu-the o day co chu dich
       # (yeu cau nhiem vu chi de nghi RENDER_DEPLOY_HOOK_URL, pham vi toi
       # thieu) — hook chi kich hoat build lai branch `main` da cau hinh
@@ -254,14 +279,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           NEXT_PUBLIC_API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
-          # Da kiem 0/1 o `validate` (buoc "Resolve AI UI build flags") — xem ly do o do.
+          # Da kiem 0/1 o `validate` (buoc "Resolve AI UI build flags") va kiem lech cap o
+          # dau job nay ("Refuse environment-level AI UI flag overrides").
           NEXT_PUBLIC_AI_ASSISTANT_ENABLED: ${{ needs.validate.outputs.ai_assistant_flag }}
           NEXT_PUBLIC_AI_COMPANION_ENABLED: ${{ needs.validate.outputs.ai_companion_flag }}
-          # Job nay chay trong `environment: production`, noi `vars.*` uu tien bien CAP MOI
-          # TRUONG. `validate` khong co moi truong nen chi thay bien CAP REPOSITORY. Hai
-          # cap lech nhau = cau hinh mo ho -> DUNG, khong lang le chon mot ben.
-          AI_ASSISTANT_FLAG_ENV_VIEW: ${{ vars.PRODUCTION_AI_ASSISTANT_ENABLED }}
-          AI_COMPANION_FLAG_ENV_VIEW: ${{ vars.PRODUCTION_AI_COMPANION_ENABLED }}
         run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
@@ -278,11 +299,6 @@ jobs:
               exit 1
             fi
           done
-          if [ "${AI_ASSISTANT_FLAG_ENV_VIEW:-}" != "$NEXT_PUBLIC_AI_ASSISTANT_ENABLED" ] || \
-             [ "${AI_COMPANION_FLAG_ENV_VIEW:-}" != "$NEXT_PUBLIC_AI_COMPANION_ENABLED" ]; then
-            echo "::error::PRODUCTION_AI_*_ENABLED differs between the 'production' environment variables and the repository variables. Keep them ONLY as repository variables (delete the environment-level copy) — refusing to build with an ambiguous AI UI flag."
-            exit 1
-          fi
           echo "Building with NEXT_PUBLIC_AI_ASSISTANT_ENABLED=$NEXT_PUBLIC_AI_ASSISTANT_ENABLED NEXT_PUBLIC_AI_COMPANION_ENABLED=$NEXT_PUBLIC_AI_COMPANION_ENABLED"
           npm ci
           npm run cf:deploy:production

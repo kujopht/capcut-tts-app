@@ -177,8 +177,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   const uidRef = useRef<string | null>(null);
   uidRef.current = profile?.user_id ?? null;
   const assistantIdRef = useRef<string | null>(null);
-  /** Đang có một lượt gửi chạy (khoá đồng bộ, xem `guiVanBan`). */
-  const dangGuiRef = useRef(false);
+  /** ID của lượt gửi đang giữ khoá đồng bộ (0 = rảnh) và bộ đếm cấp ID — xem `guiVanBan`. */
+  const khoaGuiRef = useRef(0);
+  const demLuotRef = useRef(0);
 
   // ĐỔI NGƯỜI DÙNG trong cùng trang (đăng xuất, đăng nhập tài khoản khác — `SessionProvider` không tải lại trang) thì
   // BỎ SẠCH trạng thái của người trước: tin nhắn, lịch sử, hạn mức, dự án, bản nháp. Trước đây Provider (gắn ở layout)
@@ -197,7 +198,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
       ctrlRef.current?.abort();
       ctrlRef.current = null;
       assistantIdRef.current = null;
-      dangGuiRef.current = false;
+      khoaGuiRef.current = 0;
     };
   }, [uidHienTai]);
   /**
@@ -417,7 +418,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const chayLuotGui = useCallback(
-    async (text: string, regenerateOf?: string) => {
+    async (text: string, regenerateOf: string | undefined, nhaKhoa: () => void) => {
       const trimmed = text.trim();
       if (!trimmed || state.streaming) return;
       // Mọi cập nhật trong lượt này đi qua `cn`: nếu người dùng đăng xuất/đổi tài khoản giữa chừng thì luồng đang chạy
@@ -493,6 +494,9 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
                 };
                 return { ...s, messages: [...s.messages, assistantMsg], streaming: false, streamingText: "" };
               });
+              // Lượt đã XONG về mặt logic (ô soạn mở lại): nhả khoá NGAY, không đợi luồng mạng đóng hẳn — nếu không, tin
+              // gửi liền sau đó (vài ms trước khi `reader.read()` trả `done`) bị nuốt mà ô soạn đã bị xoá.
+              nhaKhoa();
             } else if (ev.type === "error") {
               ketThuc = true;
               // F2: LUÔN thêm một bong bóng trợ lý — kể cả khi CHƯA có token
@@ -517,6 +521,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
                   },
                 ],
               }));
+              nhaKhoa();
             }
           },
           ctrl.signal,
@@ -545,6 +550,11 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (e) {
         if (!cn.conHieuLuc()) return;
+        // Đã nhận khung kết thúc (`done`/`error`) thì lượt này XONG và khoá gửi đã nhả: một lỗi vận chuyển đến SAU đó (đứt
+        // mạng đúng lúc đóng luồng) không còn ý nghĩa với lượt này, và lượt kế có thể đang chạy — nếu xử lý, nó dùng chung
+        // `assistantIdRef` đã bị lượt mới đặt lại: tắt "đang trả lời" của lượt mới, cắt mất phần đầu câu trả lời, hiện biểu
+        // ngữ lỗi thừa hoặc đánh dấu "Chưa gửi" lên một tin đã được trả lời.
+        if (ketThuc) return;
         if (ctrl.signal.aborted) {
           // F2: người dùng bấm Dừng TRƯỚC token đầu tiên — trước đây không
           // để lại dấu vết gì (không bong bóng trợ lý, không "Đã dừng"), nên
@@ -592,15 +602,24 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
    * hai lần bấm Gửi trong CÙNG một nhịp (nhấn đúp, phím lặp) đều thấy `streaming=false` và gửi hai request: máy chủ từ chối
    * cái thứ hai (một luồng/người) và giao diện tắt trạng thái "đang trả lời" giữa lúc câu trả lời của cái thứ nhất còn
    * đang chạy, làm mất chữ đang hiện.
+   *
+   * Khoá mang ID của lượt giữ nó và được nhả ngay khi lượt XONG về mặt logic (`done`/`error`, ô soạn mở lại), không đợi luồng
+   * mạng đóng hẳn: ngược lại, tin gửi liền sau khi câu trả lời vừa hiện xong sẽ bị nuốt (và ô soạn đã bị xoá). ID đảm bảo lượt
+   * cũ nhả muộn không nhả nhầm khoá của lượt mới.
    */
   const guiVanBan = useCallback(
     async (text: string, regenerateOf?: string) => {
-      if (dangGuiRef.current) return;
-      dangGuiRef.current = true;
+      if (khoaGuiRef.current !== 0) return;
+      demLuotRef.current += 1;
+      const id = demLuotRef.current;
+      khoaGuiRef.current = id;
+      const nhaKhoa = () => {
+        if (khoaGuiRef.current === id) khoaGuiRef.current = 0;
+      };
       try {
-        await chayLuotGui(text, regenerateOf);
+        await chayLuotGui(text, regenerateOf, nhaKhoa);
       } finally {
-        dangGuiRef.current = false;
+        nhaKhoa();
       }
     },
     [chayLuotGui],

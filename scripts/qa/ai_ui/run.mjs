@@ -285,7 +285,14 @@ async function send(page, text, { script, wait = "done" } = {}) {
   await page.type(text);
   await page.key("Enter");
   if (wait === "done") {
-    await page.wait(`__qa.count('/messages') > ${before} && !document.querySelector('.ai-nut-dung')`, 15000, "xong lượt gửi");
+    try {
+      // `inflight === 0`: máy chủ giả đã đóng luồng. Chỉ nhìn "đã có request và chưa thấy nút Dừng" là sai: ngay sau khi
+      // gửi, React chưa kịp vẽ `streaming: true` nên nút Dừng chưa hiện — kịch bản sẽ chạy tiếp khi luồng còn đang chạy.
+      await page.wait(`__qa.count('/messages') > ${before} && __qa.inflight === 0 && !document.querySelector('.ai-nut-dung')`, 15000, "xong lượt gửi");
+    } catch (e) {
+      const st = await page.ev(`({ requests: __qa.count('/messages'), dung: !!document.querySelector('.ai-nut-dung'), nhap: document.querySelector('textarea.ai-o')?.value ?? null, khoa: !!document.querySelector('textarea.ai-o')?.disabled, loi: document.querySelector('.ai-loi')?.innerText ?? null, hanMuc: document.querySelector('.ai-usage')?.innerText ?? null, daDung: __qa.usedBy(__qa.calls.length ? __qa.calls[__qa.calls.length - 1].user : ''), cuoi: __qa.calls.slice(-4).map((c) => c.method + ' ' + c.path.replace('/api/ai/', '')) })`).catch(() => ({}));
+      throw new Error(`${e.message} — gửi "${text.slice(0, 24)}": trước=${before}, ${JSON.stringify(st)}`);
+    }
     await sleep(60);
   }
 }
@@ -471,6 +478,65 @@ scenario("behaviour-double-submit", async (page, vp) => {
   await page.wait(`__qa.count('/messages') > ${b2} && !document.querySelector('.ai-nut-dung')`, 12000, "xong lượt thứ hai");
   await sleep(300);
   check("bấm Gửi hai lần cùng nhịp chỉ gửi MỘT lần", vp.name, (await page.ev(`__qa.count('/messages')`)) === b2 + 1, `requests=${(await page.ev(`__qa.count('/messages')`)) - b2}`);
+
+  // Gửi LIỀN ngay khi câu trả lời vừa hiện xong (người dùng đã gõ sẵn tin kế trong lúc đang stream, bấm Enter đúng khoảnh
+  // khắc nút Dừng biến mất — vài ms trước khi luồng mạng đóng hẳn). Khoá chống gửi đôi KHÔNG được nuốt tin này.
+  const b3 = await page.ev(`__qa.count('/messages')`);
+  await page.ev(`__qa.script.push({ kind: 'ok', words: 8, delay: 40 })`);
+  await page.focus("textarea.ai-o");
+  await page.type("tin thứ nhất");
+  await page.key("Enter");
+  await page.wait("document.querySelector('.ai-nut-dung')", 4000, "đang stream");
+  await page.focus("textarea.ai-o");
+  await page.type("tin gửi liền");
+  await page.ev(`(() => {
+    const mo = new MutationObserver(() => {
+      if (document.querySelector('.ai-nut-dung')) return;
+      mo.disconnect();
+      document.querySelector('textarea.ai-o').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  })()`);
+  await page.wait(`__qa.count('/messages') >= ${b3 + 2} && !document.querySelector('.ai-nut-dung')`, 12000, "cả hai lượt đã gửi");
+  await sleep(300);
+  check("gửi liền ngay khi câu trả lời vừa xong: tin KHÔNG bị nuốt", vp.name, (await page.ev(`__qa.count('/messages')`)) === b3 + 2 && (await page.ev(`__qa.lastContent`)) === "tin gửi liền", `requests=${(await page.ev(`__qa.count('/messages')`)) - b3}, last=${await page.ev("__qa.lastContent")}`);
+}, { viewports: VIEWPORTS.filter((v) => ["390", "desktop"].includes(v.name)) });
+
+scenario("behaviour-late-transport-error", async (page, vp) => {
+  await ready(page, vp, "mai");
+  // Đứt mạng đúng lúc đóng luồng, SAU khi khung `done` đã tới: lượt đã xong, lỗi vận chuyển đến muộn không còn ý nghĩa. Khoá
+  // gửi nhả ngay khi `done`, nên người dùng gửi tin kế được trước khi lỗi muộn ấy xảy ra — lỗi muộn của lượt CŨ không được tắt
+  // "đang trả lời" của lượt MỚI, không được hiện biểu ngữ lỗi, không được đánh dấu "Chưa gửi" lên tin đã được trả lời.
+  const B = "đây là câu trả lời dài của lượt thứ hai, phải hiện đủ từ đầu đến cuối dù lượt trước đứt mạng muộn";
+  await page.ev(`__qa.failAfterDone = true; __qa.closeDelayMs = 150; __qa.script.push({ kind: 'ok', words: 6, delay: 20 }, { kind: 'text', text: ${JSON.stringify(B)}, chunk: 4, delay: 30 })`);
+  const b0 = await page.ev(`__qa.count('/messages')`);
+  await page.focus("textarea.ai-o");
+  await page.type("lượt thứ nhất");
+  await page.key("Enter");
+  await page.wait("document.querySelector('.ai-nut-dung')", 4000, "đang stream");
+  await page.focus("textarea.ai-o");
+  await page.type("lượt thứ hai");
+  // Bấm Enter đúng khoảnh khắc nút Dừng biến mất (lượt 1 vừa xong về mặt logic; luồng mạng của nó còn mở thêm 150ms).
+  await page.ev(`(() => {
+    const mo = new MutationObserver(() => {
+      if (document.querySelector('.ai-nut-dung')) return;
+      mo.disconnect();
+      document.querySelector('textarea.ai-o').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  })()`);
+  await page.wait("__qa.lateErrors >= 1", 6000, "lỗi mạng muộn của lượt thứ nhất");
+  await sleep(100);
+  const giua = await page.ev(`({ dung: !!document.querySelector('.ai-nut-dung'), inflight: __qa.inflight, loi: document.querySelector('.ai-loi')?.innerText ?? null, chuaGui: !!document.querySelector('.ai-bong-chua-gui-nhan') })`);
+  check("lỗi mạng muộn của lượt cũ: lượt mới vẫn 'đang trả lời' (nút Dừng còn)", vp.name, giua.dung && giua.inflight === 1, JSON.stringify(giua));
+  check("lỗi mạng muộn của lượt cũ: không hiện biểu ngữ lỗi / 'Chưa gửi' giữa chừng", vp.name, giua.loi === null && !giua.chuaGui, JSON.stringify(giua));
+  await page.wait(`__qa.count('/messages') >= ${b0 + 2} && __qa.inflight === 0 && !document.querySelector('.ai-nut-dung')`, 12000, "cả hai lượt xong");
+  await sleep(250);
+  const cuoi = await page.ev(`({ loi: document.querySelector('.ai-loi')?.innerText ?? null, chuaGui: !!document.querySelector('.ai-bong-chua-gui-nhan'), tro: [...document.querySelectorAll('.ai-bong-assistant .ai-bong-noidung')].map((e) => e.innerText.replace(/\\s+/g, ' ').trim()), nguoi: document.querySelectorAll('.ai-bong-user').length })`);
+  check("lỗi mạng muộn của lượt cũ: kết thúc không có biểu ngữ lỗi, không có tin 'Chưa gửi'", vp.name, cuoi.loi === null && !cuoi.chuaGui, JSON.stringify(cuoi));
+  check("lỗi mạng muộn của lượt cũ: câu trả lời lượt mới hiện ĐỦ (không bị cắt đầu)", vp.name, cuoi.tro.length === 2 && cuoi.tro[1] === B, JSON.stringify(cuoi.tro));
+  check("lỗi mạng muộn của lượt cũ: đúng hai lượt người dùng", vp.name, cuoi.nguoi === 2, `nguoi=${cuoi.nguoi}`);
+  await page.ev(`__qa.failAfterDone = false; __qa.closeDelayMs = 60`);
 }, { viewports: VIEWPORTS.filter((v) => ["390", "desktop"].includes(v.name)) });
 
 scenario("behaviour-resilience", async (page, vp) => {

@@ -220,11 +220,20 @@ test("useChatDockOffset: không dựng lại ResizeObserver mỗi lần DOM đ�
 
 test("AiProvider: khoá ĐỒNG BỘ chống gửi đôi trong cùng một nhịp (Enter lặp, nhấn đúp nút Gửi)", () => {
   const src = codeOnly(read("components/ai/AiProvider.tsx"));
-  assert.match(src, /const dangGuiRef = useRef\(false\)/);
-  assert.match(src, /if \(dangGuiRef\.current\) return;\s*dangGuiRef\.current = true;\s*try \{\s*await chayLuotGui\(text, regenerateOf\);\s*\} finally \{\s*dangGuiRef\.current = false;/);
+  assert.match(src, /const khoaGuiRef = useRef\(0\)/);
+  assert.match(src, /if \(khoaGuiRef\.current !== 0\) return;/);
+  assert.match(src, /try \{\s*await chayLuotGui\(text, regenerateOf, nhaKhoa\);\s*\} finally \{\s*nhaKhoa\(\);/);
+  // khoá mang ID của lượt giữ nó: lượt cũ nhả muộn không nhả nhầm khoá của lượt mới
+  assert.match(src, /if \(khoaGuiRef\.current === id\) khoaGuiRef\.current = 0;/);
   assert.match(src, /const sendMessage = useCallback\(\(text: string\) => guiVanBan\(text\)/);
+  // nhả NGAY khi lượt xong về mặt logic (done / error), không đợi luồng mạng đóng — nếu không tin gửi liền sau đó bị nuốt
+  const handlers = src.match(/ev\.type === "done"\) \{[\s\S]*?ctrl\.signal,/)?.[0] ?? "";
+  assert.equal((handlers.match(/nhaKhoa\(\);/g) ?? []).length, 2, "done và error đều phải nhả khoá ngay");
   // đổi người dùng cũng nhả khoá (luồng cũ đã bị huỷ)
-  assert.match(src, /assistantIdRef\.current = null;\s*dangGuiRef\.current = false;/);
+  assert.match(src, /assistantIdRef\.current = null;\s*khoaGuiRef\.current = 0;/);
+  // Hệ quả của việc nhả sớm: lỗi vận chuyển đến SAU khung kết thúc phải bị bỏ qua, nếu không `catch` của lượt cũ chạy xen vào
+  // lượt mới (dùng chung `assistantIdRef`): tắt streaming của lượt mới, cắt đầu câu trả lời, biểu ngữ lỗi/"Chưa gửi" thừa.
+  assert.match(src, /\} catch \(e\) \{\s*if \(!cn\.conHieuLuc\(\)\) return;\s*if \(ketThuc\) return;\s*if \(ctrl\.signal\.aborted\)/);
 });
 
 test("AiProvider.ensureReady dừng khi máy chủ báo không dùng được (không nạp lịch sử vào một route chắc chắn bị từ chối)", () => {

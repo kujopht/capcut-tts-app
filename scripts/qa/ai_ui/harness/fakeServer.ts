@@ -80,6 +80,15 @@ export function installFakeServer(): void {
     cap: 5,
     token: null as string | null,
     log: [] as string[],
+    /** Máy chủ thật đóng kết nối SAU khung cuối vài chục ms (đóng chunked + TCP); giữ luồng mở thêm chừng đó để lộ các lỗi
+     *  "lượt đã xong về mặt giao diện nhưng fetch chưa resolve". */
+    closeDelayMs: 60,
+    /** Số luồng SSE đang mở phía máy chủ giả (+1 khi bắt đầu, -1 khi kết thúc/bị huỷ) — để harness đợi đúng "đã xong". */
+    inflight: 0,
+    /** Bật: sau khung `done` + `closeDelayMs`, luồng KẾT THÚC BẰNG LỖI MẠNG thay vì đóng sạch (đứt kết nối đúng lúc đóng
+     *  luồng). `lateErrors` đếm số lần điều đó đã xảy ra. */
+    failAfterDone: false,
+    lateErrors: 0,
     /** Công tắc tổng TẮT (kill switch): access `eligible:false`, availability `disabled_by_admin`, gửi tin 503 `ai_not_enabled`. */
     killed: false,
     /** Người có id bắt đầu bằng "outsider" là NGOÀI khán giả: access `eligible:false`, availability `not_in_audience`, mọi route khác 403. */
@@ -193,9 +202,20 @@ export function installFakeServer(): void {
     if (step.kind === "http") return jsonResponse(step.status, step.body);
 
     const assistantId = `a${++counter}`;
+    qa.inflight += 1;
+    let released = false;
+    const nha = () => {
+      if (!released) {
+        released = true;
+        qa.inflight -= 1;
+      }
+    };
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const onAbort = () => controller.error(new DOMException("Aborted", "AbortError"));
+        const onAbort = () => {
+          nha();
+          controller.error(new DOMException("Aborted", "AbortError"));
+        };
         if (signal?.aborted) return onAbort();
         signal?.addEventListener("abort", onAbort);
         const push = (e: string, d: unknown) => controller.enqueue(frame(e, d));
@@ -241,10 +261,17 @@ export function installFakeServer(): void {
           c.updated_at = now();
           push("usage", { input_tokens: 10, output_tokens: 5, used_today: 15, lane: "user", allowance: allowance() });
           push("done", { status: "complete" });
-          controller.close();
+          await sleep(qa.closeDelayMs, signal);
+          if (qa.failAfterDone) {
+            qa.lateErrors += 1;
+            controller.error(new TypeError("network error"));
+          } else {
+            controller.close();
+          }
         } catch {
           // Dừng giữa chừng: luồng đã bị `controller.error` ở onAbort.
         } finally {
+          nha();
           signal?.removeEventListener("abort", onAbort);
         }
       },

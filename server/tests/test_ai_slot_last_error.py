@@ -87,6 +87,29 @@ class TestProviderAttachesCategory(unittest.TestCase):
             p.generate(self._req())
         self.assertEqual((cm.exception.code, cm.exception.category), ("provider_http_403", "PERMISSION_DENIED:SERVICE_DISABLED"))
 
+    def test_slow_drip_error_body_stops_at_deadline(self) -> None:
+        """Review LOW #1: doc than loi co han thoi gian tong, khong cho het luong."""
+        import server.llm_gateway.chat_providers as cp
+
+        class Drip(httpx.SyncByteStream):
+            def __iter__(self):
+                for _ in range(10_000):
+                    yield b" "
+
+        transport = httpx.MockTransport(lambda req: httpx.Response(404, stream=Drip()))
+        p = OpenAICompatChatProvider(name="gemini-01", base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                                     api_key=FAKE_KEY, client=httpx.Client(transport=transport,
+                                                                          base_url="https://generativelanguage.googleapis.com/v1beta/openai"))
+        old = cp.ERROR_BODY_PEEK_DEADLINE_S
+        cp.ERROR_BODY_PEEK_DEADLINE_S = 0.0
+        try:
+            with self.assertRaises(ProviderError) as cm:
+                list(p.stream(self._req()))
+        finally:
+            cp.ERROR_BODY_PEEK_DEADLINE_S = old
+        self.assertEqual(cm.exception.code, "provider_http_404")
+        self.assertIsNone(cm.exception.category)
+
     def test_non_json_error_has_no_category(self) -> None:
         p = self._provider(502, b"<html>bad gateway</html>")
         with self.assertRaises(ProviderError) as cm:

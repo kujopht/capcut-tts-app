@@ -119,13 +119,21 @@ def error_category(raw: bytes) -> Optional[str]:
     return None
 
 
+#: Wall-clock budget for reading an error body: a slow-dripping vendor must not
+#: delay failover (review LOW #1). Checked between chunks; each chunk read is
+#: still bounded by the client's own read timeout.
+ERROR_BODY_PEEK_DEADLINE_S = 2.0
+
+
 def _peek_stream_error(resp: httpx.Response) -> bytes:
-    """At most ERROR_BODY_PEEK_BYTES of a streamed error body (never the whole thing)."""
+    """At most ERROR_BODY_PEEK_BYTES of a streamed error body (never the whole thing),
+    within ERROR_BODY_PEEK_DEADLINE_S."""
     buf = b""
+    deadline = time.monotonic() + ERROR_BODY_PEEK_DEADLINE_S
     try:
         for chunk in resp.iter_bytes():
             buf += chunk
-            if len(buf) >= ERROR_BODY_PEEK_BYTES:
+            if len(buf) >= ERROR_BODY_PEEK_BYTES or time.monotonic() >= deadline:
                 break
     except Exception:  # noqa: BLE001 — classification is best-effort, never a new failure
         return b""

@@ -676,10 +676,11 @@ class ControlPlane:
             self._probe_day, self._probe_counts = day, {}
 
     def _note_probe(self, slot_id: str, out: Mapping[str, Any]) -> None:
+        """Result of a probe already counted (reserved) in `probe()`. `_probe_log` is NOT
+        reset at midnight on purpose: stability is about the LAST probes, whatever the day."""
         with self._lock:
             self._roll_probe_day()
             c = self._probe_counts.setdefault(slot_id, [0, 0, 0])
-            c[0] += 1
             if out.get("ok"):
                 c[1] += 1
                 c[2] += int(out.get("tokens") or 0)
@@ -741,9 +742,12 @@ class ControlPlane:
             if now - self._probe_at.get(slot_id, -1e9) < PROBE_MIN_INTERVAL_S:
                 raise ControlConflict(f"Vừa kiểm slot {slot_id} — đợi {int(PROBE_MIN_INTERVAL_S)} giây rồi thử lại.")
             self._roll_probe_day()
-            if self._probe_counts.get(slot_id, [0, 0])[0] >= PROBE_DAILY_CAP_PER_SLOT:
+            counts = self._probe_counts.setdefault(slot_id, [0, 0, 0])
+            if counts[0] >= PROBE_DAILY_CAP_PER_SLOT:
                 raise ControlConflict(f"Slot {slot_id} đã được kiểm {PROBE_DAILY_CAP_PER_SLOT} lần hôm nay "
                                       "(ngân sách kiểm riêng) — thử lại ngày mai.")
+            # Reserve the probe INSIDE the lock (review): the count can never overshoot the cap.
+            counts[0] += 1
             self._probe_at[slot_id] = now
         out: Dict[str, Any] = {"slot_id": slot_id, "model": slot.model, "ok": False, "latency_ms": None,
                                "code": None, "category": None}

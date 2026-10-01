@@ -26,6 +26,7 @@ class TestPresets(unittest.TestCase):
             plane = plane_with([slot("gemini-01")], controls=GlobalControls(ai_enabled=on, provider_types=TYPES, version=3))
             out = plane.apply_preset("owner", "beta", expected_version=3)
             self.assertEqual(out["ai_enabled"], on)
+            self.assertEqual(out["version"], 4, "one logical action = one version bump (review LOW #2)")
             for k, v in ROLLOUT_PRESETS["beta"].items():
                 self.assertEqual(out[k], v, k)
             self.assertEqual(plane.config_view()["rollout"]["active_preset"], "beta")

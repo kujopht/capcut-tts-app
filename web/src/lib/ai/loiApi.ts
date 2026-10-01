@@ -13,6 +13,8 @@ export interface LoiApiDoc {
   status: number;
   code?: string;
   resetAt: string | null;
+  /** Chỉ có ở `ai_budget_exhausted`: điều gì đã hết ("user" | "global" | "qa"). Thiếu/lạ = `undefined`. */
+  scope?: "user" | "global" | "qa";
 }
 
 export function docLoiApi(body: unknown, status: number, macDinh: string): LoiApiDoc {
@@ -20,10 +22,14 @@ export function docLoiApi(body: unknown, status: number, macDinh: string): LoiAp
   const d = ngoai && "detail" in ngoai ? ngoai.detail : ngoai;
   if (typeof d === "string") return { message: d || macDinh, status, resetAt: null };
   const obj = d && typeof d === "object" ? (d as Record<string, unknown>) : null;
-  return {
+  const doc: LoiApiDoc = {
     message: (obj && typeof obj.message === "string" && obj.message) || macDinh,
     status,
     code: obj && typeof obj.code === "string" ? obj.code : undefined,
     resetAt: obj && typeof obj.reset_at === "string" ? obj.reset_at : null,
   };
+  // Chỉ gắn khi có: hình dạng cũ của kết quả (không có khoá `scope`) giữ nguyên cho mọi lỗi khác.
+  const scope = obj ? obj.scope : undefined;
+  if (scope === "user" || scope === "global" || scope === "qa") doc.scope = scope;
+  return doc;
 }

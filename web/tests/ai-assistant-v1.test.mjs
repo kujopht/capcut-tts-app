@@ -304,13 +304,13 @@ test("F3. /assistant là bố cục toàn màn hình CỐ ĐỊNH ở <=1023px (
   assert.match(css, /\.ai-trang \.ai-panel-soan \{[\s\S]*?env\(safe-area-inset-bottom/);
 });
 
-test("F4. Nhãn hạn mức hiện PHẦN TRĂM (không phải số token thô) trong câu chính; số token chỉ ở tooltip", () => {
+test("F4. Dòng hạn mức chỉ nói về hạn mức RIÊNG của người dùng (số lượt còn lại + giờ làm mới), không phần trăm, không token", () => {
+  // Bản cũ (F4 gốc) hiện "Đã dùng 51% hạn mức hôm nay": phần trăm theo ngân sách TOKEN cũ cạnh câu "đã hết lượt hỏi" (trần
+  // 5 LƯỢT thật) — hai thước đo khác nhau đặt cạnh nhau. Chi tiết hành vi ở web/tests/ai-quota-ux.test.mjs.
   const controls = codeOnly(read("components/ai/AiControls.tsx"));
-  assert.match(controls, /Đã dùng \{phanTramSuDung\(/, "F4: câu chính phải hiện phần trăm, không phải used_today/limit_today thô");
-  assert.match(controls, /hạn mức hôm nay/);
-  assert.match(controls, /title=\{`\$\{availability\.limits\.used_today[\s\S]*?token`\}/, "số token thô chỉ nằm trong title (tooltip)");
-  assert.ok(!/Đã dùng \{availability\.limits\.used_today\.toLocaleString\("vi-VN"\)\}\//.test(controls),
-    "không còn hiện thẳng used_today/limit_today ở câu chính (dạng cũ gây hiểu lầm token = lượt hỏi)");
+  assert.match(controls, /nhanHanMuc\(hanMuc, dinhDangGio\(hanMuc\.reset_at\)\)/);
+  assert.ok(!/phanTramSuDung|used_today|limit_today/.test(controls), "không còn đo phần trăm / token thô ở AiControls");
+  assert.ok(!/hạn mức hôm nay/.test(controls), "câu 'Đã dùng X% hạn mức hôm nay' đã bị gỡ");
 });
 
 // ---------------------------------------------------------------- Release gate C

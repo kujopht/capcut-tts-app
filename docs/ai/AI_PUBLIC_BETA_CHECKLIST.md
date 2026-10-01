@@ -95,7 +95,8 @@ Hội thoại đã lưu không cần xoá khi rút lui. Người dùng tự xoá
 - Chống lạm dụng chỉ gồm hạn mức ngày cộng RPM 8/người/phút. Chưa có chống spam theo nội dung.
 - 429 thật từ Google mới chỉ kiểm bằng unit test; trên production mới kiểm qua breaker và RPM mềm.
 - Ink Scout chưa kiểm trên máy thật.
-- Hạn mức ngày tính theo **UTC**: đặt lại lúc 07:00 giờ Việt Nam. Owner cũng chịu trần 5/ngày khi preset `beta` áp.
+- Hạn mức ngày tính theo **UTC**: đặt lại lúc 07:00 giờ Việt Nam. Owner dùng như người thường cũng chịu trần 5/ngày khi preset `beta` áp. Smoke test của Owner đi **lối QA** (`qa: true`, hạn mức riêng `FAS_AI_OWNER_QA_DAILY_REQUESTS`, mặc định 20/ngày) nên không ăn vào 5 lượt đó và không cần nâng trần tạm rồi áp lại preset; lượt QA vẫn nằm trong trần toàn cục 150 và bị Tắt khẩn cấp chặn.
+- Giao diện người dùng chỉ hiện hạn mức RIÊNG ("Hôm nay còn 3/5 lượt hỏi · làm mới lúc 07:00"); mức dùng toàn cục chỉ xem ở `/admin/ai`. Tin bị từ chối vì hết hạn mức hiện "Chưa gửi".
 
 ## G. Nhóm beta (10–30 tester): bật, smoke, rút lui
 
@@ -143,7 +144,7 @@ Hội thoại đã lưu không cần xoá khi rút lui. Người dùng tự xoá
 
 | # | Ai | Làm gì | Kỳ vọng |
 |---|---|---|---|
-| 1 | Owner | 1 lượt mỗi chế độ General / Hỗ trợ / Truyện (tốn 3 trong 5 lượt của Owner hôm nay) | Mỗi lượt có chữ chạy dần rồi kết thúc. Không `ai_no_provider`. `overview` thấy request ở các slot khác nhau. |
+| 1 | Owner | 1 lượt mỗi chế độ General / Hỗ trợ / Truyện, gửi kèm `"qa": true` (lối QA: không tốn 5 lượt thường của Owner, tốn 3 trong hạn mức QA) | Mỗi lượt có chữ chạy dần rồi kết thúc. Không `ai_no_provider`. Sự kiện `usage` có `lane:"qa"`. `overview` thấy request ở các slot khác nhau và ô "Lượt QA của Owner" tăng 3. |
 | 2 | Tester A (trong danh sách) | Mở trợ lý, gửi 1 câu General | Trả lời stream, có nút Dừng |
 | 3 | Tester A | Gửi câu dài, bấm **Dừng** giữa chừng, rồi **Tạo lại** | Dừng ngay; tạo lại trả lời mới |
 | 4 | Tester A | Ở trang một chương truyện, chọn chế độ Truyện, hỏi tóm tắt | Trả lời bám đúng chương |

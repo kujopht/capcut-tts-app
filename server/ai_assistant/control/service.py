@@ -43,6 +43,7 @@ from server.ai_assistant.control.store import (
     AuditEntry, ControlConfigCorrupt, ControlStore, ControlStoreUnavailable, UsageCounters, now_iso,
 )
 from server.ai_assistant.gateway import DEFAULT_429_COOLDOWN_S
+from server.ai_assistant.scopes import SCOPE_GLOBAL, SCOPE_QA, SCOPE_USER
 from server.llm_gateway.chat_provider import ChatProvider, ChatTurn, GenerateRequest, ProviderError
 from server.llm_gateway.usage_limits import CircuitBreaker
 
@@ -104,6 +105,9 @@ class AdmissionError:
     code: str
     message: str
     reset_at: Optional[str] = None
+    #: Chỉ có ở `ai_budget_exhausted`: "user" | "global" | "qa" (xem `limits.SCOPE_*`). Để giao diện nói đúng
+    #: ai hết gì, mà không phải lộ một con số công suất nào.
+    scope: str = ""
 
 
 class _Window:
@@ -135,6 +139,8 @@ class ControlPlane:
         self._rng = rng or random.Random()
         self._active_users_fn = active_users_fn
         self._user_usage_fn = user_usage_fn
+        #: day -> {"requests", "tokens", ...} của lần QA Owner (chỉ để HIỂN THỊ ở /admin/ai; không phải rào chặn).
+        self._qa_overview_fn: Optional[Callable[[str], Dict[str, Any]]] = None
         self._lock = threading.Lock()
         self._mut_lock = threading.RLock()
         self._cfg: Optional[ControlConfig] = None
@@ -159,13 +165,16 @@ class ControlPlane:
         self._probe_log: Dict[str, Deque[Tuple[str, bool, Optional[int], Optional[str]]]] = {}
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
-                             user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None) -> None:
+                             user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
+                             qa_overview_fn: Optional[Callable[[str], Dict[str, Any]]] = None) -> None:
         """Wired by `build_ai_runtime` once the AI repo exists (the plane itself
         is built earlier so `/admin/ai` works even while the assistant is off)."""
         if active_users_fn is not None:
             self._active_users_fn = active_users_fn
         if user_usage_fn is not None:
             self._user_usage_fn = user_usage_fn
+        if qa_overview_fn is not None:
+            self._qa_overview_fn = qa_overview_fn
 
     # ------------------------------------------------------------ config
     def invalidate(self) -> None:
@@ -374,7 +383,17 @@ class ControlPlane:
     def enabled(self) -> bool:
         return self.snapshot().controls.ai_enabled
 
-    def admission(self, user_id: str) -> Optional[AdmissionError]:
+    def user_caps(self) -> Tuple[int, int]:
+        """(trần lượt/ngày, trần token/ngày) MỖI NGƯỜI hiện hành; 0 = không đặt trần. Chỉ để tính hạn mức
+        riêng của người dùng — không có số liệu toàn cục nào ở đây."""
+        c = self.snapshot().controls
+        return c.per_user_daily_request_cap, c.per_user_daily_token_cap
+
+    def admission(self, user_id: str, *, qa_ledger_user: str = "", qa_daily_cap: int = 0) -> Optional[AdmissionError]:
+        """Cổng trước mỗi lượt gửi. Công tắc khẩn cấp và trần TOÀN CỤC áp cho MỌI lượt, kể cả lần QA của Owner
+        (lần QA không thể vượt trần an toàn toàn cục). Khác nhau duy nhất: trần THEO NGƯỜI. Lượt thường bị
+        chặn bởi trần riêng của người đó (scope "user"); lượt QA (`qa_ledger_user` != "") bị chặn bởi hạn mức
+        QA riêng `qa_daily_cap` trên sổ QA (scope "qa") và KHÔNG chạm tới sổ của người dùng thường."""
         cfg = self.snapshot()
         c = cfg.controls
         if not c.ai_enabled:
@@ -388,7 +407,21 @@ class ControlPlane:
         if (c.global_daily_request_cap and req >= c.global_daily_request_cap) or \
                 (c.global_daily_token_cap and tok >= c.global_daily_token_cap) or \
                 (c.daily_cost_cap_micro_usd and cost >= c.daily_cost_cap_micro_usd):
-            return AdmissionError(429, "ai_budget_exhausted", "Trợ lý AI đã dùng hết hạn mức hôm nay.", _reset_at_iso())
+            return AdmissionError(429, "ai_budget_exhausted", "Trợ lý AI đã dùng hết hạn mức hôm nay.",
+                                  _reset_at_iso(), SCOPE_GLOBAL)
+        if qa_ledger_user:
+            # Lối QA là lối đặc quyền: không đọc được sổ thì ĐÓNG (khác lối thường, nơi thiếu nguồn đếm = bỏ qua).
+            if self._user_usage_fn is None:
+                return AdmissionError(503, "ai_storage_unavailable", "Chưa đọc được hạn mức AI — thử lại sau ít phút.")
+            try:
+                qreq, _ = self._user_usage_fn(qa_ledger_user, today_utc())
+            except Exception:  # noqa: BLE001 — unknown usage never means "under the cap"
+                log.warning("ai_control: QA usage unavailable — refusing the turn")
+                return AdmissionError(503, "ai_storage_unavailable", "Chưa đọc được hạn mức AI — thử lại sau ít phút.")
+            if qreq >= qa_daily_cap:  # cap 0 => đóng hẳn
+                return AdmissionError(429, "ai_budget_exhausted", "Đã dùng hết lượt QA hôm nay.",
+                                      _reset_at_iso(), SCOPE_QA)
+            return None
         if self._user_usage_fn is not None:
             try:
                 ureq, utok = self._user_usage_fn(user_id, today_utc())
@@ -397,7 +430,8 @@ class ControlPlane:
                 return AdmissionError(503, "ai_storage_unavailable", "Chưa đọc được hạn mức AI — thử lại sau ít phút.")
             if (c.per_user_daily_request_cap and ureq >= c.per_user_daily_request_cap) or \
                     (c.per_user_daily_token_cap and utok >= c.per_user_daily_token_cap):
-                return AdmissionError(429, "ai_budget_exhausted", "Bạn đã dùng hết lượt hỏi hôm nay.", _reset_at_iso())
+                return AdmissionError(429, "ai_budget_exhausted", "Bạn đã dùng hết lượt hỏi hôm nay.",
+                                      _reset_at_iso(), SCOPE_USER)
         return None
 
     # ------------------------------------------------------------ admin views
@@ -493,8 +527,17 @@ class ControlPlane:
             tot.errors += u.errors
             tot.rate_limited += u.rate_limited
             tot.cost_micro_usd += u.cost_micro_usd
+        qa: Optional[Dict[str, Any]] = None
+        if self._qa_overview_fn is not None:
+            try:
+                qa = self._qa_overview_fn(today_utc())
+            except Exception:  # noqa: BLE001 — a metric, never a failure
+                qa = None
         return {
             "state": self.state, "day": today_utc(), "ai_enabled": c.ai_enabled,
+            #: Lần QA của Owner đã NẰM TRONG `requests` ở trên (đi qua cùng slot, cùng trần toàn cục); đây chỉ là
+            #: phần tách riêng để Owner thấy QA đã dùng bao nhiêu so với hạn mức QA.
+            "qa": qa,
             "requests": tot.requests, "input_tokens": tot.input_tokens, "output_tokens": tot.output_tokens,
             "errors": tot.errors, "rate_limited": tot.rate_limited, "est_cost_micro_usd": tot.cost_micro_usd,
             "active_users": active,

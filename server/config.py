@@ -263,6 +263,9 @@ class LlmGatewaySettings:
 AI_AUDIENCES = ("canary", "beta", "all")
 #: Nhom beta toi da (dot dau 10–30 tester). Vuot tran -> AI TAT (fail-closed), khong cat bot am tham.
 AI_BETA_MAX_USERS = 50
+#: Lan QA cua Owner: mac dinh 20 luot/ngay/Owner, tran cung 200 (`FAS_AI_OWNER_QA_DAILY_REQUESTS`).
+AI_OWNER_QA_DAILY_REQUESTS_DEFAULT = 20
+AI_OWNER_QA_DAILY_REQUESTS_MAX = 200
 #: Mot user ID Appwrite (chu, so, `.`, `_`, `-`; toi da 36 ky tu).
 _AI_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$")
 
@@ -328,6 +331,12 @@ class AiAssistantSettings:
     audience: str = ""
     canary_users: Tuple[str, ...] = ()
     beta_users: Tuple[str, ...] = ()
+    #: Lan QA cua Owner (`POST .../messages` voi `qa: true`): so luot/ngay RIENG cho MOI Owner, tach khoi
+    #: han muc nguoi dung thuong (de smoke test khong an vao 5 luot/ngay) nhung VAN tinh vao tran toan cuc va
+    #: bi cong tac khan cap chan. 0 = dong lan QA. Cau hinh bang BIEN MOI TRUONG, co y KHONG phai truong
+    #: cua kho cau hinh `/admin/ai`: them mot cot Appwrite moi vao `ai_control_settings` ma chua tao cot do
+    #: tren production se lam hong MOI lan ghi cau hinh, ke ca nut tat khan cap.
+    owner_qa_daily_requests: int = AI_OWNER_QA_DAILY_REQUESTS_DEFAULT
 
     def resolved_audience(self, data_backend: str) -> str:
         """"canary" | "beta" | "all"; chuoi RONG (= AI tat) khi `FAS_AI_AUDIENCE` co gia tri la
@@ -1095,6 +1104,14 @@ def _ai_assistant_settings() -> AiAssistantSettings:
         except ValueError:
             raise ConfigError(f"{name} phải là số nguyên, nhận được {raw!r}.")
 
+    def _qa_cap() -> int:
+        """Gia tri hong/ngoai khoang KHONG lam sap khoi dong (khac `_int` ben tren): ve mac dinh / kep vao [0, tran]."""
+        raw = _env("FAS_AI_OWNER_QA_DAILY_REQUESTS", "").strip()
+        try:
+            return max(0, min(AI_OWNER_QA_DAILY_REQUESTS_MAX, int(raw))) if raw else AI_OWNER_QA_DAILY_REQUESTS_DEFAULT
+        except ValueError:
+            return AI_OWNER_QA_DAILY_REQUESTS_DEFAULT
+
     return AiAssistantSettings(
         enabled=_env_bool("FAS_AI_ASSISTANT_V1", False),
         assistant_name=_env("FAS_AI_ASSISTANT_NAME", "Fanfic AI") or "Fanfic AI",
@@ -1124,6 +1141,7 @@ def _ai_assistant_settings() -> AiAssistantSettings:
         # Muc khong giong user ID bi BO (khong bao gio mo rong khan gia vi mot dong go nham).
         canary_users=tuple(x for x in _env_list("FAS_AI_CANARY_USERS", "") if _AI_USER_ID.match(x)),
         beta_users=tuple(dict.fromkeys(x for x in _env_list("FAS_AI_BETA_USERS", "") if _AI_USER_ID.match(x))),
+        owner_qa_daily_requests=_qa_cap(),
     )
 
 

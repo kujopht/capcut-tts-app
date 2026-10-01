@@ -55,6 +55,11 @@ export interface AiOverview {
     global_daily_token_cap: number;
     daily_cost_cap_micro_usd: number;
   };
+  /**
+   * Lần QA của Owner hôm nay (`qa: true` trong thân lượt gửi) — tách khỏi hạn mức người dùng thường nhưng NẰM TRONG
+   * `requests` ở trên và trong các trần toàn cục. `null` = không đo được.
+   */
+  qa?: { requests: number; tokens: number; owners: number; per_owner_daily_cap: number } | null;
   slots_by_status: Record<string, number>;
   providers: AiProviderSummary[];
 }

@@ -75,6 +75,9 @@ export function dienDichKhungAi(k: KhungTho): AiStreamEvent | null {
         input_tokens: Number(d.input_tokens ?? 0),
         output_tokens: Number(d.output_tokens ?? 0),
         used_today: typeof d.used_today === "number" ? d.used_today : null,
+        lane: d.lane === "qa" ? "qa" : "user",
+        // Chưa kiểm kiểu ở đây (tệp này không import gì): AiProvider đọc bằng `docHanMuc`.
+        allowance: d.allowance && typeof d.allowance === "object" ? d.allowance : null,
       };
     case "done":
       return { type: "done", status: (d.status === "stopped" || d.status === "error") ? d.status : "complete" };
@@ -84,6 +87,7 @@ export function dienDichKhungAi(k: KhungTho): AiStreamEvent | null {
         code: toErrorCode(d.code),
         message: String(d.message ?? "Có lỗi khi tạo phản hồi."),
         reset_at: typeof d.reset_at === "string" ? d.reset_at : null,
+        scope: d.scope === "user" || d.scope === "global" || d.scope === "qa" ? d.scope : undefined,
       };
     default:
       return null;

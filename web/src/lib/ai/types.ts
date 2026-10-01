@@ -21,17 +21,30 @@ export const AI_MODE_LABELS: Record<AiMode, string> = {
   writer: "Studio viết",
 };
 
+/**
+ * Hạn mức RIÊNG của người đang đăng nhập — đúng thứ máy chủ sẽ thực thi ở lượt gửi kế tiếp. Không có mức dùng
+ * toàn site hay công suất nhà cung cấp ở đây (chỉ `/admin/ai` thấy). Xem `lib/ai/hanMuc.ts`.
+ */
+export interface AiAllowance {
+  requests_used: number;
+  /** `null` = máy chủ không đặt trần số lượt: giao diện không có "x/y lượt" để hiện. */
+  requests_limit: number | null;
+  requests_remaining: number | null;
+  exhausted: boolean;
+  /** ISO (nửa đêm UTC kế tiếp); giao diện đổi sang giờ địa phương. */
+  reset_at: string | null;
+}
+
+/** Điều gì đã hết khi `ai_budget_exhausted`: lượt của chính bạn / công suất chung của site / hạn mức QA của Owner. */
+export type AiBudgetScope = "user" | "global" | "qa";
+
 export interface AiAvailability {
   enabled: boolean;
   reason: string | null;
   name: string;
   modes: AiMode[];
   web_search: boolean;
-  limits?: {
-    used_today: number;
-    limit_today: number;
-    reset_at: string | null;
-  };
+  limits?: AiAllowance;
 }
 
 export interface AiConversationSummary {
@@ -45,7 +58,12 @@ export interface AiConversationSummary {
   ephemeral?: boolean;
 }
 
-export type AiMessageStatus = "complete" | "stopped" | "error";
+/**
+ * `not_sent` là trạng thái CHỈ có ở phía client: máy chủ từ chối lượt này TRƯỚC khi nhận (hết hạn mức, quá
+ * nhanh, đang bận, mất mạng…) nên tin KHÔNG có trong hội thoại thật — giao diện phải nói đúng điều đó thay vì
+ * để nó trông như đã gửi.
+ */
+export type AiMessageStatus = "complete" | "stopped" | "error" | "not_sent";
 
 export interface AiCitation {
   novel_id: string;
@@ -97,6 +115,8 @@ export interface AiErrorInfo {
   code: AiErrorCode;
   message: string;
   reset_at?: string | null;
+  /** Chỉ có ở `ai_budget_exhausted`; thiếu (máy chủ cũ) thì coi như "user". */
+  scope?: AiBudgetScope;
 }
 
 /** Sự kiện SSE đã phân tích — hợp đồng §10. */
@@ -104,9 +124,18 @@ export type AiStreamEvent =
   | { type: "meta"; message_id: string; conversation_id: string }
   | { type: "delta"; text: string }
   | { type: "citations"; items: AiCitation[] }
-  | { type: "usage"; input_tokens: number; output_tokens: number; used_today: number | null }
+  | {
+      type: "usage";
+      input_tokens: number;
+      output_tokens: number;
+      used_today: number | null;
+      /** "qa" = lượt QA của Owner (hạn mức QA riêng); mặc định "user". */
+      lane: "user" | "qa";
+      /** Hạn mức riêng sau lượt này, CHƯA kiểm kiểu (bộ tách SSE không import gì): đọc bằng `docHanMuc`; `null` nếu máy chủ không gửi. */
+      allowance: unknown;
+    }
   | { type: "done"; status: AiMessageStatus }
-  | { type: "error"; code: AiErrorCode; message: string; reset_at?: string | null };
+  | { type: "error"; code: AiErrorCode; message: string; reset_at?: string | null; scope?: AiBudgetScope };
 
 export interface AiPreferences {
   memory_enabled: boolean;

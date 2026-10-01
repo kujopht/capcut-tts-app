@@ -50,6 +50,13 @@ export function AiOverviewCards({ overview, config }: { overview: AiOverview; co
           <span className="hint admin-o-ghi">Theo giá Owner nhập, không phải hoá đơn</span>
         </div>
         <OSo nhan="Người dùng AI hoạt động" so={overview.active_users} />
+        {overview.qa ? (
+          <OSo
+            nhan="Lượt QA của Owner"
+            so={overview.qa.requests}
+            ghi_chu={`Hạn mức QA ${overview.qa.per_owner_daily_cap}/Owner/ngày · đã nằm trong số "Yêu cầu hôm nay" và trần toàn cục`}
+          />
+        ) : null}
         <OSo nhan="Lỗi" so={overview.errors} />
         <OSo nhan="Bị giới hạn tốc độ (429)" so={overview.rate_limited} />
       </div>

@@ -14,7 +14,7 @@ from typing import Any, Dict, FrozenSet, Optional, Tuple
 from server.ai_assistant.config import resolve_provider_chain
 from server.ai_assistant.ephemeral import EphemeralConversationStore
 from server.ai_assistant.gateway import AiGateway
-from server.ai_assistant.limits import RpmLimiter, StreamGuard
+from server.ai_assistant.limits import QA_LEDGER_PREFIX, RpmLimiter, StreamGuard, qa_ledger_user
 from server.ai_assistant.memory import AiRepo, AiUnavailable, AppwriteAiRepo, InMemoryAiRepo
 from server.ai_assistant.tools import ToolContext
 from server.llm_gateway.chat_providers import (
@@ -65,9 +65,26 @@ class AiRuntime:
     #: `enabled:false`, `/api/ai/access` `eligible:false`, route khac 403.
     audience: str = "all"
     audience_users: FrozenSet[str] = field(default_factory=frozenset)
+    #: Owner (`FAS_OWNER_USER_IDS`): CHỈ họ được dùng lần QA (`qa: true` trong thân lượt gửi). Server-side,
+    #: không bao giờ ra client. Người khác gửi `qa: true` thì cờ bị BỎ QUA (lượt tính như lượt thường).
+    owner_users: FrozenSet[str] = field(default_factory=frozenset)
+    #: Trần lượt QA mỗi ngày của MỖI Owner, tách khỏi hạn mức người dùng thường (0 = đóng lối QA).
+    owner_qa_daily_requests: int = 20
 
     def allows(self, user_id: str) -> bool:
+        # Tiền tố của khoá sổ QA (`limits.qa_ledger_user`) là của riêng sổ đó: id tài khoản thật do Appwrite sinh
+        # (`unique()`) nên không bao giờ mang nó, nhưng nếu có thì KHÔNG được vào, kẻo dùng chung sổ QA của Owner.
+        if user_id and user_id.startswith(QA_LEDGER_PREFIX):
+            return False
         return self.audience == "all" or (bool(user_id) and user_id in self.audience_users)
+
+    def is_owner(self, user_id: str) -> bool:
+        return bool(user_id) and user_id in self.owner_users
+
+    def qa_lane(self, user_id: str, requested: bool) -> bool:
+        """Lượt này đi lối QA? Cần ĐỦ ba điều kiện: người gọi xin (`qa: true`), người gọi là Owner, và control
+        plane đang bật (lối QA dùng hạn mức của control plane; ở chế độ cũ `FAS_AI_PROVIDERS` thì không có)."""
+        return bool(requested) and self.control is not None and self.is_owner(user_id)
 
     def serving(self) -> bool:
         """Runtime dựng xong và phục vụ được (cờ bật, khán giả hợp lệ, có repo + gateway)."""
@@ -178,11 +195,34 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
     if getattr(ai, "user_ref_salt", ""):
         kwargs["user_ref_salt"] = ai.user_ref_salt
 
+    owner_users = frozenset(getattr(settings, "owner_user_ids", ()) or ())
+    owner_qa_daily_requests = max(0, int(getattr(ai, "owner_qa_daily_requests", 20)))
+
     if control is not None:
         def _user_usage(user_id: str, day: str) -> Tuple[int, int]:
             u = repo.get_usage_day(user_id, day)
             return (u.requests, u.input_tokens + u.output_tokens) if u else (0, 0)
-        control.attach_usage_sources(active_users_fn=repo.count_usage_users, user_usage_fn=_user_usage)
+
+        def _active_users(day: str) -> Optional[int]:
+            """Người dùng AI hoạt động = số dòng sổ hôm nay TRỪ các dòng sổ QA (khoá tổng hợp, không phải người)."""
+            total = repo.count_usage_users(day)
+            if total is None:
+                return None
+            qa_rows = sum(1 for o in sorted(owner_users) if repo.get_usage_day(qa_ledger_user(o), day) is not None)
+            return max(0, total - qa_rows)
+
+        def _qa_overview(day: str) -> Dict[str, Any]:
+            used_req = used_tok = 0
+            for o in sorted(owner_users):
+                u = repo.get_usage_day(qa_ledger_user(o), day)
+                if u is not None:
+                    used_req += u.requests
+                    used_tok += u.input_tokens + u.output_tokens
+            return {"requests": used_req, "tokens": used_tok, "owners": len(owner_users),
+                    "per_owner_daily_cap": owner_qa_daily_requests}
+
+        control.attach_usage_sources(active_users_fn=_active_users, user_usage_fn=_user_usage,
+                                     qa_overview_fn=_qa_overview)
 
     return AiRuntime(
         True, repo=repo, gateway=gateway, control=control, tool_ctx=tool_ctx or ToolContext(),
@@ -191,4 +231,5 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
         rpm=ai.rpm, web_search_enabled=(ai.web_search_provider or "off") != "off",
         heartbeat_s=float(getattr(ai, "heartbeat_s", 15)),
         stream_guard=StreamGuard(max_streams_per_instance=ai.max_streams),
-        audience=audience, audience_users=audience_users, **kwargs)
+        audience=audience, audience_users=audience_users, owner_users=owner_users,
+        owner_qa_daily_requests=owner_qa_daily_requests, **kwargs)

@@ -10,13 +10,24 @@ feature" convention as `server/llm_gateway/usage_limits.py`'s
 """
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from server.ai_assistant.memory import AiRepo
+from server.ai_assistant.scopes import SCOPE_GLOBAL, SCOPE_QA, SCOPE_USER  # noqa: F401 — re-export cho route/test
 from server.rate_limit import SlidingWindowRateLimiter
+
+#: Lần QA của Owner ghi vào CÙNG sổ `ai_usage_daily` nhưng dưới một khoá tổng hợp (`qa-` + 16 hex của
+#: băm), nên: (1) không cần cột Appwrite mới, (2) không bao giờ cộng vào hạn mức người dùng thường,
+#: (3) vừa đủ ngắn cho `user_id` (64) và mã tài liệu `{khoá}_{yyyymmdd}` (<= 36 ký tự) dù user id dài tới 36.
+QA_LEDGER_PREFIX = "qa-"
+
+
+def qa_ledger_user(user_id: str) -> str:
+    return QA_LEDGER_PREFIX + hashlib.sha256(("fanfic-ai-qa:" + user_id).encode("utf-8")).hexdigest()[:16]
 
 
 class AiUsageError(Exception):
@@ -33,9 +44,10 @@ class AiRateLimited(AiUsageError):
 class AiBudgetExceeded(AiUsageError):
     code = "ai_budget_exhausted"
 
-    def __init__(self, message: str, *, reset_at: str):
+    def __init__(self, message: str, *, reset_at: str, scope: str = SCOPE_USER):
         super().__init__(message)
         self.reset_at = reset_at
+        self.scope = scope
 
 
 class AiBusy(AiUsageError):
@@ -104,13 +116,55 @@ class BudgetStatus:
     used_today: int
     limit_today: int
     reset_at: str
+    #: Số lượt đã ghi sổ hôm nay (cùng bản ghi với `used_today`, không tốn thêm lần đọc).
+    requests_used: int = 0
+
+
+@dataclass(frozen=True)
+class Allowance:
+    """Hạn mức RIÊNG của một người trong ngày — đúng thứ `ControlPlane.admission` + ngân sách token cũ sẽ
+    thực thi, và KHÔNG chứa gì về công suất toàn site / nhà cung cấp (phần đó chỉ ở `/admin/ai`)."""
+
+    requests_used: int
+    #: `None` = không đặt trần số lượt (chỉ còn trần token) — giao diện không có "x/y lượt" để hiện.
+    requests_limit: Optional[int]
+    requests_remaining: Optional[int]
+    exhausted: bool
+    reset_at: str
+
+    def to_public(self) -> Dict[str, Any]:
+        return {"requests_used": self.requests_used, "requests_limit": self.requests_limit,
+                "requests_remaining": self.requests_remaining, "exhausted": self.exhausted,
+                "reset_at": self.reset_at}
+
+
+def compute_allowance(*, requests_used: int, tokens_used: int, request_cap: int, token_cap: int,
+                      legacy_token_limit: Optional[int] = None, reset_at: Optional[str] = None) -> Allowance:
+    """Gộp ĐÚNG ba phép kiểm mà một lượt gửi sẽ gặp: trần số lượt và trần token của control plane
+    (`0` = không đặt trần) và ngân sách token theo hạng tài khoản cũ (`enforce_budget`, `None` = không áp)."""
+    req_cap = request_cap if request_cap and request_cap > 0 else None
+    exhausted = bool(
+        (req_cap is not None and requests_used >= req_cap)
+        or (token_cap and tokens_used >= token_cap)
+        or (legacy_token_limit is not None and tokens_used >= legacy_token_limit))
+    remaining = None if req_cap is None else (0 if exhausted else max(0, req_cap - requests_used))
+    return Allowance(requests_used=requests_used, requests_limit=req_cap, requests_remaining=remaining,
+                     exhausted=exhausted, reset_at=reset_at or _reset_at_iso())
+
+
+def qa_allowance(*, requests_used: int, daily_cap: int, reset_at: Optional[str] = None) -> Allowance:
+    """Lần QA của Owner: CHỈ trần số lượt, và `0` nghĩa là ĐÓNG (khác trần người dùng, nơi 0 = không trần)."""
+    return Allowance(requests_used=requests_used, requests_limit=daily_cap,
+                     requests_remaining=max(0, daily_cap - requests_used), exhausted=requests_used >= daily_cap,
+                     reset_at=reset_at or _reset_at_iso())
 
 
 def budget_status(repo: AiRepo, *, user_id: str, daily_limit: int) -> BudgetStatus:
     day = _today()
     usage = repo.get_usage_day(user_id, day)
     used = (usage.input_tokens + usage.output_tokens) if usage else 0
-    return BudgetStatus(used_today=used, limit_today=daily_limit, reset_at=_reset_at_iso())
+    return BudgetStatus(used_today=used, limit_today=daily_limit, reset_at=_reset_at_iso(),
+                        requests_used=usage.requests if usage else 0)
 
 
 def enforce_budget(repo: AiRepo, *, user_id: str, daily_limit: int) -> BudgetStatus:
@@ -132,4 +186,4 @@ def record_usage(repo: AiRepo, *, user_id: str, input_tokens: int, output_tokens
     day = _today()
     u = repo.increment_usage(user_id, day, input_tokens=input_tokens, output_tokens=output_tokens)
     return BudgetStatus(used_today=u.input_tokens + u.output_tokens, limit_today=daily_limit,
-                        reset_at=_reset_at_iso())
+                        reset_at=_reset_at_iso(), requests_used=u.requests)

@@ -7,23 +7,18 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useAi } from "./AiProvider";
-import { AI_MODES, AI_MODE_LABELS, type AiErrorCode } from "@/lib/ai/types";
+import { AI_MODES, AI_MODE_LABELS, type AiBudgetScope, type AiErrorCode } from "@/lib/ai/types";
+import { daHetLuot, dinhDangGio, nhanHanMuc, thongDiepHetLuot } from "@/lib/ai/hanMuc";
 import { FanficIcon } from "@/components/icons/FanficIcon";
 import { AI_COMPANION_ENABLED } from "@/lib/features";
 import { CompanionSettings } from "./companion/CompanionSettings";
 
-/**
- * F4 (QA Chrome thật): nhãn usage từng hiện thẳng số TOKEN dưới nhãn "lượt"
- * ("Đã dùng 2.188/30.000 lượt hôm nay") — gây hiểu lầm token là số lượt
- * hỏi. Số token thô (không lộ khái niệm "token" ra câu chữ chính, chỉ ở
- * `title` — người dùng thường không cần biết đơn vị đo ngân sách) chuyển
- * xuống tooltip; câu chính chỉ còn phần trăm hạn mức đã dùng.
+/*
+ * Dòng hạn mức dưới tiêu đề (`nhanHanMuc`) CHỈ nói về hạn mức RIÊNG của người đang dùng: "Hôm nay còn 3/5 lượt hỏi ·
+ * làm mới lúc 07:00". Không còn phần trăm, không còn số token, không bao giờ có mức dùng toàn site / công suất nhà
+ * cung cấp (những thứ đó chỉ ở /admin/ai). Phần trăm "Đã dùng 51% hạn mức hôm nay" từng hiện cạnh câu "đã hết lượt":
+ * nó đo ngân sách token cũ theo hạng tài khoản, còn trần thật là số LƯỢT — hai thước đo khác nhau đặt cạnh nhau.
  */
-function phanTramSuDung(used: number, limit: number): string {
-  if (!Number.isFinite(limit) || limit <= 0) return "—";
-  const pct = Math.min(100, Math.max(0, Math.round((used / limit) * 100)));
-  return `${pct}%`;
-}
 
 /**
  * Popover cài đặt ký ức — bật/tắt ghi nhớ (`memory_enabled`) và "Xoá toàn bộ
@@ -106,17 +101,8 @@ function AiSettingsPopover({ onClose }: { onClose: () => void }) {
   );
 }
 
-function dinhDangGio(iso: string | null | undefined): string {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "";
-  }
-}
-
 /** Thông điệp thân thiện theo mã lỗi — KHÔNG lộ provider/model (§0.3, §11). */
-function thongDiepLoi(code: AiErrorCode, resetAt?: string | null): string {
+function thongDiepLoi(code: AiErrorCode, resetAt?: string | null, scope?: AiBudgetScope): string {
   switch (code) {
     case "ai_not_enabled":
       return "Trợ lý AI chưa được bật.";
@@ -126,7 +112,8 @@ function thongDiepLoi(code: AiErrorCode, resetAt?: string | null): string {
     case "ai_rate_limited":
       return "Bạn đang hỏi hơi nhanh — chờ một chút rồi thử lại.";
     case "ai_budget_exhausted":
-      return resetAt ? `Đã dùng hết lượt hỏi hôm nay. Làm mới lúc ${dinhDangGio(resetAt)}.` : "Đã dùng hết lượt hỏi hôm nay.";
+      // Nói ĐÚNG điều gì đã hết (lượt của bạn / công suất chung "không phải do bạn" / hạn mức QA), không số liệu chung.
+      return thongDiepHetLuot(scope, dinhDangGio(resetAt));
     case "ai_busy":
       return "Trợ lý AI đang bận, vui lòng thử lại sau.";
     case "ai_context_too_large":
@@ -164,6 +151,8 @@ export function AiControls({ onClose }: { onClose?: () => void } = {}) {
   const [caiDatMo, setCaiDatMo] = useState(false);
 
   const coTraLoiCuoi = messages.some((m) => m.role === "assistant");
+  const hanMuc = availability ? availability.limits : undefined;
+  const dongHanMuc = hanMuc ? nhanHanMuc(hanMuc, dinhDangGio(hanMuc.reset_at)) : "";
 
   return (
     <div className="ai-panel-dieukhien">
@@ -228,18 +217,13 @@ export function AiControls({ onClose }: { onClose?: () => void } = {}) {
         </div>
       </header>
 
-      {availability && availability.limits ? (
-        <div
-          className="ai-usage hint"
-          title={`${availability.limits.used_today.toLocaleString("vi-VN")}/${availability.limits.limit_today.toLocaleString("vi-VN")} token`}
-        >
-          Đã dùng {phanTramSuDung(availability.limits.used_today, availability.limits.limit_today)} hạn mức hôm nay
-        </div>
+      {hanMuc && dongHanMuc ? (
+        <div className={`ai-usage hint${daHetLuot(hanMuc) ? " ai-usage-het" : ""}`}>{dongHanMuc}</div>
       ) : null}
 
       {error ? (
         <div className="ai-loi" role="alert">
-          <span>{thongDiepLoi(error.code, error.reset_at)}</span>
+          <span>{thongDiepLoi(error.code, error.reset_at, error.scope)}</span>
           {error.code === "ai_provider_interrupted" && coTraLoiCuoi && !streaming ? (
             <button type="button" className="btn btn-sm" onClick={() => void regenerate()}>
               Tạo lại

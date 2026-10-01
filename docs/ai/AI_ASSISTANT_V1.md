@@ -146,26 +146,43 @@ Adapter: `NullWebSearch` (mặc định, trả rỗng + cờ "tắt"), `MockWebS
 - Ngân sách token/ngày theo tier (`ai_usage_daily`); hết → 429 `ai_budget_exhausted` kèm `reset_at`. (Appwrite không có giao dịch: tăng bộ đếm đọc-sửa-ghi, chấp nhận lệch nhỏ khi đua — ghi rõ.)
 - Trần: tin người dùng ≤ 4000 ký tự; ngữ cảnh ≤ 6000 token ước lượng (writer 8000); output mặc định 800 token (writer draft 1500); ≤ 200 hội thoại/người; `FAS_AI_MAX_STREAMS` stream/instance → 503 `ai_busy`.
 - Dự phòng provider: §3. Công tắc tắt: `FAS_AI_ASSISTANT_V1=0`.
-- Đo usage: mỗi lượt ghi provider/model/tokens/latency/outcome; `GET /api/ai/availability` trả `used_today/limit_today` của CHÍNH người đó.
+- Đo usage: mỗi lượt ghi provider/model/tokens/latency/outcome; `GET /api/ai/availability` trả hạn mức RIÊNG của CHÍNH người đó (`limits`, xem §10) — không bao giờ trả mức dùng toàn site hay công suất nhà cung cấp (chỉ `/admin/ai` thấy).
 
 ## 10. API (tiền tố `/api/ai/*` — KHÔNG dùng `/api/chat/*`, đã thuộc Chat V1 + reader AI)
 
 | Method + path | Mô tả |
 |---|---|
-| `GET /api/ai/availability` | `{enabled, reason, name, modes[], web_search, limits:{used_today, limit_today, reset_at}}` — luôn 200 khi đã đăng nhập |
+| `GET /api/ai/availability` | `{enabled, reason, name, modes[], web_search, limits:{requests_used, requests_limit, requests_remaining, exhausted, reset_at, used_today, limit_today}, qa?}` — luôn 200 khi đã đăng nhập. `limits` = hạn mức RIÊNG của người gọi, đúng thứ lượt gửi kế tiếp sẽ gặp (trần lượt + trần token của control plane + ngân sách token hạng tài khoản cũ); `requests_limit`/`requests_remaining` là `null` khi không đặt trần lượt. `used_today`/`limit_today` (token) giữ lại cho bản giao diện cũ trong bộ nhớ đệm, giao diện mới KHÔNG dùng. `qa` chỉ có ở Owner (hạn mức lối QA, §10b) |
 | `GET /api/ai/conversations?limit&cursor` | danh sách (không nội dung) |
 | `POST /api/ai/conversations` | `{mode, title?, context?:{novel_id?, chapter_id?, current_chapter_index?, project_id?}}` |
 | `GET /api/ai/conversations/{id}` | hội thoại + tin nhắn (phân trang) |
 | `DELETE /api/ai/conversations/{id}` | xoá hội thoại + tin + tóm tắt |
-| `POST /api/ai/conversations/{id}/messages` | **SSE** (fetch + Authorization, như Chat V1). Body `{content, client_id, regenerate_of?, use_web_search?, use_library?}` |
+| `POST /api/ai/conversations/{id}/messages` | **SSE** (fetch + Authorization, như Chat V1). Body `{content, client_id, regenerate_of?, use_web_search?, use_library?, qa?}` (`qa`: lối QA của Owner, §10b) |
 | `GET/PUT /api/ai/preferences` | sở thích tường minh + memory_enabled |
 | `DELETE /api/ai/memory` | xoá toàn bộ ký ức AI (tuỳ chọn `include_projects`) |
 | `GET/POST /api/ai/projects`, `GET/PUT/DELETE /api/ai/projects/{id}` | dự án viết |
 | `POST /api/ai/support/escalations` | tạo yêu cầu hỗ trợ (người dùng xác nhận) |
 
-Sự kiện SSE: `meta{message_id, conversation_id}` → `delta{text}`* → (`citations{items}`)? → `usage{input_tokens, output_tokens, used_today, limit_today}` → `done{status: complete|stopped}`; hoặc `error{code, message}`. Heartbeat comment `: ping` sau mỗi `FAS_AI_HEARTBEAT_S` giây (15–25, mặc định 15) provider im lặng — xem "Release gate / A". Dừng: client huỷ fetch → server phát hiện ngắt (`request.is_disconnected()` giữa các chunk) → đóng stream upstream, lưu `status=stopped` với phần đã sinh.
+Sự kiện SSE: `meta{message_id, conversation_id}` → `delta{text}`* → (`citations{items}`)? → `usage{input_tokens, output_tokens, used_today, limit_today, lane, allowance}` → `done{status: complete|stopped}`; hoặc `error{code, message, scope?, reset_at?}`. `usage.allowance` là hạn mức riêng SAU lượt này (cùng hình dạng `limits`); `usage.lane` là `user` hoặc `qa`. Heartbeat comment `: ping` sau mỗi `FAS_AI_HEARTBEAT_S` giây (15–25, mặc định 15) provider im lặng — xem "Release gate / A". Dừng: client huỷ fetch → server phát hiện ngắt (`request.is_disconnected()` giữa các chunk) → đóng stream upstream, lưu `status=stopped` với phần đã sinh.
 
 Mã lỗi ổn định: `ai_not_enabled`(503), `ai_no_provider`(503), `ai_rate_limited`(429), `ai_budget_exhausted`(429), `ai_busy`(503), `ai_context_too_large`(400), `ai_provider_unavailable`(503), `ai_provider_interrupted`(sự kiện), `ai_forbidden`(403), `ai_not_found`(404).
+
+`ai_budget_exhausted` kèm `scope` để giao diện nói đúng điều gì đã hết: `user` = lượt hỏi riêng của người đó; `global` = công suất chung của site / nhà cung cấp (không kèm con số nào ra người dùng); `qa` = hạn mức lối QA của Owner. Thiếu `scope` (máy chủ cũ) thì coi như `user`. Kèm `reset_at` (nửa đêm UTC kế tiếp).
+
+**Lượt bị từ chối ở các cổng KHÔNG được lưu**: máy chủ kiểm khán giả, công tắc khẩn cấp, RPM, trần/hạn mức (lượt, token, toàn cục) và giới hạn stream đồng thời TRƯỚC khi ghi tin nhắn người dùng. Vì vậy khi chưa nhận được sự kiện `meta` mà yêu cầu lỗi, giao diện đánh dấu tin vừa gõ là "Chưa gửi" (`status:"not_sent"`, chỉ có ở client) thay vì để nó trông như đã gửi; đã có `meta` thì tin đã ở máy chủ và được giữ nguyên.
+
+### 10b. Lối QA của Owner
+
+Smoke test của Owner không được ăn vào hạn mức người dùng thường (5 lượt/ngày). Gửi `qa: true` trong thân lượt gửi:
+
+| Hạng mục | Hành vi |
+|---|---|
+| Ai dùng được | CHỈ người trong `FAS_OWNER_USER_IDS`, và chỉ khi control plane đang bật. Với người khác cờ bị BỎ QUA im lặng: lượt tính như lượt thường (không báo lỗi, không mở quyền) |
+| Sổ đếm | Lượt QA ghi vào sổ `ai_usage_daily` dưới khoá tổng hợp (`qa-` + 16 hex của băm user id), KHÔNG vào sổ của người dùng. Không cần cột Appwrite mới |
+| Hạn mức | `FAS_AI_OWNER_QA_DAILY_REQUESTS` lượt/ngày/Owner (mặc định 20, tối đa 200, `0` = đóng lối QA, giá trị hỏng = mặc định). Là biến môi trường, KHÔNG phải trường của `/admin/ai`: thêm cột vào `ai_control_settings` mà chưa tạo cột trên production sẽ làm hỏng mọi lần ghi cấu hình, kể cả nút tắt khẩn cấp |
+| Vẫn áp dụng | Công tắc khẩn cấp, trần TOÀN CỤC (lượt/token/chi phí), slot và RPM. Lượt QA nằm TRONG tổng toàn cục: không có cách nào vượt trần an toàn bằng QA |
+| Hết hạn mức QA | 429 `ai_budget_exhausted` `scope:"qa"`; không ảnh hưởng lượt thường của Owner |
+| Hiển thị | Owner thấy `qa` trong availability; `/admin/ai` có ô "Lượt QA của Owner" (đã nằm trong "Yêu cầu hôm nay"); "Người dùng AI hoạt động" không đếm sổ QA |
 
 ## 11. Giao diện web
 

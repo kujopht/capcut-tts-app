@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAi } from "./AiProvider";
 import { renderMarkdownLite } from "./markdownLite";
+import { daHetLuot } from "@/lib/ai/hanMuc";
 import { FanficIcon } from "@/components/icons/FanficIcon";
 import { AI_PROJECT_FIELD_LABELS, type AiProjectField } from "@/lib/ai/types";
 
@@ -61,8 +62,10 @@ function AiSaveToProjectMenu({ content }: { content: string }) {
 }
 
 export function AiConversation() {
-  const { messages, streaming, streamingText, conversationId, mode, regenerate } = useAi();
+  const { messages, streaming, streamingText, conversationId, mode, regenerate, availability } = useAi();
   const cuoiRef = useRef<HTMLDivElement | null>(null);
+  // Hết lượt của chính người này: "Tạo lại" chắc chắn bị từ chối, nên không mời bấm.
+  const hetLuot = daHetLuot(availability ? availability.limits : undefined);
   // "Tao lai" la dieu khien THUONG cho tin tra loi CUOI (ke ca da dung/loi) — khong chi trong banner loi.
   const idCuoi = [...messages].reverse().find((m) => m.role === "assistant")?.message_id;
 
@@ -89,8 +92,12 @@ export function AiConversation() {
       ) : null}
       {messages.map((m) => {
         const rong = m.role === "assistant" && !m.content.trim();
+        const chuaGui = m.role === "user" && m.status === "not_sent";
         return (
-        <div key={m.message_id} className={`ai-bong ai-bong-${m.role}${m.status === "error" ? " ai-bong-loi" : ""}`}>
+        <div
+          key={m.message_id}
+          className={`ai-bong ai-bong-${m.role}${m.status === "error" ? " ai-bong-loi" : ""}${chuaGui ? " ai-bong-chua-gui" : ""}`}
+        >
           {/*
             F2: trước đây một lượt bị dừng/lỗi TRƯỚC token đầu tiên để lại
             một bong bóng nội dung rỗng gần như vô hình — người dùng thấy
@@ -105,6 +112,9 @@ export function AiConversation() {
             <div className="ai-bong-noidung">{renderMarkdownLite(m.content)}</div>
           )}
           {m.status === "stopped" && !rong ? <span className="ai-bong-ghichu">Đã dừng</span> : null}
+          {/* Máy chủ từ chối lượt này TRƯỚC khi nhận (hết hạn mức, quá nhanh, mất mạng…): tin không có trong hội
+              thoại thật — nói thẳng, đừng để nó trông như đã gửi. Lý do nằm ở khung báo lỗi phía trên. */}
+          {chuaGui ? <span className="ai-bong-ghichu ai-bong-chua-gui-nhan" role="status">Chưa gửi</span> : null}
           {m.citations.length ? (
             <ul className="ai-trichdan">
               {m.citations.map((c, i) => (
@@ -119,7 +129,7 @@ export function AiConversation() {
           {mode === "writer" && m.role === "assistant" && m.status === "complete" ? (
             <AiSaveToProjectMenu content={m.content} />
           ) : null}
-          {m.message_id === idCuoi && !streaming ? (
+          {m.message_id === idCuoi && !streaming && !hetLuot ? (
             <button type="button" className="ai-nut-tao-lai" onClick={() => void regenerate()}
               aria-label="Tạo lại câu trả lời">
               <FanficIcon name="refresh" size={14} />

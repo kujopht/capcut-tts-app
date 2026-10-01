@@ -114,7 +114,7 @@ Người ngoài khán giả nhận `GET /api/ai/availability` → `enabled:false
 ## 3. Thứ tự kiểm một lượt chat
 
 0. Khán giả (ở trên): ngoài khán giả → 403 trước mọi bước dưới.
-1. `admission()` (trước khi stream): công tắc tổng → 503 `ai_not_enabled`; trần toàn cục/chi phí → 429 `ai_budget_exhausted`; trần theo người dùng → 429 `ai_budget_exhausted`. **Không đọc được bộ đếm** (kho sập, hôm nay chưa có số nào trong bộ nhớ) → 503 `ai_storage_unavailable`: số không biết không bao giờ được coi là 0. Ngân sách token theo tier cũ vẫn áp dụng.
+1. `admission()` (trước khi stream): công tắc tổng → 503 `ai_not_enabled`; trần toàn cục/chi phí → 429 `ai_budget_exhausted` `scope:"global"`; trần theo người dùng → 429 `ai_budget_exhausted` `scope:"user"` (lối QA của Owner: hạn mức QA → `scope:"qa"`, xem "Hạn mức người dùng và lối QA"). **Không đọc được bộ đếm** (kho sập, hôm nay chưa có số nào trong bộ nhớ) → 503 `ai_storage_unavailable`: số không biết không bao giờ được coi là 0. Ngân sách token theo tier cũ vẫn áp dụng (cũng `scope:"user"`). Tất cả các từ chối này xảy ra TRƯỚC khi tin nhắn được lưu.
 2. `plan()`: dựng danh sách slot theo hồ sơ, mỗi slot kèm lý do bỏ qua hoặc "đủ điều kiện": `slot_disabled`, `type_disabled`, `workload_not_allowed`, `missing_secret`, `cooldown`, `request_cap`, `token_cap`, `rpm_soft_cap`, `tpm_soft_cap`.
 3. `ControlledGateway.stream()`: thử lần lượt. 429 → cooldown theo `Retry-After` (1–600 s, mặc định 30 s); lỗi khác → circuit breaker theo slot. Không còn slot nào → sự kiện lỗi thân thiện (`ai_budget_exhausted` nếu do trần, `ai_no_provider` nếu không có gì bật/cấu hình).
 4. Kết thúc lượt: cộng usage/chi phí cho **đúng slot đã phục vụ** (`ai_provider_usage_daily`), cùng lúc với ledger theo người dùng như trước.
@@ -124,6 +124,19 @@ Người ngoài khán giả nhận `GET /api/ai/availability` → `enabled:false
 - `last_error_category` là enum của nhà cung cấp: `error.status` của Google (`NOT_FOUND`, `PERMISSION_DENIED`…), kèm `ErrorInfo.reason` nếu có (`PERMISSION_DENIED:SERVICE_DISABLED`); hoặc `error.code`/`error.type` kiểu OpenAI (`model_not_found`…).
 - Server đọc tối đa 16 KB thân lỗi, parse trong bộ nhớ rồi bỏ. Chỉ giữ giá trị nằm trong danh sách cho phép đóng hoặc khớp mẫu UPPER_SNAKE (không có chữ số, không có chữ thường). **Không bao giờ lưu `message`, request echo, project hay khoá.**
 - Ghi ở mọi pha, kể cả khi đứt giữa stream. Dữ liệu nằm trong tiến trình giống breaker, nên khởi động lại là mất.
+
+### Hạn mức người dùng và lối QA
+
+**Giao diện người dùng chỉ hiện hạn mức RIÊNG của họ.** `GET /api/ai/availability` → `limits` gồm `requests_used`, `requests_limit`, `requests_remaining`, `exhausted`, `reset_at`: đúng ba phép kiểm mà lượt gửi kế tiếp sẽ gặp (trần lượt/ngày và trần token/ngày của control plane, cùng ngân sách token hạng tài khoản cũ). Dòng giao diện là "Hôm nay còn 3/5 lượt hỏi · làm mới lúc 07:00", hết thì ô soạn khoá. Mức dùng toàn site, công suất nhà cung cấp, phần trăm "đã dùng" **không bao giờ** ra người dùng; chúng nằm ở `/admin/ai` ("Hạn mức toàn cục hôm nay"). Trước đây giao diện hiện "Đã dùng 51% hạn mức hôm nay" (token cũ) ngay cạnh "đã hết lượt hỏi" (trần 5 lượt thật): hai thước đo khác nhau.
+
+Hết công suất chung là chuyện khác: 429 `scope:"global"`, giao diện nói "không phải do bạn", không kèm số. Hạn mức riêng của người dùng không đổi trong trường hợp đó.
+
+**Lối QA của Owner** (`qa: true` trong thân lượt gửi) để smoke test không ăn vào 5 lượt/ngày của chính Owner:
+- Chỉ Owner (`FAS_OWNER_USER_IDS`) và chỉ khi control plane bật; người khác gửi cờ thì bị bỏ qua, lượt tính như lượt thường.
+- Ghi vào sổ riêng (khoá tổng hợp trong `ai_usage_daily`), có hạn mức riêng `FAS_AI_OWNER_QA_DAILY_REQUESTS` (mặc định 20/Owner/ngày, `0` = đóng). Là biến môi trường chứ không phải trường lưu: thêm cột Appwrite chưa có trên production sẽ làm hỏng mọi lần ghi cấu hình, kể cả nút tắt khẩn cấp.
+- **Không phải cửa sau**: công tắc khẩn cấp, mọi trần TOÀN CỤC, slot và RPM áp y hệt; lượt QA nằm trong tổng "Yêu cầu hôm nay". Lượt thường của Owner vẫn bị trần riêng như mọi người.
+- `/admin/ai` có ô "Lượt QA của Owner"; "Người dùng AI hoạt động" không đếm sổ QA.
+- Cách dùng trong smoke: `POST /api/ai/conversations/{id}/messages` với `{"content": …, "client_id": …, "qa": true}`; `GET /api/ai/availability` của Owner có khối `qa` báo còn bao nhiêu lượt QA.
 
 ## 4. Schema (bổ sung thuần — CHƯA áp lên production)
 

@@ -10,11 +10,13 @@
  * huỷ (nút Dừng).
  */
 import { API_BASE, ApiError, getToken } from "@/lib/api";
+import { docHanMuc } from "./hanMuc";
 import { docLoiApi } from "./loiApi";
 import { docQuyen } from "./quyenTruyCap";
 import { tachKhungSse, dienDichKhungAi } from "./sse";
 import type {
   AiAvailability,
+  AiBudgetScope,
   AiConversationContext,
   AiConversationDetail,
   AiConversationSummary,
@@ -78,10 +80,13 @@ function headers(json: boolean): HeadersInit {
 /** `ApiError` + `reset_at` của lỗi hết ngân sách ngày (để hiện "Làm mới lúc …"). */
 export class AiApiError extends ApiError {
   resetAt: string | null;
-  constructor(message: string, status: number, code?: string, resetAt: string | null = null) {
+  /** Chỉ có ở `ai_budget_exhausted`: hết lượt của bạn ("user") / công suất chung ("global") / hạn mức QA ("qa"). */
+  scope: AiBudgetScope | undefined;
+  constructor(message: string, status: number, code?: string, resetAt: string | null = null, scope?: AiBudgetScope) {
     super(message, status, code);
     this.name = "AiApiError";
     this.resetAt = resetAt;
+    this.scope = scope;
   }
 }
 
@@ -93,7 +98,7 @@ async function loiTuPhanHoi(res: Response, macDinh: string): Promise<AiApiError>
     // không phải JSON — giữ body = null
   }
   const l = docLoiApi(body, res.status, macDinh);
-  return new AiApiError(l.message, l.status, l.code, l.resetAt);
+  return new AiApiError(l.message, l.status, l.code, l.resetAt, l.scope);
 }
 
 async function doc<T>(res: Response): Promise<T> {
@@ -115,7 +120,12 @@ export const aiApi = {
 
   async availability(): Promise<AiAvailability> {
     const res = await fetch(`${API_BASE}/api/ai/availability`, { headers: headers(false), cache: "no-store" });
-    return doc<AiAvailability>(res);
+    const raw = await doc<AiAvailability & { limits?: unknown }>(res);
+    // `limits` đi qua `docHanMuc`: chỉ hạn mức RIÊNG của người này lên được giao diện. Hình dạng cũ (chỉ token)
+    // thành "không có" thay vì bị hiểu nhầm; token thô không còn được dùng ở đâu trong giao diện.
+    const { limits, ...phanConLai } = raw;
+    const hanMuc = docHanMuc(limits);
+    return hanMuc ? { ...phanConLai, limits: hanMuc } : phanConLai;
   },
 
   async listConversations(limit = 30, cursor?: string): Promise<{ items: AiConversationSummary[] }> {

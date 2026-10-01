@@ -32,8 +32,10 @@ from server.ai_assistant.config import (
 from server.ai_assistant.context_builder import build_context
 from server.ai_assistant.gateway import ErrorEvent, ProviderServed
 from server.ai_assistant.limits import (
-    AiBudgetExceeded, AiBusy, AiRateLimited, budget_status, enforce_budget, record_usage,
+    AiBudgetExceeded, AiBusy, AiRateLimited, budget_status, compute_allowance, enforce_budget, qa_allowance,
+    qa_ledger_user, record_usage,
 )
+from server.ai_assistant.scopes import SCOPE_GLOBAL
 from server.ai_assistant.memory import (
     AiConversation, AiEscalation, AiMessage, AiPreferences, AiProject, AiUnavailable, RepoConflict,
     now_iso, redact,
@@ -76,6 +78,10 @@ class MessageIn(BaseModel):
     regenerate_of: Optional[str] = None
     use_web_search: bool = False
     use_library: bool = False
+    #: Lần QA của Owner (smoke test): chỉ có hiệu lực khi người gọi là Owner VÀ control plane đang bật; với
+    #: người khác cờ bị BỎ QUA (lượt tính như lượt thường, không báo lỗi). Lượt QA ghi vào sổ QA riêng, không
+    #: ăn vào hạn mức người dùng thường, nhưng VẪN bị công tắc khẩn cấp và trần toàn cục chặn.
+    qa: bool = False
 
 
 class PreferencesIn(BaseModel):
@@ -184,7 +190,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         except AiBudgetExceeded as exc:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
                                 {"code": "ai_budget_exhausted", "message": str(exc),
-                                 "reset_at": exc.reset_at}) from exc
+                                 "reset_at": exc.reset_at, "scope": exc.scope}) from exc
         except AiBusy as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 {"code": "ai_busy", "message": str(exc)}) from exc
@@ -253,6 +259,14 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                                 {"code": "ai_forbidden", "message": "Dự án này không thuộc về bạn."})
         return proj
 
+    def _user_allowance(status_: Any) -> Any:
+        """Hạn mức riêng của người gọi từ MỘT bản ghi sổ đã đọc (không tốn thêm lần đọc): trần lượt/token của
+        control plane (nếu bật) + ngân sách token hạng tài khoản cũ. Không chứa số liệu toàn cục."""
+        req_cap, tok_cap = rt.control.user_caps() if rt.control is not None else (0, 0)
+        return compute_allowance(requests_used=status_.requests_used, tokens_used=status_.used_today,
+                                 request_cap=req_cap, token_cap=tok_cap, legacy_token_limit=status_.limit_today,
+                                 reset_at=status_.reset_at)
+
     def _access(authorization: Optional[str]) -> Tuple[Any, str]:
         """Ho so (401 neu chua dang nhap) + `AiRuntime.access_state` — CUNG mot phan quyet cho
         availability va `/api/ai/access`, de nut mo tro ly khong bao gio hien theo mot luat khac
@@ -292,10 +306,26 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         # /api/ai/preferences) — usage limits below are ALWAYS from the
         # durable ai_usage_daily ledger regardless of this flag (contract
         # §5/§9: usage metering keeps recording, content does not).
-        return {"enabled": True, "reason": None, "name": rt.assistant_name, "modes": list(MODES),
-                "web_search": rt.web_search_enabled, "memory_enabled": _memory_enabled(profile.user_id),
-                "limits": {"used_today": status_.used_today, "limit_today": status_.limit_today,
-                          "reset_at": status_.reset_at}}
+        #
+        # `limits` = hạn mức RIÊNG của người gọi, đúng thứ `post_message` sẽ thực thi: `requests_*` +
+        # `exhausted` + `reset_at`. KHÔNG có mức dùng toàn site hay công suất nhà cung cấp (chỉ ở /admin/ai).
+        # `used_today`/`limit_today` (token, ngân sách hạng tài khoản cũ) giữ lại để bản giao diện cũ trong
+        # bộ nhớ đệm không vỡ; giao diện mới không dùng chúng.
+        out: Dict[str, Any] = {
+            "enabled": True, "reason": None, "name": rt.assistant_name, "modes": list(MODES),
+            "web_search": rt.web_search_enabled, "memory_enabled": _memory_enabled(profile.user_id),
+            "limits": {"used_today": status_.used_today, "limit_today": status_.limit_today,
+                       **_user_allowance(status_).to_public()}}
+        if rt.control is not None and rt.is_owner(profile.user_id):
+            # Chỉ Owner thấy hạn mức QA của mình (để smoke test biết còn bao nhiêu lượt QA). Lỗi đọc sổ QA
+            # không bao giờ làm hỏng availability.
+            try:
+                qa_status = budget_status(rt.repo, user_id=qa_ledger_user(profile.user_id), daily_limit=0)
+                out["qa"] = qa_allowance(requests_used=qa_status.requests_used,
+                                         daily_cap=rt.owner_qa_daily_requests, reset_at=qa_status.reset_at).to_public()
+            except AiUnavailable:
+                pass
+        return out
 
     # ---------------------------------------------------------------- conversations
     @r.get("/api/ai/conversations")
@@ -398,14 +428,23 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         profile = await run_in_threadpool(_profile, authorization)
         conv, _ = await run_in_threadpool(_own_conversation, profile.user_id, conversation_id)
         _run(lambda: rt.rpm_limiter.check(profile.user_id, rpm=rt.rpm))
+        # Lối QA của Owner: cờ `qa` chỉ có hiệu lực với Owner + control plane bật (xem `AiRuntime.qa_lane`).
+        # Lượt QA đếm vào sổ QA riêng (`ledger_user`), KHÔNG vào sổ người dùng thường; mọi thứ khác (công tắc
+        # khẩn cấp, trần toàn cục, slot, RPM) áp y hệt lượt thường.
+        qa = rt.qa_lane(profile.user_id, payload.qa)
+        ledger_user = qa_ledger_user(profile.user_id) if qa else profile.user_id
         if rt.control is not None:
             # Kill switch + global/per-user daily ceilings from the control
             # plane (reads the store -> off the event loop).
-            denied = await run_in_threadpool(rt.control.admission, profile.user_id)
+            denied = await run_in_threadpool(
+                lambda: rt.control.admission(profile.user_id, qa_ledger_user=ledger_user if qa else "",
+                                             qa_daily_cap=rt.owner_qa_daily_requests))
             if denied is not None:
                 detail: Dict[str, Any] = {"code": denied.code, "message": denied.message}
                 if denied.reset_at:
                     detail["reset_at"] = denied.reset_at
+                if denied.scope:
+                    detail["scope"] = denied.scope
                 raise HTTPException(denied.status, detail)
         tier = _tier_of(profile)
         daily_limit = _daily_limit(rt, tier)
@@ -414,8 +453,9 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         # real HTTP calls — every one of them runs via `run_in_threadpool`
         # below so a slow Appwrite round-trip never blocks the asyncio loop
         # (same lesson as the streaming path itself, contract §0.2).
-        await run_in_threadpool(
-            lambda: _run(lambda: enforce_budget(rt.repo, user_id=profile.user_id, daily_limit=daily_limit)))
+        if not qa:  # lối QA bị chặn bởi hạn mức QA ở `admission`, không phải ngân sách token hạng tài khoản
+            await run_in_threadpool(
+                lambda: _run(lambda: enforce_budget(rt.repo, user_id=profile.user_id, daily_limit=daily_limit)))
         _run(lambda: rt.stream_guard.acquire(profile.user_id))
 
         def _prepare():
@@ -582,12 +622,12 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 if final_text or in_tok or out_tok:
                     budget = await run_in_threadpool(
                         lambda: record_usage(
-                            rt.repo, user_id=profile.user_id, input_tokens=counted_in,
+                            rt.repo, user_id=ledger_user, input_tokens=counted_in,
                             output_tokens=counted_out, daily_limit=daily_limit))
                 else:
                     counted_in = counted_out = 0
                     budget = await run_in_threadpool(
-                        lambda: budget_status(rt.repo, user_id=profile.user_id, daily_limit=daily_limit))
+                        lambda: budget_status(rt.repo, user_id=ledger_user, daily_limit=daily_limit))
 
                 if final_text:
                     citations_json = json.dumps([
@@ -613,6 +653,15 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 finalize_result["counted_in"] = counted_in
                 finalize_result["counted_out"] = counted_out
                 finalize_result["budget"] = budget
+                # Hạn mức RIÊNG sau lượt này (cho sự kiện `usage`): lối QA báo hạn mức QA, lối thường báo hạn
+                # mức người dùng. Không bao giờ làm hỏng lượt: lỗi thì bỏ trường `allowance`.
+                try:
+                    finalize_result["allowance"] = (
+                        qa_allowance(requests_used=budget.requests_used, daily_cap=rt.owner_qa_daily_requests,
+                                     reset_at=budget.reset_at) if qa
+                        else await run_in_threadpool(_user_allowance, budget))
+                except Exception:  # noqa: BLE001
+                    log.warning("ai_assistant: allowance for the usage event failed", exc_info=True)
                 if rt.control is not None and served["provider_name"]:
                     # Per-SLOT usage/cost for the control plane (provider_name
                     # is the slot id there). Never allowed to fail the turn.
@@ -709,12 +758,20 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                      "chapter_title": c.chapter_title, "excerpt": c.excerpt}
                     for c in citations]})
 
-            yield _sse("usage", {"input_tokens": finalize_result["counted_in"],
-                                 "output_tokens": finalize_result["counted_out"],
-                                 "used_today": finalize_result["budget"].used_today,
-                                 "limit_today": finalize_result["budget"].limit_today})
+            usage_event: Dict[str, Any] = {
+                "input_tokens": finalize_result["counted_in"], "output_tokens": finalize_result["counted_out"],
+                "used_today": finalize_result["budget"].used_today,
+                "limit_today": finalize_result["budget"].limit_today,
+                "lane": "qa" if qa else "user"}
+            if finalize_result.get("allowance") is not None:
+                usage_event["allowance"] = finalize_result["allowance"].to_public()
+            yield _sse("usage", usage_event)
 
             if error_payload is not None:
+                if error_payload.get("code") == "ai_budget_exhausted":
+                    # Các slot đều chạm trần giữa chừng = công suất CHUNG hết, không phải lượt của người này.
+                    error_payload.setdefault("scope", SCOPE_GLOBAL)
+                    error_payload.setdefault("reset_at", finalize_result["budget"].reset_at)
                 yield _sse("error", error_payload)
             else:
                 yield _sse("done", {"status": final_status})

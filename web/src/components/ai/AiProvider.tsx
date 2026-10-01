@@ -33,6 +33,7 @@ import {
 } from "react";
 import { ApiError } from "@/lib/api";
 import { AiApiError, aiApi, docVanBanTruongDuAn, ghepBodyDuAn, taoClientId } from "@/lib/ai/client";
+import { apDungHetLuot, boTinTraLoiCu, danhDauChuaGui, docHanMuc } from "@/lib/ai/hanMuc";
 import {
   CO_HOI_THOAI, apDungHanhDongMo, docNhap, docPhien, ghiNhap, ghiPhien, khoiPhucMo, openSauKhiPhucHoi,
 } from "@/lib/ai/phienMo";
@@ -56,7 +57,8 @@ function loiTuApiError(e: unknown): AiErrorInfo {
   if (e instanceof ApiError) {
     const code = (e.code as AiErrorInfo["code"]) || "ai_provider_unavailable";
     const reset_at = e instanceof AiApiError ? e.resetAt : null;
-    return { code, message: e.message || "Có lỗi khi liên hệ trợ lý AI.", reset_at };
+    const scope = e instanceof AiApiError ? e.scope : undefined;
+    return { code, message: e.message || "Có lỗi khi liên hệ trợ lý AI.", reset_at, scope };
   }
   return { code: "network_error", message: "Mất kết nối mạng." };
 }
@@ -379,11 +381,15 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           return;
         }
       }
+      // Khôi phục nếu lượt này bị từ chối trước khi máy chủ nhận: "Tạo lại" phải nhắm vào lượt đã GỬI được, không phải
+      // vào tin chưa gửi.
+      const vanBanTruoc = lastUserTextRef.current;
       lastUserTextRef.current = trimmed;
       const clientId = taoClientId();
+      const userMsgId = `local_${clientId}`;
       if (!regenerateOf) {
         const userMsg: AiMessage = {
-          message_id: `local_${clientId}`,
+          message_id: userMsgId,
           role: "user",
           content: trimmed,
           status: "complete",
@@ -404,7 +410,11 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
           (ev) => {
             if (ev.type === "meta") {
               assistantIdRef.current = ev.message_id;
-              setState((s) => (s.responseStarted ? s : { ...s, responseStarted: true }));
+              setState((s) => ({ ...s, responseStarted: true, messages: boTinTraLoiCu(s.messages, regenerateOf) }));
+            } else if (ev.type === "usage") {
+              // Hạn mức RIÊNG sau lượt này (lượt QA của Owner báo hạn mức QA, không phải của người dùng).
+              const hanMuc = ev.lane === "qa" ? null : docHanMuc(ev.allowance);
+              if (hanMuc) setState((s) => (s.availability ? { ...s, availability: { ...s.availability, limits: hanMuc } } : s));
             } else if (ev.type === "delta") {
               setState((s) => ({ ...s, streamingText: s.streamingText + ev.text }));
             } else if (ev.type === "citations") {
@@ -436,7 +446,7 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
                 ...s,
                 streaming: false,
                 streamingText: "",
-                error: { code: ev.code, message: ev.message, reset_at: ev.reset_at },
+                error: { code: ev.code, message: ev.message, reset_at: ev.reset_at, scope: ev.scope },
                 messages: [
                   ...s.messages,
                   {
@@ -477,7 +487,20 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
             ],
           }));
         } else {
-          setState((s) => ({ ...s, streaming: false, streamingText: "", error: loiTuApiError(e) }));
+          const loi = loiTuApiError(e);
+          // Chưa nhận `meta` = máy chủ CHƯA nhận lượt này (hết hạn mức, quá nhanh, đang bận, mất mạng…): tin không
+          // có trong hội thoại thật, nên phải hiện "Chưa gửi" thay vì trông như đã gửi. Đã có `meta` mà luồng đứt
+          // giữa chừng thì tin ĐÃ ở máy chủ — giữ nguyên.
+          const chuaNhan = assistantIdRef.current === null;
+          if (chuaNhan) lastUserTextRef.current = vanBanTruoc;
+          setState((s) => ({
+            ...s,
+            streaming: false,
+            streamingText: "",
+            error: loi,
+            messages: chuaNhan && !regenerateOf ? danhDauChuaGui(s.messages, userMsgId) : s.messages,
+            availability: loi.code === "ai_budget_exhausted" ? apDungHetLuot(s.availability, loi.scope, loi.reset_at) : s.availability,
+          }));
         }
       }
     },
@@ -500,9 +523,8 @@ export function AiProvider({ children }: { children: React.ReactNode }) {
   const regenerate = useCallback(async () => {
     if (!lastUserTextRef.current) return;
     const lastAssistant = [...state.messages].reverse().find((m) => m.role === "assistant");
-    if (lastAssistant) {
-      setState((s) => ({ ...s, messages: s.messages.filter((m) => m.message_id !== lastAssistant.message_id) }));
-    }
+    // KHÔNG xoá câu trả lời cũ ở đây: `guiVanBan` chỉ bỏ nó khi máy chủ đã nhận lượt mới (`meta`), để một lượt tạo
+    // lại bị từ chối (hết hạn mức…) không làm câu trả lời cũ biến mất.
     await guiVanBan(lastUserTextRef.current, lastAssistant?.message_id);
   }, [state.messages, guiVanBan]);
 

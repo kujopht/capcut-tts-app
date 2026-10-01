@@ -173,6 +173,8 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
 .ai-caidat-xacnhan .row { justify-content: flex-end; gap: var(--s2); }
 
 .ai-usage { padding: 2px var(--s3); font-size: 11px; }
+/* Hết lượt của chính người dùng: nhấn nhẹ bằng màu, không phải một lỗi (lỗi thật nằm ở .ai-loi). */
+.ai-usage-het { color: var(--danger); }
 
 .ai-loi {
   display: flex;
@@ -237,6 +239,9 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224p
 }
 .ai-bong-loi { outline: 1px solid var(--danger); outline-offset: 2px; }
 .ai-bong-ghichu { display: block; margin-top: 4px; font-size: 11px; color: var(--text-3); }
+/* Tin KHÔNG tới được máy chủ (hết hạn mức, quá nhanh, mất mạng…): nét đứt + mờ + nhãn "Chưa gửi", khác hẳn tin đã gửi. */
+.ai-bong-chua-gui { opacity: 0.72; outline: 1px dashed var(--danger); outline-offset: 2px; }
+.ai-bong-chua-gui-nhan { color: var(--danger); font-weight: 600; }
 /* F2: bong bóng dừng/lỗi TRƯỚC token đầu tiên — nội dung rỗng đổi thành một câu giải thích, không phải khoảng trắng vô hình. */
 .ai-bong-rong { color: var(--text-3); font-style: italic; }
 .ai-nut-tao-lai {

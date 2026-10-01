@@ -163,6 +163,18 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                                  "message": "Trợ lý AI chưa được bật trên máy chủ."})
         return rt
 
+    def _profile(authorization: Optional[str]) -> Any:
+        """Ho so nguoi goi (401 neu chua dang nhap), VA nguoi do phai trong khan gia
+        (`FAS_AI_AUDIENCE`) — ngoai khan gia: 403 `ai_not_enabled` (ma on dinh client da
+        biet). Moi route tru availability di qua day; kiem o MOI request nen go mot
+        ID khoi `FAS_AI_CANARY_USERS` co hieu luc o lan deploy ke tiep."""
+        profile = resolve_profile(authorization)
+        if not rt.allows(getattr(profile, "user_id", "") or ""):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                {"code": "ai_not_enabled",
+                                 "message": "Trợ lý AI chưa mở cho tài khoản này."})
+        return profile
+
     def _run(f: Callable[[], Any]) -> Any:
         try:
             return f()
@@ -250,6 +262,10 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         if not rt.enabled or rt.repo is None or rt.gateway is None:
             return {"enabled": False, "reason": rt.reason or "off", "name": rt.assistant_name,
                     "modes": [], "web_search": False}
+        # Ngoai khan gia (`FAS_AI_AUDIENCE=canary`): nhu AI tat — khong lo han muc/cau hinh.
+        if not rt.allows(getattr(profile, "user_id", "") or ""):
+            return {"enabled": False, "reason": "not_in_audience", "name": rt.assistant_name,
+                    "modes": [], "web_search": False}
         # Control plane global kill switch (`/admin/ai`, fail-closed config).
         if rt.control is not None and not rt.control.enabled():
             return {"enabled": False, "reason": "disabled_by_admin", "name": rt.assistant_name,
@@ -270,7 +286,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def list_conversations(limit: int = 30, cursor: Optional[str] = None,
                            authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         durable = _run(lambda: rt.repo.list_conversations(profile.user_id, limit=limit, cursor=cursor))
         # Ephemeral (memory-off) conversations are ALWAYS flagged
         # `ephemeral: true` — the UI must be able to tell a user this
@@ -290,7 +306,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def create_conversation(payload: ConversationCreateIn,
                             authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         # M11 (review finding): creating a conversation previously had NO
         # rate limit at all (every other write route enforces `rt.rpm`)
         # and only counted DURABLE conversations against
@@ -327,7 +343,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def get_conversation(conversation_id: ConvId, limit: int = 50,
                          authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         conv, is_ephemeral = _own_conversation(profile.user_id, conversation_id)
         msgs = _recent_messages_combined(conversation_id, limit=limit)
         return {
@@ -342,7 +358,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def delete_conversation(conversation_id: ConvId,
                             authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         _own_conversation(profile.user_id, conversation_id)
         # Harmless no-op on whichever store the conversation ISN'T in.
         _run(lambda: rt.repo.delete_conversation(conversation_id))
@@ -363,7 +379,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         # OTHER concurrent request this worker is serving (same lesson as
         # the streaming path itself, contract §0.2). `run_in_threadpool`
         # moves both off the loop.
-        profile = await run_in_threadpool(resolve_profile, authorization)
+        profile = await run_in_threadpool(_profile, authorization)
         conv, _ = await run_in_threadpool(_own_conversation, profile.user_id, conversation_id)
         _run(lambda: rt.rpm_limiter.check(profile.user_id, rpm=rt.rpm))
         if rt.control is not None:
@@ -694,7 +710,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     @r.get("/api/ai/preferences")
     def get_preferences(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         prefs = _run(lambda: rt.repo.get_preferences(profile.user_id))
         if prefs is None:
             return {"memory_enabled": True, "preferences": {}}
@@ -705,7 +721,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def put_preferences(payload: PreferencesIn,
                         authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         # L12/M7 (review finding): this used to silently `[:2000]`-truncate
         # the serialized JSON — truncating a JSON string mid-structure
         # produces INVALID JSON, so `get_preferences`'s own
@@ -731,7 +747,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def delete_memory(include_projects: bool = False,
                       authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         _run(lambda: rt.repo.delete_all_memory(profile.user_id, include_projects=include_projects))
         # Also clears any live ephemeral (memory-off) entries for this
         # user — a superset of the ≤1h TTL guarantee, not a requirement of
@@ -745,7 +761,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     @r.get("/api/ai/projects")
     def list_projects(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         items = _run(lambda: rt.repo.list_projects(profile.user_id))
         return {"items": [{"project_id": p.project_id, "title": p.title, "updated_at": p.updated_at}
                           for p in items]}
@@ -768,7 +784,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def create_project(payload: ProjectIn,
                        authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         proj = AiProject(
             project_id=_new_id(), user_id=profile.user_id, title=payload.title,
             premise=payload.premise,
@@ -782,7 +798,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def get_project(project_id: ProjectId,
                     authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         p = _own_project(profile.user_id, project_id)
         return {"project_id": p.project_id, "title": p.title, "premise": p.premise,
                 "outline": json.loads(p.outline_json or "{}"),
@@ -794,7 +810,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def update_project(project_id: ProjectId, payload: ProjectIn,
                        authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         _own_project(profile.user_id, project_id)
         p = _run(lambda: rt.repo.update_project(project_id, {
             "title": payload.title, "premise": payload.premise,
@@ -808,7 +824,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def delete_project(project_id: ProjectId,
                        authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         _own_project(profile.user_id, project_id)
         _run(lambda: rt.repo.delete_project(project_id))
         return {"deleted": True}
@@ -818,7 +834,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
     def create_escalation(payload: EscalationIn,
                           authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         _bat()
-        profile = resolve_profile(authorization)
+        profile = _profile(authorization)
         esc = AiEscalation(
             escalation_id=_new_id(), user_id=profile.user_id,
             conversation_id=payload.conversation_id or "", summary=payload.summary)

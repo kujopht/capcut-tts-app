@@ -30,6 +30,19 @@ Bảng điều khiển cho **Owner/Admin** để định tuyến provider, đặ
 
 **Gemini project pool** = nhiều slot `provider_type=gemini`, mỗi slot một `secret_ref` riêng (`GEMINI_PROJECT_01`…). Cooldown, bộ đếm, sức khoẻ tính **theo slot**, nên project 03 bị 429 không kéo project 01 xuống.
 
+**Cân bằng trong một pool:** `priority` vẫn là **tầng** (tầng nhỏ thử trước). Trong cùng một priority, thứ tự là ngẫu nhiên có trọng số: `weight × hệ số cân bằng` (`ControlPlane.balance_factor`).
+- `phần còn = 1 − max(yêu cầu/ngày, token/ngày, yêu cầu/phút RPM mềm, token/phút TPM mềm)`. Trần 0 nghĩa là không giới hạn và được bỏ qua. Hệ số là `phần còn²`.
+- Hệ số ×0,25 nếu slot đang lỗi liên tiếp, và ×0,25 nếu slot bị 429 trong 10 phút gần nhất. Sàn của hệ số là 0,01, để slot gần đầy vẫn làm được phương án cuối.
+- Hệ quả: các slot **cùng priority** tiêu đều nhau, không project nào cạn trước. Test mô phỏng 200 lượt qua 9 slot: không slot nào chạm trần 30, chênh lệch ≤8 lượt. Pool vẫn dùng hết được 100% tổng hạn mức.
+- Muốn thử tuần tự kiểu cũ thì đặt priority khác nhau.
+- Cooldown, hết trần, tắt và thiếu khoá vẫn bị **bỏ qua hẳn** như trước; hệ số chỉ sắp thứ tự các slot đủ điều kiện.
+
+**Kiểm slot (Owner):** `POST /api/admin/ai/slots/{id}/probe` gửi **một** request tối thiểu thật qua khoá, endpoint và model của slot. Gọi được cả khi slot đang tắt và công tắc tổng TẮT, nên kiểm được project mới trước khi cho phục vụ người dùng.
+- Kết quả chỉ gồm `ok`, `latency_ms`, `code`, `category` đã làm sạch; không bao giờ có văn bản của nhà cung cấp.
+- Được tính như một lượt thật: usage của slot, breaker, cooldown 429, `last_error_*`.
+- Ghi audit `slot:<id>.probe`. Mỗi slot tối đa 1 lần / 20 giây (409 nếu gọi dồn).
+- Quy trình mở rộng: tạo slot TẮT → cài khoá → deploy → **Kiểm tra** → chỉ bật slot trả `ok`.
+
 ### Hồ sơ định tuyến
 
 | Hồ sơ | Thứ tự mặc định |
@@ -101,6 +114,7 @@ Tất cả `permissions=[]`, `documentSecurity=true` (chỉ backend đọc/ghi).
 | POST | `/api/admin/ai/slots` | OWNER |
 | PUT / DELETE | `/api/admin/ai/slots/{slot_id}` | OWNER |
 | POST | `/api/admin/ai/slots/{slot_id}/reset-cooldown` | OWNER |
+| POST | `/api/admin/ai/slots/{slot_id}/probe` (1 request thật; 409 nếu < 20 s) | OWNER |
 | PUT | `/api/admin/ai/profiles/{name}` | OWNER |
 
 Lỗi: 422 `ai_admin_invalid` (kèm danh sách `{field, message}`), 409 `ai_admin_conflict` (trùng id, slot đang được hồ sơ dùng, version cũ, kho hỏng), 404, 503.

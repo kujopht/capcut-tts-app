@@ -214,6 +214,43 @@ class TestFailoverBudgetAndCancellation(unittest.TestCase):
                          .stream(turns(), mode="general") if isinstance(e, Delta)])
 
 
+class TestOnAttemptReporting(unittest.TestCase):
+    """`on_attempt(slot_id, model)`: route biết slot nào ĐANG BỊ GỌI trước cả token đầu, để tính đúng một lượt vào bộ đếm
+    slot (= trần toàn cục) khi client bỏ ngang trước token đầu."""
+
+    def test_reported_right_before_each_provider_call_in_order(self) -> None:
+        order: List[Any] = []
+
+        class Recording(Scripted):
+            def stream(self, req):  # type: ignore[override]
+                order.append(("call", self.name))
+                yield from super().stream(req)
+
+        provs = {"gemini-01": Recording("gemini-01", fail=ProviderError("x", code="provider_http_503")),
+                 "gemini-02": Recording("gemini-02")}
+        plane = plane_with([slot("gemini-01", priority=1), slot("gemini-02", priority=2)], providers=provs)
+        events = list(ControlledGateway(plane).stream(
+            turns(), mode="general", on_attempt=lambda s, m: order.append(("attempt", s, m))))
+        self.assertEqual(order, [("attempt", "gemini-01", "gemini-model"), ("call", "gemini-01"),
+                                 ("attempt", "gemini-02", "gemini-model"), ("call", "gemini-02")])
+        self.assertTrue([e for e in events if isinstance(e, Delta)])
+
+    def test_a_failing_callback_never_breaks_the_turn(self) -> None:
+        def boom(_s: str, _m: str) -> None:
+            raise RuntimeError("callback hỏng")
+
+        plane = plane_with([slot("gemini-01")])
+        events = list(ControlledGateway(plane).stream(turns(), mode="general", on_attempt=boom))
+        self.assertIsNone(last_error(events))
+        self.assertTrue([e for e in events if isinstance(e, Delta)])
+
+    def test_legacy_gateway_reports_too(self) -> None:
+        seen: List[Any] = []
+        gw = AiGateway(providers={"b": Scripted("b")}, provider_chain=["b"])
+        list(gw.stream(turns(), mode="general", on_attempt=lambda s, m: seen.append((s, m))))
+        self.assertEqual([s for s, _ in seen], ["b"])
+
+
 class TestAbandonedTurnsDoNotKeepHittingProviders(unittest.TestCase):
     """Chứng minh trên socket THẬT: client bỏ đi trong lúc slot đầu còn treo -> slot sau KHÔNG bị gọi."""
 

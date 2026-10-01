@@ -163,10 +163,15 @@ class ControlledGateway:
         self._plane = plane
 
     def stream(self, messages: List[ChatTurn], *, mode: str, user_ref: str = "",
-               workload: Optional[str] = None, cancel: Optional[Callable[[], bool]] = None) -> Iterator[StreamEvent]:
+               workload: Optional[str] = None, cancel: Optional[Callable[[], bool]] = None,
+               on_attempt: Optional[Callable[[str, str], None]] = None) -> Iterator[StreamEvent]:
         """`cancel()` -> True nghĩa là không còn ai đọc kết quả (client đã ngắt/dừng): không được BẮT ĐẦU thêm lời gọi nhà
         cung cấp nào nữa. Nó chỉ chặn được lần thử KẾ TIẾP — một lần thử đang chờ mạng thì tự hết hạn theo timeout của chính
-        nó — nhưng đủ để một lượt bị bỏ không đi hết cả chuỗi slot, mỗi slot tốn một lượt quota thật."""
+        nó — nhưng đủ để một lượt bị bỏ không đi hết cả chuỗi slot, mỗi slot tốn một lượt quota thật.
+
+        `on_attempt(slot_id, model)` được gọi NGAY TRƯỚC mỗi lời gọi nhà cung cấp (trên luồng bơm). `ProviderServed` chỉ phát ra
+        khi đã có token đầu, nên một lượt bị client bỏ ngang LÚC nhà cung cấp còn đang xử lý trước đây không để lại dấu vết slot
+        nào: nhà cung cấp đã bị gọi thật nhưng trần toàn cục không đếm — N tài khoản x 5 lượt "gửi rồi ngắt" né được trần 150."""
         plane = self._plane
         clock = getattr(plane, "_clock", None) or time.monotonic
         cfg = plane.snapshot()  # type: ignore[attr-defined]
@@ -195,6 +200,11 @@ class ControlledGateway:
                 first_attempt_at = clock()
             tried_any = True
             plane.note_attempt(slot, est)  # type: ignore[attr-defined]
+            if on_attempt is not None:
+                try:
+                    on_attempt(slot.slot_id, slot.model)
+                except Exception:  # noqa: BLE001 — phép đo phụ, không bao giờ làm hỏng lượt
+                    log.warning("ai_control: on_attempt callback failed", exc_info=True)
             req = GenerateRequest(messages=trimmed, model=slot.model, max_output_tokens=max_out, user_ref=user_ref)
             started = False
             try:

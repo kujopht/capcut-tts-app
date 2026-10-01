@@ -116,7 +116,8 @@ class AiGateway:
 
     def stream(self, messages: List[ChatTurn], *, mode: str,
               user_ref: str = "", workload: Optional[str] = None,
-              cancel: Optional[Callable[[], bool]] = None) -> Iterator[StreamEvent]:
+              cancel: Optional[Callable[[], bool]] = None,
+              on_attempt: Optional[Callable[[str, str], None]] = None) -> Iterator[StreamEvent]:
         # `workload` exists for signature parity with the control plane's
         # `ControlledGateway`; the env-configured chain has one route only.
         # `cancel()` -> True: nobody is reading any more (client gone) — start no further provider call.
@@ -134,6 +135,11 @@ class AiGateway:
                 continue
             tried_any = True
             model = self._model_for(mode, name, provider)
+            if on_attempt is not None:
+                try:
+                    on_attempt(name, model)
+                except Exception:  # noqa: BLE001 — phép đo phụ, không bao giờ làm hỏng lượt
+                    pass
             req = GenerateRequest(
                 messages=trimmed, model=model, max_output_tokens=limits["max_output_tokens"],
                 user_ref=user_ref)

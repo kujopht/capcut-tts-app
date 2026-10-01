@@ -25,7 +25,6 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
-from starlette.background import BackgroundTask
 from typing_extensions import Annotated
 
 from server.ai_assistant.config import (
@@ -109,8 +108,25 @@ class ProjectIn(BaseModel):
 
 class EscalationIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    conversation_id: Optional[ConvId] = None
+    #: Rỗng/thiếu = yêu cầu hỗ trợ không gắn hội thoại (như trước). Có giá trị thì route kiểm hội thoại đó là CỦA MÌNH
+    #: (không dùng khuôn `ConvId`: chuỗi rỗng từng hợp lệ và không nên thành 422 chỉ vì thắt chặt quyền sở hữu).
+    conversation_id: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
     summary: Annotated[str, StringConstraints(max_length=2000)]
+
+
+class _TicketedStreamingResponse(StreamingResponse):
+    """`StreamingResponse` nhả vé luồng (`StreamTicket`) trên MỌI đường thoát của response — kể cả khi generator chưa từng
+    được chạy vì `send` ném lỗi ngay ở `http.response.start`, hoặc response bị huỷ trước khi nó bắt đầu."""
+
+    def __init__(self, *args: Any, ticket: StreamTicket, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._ticket = ticket
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._ticket.release()
 
 
 def _clamp_limit(limit: int) -> int:
@@ -611,8 +627,14 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             error_payload: Optional[Dict[str, Any]] = None
             finalize_result: Dict[str, Any] = {}
             served: Dict[str, str] = {"provider_name": "", "model": ""}
+            #: Slot ĐANG BỊ GỌI gần nhất (gateway báo ngay trước mỗi lời gọi nhà cung cấp, trên luồng bơm). `served` chỉ có
+            #: sau token đầu; `tried` cho biết slot nào đã tốn một request thật khi client bỏ đi TRƯỚC token đầu.
+            tried: Dict[str, str] = {"provider_name": "", "model": ""}
             pump: Optional[StreamPump] = None
             gateway_cancel = threading.Event()
+
+            def _note_attempt(slot_id: str, model: str) -> None:
+                tried["provider_name"], tried["model"] = slot_id, model
 
             async def _finalize() -> None:
                 """Records usage + persists the assistant message — MUST run
@@ -655,9 +677,13 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 counted_out = (out_tok or estimated_out) if charge else 0
                 # Hạch toán theo SLOT trước tiên và trong `try` riêng (audit F20): trước đây nó nằm SAU các lần ghi kho
                 # tin nhắn/sổ người dùng, nên một lần ghi hỏng làm mất luôn bộ đếm slot (rồi tới trần toàn cục).
-                if rt.control is not None and served["provider_name"]:
+                # Lượt bị client bỏ ngang TRƯỚC token đầu (`served` rỗng) vẫn đã tốn một request thật ở slot đang được
+                # gọi: ghi nó vào slot đó, nếu không bộ đếm slot — chính là trần toàn cục 150 — đếm thiếu, và N tài khoản x
+                # 5 lượt "gửi rồi ngắt" gọi nhà cung cấp mà không bao giờ chạm trần toàn cục.
+                slot_tinh_phi = served["provider_name"] or (tried["provider_name"] if abandoned_after_call else "")
+                if rt.control is not None and slot_tinh_phi:
                     try:
-                        await run_in_threadpool(rt.control.record_turn, served["provider_name"],
+                        await run_in_threadpool(rt.control.record_turn, slot_tinh_phi,
                                                 counted_in, counted_out, final_status)
                     except Exception:  # noqa: BLE001
                         log.warning("ai_assistant: control-plane usage record failed", exc_info=True)
@@ -715,7 +741,7 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 # lượt đã bị bỏ (xem `ControlledGateway.stream`). Đặt ở `finally` bên dưới trên MỌI đường thoát.
                 gen = rt.gateway.stream(turns, mode=conv.mode,
                                        user_ref=_hashed_user_ref(rt, profile.user_id), workload=workload,
-                                       cancel=gateway_cancel.is_set)
+                                       cancel=gateway_cancel.is_set, on_attempt=_note_attempt)
                 # The provider generator runs on the pump's own thread
                 # (never on the event loop, contract §0.2) and is closed
                 # THERE under `contextlib.closing` (R3) the moment
@@ -816,11 +842,13 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
             else:
                 yield _sse("done", {"status": final_status})
 
-        # `background=ticket.release`: lưới thứ hai cho trường hợp generator CHƯA BAO GIỜ được chạy (client ngắt trước khi
-        # stream bắt đầu thì `finally` của generator không tồn tại để chạy). Vé nhả đúng một lần nên không lo nhả đôi.
-        return StreamingResponse(_generate(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
-                                 background=BackgroundTask(ticket.release))
+        # Lưới thứ hai cho trường hợp generator CHƯA BAO GIỜ được chạy (client ngắt trước khi stream bắt đầu thì `finally`
+        # của generator không tồn tại để chạy). `BackgroundTask` KHÔNG đủ: nó không chạy khi `send` ném lỗi (ASGI 2.4
+        # ClientDisconnect) hay khi response bị huỷ giữa chừng — nên vé được nhả ở chính `__call__` của response, trên MỌI
+        # đường thoát. Vé nhả đúng một lần nên không lo nhả đôi với `finally` của generator.
+        return _TicketedStreamingResponse(_generate(), media_type="text/event-stream",
+                                          headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+                                          ticket=ticket)
 
     # ---------------------------------------------------------------- preferences
     @r.get("/api/ai/preferences")

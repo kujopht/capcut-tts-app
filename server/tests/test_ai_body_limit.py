@@ -113,6 +113,76 @@ class TestBodyLimitUnit(unittest.TestCase):
         self.assertLessEqual(AI_MAX_BODY_BYTES, 1024 * 1024, "trần phải nhỏ hơn nhiều so với RAM của instance")
 
 
+class TestAppThatStartsRespondingBeforeTheBodyIsFullyRead(unittest.TestCase):
+    """Reviewer: nếu ứng dụng đã gửi `http.response.start` TRƯỚC khi thân vượt trần thì không được cắt ngang phản hồi dở
+    dang của nó (không còn đổi được mã trạng thái nữa); chỉ việc ĐỌC thân dừng lại."""
+
+    @staticmethod
+    def _drive(app: Any, chunks: List[bytes], *, limit: int = 100) -> List[Dict[str, Any]]:
+        import asyncio
+        sent: List[Dict[str, Any]] = []
+        queue = [{"type": "http.request", "body": c, "more_body": i < len(chunks) - 1} for i, c in enumerate(chunks)]
+
+        async def receive() -> Dict[str, Any]:
+            return queue.pop(0) if queue else {"type": "http.disconnect"}
+
+        async def send(m: Dict[str, Any]) -> None:
+            sent.append(m)
+
+        scope = {"type": "http", "method": "POST", "path": "/api/ai/x", "headers": []}
+        asyncio.run(MaxBodyMiddleware(app, rules=(("/api/ai/", limit),))(scope, receive, send))
+        return sent
+
+    def test_an_early_response_is_left_intact_when_the_body_then_exceeds_the_limit(self) -> None:
+        async def early(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/plain")]})
+            n = 0
+            while True:
+                m = await receive()
+                if m["type"] != "http.request":
+                    break
+                n += len(m.get("body") or b"")
+                if not m.get("more_body"):
+                    break
+            await send({"type": "http.response.body", "body": f"read:{n}".encode()})
+
+        sent = self._drive(early, [b"a" * 60, b"b" * 60, b"c" * 60])
+        self.assertEqual([m["type"] for m in sent], ["http.response.start", "http.response.body"])
+        self.assertEqual(sent[0]["status"], 200, "không được đổi thành 413 giữa chừng")
+        self.assertEqual(sent[1]["body"], b"read:60", "việc đọc thân dừng ở khối vượt trần")
+
+    def test_a_late_responder_still_gets_the_single_413(self) -> None:
+        async def late(scope: Any, receive: Any, send: Any) -> None:
+            while True:
+                m = await receive()
+                if m["type"] != "http.request" or not m.get("more_body"):
+                    break
+            await send({"type": "http.response.start", "status": 400, "headers": []})
+            await send({"type": "http.response.body", "body": b"loi"})
+
+        sent = self._drive(late, [b"a" * 60, b"b" * 60, b"c" * 60])
+        self.assertEqual([m["type"] for m in sent], ["http.response.start", "http.response.body"])
+        self.assertEqual(sent[0]["status"], 413)
+        self.assertIn(b"request_too_large", sent[1]["body"])
+
+    def test_an_app_that_raises_after_the_cut_still_gets_a_413(self) -> None:
+        async def raising(scope: Any, receive: Any, send: Any) -> None:
+            while True:
+                m = await receive()
+                if m["type"] == "http.disconnect":
+                    raise ConnectionError("client disconnect")
+
+        sent = self._drive(raising, [b"a" * 200])
+        self.assertEqual(sent[0]["status"], 413)
+
+    def test_an_exception_unrelated_to_the_cut_is_not_swallowed(self) -> None:
+        async def broken(scope: Any, receive: Any, send: Any) -> None:
+            raise ValueError("lỗi thật của ứng dụng")
+
+        with self.assertRaises(ValueError):
+            self._drive(broken, [b"small"])
+
+
 class TestBodyLimitOnARealServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

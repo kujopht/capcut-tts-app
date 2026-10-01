@@ -645,17 +645,17 @@ class TestDisconnectsRealServer(unittest.TestCase):
         self.assertEqual((r.status_code, r.json()["detail"]["scope"]), (429, "user"))
         self.assertEqual(len(w.provs["gemini-01"].requests) - before, 5, "lượt thứ sáu không được chạm tới nhà cung cấp")
 
-    def test_abort_before_the_first_token_never_double_counts_the_slot(self) -> None:
-        """Giới hạn đã biết: khi client ngắt lúc nhà cung cấp CHƯA trả byte nào, máy chủ chưa biết slot nào sẽ trả lời nên
-        bộ đếm slot/toàn cục không tăng (chỉ sổ người dùng tăng, nên mỗi tài khoản vẫn bị chặn ở 5 lượt/ngày). Điều bắt
-        buộc ở đây là KHÔNG BAO GIỜ đếm thừa."""
+    def test_abort_before_the_first_token_is_attributed_to_the_slot_that_was_called_exactly_once(self) -> None:
+        """Client ngắt lúc nhà cung cấp CHƯA trả byte nào: slot ĐANG BỊ GỌI (gateway báo `on_attempt` ngay trước lời gọi) vẫn
+        phải bị đếm đúng MỘT lượt vào bộ đếm slot — chính là trần toàn cục — và không bao giờ đếm thừa. Trước đây lượt này
+        chỉ trừ sổ người dùng, nên N tài khoản x 5 lượt gửi-rồi-ngắt gọi nhà cung cấp mà không chạm trần 150."""
         w, tok = self.w, "abort2"
         base = w.per_slot().get("gemini-01", 0)
         cid = self.create(tok)
         self.live.raw_post(f"/api/ai/conversations/{cid}/messages", tok,
                            {"content": "ngắt sớm", "client_id": "cb1"}, read_until=b"event: meta")
         self.assertTrue(self.wait_idle())
-        self.assertLessEqual(w.per_slot().get("gemini-01", 0) - base, 1)
+        self.assertEqual(w.per_slot().get("gemini-01", 0) - base, 1)
         self.assertEqual(self.allowance(tok)["requests_used"], 1)
 
     def test_client_that_vanishes_during_preparation_does_not_leak_the_stream_guard(self) -> None:
@@ -679,6 +679,35 @@ class TestDisconnectsRealServer(unittest.TestCase):
         self.assertEqual(w.rt.stream_guard._total, 0)  # noqa: SLF001
 
 
+class TestAbortedTurnsCountTowardsTheGlobalCeiling(unittest.TestCase):
+    """Lỗ hổng reviewer tìm ra: gửi-rồi-ngắt-trước-token-đầu tốn một request nhà cung cấp THẬT nhưng không vào trần toàn
+    cục, nên nhiều tài khoản vượt xa 150 lượt/ngày mà trần không bao giờ chạm."""
+
+    def test_many_accounts_aborting_early_still_hit_the_global_ceiling(self) -> None:
+        w = World(slots=1, delay=0.35, words=40, global_cap=3, per_user=5)
+        live = _LiveServer(w.app)
+        try:
+            for i in range(3):
+                tok = f"abuser{i}"
+                cid = httpx.post(f"{live.base}/api/ai/conversations", headers=w.hdr(tok), json={"mode": "general"}, timeout=10).json()["conversation_id"]
+                got = live.raw_post(f"/api/ai/conversations/{cid}/messages", tok, {"content": "ngắt", "client_id": f"x{i}"},
+                                    read_until=b"event: meta")
+                self.assertIn(b"event: meta", got)
+                end = time.time() + 8
+                while time.time() < end and w.rt.stream_guard._total:  # noqa: SLF001
+                    time.sleep(0.05)
+                time.sleep(0.2)
+            self.assertEqual(w.per_slot().get("gemini-01"), 3, "ba lượt ngắt sớm = ba request thật ở slot")
+            r = httpx.post(f"{live.base}/api/ai/conversations", headers=w.hdr("victim"), json={"mode": "general"}, timeout=10)
+            cid = r.json()["conversation_id"]
+            r = httpx.post(f"{live.base}/api/ai/conversations/{cid}/messages", headers=w.hdr("victim"),
+                           json={"content": "tôi là người dùng thật", "client_id": "v1"}, timeout=10)
+            self.assertEqual((r.status_code, r.json()["detail"]["scope"]), (429, "global"),
+                            "trần toàn cục đã chạm nhờ các lượt ngắt sớm")
+        finally:
+            live.close()
+
+
 class TestStreamGuardCleanup(unittest.TestCase):
     """Khoá luồng (1 luồng/người, tối đa N luồng/instance) rò = người đó, rồi sau N lần cả instance, nhận `ai_busy`
     cho tới khi restart. Các test này gọi thẳng ứng dụng ASGI nên dựng được những lúc client ngắt mà socket thật khó
@@ -693,7 +722,8 @@ class TestStreamGuardCleanup(unittest.TestCase):
                 "headers": [(b"host", b"x"), (b"authorization", f"Bearer {tok}".encode()),
                             (b"content-type", b"application/json"), (b"content-length", str(len(self.BODY)).encode())]}
 
-    def _run(self, w: World, tok: str, *, spec: str, fail_on_first_chunk: bool, disconnect_at_once: bool) -> None:
+    def _run(self, w: World, tok: str, *, spec: str, fail_on_first_chunk: bool, disconnect_at_once: bool,
+             fail_on_start: bool = False) -> None:
         import asyncio
         import gc
         cid = w.conv(tok)
@@ -712,6 +742,8 @@ class TestStreamGuardCleanup(unittest.TestCase):
                 return {"type": "http.disconnect"}
 
             async def send(message: Dict[str, Any]) -> None:
+                if fail_on_start and message["type"] == "http.response.start":
+                    raise OSError("client đã ngắt trước cả tiêu đề response")
                 if fail_on_first_chunk and message["type"] == "http.response.body" and message.get("body"):
                     raise OSError("client đã ngắt")
 
@@ -738,6 +770,15 @@ class TestStreamGuardCleanup(unittest.TestCase):
         self._run(w, "gone2", spec="2.3", fail_on_first_chunk=False, disconnect_at_once=True)
         self.assertEqual((w.rt.stream_guard._total, dict(w.rt.stream_guard._per_user)), (0, {}))  # noqa: SLF001
         self.assertEqual(w.ask("gone2")[1].status_code, 200)
+
+    def test_send_failing_on_the_response_start_still_releases_the_guard(self) -> None:
+        """Reviewer: nếu `send` ném lỗi ngay ở `http.response.start` thì generator CHƯA BAO GIỜ chạy (không có `finally`)
+        và `BackgroundTask` cũng không chạy -> khoá luồng rò. Giờ response tự nhả vé trên mọi đường thoát."""
+        w = World(slots=1)
+        for i in range(10):  # nhiều hơn max_streams của instance (8): rò thì từ lần thứ 9 mọi người nhận ai_busy
+            self._run(w, f"nostart{i}", spec="2.4", fail_on_first_chunk=False, disconnect_at_once=False, fail_on_start=True)
+        self.assertEqual((w.rt.stream_guard._total, dict(w.rt.stream_guard._per_user)), (0, {}))  # noqa: SLF001
+        self.assertEqual(w.ask("fresh")[1].status_code, 200)
 
     def test_repeated_early_hangups_never_exhaust_the_instance_wide_stream_slots(self) -> None:
         w = World(slots=1)
@@ -1112,6 +1153,11 @@ class TestUserIsolationAndSessions(unittest.TestCase):
         ok = w.c.post("/api/ai/support/escalations", headers=w.hdr("alice"), json={"summary": "xin hỗ trợ", "conversation_id": cid})
         self.assertEqual(ok.status_code, 200, ok.text)
         self.assertEqual(w.c.post("/api/ai/support/escalations", headers=w.hdr("alice"), json={"summary": "không gắn hội thoại"}).status_code, 200)
+        # Chuỗi rỗng từng hợp lệ (= không gắn hội thoại): thắt chặt quyền sở hữu không được biến nó thành 422.
+        self.assertEqual(w.c.post("/api/ai/support/escalations", headers=w.hdr("alice"),
+                                  json={"summary": "id rỗng", "conversation_id": ""}).status_code, 200)
+        self.assertEqual(w.c.post("/api/ai/support/escalations", headers=w.hdr("alice"),
+                                  json={"summary": "id quá dài", "conversation_id": "x" * 65}).status_code, 422)
 
 
 # ======================================================================================== hardening of the non-chat routes

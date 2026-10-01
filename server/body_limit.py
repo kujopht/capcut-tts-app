@@ -83,7 +83,8 @@ class MaxBodyMiddleware:
 
         seen = 0
         exceeded = False
-        started = False
+        app_started = False  # ứng dụng đã bắt đầu phản hồi CỦA NÓ (không còn đổi được mã trạng thái nữa)
+        replied = False  # ta đã gửi 413
 
         async def counting_receive() -> Message:
             nonlocal seen, exceeded
@@ -98,15 +99,18 @@ class MaxBodyMiddleware:
             return message
 
         async def guarded_send(message: Message) -> None:
-            nonlocal started
-            if exceeded:
-                # Ứng dụng phản ứng với `disconnect` bằng 400/lỗi nào đó: thay bằng 413 một lần, nuốt phần còn lại.
-                if not started:
-                    started = True
-                    await _send_413(send, limit)
+            nonlocal app_started, replied
+            if replied:
+                return  # đã trả lời 413: nuốt phần còn lại của ứng dụng
+            if exceeded and not app_started:
+                # Ứng dụng phản ứng với `disconnect` bằng 400/lỗi nào đó: thay bằng 413 một lần.
+                replied = True
+                await _send_413(send, limit)
                 return
+            # Ứng dụng đã tự bắt đầu phản hồi TRƯỚC khi thân vượt trần (vd. một route phát ngay rồi mới đọc tiếp): không
+            # được cắt ngang giữa chừng một phản hồi dở dang — để nó chạy hết; ta chỉ đã ngừng đọc thân.
             if message.get("type") == "http.response.start":
-                started = True
+                app_started = True
             await send(message)
 
         try:
@@ -114,6 +118,6 @@ class MaxBodyMiddleware:
         except Exception:  # noqa: BLE001 — một ứng dụng thuần Starlette có thể ném ClientDisconnect khi ta cắt thân
             if not exceeded:
                 raise
-        if exceeded and not started:
+        if exceeded and not app_started and not replied:
             # Ứng dụng kết thúc mà không phản hồi gì (vd. coi là client đã ngắt): vẫn báo 413 cho client thật.
             await _send_413(send, limit)

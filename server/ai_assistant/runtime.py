@@ -112,7 +112,8 @@ def build_ai_runtime(settings: Any, *, tool_ctx: Optional[ToolContext] = None,
 
     data_backend = str(getattr(settings, "data_backend", "mock")).lower()
     resolve_audience = getattr(ai, "resolved_audience", None)
-    audience = resolve_audience(data_backend) if callable(resolve_audience) else "all"
+    # Thieu `resolved_audience` (settings gia/cu) -> "" -> AI TAT: khong bao gio mo cong vi thieu cau hinh.
+    audience = resolve_audience(data_backend) if callable(resolve_audience) else ""
     if not audience:
         return AiRuntime(False, reason=f"FAS_AI_AUDIENCE={getattr(ai, 'audience', '')!r} không hợp lệ (canary | all)",
                          control=control)

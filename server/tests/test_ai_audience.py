@@ -111,6 +111,14 @@ class TestBuildRuntime(unittest.TestCase):
         self.assertFalse(rt.enabled)
         self.assertIn("FAS_AI_AUDIENCE", rt.reason)
 
+    def test_settings_without_audience_support_fail_closed(self) -> None:
+        """Review (Antigravity Claude Opus, LOW #1): mot settings khong co `resolved_audience`
+        khong duoc roi ve "all"."""
+        from types import SimpleNamespace
+        fake_ai = SimpleNamespace(enabled=True, providers=("mock",))
+        rt = build_ai_runtime(SimpleNamespace(ai_assistant=fake_ai, data_backend="appwrite", environment="production"))
+        self.assertFalse(rt.enabled)
+
 
 class TestRoutesCanary(unittest.TestCase):
     def setUp(self) -> None:

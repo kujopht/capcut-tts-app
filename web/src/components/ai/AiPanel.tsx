@@ -38,6 +38,7 @@ export function AiPanel() {
       className="ai-panel"
       role="dialog"
       aria-modal="false"
+      tabIndex={-1}
       aria-label={availability ? `${availability.name} — trợ lý AI` : "Trợ lý AI"}
       style={dockOffset ? ({ ["--ai-dock-offset" as string]: `${dockOffset}px` } as React.CSSProperties) : undefined}
     >

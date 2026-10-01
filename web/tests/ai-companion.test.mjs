@@ -160,7 +160,8 @@ test("AiProvider chi dat `error` o nhanh su kien error / ngoai le, va xoa no khi
   assert.ok(at.length >= 1);
   for (const i of at) {
     const truoc = src.slice(Math.max(0, i - 900), i);
-    assert.ok(/ev\.type === "error"|catch \(e\)/.test(truoc), "error chi dat khi may chu bao loi that");
+    // `!ketThuc`: luong dong SACH ma khong co khung done/error (mat ket noi giua chung) cung la loi that, khong phai gia.
+    assert.ok(/ev\.type === "error"|catch \(e\)|!ketThuc/.test(truoc), "error chi dat khi may chu bao loi that");
   }
   assert.match(src, /streaming: true, streamingText: "", responseStarted: false, error: null/, "luot moi xoa loi cu");
   for (const t of ["meta", "delta", "done", "citations"]) {

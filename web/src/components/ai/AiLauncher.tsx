@@ -19,6 +19,7 @@
  */
 import { usePathname } from "next/navigation";
 import { useSession } from "@/lib/session";
+import { focusPanelAi, sauKhiVe } from "@/lib/ai/tieuDiem";
 import { useAi } from "./AiProvider";
 import { useChatDockOffset } from "./useChatDockOffset";
 import { FanficIcon } from "@/components/icons/FanficIcon";
@@ -46,7 +47,11 @@ export function AiLauncher() {
       aria-haspopup="dialog"
       aria-expanded={false}
       aria-label="Mở trợ lý AI"
-      onClick={() => void openAssistant()}
+      onClick={() => {
+        void openAssistant();
+        // Nút này biến mất ngay khi panel mở: chuyển focus vào panel thay vì để nó rơi về <body>.
+        sauKhiVe(() => focusPanelAi());
+      }}
       style={dockOffset ? ({ ["--ai-dock-offset" as string]: `${dockOffset}px` } as React.CSSProperties) : undefined}
     >
       <FanficIcon name="ai" size={22} />

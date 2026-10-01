@@ -56,6 +56,9 @@ export function AiComposer() {
         aria-label="Nội dung gửi trợ lý AI"
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
+          // Đang gõ dấu bằng IME (Telex/VNI của hệ điều hành, bộ gõ CJK…): Enter chỉ CHỐT chữ đang soạn, không phải
+          // "gửi" — nếu không, tin bị gửi dở dang giữa lúc gõ. Safari báo `keyCode 229` thay vì `isComposing`.
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             gui();

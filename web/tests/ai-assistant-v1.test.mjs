@@ -283,7 +283,9 @@ test("F2. Tạo lại luôn nhắm vào lượt người dùng CUỐI CÙNG, kh�
   const doanRegen = provider.match(/const regenerate = useCallback\(async \(\) => \{[\s\S]*?\n {2}\}, \[state\.messages, guiVanBan\]\);/)?.[0] ?? "";
   assert.ok(doanRegen, "không tìm thấy regenerate()");
   assert.ok(!/if \(!lastAssistant \|\|/.test(doanRegen), "regenerate không được bắt buộc phải có bong bóng trợ lý mới chạy");
-  assert.match(doanRegen, /if \(!lastUserTextRef\.current\) return;/);
+  // Sau khi tải lại trang / mở hội thoại cũ từ lịch sử, ref "lượt trước" còn rỗng: lấy câu hỏi cuối từ chính hội thoại.
+  assert.match(doanRegen, /const vanBan = lastUserTextRef\.current \|\| cuoiCuaNguoi;/);
+  assert.match(doanRegen, /if \(!vanBan\) return;/);
 });
 
 test("F2. Bong bóng trợ lý rỗng (dừng/lỗi) hiện câu giải thích rõ ràng, không phải markdown rỗng vô hình", () => {

@@ -12,6 +12,7 @@
  * nổi để mở ở đó.
  */
 import { useRouter } from "next/navigation";
+import { focusPanelAi, sauKhiVe } from "@/lib/ai/tieuDiem";
 import { useAi } from "./AiProvider";
 import { FanficIcon } from "@/components/icons/FanficIcon";
 
@@ -42,7 +43,9 @@ export function AskAiAssistantStoryEntry({
       await ensureReady(opts);
       router.push("/assistant");
     } else {
-      await openAssistant(opts);
+      const dangMo = openAssistant(opts);
+      sauKhiVe(() => focusPanelAi());
+      await dangMo;
     }
   };
 

@@ -124,6 +124,18 @@ class TestBuildRuntime(unittest.TestCase):
         rt_c = build_ai_runtime(self._settings(audience="canary", beta_users=(tester,)))
         self.assertFalse(rt_c.allows(tester))
 
+    def test_beta_with_empty_list_warns_and_stays_owner_only(self) -> None:
+        with self.assertLogs("fanfic.ai_assistant", level="WARNING") as cm:
+            rt = build_ai_runtime(self._settings(audience="beta"))
+        self.assertTrue(any("FAS_AI_BETA_USERS" in m for m in cm.output))
+        self.assertTrue(rt.allows(OWNER))
+        self.assertFalse(rt.allows(STRANGER))
+
+    def test_invalid_audience_reason_never_echoes_the_value(self) -> None:
+        rt = build_ai_runtime(self._settings(audience="secret-looking-value"))
+        self.assertFalse(rt.enabled)
+        self.assertNotIn("secret-looking-value", rt.reason)
+
     def test_beta_over_cap_fails_closed(self) -> None:
         from server.config import AI_BETA_MAX_USERS
         many = tuple(f"t{i:03d}" for i in range(AI_BETA_MAX_USERS + 1))

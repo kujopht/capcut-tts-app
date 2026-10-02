@@ -35,8 +35,8 @@ from server.ai_assistant.control.model import (
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import (
-    SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED, SKIP_GATE_CLOSED, SKIP_META_CORRUPT, SKIP_QUOTA_EXHAUSTED,
-    SKIP_SLOT_DISABLED, SKIP_TIER, SKIP_TYPE_DISABLED, ControlledGateway, exhausted_event,
+    SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED, SKIP_FREE_QUOTA_STALE, SKIP_GATE_CLOSED, SKIP_META_CORRUPT,
+    SKIP_QUOTA_EXHAUSTED, SKIP_SLOT_DISABLED, SKIP_TIER, SKIP_TYPE_DISABLED, ControlledGateway, exhausted_event,
 )
 from server.ai_assistant.control.secrets import SecretResolver
 from server.ai_assistant.control.service import ControlConflict, ControlPlane, today_utc
@@ -298,6 +298,18 @@ class TestExplicitEnablement(unittest.TestCase):
         self.assertEqual({t for t in PROVIDER_TYPES if not build_plane([], gate=False).gate_open(t)}, {"alibaba", "qwen"},
                          "exactly the two Alibaba types are gated; Gemini and the rest are never affected")
 
+    def test_the_legacy_env_chain_for_qwen_goes_through_the_same_gate(self) -> None:
+        """With `FAS_AI_ADMIN_V1` off the chat uses `FAS_AI_PROVIDERS=qwen,…` + `AI_QWEN_API_KEY`: DashScope again."""
+        from server.ai_assistant.runtime import build_ai_runtime
+        from server.config import AiAssistantSettings, Settings
+        for gate_open in (False, True):
+            ai = AiAssistantSettings(enabled=True, providers=("qwen",), qwen_api_key=FAKE_KEY, audience="all",
+                                     alibaba_enabled=gate_open)
+            rt = build_ai_runtime(replace(Settings(), ai_assistant=ai))
+            self.assertEqual(rt.enabled, gate_open, f"gate_open={gate_open}")
+            if not gate_open:
+                self.assertEqual(rt.reason, "no_provider")
+
     def test_every_other_switch_also_blocks(self) -> None:
         a = a_slot()
         cases = [("slot off", build_plane([replace(a, enabled=False)], profiles=only("alibaba")), SKIP_SLOT_DISABLED),
@@ -448,8 +460,8 @@ class TestCapabilityTiers(unittest.TestCase):
 # ================================================================== free-quota metadata
 
 
-def fq(**kw: Any) -> ProviderSlot:
-    return a_slot(**kw)
+def fq(slot_id: str = "alibaba-01", **kw: Any) -> ProviderSlot:
+    return a_slot(slot_id, **kw)
 
 
 class TestFreeQuotaMetadata(unittest.TestCase):
@@ -482,18 +494,83 @@ class TestFreeQuotaMetadata(unittest.TestCase):
         with self.assertRaises(ConfigValidationError):
             slot_from_dict({**_dict(fq()), "free_quota_only": "yes"})
 
+    SNAP = dict(free_quota_only=True, free_quota_remaining=50_000, free_quota_expires_at="2026-12-31T00:00:00+00:00",
+                free_quota_updated_at="2026-10-02T00:00:00+00:00")  # NOW = 2026-10-02 12:00Z
+
     def test_free_quota_only_is_a_hard_lock_against_paid_usage(self) -> None:
-        base = dict(free_quota_only=True, free_quota_remaining=50_000, free_quota_expires_at="2026-12-31T00:00:00+00:00")
-        p = build_plane([fq(**base)], profiles=only("alibaba"))
-        self.assertIsNone(p.skip_reason(fq(**base), "general", 1000))
-        self.assertEqual(p.skip_reason(fq(**{**base, "free_quota_expires_at": "2026-10-01T00:00:00+00:00"}), "general", 10),
-                         SKIP_FREE_QUOTA_EXPIRED)
-        self.assertEqual(p.skip_reason(fq(**{**base, "free_quota_remaining": 0}), "general", 10), SKIP_FREE_QUOTA_EXHAUSTED)
-        self.assertEqual(p.skip_reason(fq(**{**base, "free_quota_remaining": 500}), "general", 1000), SKIP_FREE_QUOTA_EXHAUSTED,
-                         "a request that may not fit in the free quota would spill into paid usage")
-        self.assertEqual(free_quota_block_reason(fq(**base), NOW, 10), None)
-        events = go(build_plane([fq(**{**base, "free_quota_remaining": 0})], profiles=only("alibaba")))
-        self.assertEqual([e.code for e in events if isinstance(e, ErrorEvent)], ["ai_budget_exhausted"])
+        base = self.SNAP
+        with mock.patch("server.ai_assistant.control.service.today_utc", return_value="20261002"):
+            p = build_plane([fq(**base)], profiles=only("alibaba"))
+            self.assertIsNone(p.skip_reason(fq(**base), "general", 1000))
+            self.assertEqual(p.skip_reason(fq(**{**base, "free_quota_expires_at": "2026-10-01T00:00:00+00:00"}), "general", 10),
+                             SKIP_FREE_QUOTA_EXPIRED)
+            self.assertEqual(p.skip_reason(fq(**{**base, "free_quota_remaining": 0}), "general", 10), SKIP_FREE_QUOTA_EXHAUSTED)
+            self.assertEqual(p.skip_reason(fq(**{**base, "free_quota_remaining": 500}), "general", 1000), SKIP_FREE_QUOTA_EXHAUSTED,
+                             "a request (+ the 5% reserve) that may not fit in the free quota would spill into paid usage")
+            self.assertEqual(free_quota_block_reason(fq(**base), NOW, 10, consumed_tokens=0), None)
+            events = go(build_plane([fq(**{**base, "free_quota_remaining": 0})], profiles=only("alibaba")))
+            self.assertEqual([e.code for e in events if isinstance(e, ErrorEvent)], ["ai_budget_exhausted"])
+
+    def test_free_quota_only_subtracts_what_the_slot_already_served_since_the_snapshot(self) -> None:
+        """The snapshot is static; without this the 'lock' would let 10 M tokens through a 1 M balance."""
+        snap = {**self.SNAP, "free_quota_updated_at": "2026-09-20T08:00:00+00:00"}  # taken on 20 Sept, today is 2 Oct
+        s = fq(**snap)
+        store = InMemoryControlStore()
+        store.add_usage("alibaba-01", "20260925", input_tokens=30_000, output_tokens=10_000)  # a closed day inside the window
+        store.add_usage("alibaba-01", "20260919", input_tokens=999_999)  # BEFORE the snapshot day: not counted
+        store.add_usage("gemini-01", "20260926", input_tokens=999_999)  # another slot: not counted
+        with mock.patch("server.ai_assistant.control.service.today_utc", return_value="20261002"):
+            p = build_plane([s], profiles=only("alibaba"), store=store)
+            store.add_usage("alibaba-01", "20261002", input_tokens=4_000)  # today (live counters)
+            p.invalidate()
+            # consumed 40 000 + 4 000 = 44 000; 50 000 - 44 000 - 2 500 (5% reserve) = 3 500 left
+            self.assertIsNone(p.skip_reason(s, "general", 3_000, usage=p.usage_today()))
+            self.assertEqual(p.skip_reason(s, "general", 4_000, usage=p.usage_today()), SKIP_FREE_QUOTA_EXHAUSTED)
+            view = next(x["health"]["quota"] for x in p.config_view()["slots"] if x["slot_id"] == "alibaba-01")
+            self.assertEqual((view["consumed_since_snapshot"], view["estimated_remaining"]), (44_000, 6_000))
+            self.assertEqual(view["snapshot_age_days"], 12.2)
+
+    def test_closed_days_are_read_once_and_only_for_free_quota_only_slots(self) -> None:
+        reads: List[str] = []
+
+        class Spy(InMemoryControlStore):
+            def usage_for_day(self, day: str):  # type: ignore[override]
+                reads.append(day)
+                return super().usage_for_day(day)
+
+        snap = {**self.SNAP, "free_quota_updated_at": "2026-09-30T00:00:00+00:00"}
+        with mock.patch("server.ai_assistant.control.service.today_utc", return_value="20261002"):
+            only_lock, plain = fq("a-lock", **snap), fq("a-plain", **{**snap, "free_quota_only": False})
+            p = build_plane([only_lock, plain], profiles=only("alibaba"), store=Spy())
+            p.skip_reason(plain, "general", 10, usage=p.usage_today())
+            self.assertEqual([d for d in reads if d != "20261002"], [], "a slot without the lock never costs a ledger read")
+            for _ in range(3):
+                p.skip_reason(only_lock, "general", 10, usage=p.usage_today())
+            self.assertEqual(sorted(d for d in reads if d != "20261002"), ["20260930", "20261001"],
+                             "each closed day of the window is read exactly once")
+
+    def test_free_quota_only_fails_closed_when_it_cannot_verify(self) -> None:
+        class Flaky(InMemoryControlStore):
+            def usage_for_day(self, day: str):  # type: ignore[override]
+                if day == "20260930":
+                    raise ControlStoreUnavailable("down")
+                return super().usage_for_day(day)
+
+        with mock.patch("server.ai_assistant.control.service.today_utc", return_value="20261002"):
+            cases = [("old snapshot (> 31 days)", {**self.SNAP, "free_quota_updated_at": "2026-08-01T00:00:00+00:00"}, None),
+                     ("no server stamp", {**self.SNAP, "free_quota_updated_at": ""}, None),
+                     ("ledger day unreadable", {**self.SNAP, "free_quota_updated_at": "2026-09-30T00:00:00+00:00"}, Flaky())]
+            for label, kw, st in cases:
+                with self.subTest(label):
+                    s = fq(**kw)
+                    p = build_plane([s], profiles=only("alibaba"), store=st)
+                    self.assertEqual(p.skip_reason(s, "general", 10, usage=p.usage_today()), SKIP_FREE_QUOTA_STALE)
+                    self.assertEqual([e.code for e in go(p) if isinstance(e, ErrorEvent)], ["ai_budget_exhausted"])
+            # …and a fresh-enough snapshot with a readable ledger is fine
+            fresh = fq(**{**self.SNAP, "free_quota_updated_at": "2026-09-30T00:00:00+00:00"})
+            p = build_plane([fresh], profiles=only("alibaba"))
+            self.assertIsNone(p.skip_reason(fresh, "general", 10, usage=p.usage_today()))
+            self.assertEqual(served(go(p)), ["alibaba-01"])
 
     def test_without_the_lock_the_metadata_is_informational_only(self) -> None:
         s = fq(free_quota_remaining=0, free_quota_expires_at="2026-10-01T00:00:00+00:00")  # expired AND empty, paid allowed
@@ -583,6 +660,24 @@ class TestProviderQuotaWall(unittest.TestCase):
         self.assertTrue(p.breaker.is_open("alibaba-01"))
         self.assertEqual(p.recent_429("alibaba-01"), 1)
         self.assertNotIn("alibaba-01", p._quota_out)  # noqa: SLF001
+
+    def test_requests_the_vendor_rejects_cannot_open_the_breaker_but_real_slot_faults_do(self) -> None:
+        """Anyone can send content a vendor refuses. That must never take the pool offline (3 failures = 60 s cooldown)."""
+        for category, code, opens in (("CONTENT_FILTERED", "provider_http_400", False), ("CONTEXT_TOO_LONG", "provider_http_400", False),
+                                      ("BAD_REQUEST", "provider_http_400", False), ("AUTH_FAILED", "provider_http_401", True),
+                                      ("MODEL_NOT_FOUND", "provider_http_404", True), ("UNAVAILABLE", "provider_http_503", True)):
+            with self.subTest(category):
+                err = ProviderError("x", transient=False, code=code, category=category)
+                p = build_plane([a_slot()], profiles=only("alibaba"), providers={"alibaba-01": Scripted("alibaba-01", fail=err)})
+                for _ in range(5):
+                    go(p)
+                self.assertEqual(p.breaker.is_open("alibaba-01"), opens)
+                health = next(s["health"] for s in p.config_view()["slots"] if s["slot_id"] == "alibaba-01")
+                if opens:  # after 3 failures the slot is cooling down and is no longer tried
+                    self.assertEqual(health["usage_today"]["errors"], 3)
+                else:
+                    self.assertEqual(health["usage_today"]["errors"], 5, "every rejected request is still counted")
+                self.assertEqual(health["last_error_category"], category, "still visible to the owner")
 
     def test_every_slot_parked_by_quota_reads_as_budget_exhausted_not_as_no_provider(self) -> None:
         a = a_slot()

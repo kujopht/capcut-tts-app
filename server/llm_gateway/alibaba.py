@@ -65,14 +65,17 @@ CATEGORIES = frozenset({
 _TRANSIENT = frozenset({"RATE_LIMITED", "SERVER_ERROR", "UNAVAILABLE", "TIMEOUT", "NETWORK_ERROR", "EMPTY_RESPONSE"})
 
 # Keyword groups matched (lower-cased, in memory only) against the vendor's error code / type / message.
-_QUOTA_WORDS = ("freetieronly", "free tier", "free_tier", "allocationquota", "allocation quota", "allocated quota",
-                "insufficient_quota", "insufficient quota", "arrearage", "overdue", "good standing",
-                "insufficient balance", "insufficient_balance")
+# Quota = UNAMBIGUOUS "no free quota / no money" only. `Throttling.AllocationQuota` ("allocated quota exceeded") is deliberately
+# NOT here: the public docs use it for allocation/rate ceilings too, and parking a healthy slot for the rest of the UTC day
+# because of a short TPM burst is the worse mistake — it is treated as a rate limit (cooldown) until the canary says otherwise.
+_QUOTA_WORDS = ("freetieronly", "free tier", "free_tier", "insufficient_quota", "insufficient quota", "arrearage",
+                "overdue", "good standing", "insufficient balance", "insufficient_balance")
 _FILTER_WORDS = ("inspection", "inappropriate", "content_filter", "content filter", "sensitive", "safety")
 _LENGTH_WORDS = ("range of input length", "too long", "context_length", "maximum context", "input length",
                  "exceeds the maximum")
 _MODEL_WORDS = ("model_not_found", "modelnotfound", "model not exist", "model does not exist", "model_not_exist")
-_RATE_WORDS = ("throttl", "limit_requests", "limit_burst", "rate limit", "rate_limit", "ratequota")
+_RATE_WORDS = ("throttl", "limit_requests", "limit_burst", "rate limit", "rate_limit", "ratequota", "allocationquota",
+               "allocation quota", "allocated quota")
 _AUTH_WORDS = ("invalid_api_key", "invalidapikey", "invalid api-key", "invalid api key", "unauthorized")
 _MAX_TOKENS_SCANNED = 800
 
@@ -99,45 +102,64 @@ def alibaba_endpoint_error(endpoint: str) -> Optional[str]:
     return None
 
 
-def _error_text(raw: bytes) -> str:
-    """Lower-cased concatenation of the vendor's error code/type/message. In memory only — NEVER returned or logged."""
+def _error_fields(raw: bytes) -> Tuple[str, str]:
+    """(codes, message): lower-cased vendor error code/type fields, and the free-text message. In memory only — NEVER returned
+    or logged. The message may ECHO user content (validation errors often do), so only the codes can drive decisions that
+    change a slot's state; the message is used only for request-fault categories, which never touch slot health."""
     try:
         data = json.loads((raw or b"")[:ERROR_BODY_PEEK_BYTES].decode("utf-8", errors="replace"))
     except ValueError:
-        return ""
+        return "", ""
     if isinstance(data, list) and data:
         data = data[0]
     if not isinstance(data, dict):
-        return ""
-    parts: List[str] = []
+        return "", ""
+    codes: List[str] = []
+    messages: List[str] = []
     err = data.get("error")
     for src in (err if isinstance(err, dict) else {}, data):
-        for k in ("code", "type", "message", "error_code"):
+        for k in ("code", "type", "error_code"):
             v = src.get(k)
             if isinstance(v, str):
-                parts.append(v)
-    return " ".join(parts).lower()[:_MAX_TOKENS_SCANNED]
+                codes.append(v)
+        v = src.get("message")
+        if isinstance(v, str):
+            messages.append(v)
+    return " ".join(codes).lower()[:_MAX_TOKENS_SCANNED], " ".join(messages).lower()[:_MAX_TOKENS_SCANNED]
+
+
+#: Categories caused by the REQUEST (its content or size), not by the slot: they must never open a breaker / park a slot,
+#: otherwise anyone could take the whole pool offline by sending content the vendor rejects. The control plane reads this set.
+REQUEST_FAULT_CATEGORIES = frozenset({"CONTENT_FILTERED", "CONTEXT_TOO_LONG", "BAD_REQUEST"})
 
 
 def classify_error(status: int, raw: bytes = b"") -> str:
-    """Our closed category for an upstream failure: HTTP status first, vendor code/type/message second."""
-    text = _error_text(raw)
-    has = lambda words: any(w in text for w in words)  # noqa: E731
-    if status == 401 or has(_AUTH_WORDS):
+    """Our closed category for an upstream failure: HTTP status first, then the vendor's error CODE/TYPE. Decisions that change
+    a slot's state (auth, quota, rate limit, model) never rest on the free-text message of a 400 (it may echo user content)."""
+    codes, message = _error_fields(raw)
+    in_codes = lambda words: any(w in codes for w in words)  # noqa: E731
+    in_all = lambda words: any(w in codes or w in message for w in words)  # noqa: E731
+    if status == 401 or in_codes(_AUTH_WORDS):
         return "AUTH_FAILED"
-    if status in (0, 400, 402, 403, 429) and has(_QUOTA_WORDS):  # 0 = an error frame inside a 200 stream
+    # The vendor CODE decides. The free-text message is consulted only when the vendor sent NO code, and never on a 400 (it may
+    # echo user content). Alibaba's own arrears error is a 400 with an `Arrearage` code. 0 = an error frame inside a 200 stream.
+    use_message = not codes and status != 400
+    quota_seen = in_codes(_QUOTA_WORDS) or (use_message and any(w in message for w in _QUOTA_WORDS))
+    if status in (0, 400, 402, 403, 429) and quota_seen:
         return "QUOTA_EXHAUSTED"
     if status == 402:
         return "QUOTA_EXHAUSTED"
-    if status == 429 or (status == 0 and has(_RATE_WORDS)):
+    if status == 429 or (status == 0 and in_all(_RATE_WORDS)):
         return "RATE_LIMITED"
     if status == 403:
         return "PERMISSION_DENIED"
-    if status == 404 or has(_MODEL_WORDS):
+    if status == 404 or in_codes(_MODEL_WORDS):
         return "MODEL_NOT_FOUND"
-    if status in (400, 413, 422) and has(_FILTER_WORDS):
+    # Request faults (content refused / too long): also when the error arrives as a frame inside a 200 stream (status 0), e.g.
+    # output moderation — they must never be read as a slot fault.
+    if status in (0, 400, 413, 422) and in_all(_FILTER_WORDS):
         return "CONTENT_FILTERED"
-    if status in (400, 413, 422) and has(_LENGTH_WORDS):
+    if status in (0, 400, 413, 422) and in_all(_LENGTH_WORDS):
         return "CONTEXT_TOO_LONG"
     if status in (408, 504):
         return "TIMEOUT"
@@ -148,8 +170,24 @@ def classify_error(status: int, raw: bytes = b"") -> str:
     return "SERVER_ERROR"
 
 
+def _token_count(v: Any) -> int:
+    """A usage figure from the wire -> a non-negative int; anything odd is 0 (the route then estimates) — never an exception
+    that would escape the adapter (and log vendor text through the gateway's generic handler)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v < 0 or v > 10 ** 9:
+        return 0
+    return int(v)
+
+
 def _provider_error(message: str, *, code: str, category: str, retry_after_s: Optional[float] = None) -> ProviderError:
     return ProviderError(message, transient=category in _TRANSIENT, code=code, retry_after_s=retry_after_s, category=category)
+
+
+class _DeadlineExceeded(Exception):
+    """Raised by OUR deadline checks only (`reason` is one of our own two markers) — never a foreign exception's text."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class AlibabaModelStudioProvider(OpenAICompatChatProvider):
@@ -233,9 +271,9 @@ class AlibabaModelStudioProvider(OpenAICompatChatProvider):
                 for line in resp.iter_lines():
                     now = self._clock()
                     if now - started_at > self._total_timeout_s:
-                        raise TimeoutError("total")
+                        raise _DeadlineExceeded("total")
                     if not got_content and now - started_at > self._first_token_timeout_s:
-                        raise TimeoutError("first-token")
+                        raise _DeadlineExceeded("first-token")
                     if not line or not line.startswith("data:"):
                         continue
                     raw = line[len("data:"):].strip()
@@ -254,8 +292,7 @@ class AlibabaModelStudioProvider(OpenAICompatChatProvider):
                                               category=classify_error(0, raw.encode("utf-8", errors="replace")))
                     usage = chunk.get("usage")
                     if isinstance(usage, dict) and usage:
-                        in_tok = int(usage.get("prompt_tokens", 0) or 0)
-                        out_tok = int(usage.get("completion_tokens", 0) or 0)
+                        in_tok, out_tok = _token_count(usage.get("prompt_tokens")), _token_count(usage.get("completion_tokens"))
                         self._counters.input_tokens += in_tok
                         self._counters.output_tokens += out_tok
                         yield UsageEvent(input_tokens=in_tok, output_tokens=out_tok)
@@ -278,9 +315,9 @@ class AlibabaModelStudioProvider(OpenAICompatChatProvider):
                 yield Done(finish_reason=finish_reason)
         except ProviderError:
             raise
-        except TimeoutError as exc:
+        except _DeadlineExceeded as exc:
             self._counters.errors += 1
-            raise _provider_error(f"'{self.name}' quá thời gian chờ ({exc}).", code="provider_timeout",
+            raise _provider_error(f"'{self.name}' quá thời gian chờ ({exc.reason}).", code="provider_timeout",
                                   category="TIMEOUT") from None
         except httpx.TimeoutException:
             self._counters.errors += 1

@@ -7,9 +7,13 @@ Capability tiers + free-quota metadata for provider slots — PURE functions (no
   behaves exactly as before.
 * FREE QUOTA metadata (`free_quota_remaining`, `free_quota_expires_at`, `free_quota_only`) is entered by the owner from the
   provider's console — a SNAPSHOT, not live data (`free_quota_updated_at` says how old it is). `free_quota_only` is a safety
-  lock: such a slot is skipped when its free quota is expired, exhausted or smaller than the request estimate, so it can never
-  spend paid quota. Preferring soon-to-expire free quota (`order_by_expiring_free_quota`) is implemented and tested but
-  DORMANT: the control plane applies it only when `FAS_AI_PREFER_FREE_QUOTA` is on (default off, not set in production).
+  lock on OUR side: the balance is ESTIMATED as snapshot - tokens served since the snapshot (read from the usage ledger) - a 5%
+  reserve, and a slot is skipped when that is smaller than the request estimate, when the quota has expired, or when the
+  snapshot is stale / consumption cannot be established (fail closed). It is NOT the only barrier: our token counts can differ
+  from the vendor's billing and the account may be spent elsewhere, so the vendor-side "free tier only" console mode must be
+  on too (docs/ai/ALIBABA_PROVIDER.md §7). Preferring soon-to-expire free quota (`order_by_expiring_free_quota`) is implemented
+  and tested but DORMANT: the control plane applies it only when `FAS_AI_PREFER_FREE_QUOTA` is on (default off, not set in
+  production).
 """
 from __future__ import annotations
 
@@ -20,6 +24,12 @@ from server.ai_assistant.control.model import CAPABILITY_TIERS, CHAT_TIERS, Cont
 
 #: "expiring" is shown in /admin/ai (and sorts first when the preference is on) once the free quota ends within this many days.
 EXPIRING_SOON_DAYS = 7.0
+#: `free_quota_only` slots are only trusted while the owner's snapshot is this fresh: consumption since the snapshot is read from
+#: the daily usage ledger, one day at a time, so the window is bounded — and an old number is a guess, not a lock.
+FREE_QUOTA_MAX_SNAPSHOT_AGE_DAYS = 31
+#: Kept back from the estimated balance by the `free_quota_only` lock (our token counts can differ from the vendor's billing, and
+#: other consumers of the same account share the quota). The vendor-side "free tier only" console mode is the real barrier.
+FREE_QUOTA_RESERVE_RATIO = 0.05
 
 
 def serves_tier(slot: ProviderSlot, tier: Optional[str]) -> bool:
@@ -47,39 +57,68 @@ def _parse(ts: str) -> Optional[datetime]:
     return datetime.fromisoformat(norm) if norm else None
 
 
-def free_quota_state(slot: ProviderSlot, now: datetime) -> Dict[str, Any]:
+def snapshot_age_days(slot: ProviderSlot, now: datetime) -> Optional[float]:
+    """How old the owner's balance snapshot is, in days (None = no server stamp)."""
+    stamped = _parse(slot.free_quota_updated_at)
+    if stamped is None:
+        return None
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return round((now - stamped).total_seconds() / 86400.0, 1)
+
+
+def free_quota_state(slot: ProviderSlot, now: datetime, consumed_tokens: Optional[int] = None) -> Dict[str, Any]:
     """Derived, JSON-safe view of the slot's free-quota metadata at `now` (timezone-aware).
+
+    `consumed_tokens` = tokens the slot served since the snapshot (None = unknown): the ESTIMATED balance is the snapshot minus it.
 
     state: "none" (no metadata) | "active" | "expiring" (<= EXPIRING_SOON_DAYS left) | "expired" | "exhausted"."""
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     expires = _parse(slot.free_quota_expires_at)
     remaining = slot.free_quota_remaining
+    estimated = None if remaining is None or consumed_tokens is None else max(0, remaining - max(0, consumed_tokens))
+    effective = estimated if estimated is not None else remaining
     days_left = round((expires - now).total_seconds() / 86400.0, 1) if expires else None
     if remaining is None and expires is None:
         state = "none"
     elif expires is not None and expires <= now:
         state = "expired"
-    elif remaining is not None and remaining <= 0:
+    elif effective is not None and effective <= 0:
         state = "exhausted"
     elif days_left is not None and days_left <= EXPIRING_SOON_DAYS:
         state = "expiring"
     else:
         state = "active"
     return {"state": state, "remaining": remaining, "expires_at": slot.free_quota_expires_at or None,
-            "days_left": days_left, "only": slot.free_quota_only, "updated_at": slot.free_quota_updated_at or None}
+            "days_left": days_left, "only": slot.free_quota_only, "updated_at": slot.free_quota_updated_at or None,
+            "snapshot_age_days": snapshot_age_days(slot, now), "consumed_since_snapshot": consumed_tokens,
+            "estimated_remaining": estimated}
 
 
-def free_quota_block_reason(slot: ProviderSlot, now: datetime, est_tokens: int) -> Optional[str]:
-    """For `free_quota_only` slots: why the slot must NOT be used now ("expired" | "exhausted"), else None.
+def free_quota_block_reason(slot: ProviderSlot, now: datetime, est_tokens: int,
+                            consumed_tokens: Optional[int] = None) -> Optional[str]:
+    """For `free_quota_only` slots: why the slot must NOT be used now, else None. Fail-closed on anything unverifiable:
+
+      "expired"      the free quota's end date has passed;
+      "stale"        no server-stamped snapshot, or older than FREE_QUOTA_MAX_SNAPSHOT_AGE_DAYS;
+      "unverifiable" consumption since the snapshot could not be established (`consumed_tokens` is None);
+      "exhausted"    snapshot - consumed - reserve (FREE_QUOTA_RESERVE_RATIO) is smaller than the request estimate.
+
     Other slots are never blocked by their free-quota metadata (it is informational for them)."""
     if not slot.free_quota_only:
         return None
-    st = free_quota_state(slot, now)
+    st = free_quota_state(slot, now, consumed_tokens)
     if st["state"] == "expired":
         return "expired"
+    age = st["snapshot_age_days"]
     remaining = slot.free_quota_remaining
-    if st["state"] == "exhausted" or remaining is None or remaining < max(0, est_tokens):
+    if remaining is None or age is None or age > FREE_QUOTA_MAX_SNAPSHOT_AGE_DAYS:
+        return "stale"
+    if consumed_tokens is None:
+        return "unverifiable"
+    reserve = int(remaining * FREE_QUOTA_RESERVE_RATIO + 0.9999)  # round up
+    if remaining - max(0, consumed_tokens) - reserve < max(0, est_tokens):
         return "exhausted"
     return None
 

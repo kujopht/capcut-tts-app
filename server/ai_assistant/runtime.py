@@ -121,6 +121,11 @@ def _build_provider(name: str, settings: Any) -> Optional[ChatProvider]:
                 tre_ms = 0.0
             return MockChatProvider(delay_s=tre_ms / 1000.0)
         if name == "qwen":
+            # DashScope IS Alibaba: chuỗi env cũ (khi control plane tắt) cũng đi qua cổng máy chủ `FAS_AI_ALIBABA_ENABLED` —
+            # không có đường nào tới Alibaba mà thiếu bật tường minh.
+            if not getattr(ai, "alibaba_enabled", False):
+                log.info("ai_assistant: provider 'qwen' bị bỏ — cổng máy chủ FAS_AI_ALIBABA_ENABLED đang đóng.")
+                return None
             return QwenDashScopeProvider(
                 api_key=ai.qwen_api_key, base_url=ai.qwen_base_url, model=ai.qwen_model)
         if name == "azure_openai":

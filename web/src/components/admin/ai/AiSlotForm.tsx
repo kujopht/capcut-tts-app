@@ -348,8 +348,10 @@ export function AiSlotForm({
             <span>Chỉ dùng hạn mức miễn phí (khoá an toàn: hết số dư hoặc quá hạn thì KHÔNG BAO GIỜ dùng slot)</span>
           </label>
           <span className="hint">
-            Đây là ẢNH CHỤP do bạn nhập, không tự cập nhật; máy chủ ghi lại thời điểm bạn đổi số dư. Chưa có logic nào tự
-            tiêu hạn mức sắp hết hạn trước — tính năng đó đã cài sẵn nhưng đang TẮT.
+            Đây là ẢNH CHỤP do bạn nhập, không tự cập nhật; máy chủ ghi lại thời điểm bạn đổi số dư. Khoá chỉ-miễn-phí trừ lượng
+            slot đã phục vụ từ ngày nhập + dự phòng 5%, và từ chối khi số liệu quá 31 ngày — nhưng rào chặn phí thật là chế độ
+            &ldquo;chỉ dùng hạn mức miễn phí&rdquo; ở trang nhà cung cấp, hãy bật cả hai. Chưa có logic nào tự tiêu hạn mức sắp hết hạn trước
+            — tính năng đó đã cài sẵn nhưng đang TẮT.
           </span>
           <LoiDuoi loi={loiTruong} truong="free_quota_only" />
         </details>

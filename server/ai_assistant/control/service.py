@@ -25,7 +25,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Deque, Dict, List, Mapping, Optional, Tuple
 
 from server.ai_assistant.control.capability import (
@@ -35,13 +35,14 @@ from server.ai_assistant.control.model import (
     CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, GATED_PROVIDER_TYPES,
     MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS, WORKLOADS, ConfigValidationError,
     ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, controls_to_dict, controls_with, preset_matching,
-    slot_from_dict, slot_meta, slot_to_dict, validate_config, validate_controls, validate_profile, validate_slot,
+    normalize_timestamp, slot_from_dict, slot_meta, slot_to_dict, validate_config, validate_controls, validate_profile,
+    validate_slot,
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import (
-    SKIP_COOLDOWN, SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED, SKIP_GATE_CLOSED, SKIP_META_CORRUPT,
-    SKIP_MISSING_SECRET, SKIP_QUOTA_EXHAUSTED, SKIP_REQUEST_CAP, SKIP_RPM, SKIP_SLOT_DISABLED, SKIP_TIER, SKIP_TOKEN_CAP,
-    SKIP_TPM, SKIP_TYPE_DISABLED, SKIP_WORKLOAD, plan as _plan,
+    SKIP_COOLDOWN, SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED, SKIP_FREE_QUOTA_STALE, SKIP_GATE_CLOSED,
+    SKIP_META_CORRUPT, SKIP_MISSING_SECRET, SKIP_QUOTA_EXHAUSTED, SKIP_REQUEST_CAP, SKIP_RPM, SKIP_SLOT_DISABLED, SKIP_TIER,
+    SKIP_TOKEN_CAP, SKIP_TPM, SKIP_TYPE_DISABLED, SKIP_WORKLOAD, plan as _plan,
 )
 from server.ai_assistant.control.secrets import SecretResolver
 from server.ai_assistant.control.store import (
@@ -187,6 +188,9 @@ class ControlPlane:
         #: slot_id -> UTC day (yyyymmdd) on which the PROVIDER said its quota is gone: the slot rests until 00:00 UTC
         #: (or until the owner resets it). In-process like the breaker.
         self._quota_out: Dict[str, str] = {}
+        #: yyyymmdd (a COMPLETED UTC day) -> {slot_id: tokens served that day}, read once from the ledger and kept: a closed
+        #: day never changes. Only `free_quota_only` slots (and the admin quota view) ever ask for it.
+        self._past_usage: Dict[str, Dict[str, int]] = {}
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                              user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
@@ -266,6 +270,46 @@ class ControlPlane:
             self._usage, self._usage_day, self._usage_at = usage, day, now
             return {k: replace(v) for k, v in usage.items()}, True
 
+    def _past_day_tokens(self, day: str) -> Optional[Dict[str, int]]:
+        """{slot_id: tokens} of a COMPLETED UTC day, or None when the ledger cannot be read right now."""
+        with self._lock:
+            hit = self._past_usage.get(day)
+        if hit is not None:
+            return hit
+        try:
+            rows = self.store.usage_for_day(day)
+        except ControlStoreUnavailable:
+            return None
+        tokens = {sid: u.tokens for sid, u in rows.items()}
+        with self._lock:
+            self._past_usage[day] = tokens
+            for old in sorted(self._past_usage)[:-70]:  # bounded: ~2 snapshot windows
+                self._past_usage.pop(old, None)
+        return tokens
+
+    def _consumed_since_snapshot(self, slot: ProviderSlot, usage: Dict[str, UsageCounters]) -> Optional[int]:
+        """Tokens `slot` served since the UTC day of its server-stamped free-quota snapshot (that whole day counted — the
+        conservative side). `usage` = today's live counters. None = cannot be established: no stamp, a ledger day unreadable,
+        or an implausibly long window."""
+        norm = normalize_timestamp(slot.free_quota_updated_at) if slot.free_quota_updated_at else None
+        if norm is None:  # validated on write and on load, but a routing path must never raise on a bad stamp
+            return None
+        stamped = datetime.fromisoformat(norm)
+        today = self._wall_now().astimezone(timezone.utc).date()
+        day = min(stamped.astimezone(timezone.utc).date(), today)
+        total = usage.get(slot.slot_id, UsageCounters()).tokens
+        steps = 0
+        while day < today:
+            part = self._past_day_tokens(day.strftime("%Y%m%d"))
+            if part is None:
+                return None
+            total += part.get(slot.slot_id, 0)
+            day += timedelta(days=1)
+            steps += 1
+            if steps > 400:
+                return None
+        return total
+
     def _bump_local(self, slot_id: str, **delta: int) -> None:
         with self._lock:
             if self._usage_day != today_utc():
@@ -319,11 +363,15 @@ class ControlPlane:
             quota_out = self._quota_out.get(slot.slot_id) == today_utc()
         if quota_out:
             return SKIP_QUOTA_EXHAUSTED
-        blocked = free_quota_block_reason(slot, self._wall_now(), est_tokens)
-        if blocked == "expired":
-            return SKIP_FREE_QUOTA_EXPIRED
-        if blocked == "exhausted":
-            return SKIP_FREE_QUOTA_EXHAUSTED
+        if slot.free_quota_only:  # chỉ khoá an toàn mới cần đọc lượng đã dùng từ sổ; slot thường không tốn thêm gì
+            consumed = self._consumed_since_snapshot(slot, usage if usage is not None else self.usage_today())
+            blocked = free_quota_block_reason(slot, self._wall_now(), est_tokens, consumed)
+            if blocked == "expired":
+                return SKIP_FREE_QUOTA_EXPIRED
+            if blocked in ("stale", "unverifiable"):
+                return SKIP_FREE_QUOTA_STALE
+            if blocked == "exhausted":
+                return SKIP_FREE_QUOTA_EXHAUSTED
         return None
 
     def balance_factor(self, slot: ProviderSlot, usage: Optional[Dict[str, UsageCounters]] = None) -> float:
@@ -563,13 +611,30 @@ class ControlPlane:
                                 "rate_limited": u.rate_limited, "cost_micro_usd": u.cost_micro_usd},
                 "last_success_at": u.last_success_at or None,
                 # Siêu dữ liệu hạn mức miễn phí (ảnh chụp do Owner nhập) + cờ "nhà cung cấp báo hết hạn mức hôm nay".
-                "quota": {**free_quota_state(slot, self._wall_now()), "provider_exhausted_today": quota_out},
+                "quota": self._quota_view(slot, usage, quota_out),
                 "latency": self.latency_view(slot.slot_id),
                 "gate": ({"env": GATED_PROVIDER_TYPES[slot.provider_type], "open": self.gate_open(slot.provider_type)}
                          if slot.provider_type in GATED_PROVIDER_TYPES else None),
                 "meta_corrupt": slot.meta_corrupt,
                 **self.probe_view(slot.slot_id),
                 **self._last_error_fields(slot.slot_id)}
+
+    def _quota_view(self, slot: ProviderSlot, usage: Dict[str, UsageCounters], provider_exhausted_today: bool) -> Dict[str, Any]:
+        """The admin's free-quota block: snapshot, estimated balance, and — for a `free_quota_only` slot — WHY the lock is
+        blocking it right now (`lock_block`: expired | stale | unverifiable | exhausted | None)."""
+        now = self._wall_now()
+        consumed = self._consumed_for_view(slot, usage)
+        return {**free_quota_state(slot, now, consumed), "lock_block": free_quota_block_reason(slot, now, 0, consumed),
+                "provider_exhausted_today": provider_exhausted_today}
+
+    def _consumed_for_view(self, slot: ProviderSlot, usage: Dict[str, UsageCounters]) -> Optional[int]:
+        """Consumption since the snapshot for the admin view — only where a balance exists; never raises (a view must render)."""
+        if slot.free_quota_remaining is None:
+            return None
+        try:
+            return self._consumed_since_snapshot(slot, usage)
+        except (ValueError, ControlStoreUnavailable):
+            return None
 
     def _last_error_fields(self, slot_id: str) -> Dict[str, Optional[str]]:
         e = self.last_error(slot_id) or {}

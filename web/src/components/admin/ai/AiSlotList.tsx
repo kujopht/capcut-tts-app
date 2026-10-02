@@ -10,7 +10,9 @@
 
 import { useEffect, useState } from "react";
 import type { AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
-import { coThongTinHanMuc, hostCuaEndpoint, moTaDoTre, moTaHanDung, nhanHanMuc } from "@/lib/admin/aiSlotView";
+import {
+  coThongTinHanMuc, hostCuaEndpoint, moTaDoTre, moTaHanDung, moTaKhoaChan, moTaUocTinh, nhanHanMuc,
+} from "@/lib/admin/aiSlotView";
 import { AiQuotaBar } from "./AiQuotaBar";
 import { AiSlotForm } from "./AiSlotForm";
 
@@ -123,9 +125,13 @@ function DongSlot({
             <dt>Hạn mức miễn phí</dt>
             <dd>
               <span className={`tt ${nhanHanMuc(h.quota).lop}`}>{nhanHanMuc(h.quota).nhan}</span>
-              {h.quota.remaining !== null ? ` · còn ${h.quota.remaining.toLocaleString("vi-VN")} token` : ""}
+              {h.quota.remaining !== null ? ` · số Owner nhập ${h.quota.remaining.toLocaleString("vi-VN")} token` : ""}
+              {moTaUocTinh(h.quota) ? ` · ${moTaUocTinh(h.quota)}` : ""}
               {h.quota.expires_at ? ` · hết hạn ${new Date(h.quota.expires_at).toLocaleString("vi-VN")} (${moTaHanDung(h.quota)})` : ""}
               {h.quota.only ? <span className="tt tt-cho"> chỉ dùng hạn mức miễn phí</span> : null}
+              {moTaKhoaChan(h.quota) ? (
+                <span className="tt tt-tuchoi"> khoá đang CHẶN slot: {moTaKhoaChan(h.quota)}</span>
+              ) : null}
               {h.quota.provider_exhausted_today ? <span className="tt tt-tuchoi"> nhà cung cấp báo hết hôm nay</span> : null}
               <span className="hint">
                 {" · "}số Owner nhập {thoiGianTuongDoi(h.quota.updated_at)} — không tự cập nhật, cập nhật lại từ trang nhà cung cấp

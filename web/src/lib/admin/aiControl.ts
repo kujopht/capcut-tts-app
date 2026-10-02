@@ -71,6 +71,14 @@ export interface AiSlotQuota {
   days_left: number | null;
   only: boolean;
   updated_at: string | null;
+  /** Tuổi của ảnh chụp (ngày); `null` = chưa có dấu thời gian của máy chủ. */
+  snapshot_age_days: number | null;
+  /** Token slot đã phục vụ từ ngày nhập ảnh chụp (đọc từ sổ sử dụng); `null` = không xác định được. */
+  consumed_since_snapshot: number | null;
+  /** Ảnh chụp trừ lượng đã dùng — ƯỚC TÍNH, không phải số liệu của nhà cung cấp. */
+  estimated_remaining: number | null;
+  /** Với slot `only`: lý do khoá "chỉ dùng hạn mức miễn phí" đang CHẶN slot ngay lúc này, `null` = không chặn. */
+  lock_block: "expired" | "stale" | "unverifiable" | "exhausted" | null;
   /** Nhà cung cấp đã báo hết hạn mức hôm nay (không phải số liệu Owner nhập). */
   provider_exhausted_today: boolean;
 }

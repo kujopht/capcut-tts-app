@@ -49,6 +49,20 @@ test("coThongTinHanMuc: hiện dòng khi có siêu dữ liệu, khoá chỉ-mi�
   assert.equal(v.coThongTinHanMuc({ ...nen, provider_exhausted_today: true }), true);
 });
 
+test("moTaKhoaChan / moTaUocTinh: nói thẳng vì sao khoá chặn và ước tính đã trừ lượng đã dùng", () => {
+  const q = (kw) => ({ state: "active", remaining: 50000, expires_at: null, days_left: null, only: true, updated_at: null, snapshot_age_days: 3,
+    consumed_since_snapshot: 44000, estimated_remaining: 6000, lock_block: null, provider_exhausted_today: false, ...kw });
+  assert.equal(v.moTaKhoaChan(undefined), null);
+  assert.equal(v.moTaKhoaChan(q({})), null);
+  for (const r of ["expired", "stale", "unverifiable", "exhausted"]) assert.match(v.moTaKhoaChan(q({ lock_block: r })), /\S/);
+  assert.match(v.moTaKhoaChan(q({ lock_block: "stale" })), /quá cũ|thiếu dấu thời gian/);
+  assert.match(v.moTaKhoaChan(q({ lock_block: "exhausted" })), /dự phòng 5%/);
+  assert.equal(v.moTaUocTinh(undefined), null);
+  assert.equal(v.moTaUocTinh(q({ estimated_remaining: null })), null);
+  assert.equal(v.moTaUocTinh(q({ consumed_since_snapshot: null })), null);
+  assert.match(v.moTaUocTinh(q({})), /ước còn 6[.,]?000 token \(đã trừ 44[.,]?000 token/);
+});
+
 test("moTaHanDung: còn / đã quá bao nhiêu ngày, null khi không có hạn", () => {
   const q = (days_left, expires_at = "2026-12-31T00:00:00+00:00") => ({ state: "active", remaining: 1, expires_at, days_left, only: false, updated_at: null, provider_exhausted_today: false });
   assert.equal(v.moTaHanDung(q(2.5)), "còn 2.5 ngày");
@@ -165,6 +179,27 @@ test("AiSlot (TS) có đủ các trường slot_to_dict của backend (kể cả
   assert.ok(backend.includes("free_quota_only") && backend.includes("tiers"));
   const ts = read("lib/admin/aiControl.ts").match(/export interface AiSlot \{([\s\S]*?)\n\}/)[1];
   for (const k of backend) assert.match(ts, new RegExp(`\\b${k}\\??:`), `AiSlot thiếu trường ${k}`);
+});
+
+test("AiSlotQuota (TS) có đủ các trường mà backend trả trong health.quota", () => {
+  const cap = readPy("ai_assistant/control/capability.py");
+  const fn = cap.match(/def free_quota_state[\s\S]*?(?=\n\ndef )/)[0];
+  const svc = readPy("ai_assistant/control/service.py");
+  const view = svc.match(/def _quota_view[\s\S]*?(?=\n    def )/)[0];
+  const backend = new Set([...fn.matchAll(/"(\w+)":/g)].map((m) => m[1]));
+  for (const k of ["lock_block", "provider_exhausted_today"]) assert.match(view, new RegExp(`"${k}"`));
+  backend.add("lock_block");
+  backend.add("provider_exhausted_today");
+  for (const k of ["state", "estimated_remaining", "consumed_since_snapshot", "snapshot_age_days"]) assert.ok(backend.has(k), k);
+  const ts = read("lib/admin/aiControl.ts").match(/export interface AiSlotQuota \{([\s\S]*?)\n\}/)[1];
+  for (const k of backend) assert.match(ts, new RegExp(`\\b${k}\\??:`), `AiSlotQuota thiếu trường ${k}`);
+});
+
+test("danh sách slot hiện ước tính còn lại và lý do khoá chặn", () => {
+  const src = codeOnly(read("components/admin/ai/AiSlotList.tsx"));
+  assert.match(src, /moTaUocTinh\(h\.quota\)/);
+  assert.match(src, /moTaKhoaChan\(h\.quota\)/);
+  assert.match(src, /khoá đang CHẶN slot/);
 });
 
 test("AiSlotInput (TS) chỉ gửi các trường client được phép đặt", () => {

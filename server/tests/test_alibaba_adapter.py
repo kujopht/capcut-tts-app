@@ -311,8 +311,11 @@ class TestErrorClassification(unittest.TestCase):
         (403, {"code": "AllocationQuota.FreeTierOnly", "message": "free tier exhausted"}, "QUOTA_EXHAUSTED"),
         (400, {"code": "Arrearage", "message": "Access denied, please make sure your account is in good standing."},
          "QUOTA_EXHAUSTED"),
-        (429, {"code": "Throttling.AllocationQuota", "message": "Allocated quota exceeded"}, "QUOTA_EXHAUSTED"),
+        # `Throttling.AllocationQuota` is ambiguous (allocation / rate ceilings too): a rate limit, NOT a day-long park.
+        (429, {"code": "Throttling.AllocationQuota", "message": "Allocated quota exceeded"}, "RATE_LIMITED"),
+        (429, {"code": "AllocationQuota.FreeTierOnly", "message": "free tier exhausted"}, "QUOTA_EXHAUSTED"),
         (429, {"error": {"code": "insufficient_quota", "message": "x"}}, "QUOTA_EXHAUSTED"),
+        (429, {"message": "Your free tier is exhausted"}, "QUOTA_EXHAUSTED"),  # no vendor code at all: message is the only signal
         (429, {"code": "Throttling.RateQuota", "message": "Requests rate limit exceeded"}, "RATE_LIMITED"),
         (429, {"error": {"code": "limit_requests"}}, "RATE_LIMITED"),
         (429, b"not json at all", "RATE_LIMITED"),
@@ -366,6 +369,74 @@ class TestErrorClassification(unittest.TestCase):
                 self.assertNotIn(KEY, blob)
                 self.assertNotIn("1234567890", blob)
 
+    def test_user_text_echoed_inside_a_400_message_cannot_change_a_slots_state(self) -> None:
+        """Validation errors often echo the offending input. If a user's message contains 'free tier', 'unauthorized' or
+        'model not exist', the vendor's 400 must not be read as quota exhaustion / bad key / missing model — that would let
+        anyone park or break a healthy slot. Only the vendor CODE can do that on a 400."""
+        echo = "free tier arrearage overdue unauthorized invalid_api_key model not exist throttling rate limit"
+        for body in ({"code": "InvalidParameter", "message": f"bad input: {echo}"},
+                     {"error": {"code": "invalid_request_error", "message": f"input {echo}"}},
+                     {"message": echo}):
+            with self.subTest(body=str(body)[:50]):
+                p = make(lambda r, b=body: err_response(400, b))
+                with self.assertRaises(ProviderError) as ctx:
+                    stream_events(p)
+                self.assertEqual(ctx.exception.category, "BAD_REQUEST")
+        self.assertIn(classify_error(400, json.dumps({"code": "Arrearage", "message": "x"}).encode()), {"QUOTA_EXHAUSTED"})
+        self.assertEqual(classify_error(400, json.dumps({"code": "DataInspectionFailed"}).encode()), "CONTENT_FILTERED")
+        self.assertEqual(classify_error(400, json.dumps({"message": "Range of input length should be [1, 30720]"}).encode()),
+                         "CONTEXT_TOO_LONG")
+
+    def test_the_vendor_code_wins_over_the_message_and_a_message_is_only_a_fallback_when_there_is_no_code(self) -> None:
+        # a code is present -> a quota-sounding message cannot override it
+        self.assertEqual(classify_error(429, json.dumps({"code": "Throttling.RateQuota", "message": "free tier overdue"}).encode()),
+                         "RATE_LIMITED")
+        self.assertEqual(classify_error(403, json.dumps({"code": "AccessDenied", "message": "free tier arrearage"}).encode()),
+                         "PERMISSION_DENIED")
+        # no code, not a 400 -> the message may speak
+        self.assertEqual(classify_error(403, json.dumps({"message": "account overdue"}).encode()), "QUOTA_EXHAUSTED")
+        self.assertEqual(classify_error(400, json.dumps({"message": "account overdue"}).encode()), "BAD_REQUEST")
+
+    def test_an_output_moderation_frame_inside_a_200_stream_is_a_request_fault_not_a_slot_fault(self) -> None:
+        for frame in ({"error": {"code": "data_inspection_failed", "message": "x"}},
+                      {"error": {"code": "DataInspectionFailed"}},
+                      {"error": {"code": "invalid_parameter", "message": "Range of input length should be [1, 8]"}}):
+            p = make(ok_handler(sse(chunk("a"), frame, done=False)))
+            gen = p.stream(req())
+            next(gen)
+            with self.assertRaises(ProviderError) as ctx:
+                next(gen)
+            self.assertEqual(ctx.exception.code, "provider_stream_error")
+            self.assertIn(ctx.exception.category, {"CONTENT_FILTERED", "CONTEXT_TOO_LONG"})
+
+    def test_garbage_usage_figures_are_zero_not_an_exception(self) -> None:
+        for usage in ({"prompt_tokens": "lots", "completion_tokens": None}, {"prompt_tokens": -5, "completion_tokens": float("nan")},
+                      {"prompt_tokens": 10 ** 12, "completion_tokens": True}, {"prompt_tokens": 7.9, "completion_tokens": 2}):
+            p = make(ok_handler(sse(chunk("x"), {"choices": [], "usage": usage}, chunk(None, finish="stop"))))
+            events = stream_events(p)
+            u = [e for e in events if isinstance(e, UsageEvent)][0]
+            self.assertGreaterEqual(u.input_tokens, 0)
+            self.assertGreaterEqual(u.output_tokens, 0)
+        p = make(ok_handler(sse(chunk("x"), {"choices": [], "usage": {"prompt_tokens": 7.9, "completion_tokens": 2}},
+                                chunk(None, finish="stop"))))
+        u = [e for e in stream_events(p) if isinstance(e, UsageEvent)][0]
+        self.assertEqual((u.input_tokens, u.output_tokens), (7, 2))
+
+    def test_a_foreign_timeout_exception_never_puts_its_text_in_the_error(self) -> None:
+        def handler(r: httpx.Request) -> httpx.Response:
+            raise TimeoutError(f"deadline for https://x/?key={LEAK}")
+
+        p = make(handler)
+        with self.assertRaises(ProviderError) as ctx:
+            stream_events(p)
+        self.assertEqual(ctx.exception.code, "provider_unexpected_error")
+        self.assertNotIn(LEAK, str(ctx.exception) + repr(ctx.exception.args))
+
+    def test_request_fault_categories_are_the_three_that_blame_the_request_not_the_slot(self) -> None:
+        from server.llm_gateway.alibaba import REQUEST_FAULT_CATEGORIES
+        self.assertEqual(REQUEST_FAULT_CATEGORIES, frozenset({"CONTENT_FILTERED", "CONTEXT_TOO_LONG", "BAD_REQUEST"}))
+        self.assertLessEqual(REQUEST_FAULT_CATEGORIES, CATEGORIES)
+
     def test_rate_limit_keeps_a_clamped_retry_after_but_quota_exhaustion_does_not(self) -> None:
         cases = [({"Retry-After": "7"}, 7.0), ({"Retry-After": "0"}, 1.0), ({"Retry-After": "86400"}, 600.0),
                  ({"Retry-After": "abc"}, None), ({}, None)]
@@ -376,7 +447,7 @@ class TestErrorClassification(unittest.TestCase):
                     stream_events(p)
                 self.assertEqual(ctx.exception.retry_after_s, expected)
                 self.assertTrue(ctx.exception.transient)
-        p = make(lambda r: err_response(429, {"code": "Throttling.AllocationQuota"}, {"Retry-After": "30"}))
+        p = make(lambda r: err_response(429, {"code": "AllocationQuota.FreeTierOnly"}, {"Retry-After": "30"}))
         with self.assertRaises(ProviderError) as ctx:
             stream_events(p)
         self.assertEqual(ctx.exception.category, "QUOTA_EXHAUSTED")

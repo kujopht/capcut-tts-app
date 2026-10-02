@@ -32,6 +32,7 @@ from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 from server.ai_assistant.config import MODE_LIMITS, estimate_tokens
 from server.ai_assistant.control.model import PROVIDER_TYPES, ControlConfig, ProviderSlot
 from server.ai_assistant.gateway import DEFAULT_429_COOLDOWN_S, ErrorEvent, ProviderServed, trim_context
+from server.llm_gateway.alibaba import REQUEST_FAULT_CATEGORIES
 from server.llm_gateway.chat_provider import ChatTurn, Delta, GenerateRequest, ProviderError, StreamEvent
 
 log = logging.getLogger("fanfic.ai_assistant")
@@ -57,9 +58,11 @@ SKIP_QUOTA_EXHAUSTED = "quota_exhausted"
 #: `free_quota_only`: hết số dư / quá hạn hạn mức miễn phí theo số liệu Owner nhập — không bao giờ dùng quá để phát sinh phí.
 SKIP_FREE_QUOTA_EXHAUSTED = "free_quota_exhausted"
 SKIP_FREE_QUOTA_EXPIRED = "free_quota_expired"
+#: `free_quota_only` mà số liệu quá cũ / chưa có dấu thời gian của máy chủ / không đọc được lượng đã dùng: không xác minh được thì không dùng.
+SKIP_FREE_QUOTA_STALE = "free_quota_stale"
 CAP_REASONS = frozenset({SKIP_REQUEST_CAP, SKIP_TOKEN_CAP, SKIP_RPM, SKIP_TPM})
 #: Hết hạn mức của NHÀ CUNG CẤP (khác trần của ta): tự chỉ hết khi sang ngày/Owner cập nhật -> báo `ai_budget_exhausted`.
-QUOTA_REASONS = frozenset({SKIP_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED})
+QUOTA_REASONS = frozenset({SKIP_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED, SKIP_FREE_QUOTA_STALE})
 #: Hết MỖI NGÀY: chỉ sang ngày mới (UTC) mới có lại -> báo `ai_budget_exhausted` kèm giờ reset.
 DAILY_CAP_REASONS = frozenset({SKIP_REQUEST_CAP, SKIP_TOKEN_CAP})
 #: Tạm thời: hết trong vài giây (cửa sổ RPM/TPM trượt 60 s) hoặc vài phút (cooldown) -> KHÔNG được báo như hết hạn ngày,
@@ -284,7 +287,11 @@ class ControlledGateway:
                         slot.slot_id, _clamp_cooldown(exc.retry_after_s))
                     plane.note_rate_limited(slot, exc.code, category)  # type: ignore[attr-defined]
                 else:
-                    plane.breaker.record_failure(slot.slot_id)  # type: ignore[attr-defined]
+                    # Lỗi do chính YÊU CẦU (nội dung bị lọc, quá dài…) không phải lỗi sức khoẻ của slot: không đếm vào breaker,
+                    # nếu không ai cũng làm được cả pool nghỉ 60 s bằng vài yêu cầu bị nhà cung cấp từ chối. Vẫn chuyển slot
+                    # và vẫn ghi vào `errors`. Chỉ adapter Alibaba phát ra các phân loại này.
+                    if category not in REQUEST_FAULT_CATEGORIES:
+                        plane.breaker.record_failure(slot.slot_id)  # type: ignore[attr-defined]
                     if not started:
                         plane.note_error(slot, exc.code, category)  # type: ignore[attr-defined]
                     else:

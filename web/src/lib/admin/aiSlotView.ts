@@ -45,6 +45,25 @@ export function moTaHanDung(q: AiSlotQuota | undefined): string | null {
   return q.days_left < 0 ? `đã quá ${ngay} ngày` : `còn ${ngay} ngày`;
 }
 
+const LY_DO_KHOA: Record<string, string> = {
+  expired: "hạn mức miễn phí đã quá hạn",
+  stale: "số liệu quá cũ hoặc thiếu dấu thời gian — nhập lại số dư từ trang nhà cung cấp",
+  unverifiable: "không đọc được lượng đã dùng từ sổ sử dụng",
+  exhausted: "hết số dư ước tính (đã trừ dự phòng 5%)",
+};
+
+/** Lý do khoá "chỉ dùng hạn mức miễn phí" đang chặn slot; `null` khi không chặn. */
+export function moTaKhoaChan(q: AiSlotQuota | undefined): string | null {
+  if (!q || !q.lock_block) return null;
+  return LY_DO_KHOA[q.lock_block] ?? q.lock_block;
+}
+
+/** "Ước còn X token (đã trừ Y token slot đã phục vụ từ lúc nhập)"; `null` khi không ước tính được. */
+export function moTaUocTinh(q: AiSlotQuota | undefined): string | null {
+  if (!q || q.estimated_remaining === null || q.consumed_since_snapshot === null) return null;
+  return `ước còn ${q.estimated_remaining.toLocaleString("vi-VN")} token (đã trừ ${q.consumed_since_snapshot.toLocaleString("vi-VN")} token slot đã phục vụ từ lúc nhập)`;
+}
+
 /** Máy chủ (không đường dẫn) của endpoint — cho Owner thấy slot đang trỏ vùng nào mà không in cả URL. */
 export function hostCuaEndpoint(url: string | undefined): string {
   try {

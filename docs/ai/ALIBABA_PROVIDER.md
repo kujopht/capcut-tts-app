@@ -34,7 +34,8 @@ trần toàn cục → audit. Tên provider của adapter là **id của slot**,
 
 * Cổng 1 được kiểm ở **ba chỗ**: `skip_reason` (slot không được chọn), `provider_for` (không dựng được provider) và `probe` (nút
   Kiểm tra trả 409, không gửi gì, không tính lượt kiểm). Có test cho từng chỗ.
-* Loại `qwen` **cũ** (cũng là DashScope của Alibaba) dùng **chung cổng**. Lý do: `qwen` nằm trong các hồ sơ mặc định
+* Loại `qwen` **cũ** (cũng là DashScope của Alibaba) dùng **chung cổng** — kể cả chuỗi provider đọc từ env cũ (`FAS_AI_PROVIDERS=qwen,…` +
+  `AI_QWEN_API_KEY`, chỉ dùng khi control plane tắt): `runtime._build_provider("qwen")` bỏ qua provider khi cổng đóng. Lý do: `qwen` nằm trong các hồ sơ mặc định
   (`SUPPORT_SAFE = azure > qwen > gemini`, `FREE_FIRST` có `qwen` sau `gemini`, `WRITER`/`QUALITY_FIRST` có `qwen` đứng đầu) — bật
   một slot `qwen` sẽ lập tức đưa Alibaba vào lưu lượng thật, kể cả làm Alibaba đứng TRƯỚC Gemini ở chế độ Hỗ trợ. Cổng chung chặn
   đường đó. Production không có slot `qwen` nào nên việc này không đổi hành vi hiện tại. **Khuyến nghị tách riêng:** bỏ `qwen` khỏi
@@ -54,7 +55,9 @@ trần toàn cục → audit. Tên provider của adapter là **id của slot**,
   dùng, kể cả đã băm, ra nhà cung cấp mới). `reasoning_content` của model suy luận **không bao giờ** hiển thị hay chuyển tiếp.
 * **Model** luôn lấy từ slot; không có tên model nào trong mã.
 * **Hết hạn thời gian**: kết nối 10 s; chờ giữa hai gói tin 20 s; **chờ token chữ đầu (TTFT) 30 s**; tổng 120 s. Quá hạn →
-  `provider_timeout` (trước token đầu: chuyển slot; sau token đầu: báo "bị gián đoạn", giữ phần đã nhận).
+  `provider_timeout` (trước token đầu: chuyển slot; sau token đầu: báo "bị gián đoạn", giữ phần đã nhận). Hạn TTFT chỉ tính token **chữ**:
+  model suy luận chỉ phát `reasoning_content` quá 30 s sẽ bị cắt — nếu canary cần model như vậy, cần một hạn TTFT riêng theo slot (chưa có).
+  Hạn TTFT/tổng được kiểm mỗi khi có dòng SSE mới; im lặng hoàn toàn thì hạn "giữa hai gói tin" (20 s) cắt trước.
 * **Dừng/huỷ**: đóng generator = đóng kết nối. Cận trên của độ trễ huỷ khi nhà cung cấp im lặng là timeout giữa hai gói tin (20 s).
 * **Luồng cụt** (kết thúc không có `[DONE]` và không có `finish_reason`) = `provider_truncated`, không phải thành công.
 * `generate()` stream bên trong (một số model từ chối gọi không-stream); probe của Owner đi **cùng đường stream** để đo TTFT.
@@ -81,6 +84,14 @@ NETWORK_ERROR, BAD_RESPONSE, EMPTY_RESPONSE`. Mã/loại/thông điệp của nh
 
 Chuỗi mã của Alibaba (ví dụ tên `Throttling.*`, `AllocationQuota.*`) được so khớp **khoan dung theo từ khoá** sau HTTP status vì chưa
 xác nhận được với tài khoản thật — canary phải xác nhận (mục 11).
+
+Hai nguyên tắc chống bị lạm dụng (có test):
+
+* **Thông điệp của lỗi 400 có thể lặp nguyên văn nội dung người dùng** nên KHÔNG BAO GIỜ dùng nó để quyết định điều đổi trạng thái slot
+  (khoá sai, hết hạn mức, model không tồn tại, giới hạn tốc độ): các quyết định đó chỉ dựa vào **mã/loại** do nhà cung cấp gửi. Nhờ vậy một
+  người dùng gõ "free tier" hay "unauthorized" vào tin nhắn không làm slot bị nghỉ cả ngày hay bị coi là hỏng khoá.
+* **Lỗi do chính yêu cầu** (`CONTENT_FILTERED`, `CONTEXT_TOO_LONG`, `BAD_REQUEST`) không phải lỗi sức khoẻ của slot: vẫn chuyển slot và vẫn
+  ghi vào `errors`, nhưng **không** đếm vào breaker. Nếu không, ai cũng làm được cả pool nghỉ 60 s bằng vài yêu cầu bị nhà cung cấp từ chối.
 
 **Chính sách đếm** (chung mọi provider, ghi ở `AI_OPERATIONS_RUNBOOK.md` §2): lỗi nhà cung cấp trước token đầu không tính vào
 `requests`/lượt người dùng, chỉ vào `errors` (hoặc `rate_limited`) của slot; lượt trả lời rỗng thành công vẫn tính vào slot.
@@ -110,9 +121,20 @@ chuẩn hoá UTC), `free_quota_only`, và `free_quota_updated_at` (do **máy ch�
 * Đây là **ảnh chụp do Owner nhập** từ trang Model Studio, không tự cập nhật (Alibaba không đưa số dư vào API chat). Giao diện luôn
   ghi rõ tuổi của ảnh chụp.
 * Trạng thái: `none | active | expiring (≤ 7 ngày) | expired | exhausted`, hiển thị kèm số ngày còn lại.
-* `free_quota_only` là **khoá an toàn chống phát sinh phí**: slot bị bỏ qua khi quá hạn, hết số dư, hoặc số dư nhỏ hơn ước lượng
-  của yêu cầu (`free_quota_expired` / `free_quota_exhausted`). Bật khoá bắt buộc nhập số dư (không biết số dư = không được dùng). Slot
-  không bật khoá chỉ hiển thị thông tin.
+* `free_quota_only` là **khoá an toàn phía chúng ta để hạn chế phát sinh phí** (không phải rào duy nhất — xem dưới). Số dư thực tế
+  được ƯỚC TÍNH = ảnh chụp − token slot đã phục vụ từ **ngày UTC của ảnh chụp** (cả ngày đó, phía thận trọng; đọc từ sổ sử dụng theo
+  ngày, mỗi ngày đã đóng chỉ đọc một lần) − **dự phòng 5%** của ảnh chụp. Slot bị bỏ qua khi:
+  * quá hạn dùng (`free_quota_expired`);
+  * ước tính còn lại (sau dự phòng) nhỏ hơn ước lượng của yêu cầu (`free_quota_exhausted`);
+  * ảnh chụp **quá cũ** (> 31 ngày) hoặc thiếu dấu thời gian của máy chủ, hoặc **không đọc được** lượng đã dùng (`free_quota_stale`) —
+    không xác minh được thì không dùng.
+  Bật khoá bắt buộc nhập số dư. Slot không bật khoá chỉ hiển thị thông tin. `/admin/ai` hiện số ước tính, lượng đã trừ, tuổi ảnh chụp
+  và **lý do khoá đang chặn**.
+* **Giới hạn thật của khoá này (đừng hiểu nhầm):** token do ta đếm có thể lệch với cách nhà cung cấp tính tiền; lần Kiểm tra (probe) không
+  vào sổ; và **tài khoản Alibaba có thể có nơi tiêu hạn mức khác** (ứng dụng khác, console) mà ta không thấy. Vì vậy rào chặn thật sự chống
+  phát sinh phí là chế độ **"chỉ dùng hạn mức miễn phí" (free tier only) bật ở console Alibaba** (khi hết, nhà cung cấp tự từ chối — ta
+  phân loại thành `QUOTA_EXHAUSTED` và cho slot nghỉ tới 00:00 UTC). **Điều kiện canary: Owner phải xác nhận đã bật chế độ này cho từng model
+  trước khi bật `FAS_AI_ALIBABA_ENABLED`.**
 * **Ưu tiên hạn mức sắp hết hạn** (`capability.order_by_expiring_free_quota`): trong cùng bậc ưu tiên, slot có hạn mức còn dùng được
   và hết hạn SỚM nhất đứng trước. Đã cài + có test, **NGỦ ĐÔNG**: chỉ chạy khi `FAS_AI_PREFER_FREE_QUOTA=1` (mặc định tắt, không đặt ở
   production). Hiện `/admin/ai` báo trạng thái bật/tắt.
@@ -161,7 +183,8 @@ xoá mọi slot `alibaba`** (và khoá cờ loại). Khoá `provider_types_json`
    Phải nêu khoá thuộc tài khoản/vùng nào và có bật chế độ "chỉ dùng hạn mức miễn phí" của Alibaba hay không.
 3. **Danh mục model và hạn mức thật**: id model chính xác Owner muốn dùng (mỗi model một slot), tầng nào (FAST/SMART/…), số dư hạn mức miễn phí và ngày
    hết hạn của từng model, giới hạn tốc độ (RPM/TPM) trên trang Alibaba, và có model nào là model "suy luận" (có `reasoning_content`) không.
-4. Duyệt chạy migration (mục 11) và đặt `FAS_AI_ALIBABA_ENABLED=1`.
+4. Xác nhận đã bật chế độ **"chỉ dùng hạn mức miễn phí"** ở console Alibaba cho từng model sẽ dùng (rào chặn phí thật, mục 7).
+5. Duyệt chạy migration (mục 11) và đặt `FAS_AI_ALIBABA_ENABLED=1`.
 
 **Việc canary phải xác nhận trên tài khoản thật** (adapter chưa từng gọi Alibaba thật): (a) đường dẫn và `stream_options.include_usage` cho ra khung
 `usage`; (b) chuỗi mã lỗi thật cho lỗi khoá, hết hạn mức miễn phí, giới hạn tốc độ (đối chiếu phân loại ở mục 4 bằng `last_error_category`);

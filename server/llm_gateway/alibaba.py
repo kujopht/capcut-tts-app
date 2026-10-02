@@ -24,6 +24,7 @@ in the canary. No model ID is baked in anywhere: the model always comes from the
 """
 from __future__ import annotations
 
+import codecs
 import json
 import re
 import time
@@ -170,6 +171,28 @@ def classify_error(status: int, raw: bytes = b"") -> str:
     return "SERVER_ERROR"
 
 
+#: A single SSE line longer than this (no newline in sight) is not a chat stream.
+MAX_LINE_CHARS = 1_000_000
+
+
+def _read_lines(resp: httpx.Response, check: Callable[[], None]) -> Iterator[str]:
+    """Lines of a streamed response, calling `check()` after every chunk of bytes that arrives (see the deadline note above).
+    Incremental UTF-8 decoding (a multibyte character split across two chunks is not corrupted); `\\r\\n` and `\\n` both end a line."""
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    buf = ""
+    for chunk in resp.iter_bytes():
+        check()
+        buf += decoder.decode(chunk)
+        while "\n" in buf:
+            line, buf = buf.split("\n", 1)
+            yield line.rstrip("\r")
+        if len(buf) > MAX_LINE_CHARS:
+            raise _provider_error("Luồng trả về không đúng định dạng SSE.", code="provider_bad_response", category="BAD_RESPONSE")
+    buf += decoder.decode(b"", final=True)
+    if buf:
+        yield buf.rstrip("\r")
+
+
 def _token_count(v: Any) -> int:
     """A usage figure from the wire -> a non-negative int; anything odd is 0 (the route then estimates) — never an exception
     that would escape the adapter (and log vendor text through the gateway's generic handler)."""
@@ -268,12 +291,16 @@ class AlibabaModelStudioProvider(OpenAICompatChatProvider):
                         f"'{self.name}' trả lỗi {resp.status_code}.", code=f"provider_http_{resp.status_code}",
                         category=category,
                         retry_after_s=_retry_after_s(resp) if category == "RATE_LIMITED" else None)
-                for line in resp.iter_lines():
+                def check_deadlines() -> None:
                     now = self._clock()
                     if now - started_at > self._total_timeout_s:
                         raise _DeadlineExceeded("total")
                     if not got_content and now - started_at > self._first_token_timeout_s:
                         raise _DeadlineExceeded("first-token")
+
+                # Deadlines are checked on EVERY received chunk of bytes, not only when a full SSE line completes: an upstream
+                # that trickles bytes (never a newline) just under the inter-chunk read timeout cannot hold the slot open.
+                for line in _read_lines(resp, check_deadlines):
                     if not line or not line.startswith("data:"):
                         continue
                     raw = line[len("data:"):].strip()

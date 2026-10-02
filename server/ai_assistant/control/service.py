@@ -91,6 +91,12 @@ PROBE_STABLE_MAX_MS = 5000
 #: Latency accounting (`ControlPlane.note_latency`): the last LATENCY_WINDOW calls per slot, in-process (a restart clears it,
 #: like the breaker) — no Appwrite attribute is needed.
 LATENCY_WINDOW = 200
+#: A closed ledger day whose background read failed is not retried sooner than this (seconds).
+PREFETCH_RETRY_S = 30.0
+
+
+def _spawn_daemon(job: Callable[[], None]) -> None:
+    threading.Thread(target=job, name="ai-quota-prefetch", daemon=True).start()
 
 
 def today_utc() -> str:
@@ -141,8 +147,11 @@ class ControlPlane:
                  active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                  user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
                  alibaba_enabled: bool = False, prefer_free_quota: bool = False,
-                 wall_now: Optional[Callable[[], datetime]] = None) -> None:
+                 wall_now: Optional[Callable[[], datetime]] = None,
+                 background: Optional[Callable[[Callable[[], None]], None]] = None) -> None:
         self.store = store
+        #: Runs a no-argument job OFF the request path (cache warm-up for the free-quota lock). Tests inject an inline runner.
+        self._background = background or _spawn_daemon
         #: Cổng cấp MÁY CHỦ của các loại provider trong `GATED_PROVIDER_TYPES` (biến môi trường, mặc định ĐÓNG): đóng thì
         #: không slot nào của loại đó được chọn, dựng provider, hay Kiểm tra — bất kể cấu hình trong `/admin/ai`.
         self._gates: Dict[str, bool] = {t: bool(alibaba_enabled) for t in GATED_PROVIDER_TYPES}
@@ -191,6 +200,8 @@ class ControlPlane:
         #: yyyymmdd (a COMPLETED UTC day) -> {slot_id: tokens served that day}, read once from the ledger and kept: a closed
         #: day never changes. Only `free_quota_only` slots (and the admin quota view) ever ask for it.
         self._past_usage: Dict[str, Dict[str, int]] = {}
+        self._prefetching: set = set()  # closed days a background fill is already reading
+        self._prefetch_failed: Dict[str, float] = {}  # day -> monotonic time of the last failed read
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                              user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
@@ -270,11 +281,12 @@ class ControlPlane:
             self._usage, self._usage_day, self._usage_at = usage, day, now
             return {k: replace(v) for k, v in usage.items()}, True
 
-    def _past_day_tokens(self, day: str) -> Optional[Dict[str, int]]:
-        """{slot_id: tokens} of a COMPLETED UTC day, or None when the ledger cannot be read right now."""
+    def _past_day_tokens(self, day: str, block: bool = True) -> Optional[Dict[str, int]]:
+        """{slot_id: tokens} of a COMPLETED UTC day from the cache; with `block=True` a miss is read from the ledger (admin
+        views, the background prefetch). None = not cached / cannot be read right now."""
         with self._lock:
             hit = self._past_usage.get(day)
-        if hit is not None:
+        if hit is not None or not block:
             return hit
         try:
             rows = self.store.usage_for_day(day)
@@ -287,28 +299,65 @@ class ControlPlane:
                 self._past_usage.pop(old, None)
         return tokens
 
-    def _consumed_since_snapshot(self, slot: ProviderSlot, usage: Dict[str, UsageCounters]) -> Optional[int]:
+    def _prefetch(self, days: List[str]) -> None:
+        """Warm the closed-day cache OFF the request path. A failed day is not retried for PREFETCH_RETRY_S, so an unreachable
+        store cannot make every request spawn a thread."""
+        now = self._clock()
+        with self._lock:
+            todo = [d for d in days if d not in self._prefetching and now - self._prefetch_failed.get(d, -1e9) >= PREFETCH_RETRY_S]
+            self._prefetching.update(todo)
+        if not todo:
+            return
+
+        def fill() -> None:
+            try:
+                for d in todo:
+                    if self._past_day_tokens(d, block=True) is None:
+                        with self._lock:
+                            self._prefetch_failed[d] = self._clock()
+            finally:
+                with self._lock:
+                    self._prefetching.difference_update(todo)
+
+        self._background(fill)
+
+    def _consumed_since_snapshot(self, slot: ProviderSlot, usage: Dict[str, UsageCounters], block: bool = True) -> Optional[int]:
         """Tokens `slot` served since the UTC day of its server-stamped free-quota snapshot (that whole day counted — the
         conservative side). `usage` = today's live counters. None = cannot be established: no stamp, a ledger day unreadable,
-        or an implausibly long window."""
+        or an implausibly long window.
+
+        `block=False` is the ROUTING path: it only ever reads the cache. A closed day that is not cached yet makes the answer
+        None (the slot is skipped, fail closed) and is filled in the background — a month-old snapshot must never put dozens of
+        sequential ledger reads into a user's request."""
         norm = normalize_timestamp(slot.free_quota_updated_at) if slot.free_quota_updated_at else None
         if norm is None:  # validated on write and on load, but a routing path must never raise on a bad stamp
             return None
         stamped = datetime.fromisoformat(norm)
         today = self._wall_now().astimezone(timezone.utc).date()
-        day = min(stamped.astimezone(timezone.utc).date(), today)
-        total = usage.get(slot.slot_id, UsageCounters()).tokens
-        steps = 0
-        while day < today:
-            part = self._past_day_tokens(day.strftime("%Y%m%d"))
-            if part is None:
+        first = min(stamped.astimezone(timezone.utc).date(), today)
+        for attempt in (1, 2):
+            total = usage.get(slot.slot_id, UsageCounters()).tokens
+            missing: List[str] = []
+            day, steps = first, 0
+            while day < today:
+                key = day.strftime("%Y%m%d")
+                part = self._past_day_tokens(key, block=block)
+                if part is None:
+                    if block:
+                        return None
+                    missing.append(key)
+                else:
+                    total += part.get(slot.slot_id, 0)
+                day += timedelta(days=1)
+                steps += 1
+                if steps > 400:
+                    return None
+            if not missing:
+                return total
+            if attempt == 2:
                 return None
-            total += part.get(slot.slot_id, 0)
-            day += timedelta(days=1)
-            steps += 1
-            if steps > 400:
-                return None
-        return total
+            self._prefetch(missing)  # an inline executor (tests) has filled the cache by now; a thread has not
+        return None
 
     def _bump_local(self, slot_id: str, **delta: int) -> None:
         with self._lock:
@@ -364,7 +413,7 @@ class ControlPlane:
         if quota_out:
             return SKIP_QUOTA_EXHAUSTED
         if slot.free_quota_only:  # chỉ khoá an toàn mới cần đọc lượng đã dùng từ sổ; slot thường không tốn thêm gì
-            consumed = self._consumed_since_snapshot(slot, usage if usage is not None else self.usage_today())
+            consumed = self._consumed_since_snapshot(slot, usage if usage is not None else self.usage_today(), block=False)
             blocked = free_quota_block_reason(slot, self._wall_now(), est_tokens, consumed)
             if blocked == "expired":
                 return SKIP_FREE_QUOTA_EXPIRED

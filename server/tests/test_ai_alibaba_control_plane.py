@@ -101,7 +101,8 @@ class StreamProbeProvider(Scripted):
 def build_plane(slots: List[ProviderSlot], *, gate: bool = True, alibaba_type: Optional[bool] = True,
                 profiles: Optional[Dict[str, RoutingProfile]] = None, providers: Optional[Dict[str, ChatProvider]] = None,
                 prefer: bool = False, clock: Optional[Clock] = None, ai_enabled: bool = True,
-                store: Optional[InMemoryControlStore] = None, wall_now=lambda: NOW) -> ControlPlane:
+                store: Optional[InMemoryControlStore] = None, wall_now=lambda: NOW,
+                background=lambda job: job()) -> ControlPlane:  # inline "background": deterministic unless a test says otherwise
     st = store or InMemoryControlStore()
     types: Dict[str, bool] = {t: True for t in LEGACY_TYPES}  # the previous release's 6 keys…
     if alibaba_type is not None:
@@ -115,7 +116,7 @@ def build_plane(slots: List[ProviderSlot], *, gate: bool = True, alibaba_type: O
     clk = clock or Clock()
     return ControlPlane(st, secrets=SecretResolver(env_for(*slots)), factory=ProviderFactory(builder=lambda s, k: provs[s.slot_id]),
                         breaker=CircuitBreaker(clock_fn=clk), clock=clk, rng=random.Random(5), alibaba_enabled=gate,
-                        prefer_free_quota=prefer, wall_now=wall_now)
+                        prefer_free_quota=prefer, wall_now=wall_now, background=background)
 
 
 def only(*steps: str) -> Dict[str, RoutingProfile]:
@@ -548,6 +549,51 @@ class TestFreeQuotaMetadata(unittest.TestCase):
                 p.skip_reason(only_lock, "general", 10, usage=p.usage_today())
             self.assertEqual(sorted(d for d in reads if d != "20261002"), ["20260930", "20261001"],
                              "each closed day of the window is read exactly once")
+
+    def test_the_routing_path_never_waits_for_ledger_reads_a_cold_cache_fails_closed_and_warms_in_the_background(self) -> None:
+        """Cross-family review finding: a month-old snapshot must not put ~30 sequential Appwrite reads into a user's request."""
+        reads: List[str] = []
+        pending: List[Any] = []
+
+        class Spy(InMemoryControlStore):
+            fail_days: set = set()
+
+            def usage_for_day(self, day: str):  # type: ignore[override]
+                reads.append(day)
+                if day in self.fail_days:
+                    raise ControlStoreUnavailable("down")
+                return super().usage_for_day(day)
+
+        clk = Clock()
+        snap = {**self.SNAP, "free_quota_updated_at": "2026-09-30T00:00:00+00:00"}
+        st = Spy()
+        with mock.patch("server.ai_assistant.control.service.today_utc", return_value="20261002"):
+            s = fq(**snap)
+            p = build_plane([s], profiles=only("alibaba"), store=st, background=pending.append, clock=clk)
+            usage = p.usage_today()
+            reads.clear()
+            self.assertEqual(p.skip_reason(s, "general", 10, usage=usage), SKIP_FREE_QUOTA_STALE, "cold cache: skipped, immediately")
+            self.assertEqual(reads, [], "no ledger I/O on the request path")
+            for _ in range(5):
+                p.skip_reason(s, "general", 10, usage=usage)
+            self.assertEqual(len(pending), 1, "one fill at a time, not one per request")
+            pending.pop()()  # the background job runs
+            self.assertEqual(sorted(reads), ["20260930", "20261001"])
+            self.assertIsNone(p.skip_reason(s, "general", 10, usage=usage), "warm: decided from the cache")
+            self.assertEqual(len(reads), 2, "and never read again")
+            # an unreachable store must not make every request spawn a fill
+            st2 = Spy()
+            st2.fail_days = {"20260930", "20261001"}
+            p2 = build_plane([s], profiles=only("alibaba"), store=st2, background=pending.append, clock=clk)
+            usage2 = p2.usage_today()
+            p2.skip_reason(s, "general", 10, usage=usage2)
+            pending.pop()()  # fails
+            for _ in range(5):
+                self.assertEqual(p2.skip_reason(s, "general", 10, usage=usage2), SKIP_FREE_QUOTA_STALE)
+            self.assertEqual(pending, [], "no retry storm while the store is down")
+            clk.t += 31  # PREFETCH_RETRY_S passed
+            p2.skip_reason(s, "general", 10, usage=usage2)
+            self.assertEqual(len(pending), 1, "one retry after the back-off")
 
     def test_free_quota_only_fails_closed_when_it_cannot_verify(self) -> None:
         class Flaky(InMemoryControlStore):

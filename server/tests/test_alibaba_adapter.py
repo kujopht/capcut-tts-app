@@ -258,6 +258,31 @@ class TestCancellationAndTimeouts(unittest.TestCase):
         self.assertGreaterEqual(len(got), 1, "it had started: the caller reports an interrupted answer")
         self.assertEqual(ctx.exception.code, "provider_timeout")
 
+    def test_a_trickle_of_bytes_without_a_newline_cannot_hold_the_slot_past_the_deadline(self) -> None:
+        """Deadlines are checked per received chunk, not per completed SSE line (cross-family review finding)."""
+        clock = Tick()
+        stream = ClosableStream([b"d"] * 200, on_chunk=lambda: setattr(clock, "t", clock.t + 5))
+        p = make(lambda r: httpx.Response(200, stream=stream), clock=clock, total_timeout_s=12.0, first_token_timeout_s=60.0)
+        with self.assertRaises(ProviderError) as ctx:
+            list(p.stream(req()))
+        self.assertEqual((ctx.exception.code, ctx.exception.category), ("provider_timeout", "TIMEOUT"))
+        self.assertLessEqual(clock.t - 100, 20, "it stopped after a handful of chunks, not after 200")
+        self.assertTrue(stream.closed)
+
+    def test_line_framing_handles_split_multibyte_text_crlf_and_runaway_lines(self) -> None:
+        text = "Chào bạn, đây là tiếng Việt ✓ 你好"
+        raw = ("data: " + json.dumps(chunk(text), ensure_ascii=False) + "\r\n\r\ndata: " +
+               json.dumps(chunk(None, finish="stop")) + "\r\n\r\ndata: [DONE]\r\n\r\n").encode("utf-8")
+        for size in (1, 2, 3, 7):  # cuts land in the middle of multibyte characters
+            chunks = [raw[i:i + size] for i in range(0, len(raw), size)]
+            p = make(lambda r, c=chunks: httpx.Response(200, stream=ClosableStream(c)))
+            self.assertEqual("".join(e.text for e in stream_events(p) if isinstance(e, Delta)), text, f"chunk size {size}")
+        runaway = [b"x" * 100_000] * 12  # > 1 000 000 chars and no newline
+        p = make(lambda r: httpx.Response(200, stream=ClosableStream(runaway)))
+        with self.assertRaises(ProviderError) as ctx:
+            stream_events(p)
+        self.assertEqual((ctx.exception.code, ctx.exception.category), ("provider_bad_response", "BAD_RESPONSE"))
+
     def test_httpx_timeouts_and_network_errors_become_sanitised_provider_errors(self) -> None:
         def boom(exc: Exception) -> Callable[[httpx.Request], httpx.Response]:
             def handler(r: httpx.Request) -> httpx.Response:

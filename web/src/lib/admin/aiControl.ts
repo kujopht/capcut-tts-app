@@ -18,7 +18,8 @@ export type AiProviderType =
   | "workers_ai"
   | "qwen"
   | "azure_openai"
-  | "openrouter";
+  | "openrouter"
+  | "alibaba";
 
 export type AiSlotHealthStatus =
   | "HEALTHY"
@@ -26,7 +27,53 @@ export type AiSlotHealthStatus =
   | "DISABLED"
   | "MISSING_SECRET"
   | "OVER_CAP"
-  | "DEGRADED";
+  | "DEGRADED"
+  /** Loại có cổng cấp máy chủ (biến môi trường) mà cổng đang ĐÓNG: không request nào tới nhà cung cấp. */
+  | "GATE_CLOSED"
+  /** Nhà cung cấp báo hết hạn mức: slot nghỉ tới 00:00 UTC (hoặc tới khi Owner reset). */
+  | "QUOTA_EXHAUSTED"
+  /** Siêu dữ liệu của slot trong kho bị hỏng — chỉ slot này bị bỏ qua. */
+  | "META_CORRUPT";
+
+/** Tầng năng lực của một model — KHÔNG phải tên model hay gói đăng ký; gói/tính năng sau này ánh xạ tới tầng. */
+export type AiCapabilityTier = "FAST" | "SMART" | "ADVANCED" | "TRANSLATION" | "VISION" | "EMBEDDING";
+
+/** Cổng cấp máy chủ của một loại provider: `env` là TÊN biến môi trường (đổi cần deploy), `open` = đang mở. */
+export interface AiGateInfo {
+  env: string;
+  open: boolean;
+}
+
+export interface AiLatencyStat {
+  p50: number | null;
+  p95: number | null;
+  last: number | null;
+}
+
+/** Độ trễ MỘT slot: cửa sổ trượt các lời gọi gần nhất, TRONG TIẾN TRÌNH (mất khi deploy). `ttft_ms` = tới token chữ đầu tiên. */
+export interface AiSlotLatency {
+  window: number;
+  samples: number;
+  ok: number;
+  probe_samples: number;
+  ttft_ms: AiLatencyStat;
+  total_ms: AiLatencyStat;
+  note: string;
+}
+
+export type AiFreeQuotaState = "none" | "active" | "expiring" | "expired" | "exhausted";
+
+/** Hạn mức MIỄN PHÍ do Owner nhập (ẢNH CHỤP, không tự cập nhật — `updated_at` cho biết cũ bao lâu). */
+export interface AiSlotQuota {
+  state: AiFreeQuotaState;
+  remaining: number | null;
+  expires_at: string | null;
+  days_left: number | null;
+  only: boolean;
+  updated_at: string | null;
+  /** Nhà cung cấp đã báo hết hạn mức hôm nay (không phải số liệu Owner nhập). */
+  provider_exhausted_today: boolean;
+}
 
 export type AiConfigState = "ok" | "empty" | "corrupt" | "unavailable" | "stale";
 
@@ -66,6 +113,10 @@ export interface AiOverview {
    * AI chưa dựng (backend tắt) hoặc không đo được.
    */
   runtime?: { audience: string; rpm_per_user: number; streams_active: number; streams_max: number } | null;
+  /** Cổng cấp máy chủ của các loại provider có cổng: đóng = KHÔNG request nào tới nhà cung cấp đó. */
+  gates?: Record<string, AiGateInfo>;
+  /** "Ưu tiên hạn mức miễn phí sắp hết hạn" có đang bật không (mặc định TẮT). */
+  free_quota_preference?: boolean;
   slots_by_status: Record<string, number>;
   providers: AiProviderSummary[];
 }
@@ -105,6 +156,11 @@ export interface AiSlotHealth {
   probe_history?: { at: string; ok: boolean; latency_ms: number | null; code: string | null }[];
   /** `true` khi các lần kiểm gần nhất đều đạt và đủ nhanh — gợi ý có thể bật (không tự bật). */
   probe_stable?: boolean;
+  quota?: AiSlotQuota;
+  latency?: AiSlotLatency;
+  /** `null` = loại này không có cổng máy chủ. */
+  gate?: AiGateInfo | null;
+  meta_corrupt?: boolean;
 }
 
 export type AiPresetName = "canary" | "beta";
@@ -134,6 +190,14 @@ export interface AiSlot {
   workloads: string[];
   price_in_micro_per_mtok: number;
   price_out_micro_per_mtok: number;
+  /** Tầng năng lực slot phục vụ; rỗng = chưa phân loại. */
+  tiers?: AiCapabilityTier[];
+  /** Số dư hạn mức miễn phí (token) Owner nhập; `null` = không biết. */
+  free_quota_remaining?: number | null;
+  free_quota_expires_at?: string;
+  /** `true` = slot KHÔNG BAO GIỜ được dùng khi hạn mức miễn phí hết/quá hạn (không để phát sinh phí). */
+  free_quota_only?: boolean;
+  free_quota_updated_at?: string;
   effective_endpoint: string;
   health: AiSlotHealth;
 }
@@ -163,6 +227,8 @@ export interface AiProviderTypeInfo {
   label: string;
   enabled: boolean;
   slot_count: number;
+  /** Cổng cấp máy chủ của loại này, hoặc `null`/vắng nếu loại không có cổng. */
+  gate?: AiGateInfo | null;
 }
 
 export interface AiRoutingProfile {
@@ -186,12 +252,22 @@ export interface AiConfigMeta {
   /** Mẫu endpoint hợp lệ theo loại — hiện dưới ô nhập. */
   endpoint_hints: Record<string, string>;
   secret_env_prefix: string;
+  /** Các tầng năng lực chọn được cho một slot, và phần chat phục vụ được (EMBEDDING dùng API khác). */
+  capability_tiers?: AiCapabilityTier[];
+  chat_tiers?: AiCapabilityTier[];
+  /** Loại có cổng cấp máy chủ → tên biến môi trường + đang mở hay không. */
+  gated_types?: Record<string, AiGateInfo>;
+  /** Loại mà slot LUÔN được tạo ở trạng thái tắt (bật bằng thao tác riêng sau khi Kiểm tra). */
+  created_disabled_types?: string[];
+  free_quota?: { expiring_soon_days: number; prefer_expiring_active: boolean };
 }
 
 export interface AiConfig {
   state: AiConfigState;
   controls: AiControls;
   rollout?: AiRollout;
+  /** Tầng năng lực → id các slot khai báo phục vụ tầng đó. */
+  capability_map?: Record<string, string[]>;
   provider_types: AiProviderTypeInfo[];
   slots: AiSlot[];
   profiles: AiRoutingProfile[];
@@ -231,6 +307,11 @@ export interface AiSlotInput {
   workloads?: string[];
   price_in_micro_per_mtok?: number;
   price_out_micro_per_mtok?: number;
+  tiers?: AiCapabilityTier[];
+  /** `null` = xoá số liệu. Máy chủ tự đóng dấu thời điểm ảnh chụp (client không gửi được). */
+  free_quota_remaining?: number | null;
+  free_quota_expires_at?: string;
+  free_quota_only?: boolean;
 }
 
 export interface AiGlobalPatch {
@@ -383,6 +464,8 @@ export interface AiProbeResult {
   model: string;
   ok: boolean;
   latency_ms: number | null;
+  /** Thời gian tới token chữ đầu tiên — chỉ có khi kiểm qua luồng (stream). */
+  ttft_ms?: number | null;
   code: string | null;
   category: string | null;
 }

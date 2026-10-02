@@ -33,7 +33,7 @@ import httpx
 
 from server.ai_assistant.control.model import (
     PROFILES, PROVIDER_TYPES, ControlConfig, GlobalControls, ProviderSlot, RoutingProfile,
-    default_profiles,
+    default_profiles, slot_meta, slot_with_meta,
 )
 
 T_SETTINGS, T_SLOTS, T_PROFILES, T_USAGE, T_AUDIT = (
@@ -47,7 +47,20 @@ class ControlConfigCorrupt(Exception):
 
 
 class ControlStoreUnavailable(Exception):
-    """The store cannot be reached right now (network, 5xx, 429)."""
+    """The store cannot be reached right now (network, 5xx, 429) or refused a request (`status`)."""
+
+    def __init__(self, message: str = "", *, status: Optional[int] = None):
+        super().__init__(message)
+        self.status = status
+
+
+class ControlSchemaOutdated(ControlStoreUnavailable):
+    """The store REJECTED a slot write because the production schema lacks something this release writes (the `meta_json`
+    attribute, or a provider-type value in the `provider_type` enum). Nothing was stored; every other write is unaffected."""
+
+
+#: Loại provider đã có trong enum `provider_type` của production trước khi có Alibaba Model Studio.
+LEGACY_SLOT_TYPES = ("gemini", "groq", "workers_ai", "qwen", "azure_openai", "openrouter")
 
 
 def now_iso() -> str:
@@ -82,7 +95,7 @@ class AuditEntry:
 class ControlStore(Protocol):
     def load(self) -> ControlConfig: ...
     def save_controls(self, c: GlobalControls) -> None: ...
-    def save_slot(self, s: ProviderSlot) -> None: ...
+    def save_slot(self, s: ProviderSlot, *, clear_meta: bool = False) -> None: ...
     def delete_slot(self, slot_id: str) -> None: ...
     def save_profile(self, p: RoutingProfile) -> None: ...
     def add_audit(self, entries: List[AuditEntry]) -> None: ...
@@ -124,7 +137,7 @@ class InMemoryControlStore:
         with self._lock:
             self.controls = c
 
-    def save_slot(self, s: ProviderSlot) -> None:
+    def save_slot(self, s: ProviderSlot, *, clear_meta: bool = False) -> None:
         with self._lock:
             self.slots[s.slot_id] = s
 
@@ -219,9 +232,9 @@ class AppwriteControlStore:
         if r.status_code == 404:
             return None
         if r.status_code == 429 or r.status_code >= 500:
-            raise ControlStoreUnavailable("Kho cấu hình AI đang bận.")
+            raise ControlStoreUnavailable("Kho cấu hình AI đang bận.", status=r.status_code)
         if r.status_code >= 400:
-            raise ControlStoreUnavailable(f"Kho cấu hình AI từ chối yêu cầu ({r.status_code}).")
+            raise ControlStoreUnavailable(f"Kho cấu hình AI từ chối yêu cầu ({r.status_code}).", status=r.status_code)
         return r.json() if r.content else {}
 
     @staticmethod
@@ -289,7 +302,7 @@ class AppwriteControlStore:
     @staticmethod
     def _slot_from_row(r: Dict[str, Any]) -> ProviderSlot:
         try:
-            return ProviderSlot(
+            slot = ProviderSlot(
                 slot_id=str(r["slot_id"]), provider_type=str(r["provider_type"]), label=str(r.get("label") or ""),
                 secret_ref=str(r.get("secret_ref") or ""), model=str(r.get("model") or ""),
                 enabled=bool(r.get("enabled", False)), endpoint=str(r.get("endpoint") or ""),
@@ -302,6 +315,15 @@ class AppwriteControlStore:
                 price_out_micro_per_mtok=int(r.get("price_out_micro_per_mtok", 0) or 0))
         except (KeyError, TypeError, ValueError) as exc:
             raise ControlConfigCorrupt("ai_provider_slots: bad row") from exc
+        # Siêu dữ liệu tuỳ chọn (tầng năng lực, hạn mức miễn phí): hỏng/sai chỉ làm RIÊNG slot này bị bỏ qua (`meta_corrupt`),
+        # không bao giờ làm cả cấu hình hỏng — nếu không một dòng Alibaba hỏng sẽ tắt luôn AI của Gemini.
+        raw = r.get("meta_json")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                slot = slot_with_meta(slot, json.loads(raw))
+            except (ValueError, TypeError):
+                slot = replace(slot, meta_corrupt=True)
+        return slot
 
     @staticmethod
     def _profile_from_row(r: Dict[str, Any]) -> RoutingProfile:
@@ -324,15 +346,30 @@ class AppwriteControlStore:
             "web_search_profile": c.web_search_profile, "web_search_tool": c.web_search_tool,
             "version": c.version, "updated_by": c.updated_by[:64], "updated_at": c.updated_at or now_iso()})
 
-    def save_slot(self, s: ProviderSlot) -> None:
-        self._put(T_SLOTS, s.slot_id, {
+    def save_slot(self, s: ProviderSlot, *, clear_meta: bool = False) -> None:
+        data = {
             "slot_id": s.slot_id, "provider_type": s.provider_type, "label": s.label, "secret_ref": s.secret_ref,
             "model": s.model, "enabled": s.enabled, "endpoint": s.endpoint, "api_version": s.api_version,
             "priority": s.priority, "weight": s.weight, "daily_request_cap": s.daily_request_cap,
             "daily_token_cap": s.daily_token_cap, "rpm_soft_cap": s.rpm_soft_cap, "tpm_soft_cap": s.tpm_soft_cap,
             "workloads_json": json.dumps(list(s.workloads)),
             "price_in_micro_per_mtok": s.price_in_micro_per_mtok,
-            "price_out_micro_per_mtok": s.price_out_micro_per_mtok, "updated_at": now_iso()})
+            "price_out_micro_per_mtok": s.price_out_micro_per_mtok, "updated_at": now_iso()}
+        # `meta_json` CHỈ được gửi khi có siêu dữ liệu (hoặc khi cần XOÁ cái đã lưu): một slot thường gửi đúng bộ thuộc tính
+        # như trước, nên production chưa có thuộc tính này vẫn ghi slot bình thường (kể cả tắt khẩn cấp một slot).
+        meta = slot_meta(s)
+        if meta:
+            data["meta_json"] = json.dumps(meta, sort_keys=True, separators=(",", ":"))
+        elif clear_meta:
+            data["meta_json"] = ""
+        try:
+            self._put(T_SLOTS, s.slot_id, data)
+        except ControlStoreUnavailable as exc:
+            if exc.status == 400 and (meta or clear_meta or s.provider_type not in LEGACY_SLOT_TYPES):
+                raise ControlSchemaOutdated(
+                    "Schema Appwrite chưa có thuộc tính/giá trị mới mà bản này ghi (meta_json hoặc loại provider mới) — "
+                    "chạy migration trước (docs/ai/ALIBABA_PROVIDER.md, mục Migration schema).", status=400) from exc
+            raise
 
     def delete_slot(self, slot_id: str) -> None:
         self._call("DELETE", f"{self._docs(T_SLOTS)}/{quote(slot_id)}")

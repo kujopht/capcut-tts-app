@@ -96,6 +96,30 @@ export function AiOverviewCards({ overview, config }: { overview: AiOverview; co
         </div>
       ) : null}
 
+      {overview.gates && Object.keys(overview.gates).length > 0 ? (
+        <div className="card stack-2">
+          <h3 className="section-title-sm">Cổng cấp máy chủ</h3>
+          <div className="stat-grid admin-luoi">
+            {Object.entries(overview.gates).map(([loai, gate]) => (
+              <div key={loai} className="stat admin-o">
+                <span className="stat-value">{gate.open ? "MỞ" : "ĐÓNG"}</span>
+                <span className="stat-label">
+                  {config.provider_types.find((t) => t.type === loai)?.label ?? loai}
+                </span>
+                <span className="hint admin-o-ghi">
+                  Biến môi trường {gate.env} — đóng thì không request nào tới nhà cung cấp này, dù cấu hình ở đây ra sao
+                </span>
+              </div>
+            ))}
+            <div className="stat admin-o">
+              <span className="stat-value">{overview.free_quota_preference ? "BẬT" : "TẮT"}</span>
+              <span className="stat-label">Ưu tiên hạn mức miễn phí sắp hết hạn</span>
+              <span className="hint admin-o-ghi">Đã cài sẵn, mặc định tắt (biến môi trường, đổi cần deploy)</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="card stack-2">
         <h3 className="section-title-sm">Hạn mức toàn cục hôm nay</h3>
         <AiQuotaBar nhan="Yêu cầu" daDung={overview.requests} tran={overview.caps.global_daily_request_cap} />

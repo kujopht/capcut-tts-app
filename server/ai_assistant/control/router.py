@@ -46,7 +46,20 @@ SKIP_REQUEST_CAP = "request_cap"
 SKIP_TOKEN_CAP = "token_cap"
 SKIP_RPM = "rpm_soft_cap"
 SKIP_TPM = "tpm_soft_cap"
+#: Cổng cấp máy chủ của loại provider (vd. `FAS_AI_ALIBABA_ENABLED`) đang đóng.
+SKIP_GATE_CLOSED = "gate_closed"
+#: Dòng kho của slot có `meta_json` hỏng — chỉ slot này bị bỏ qua.
+SKIP_META_CORRUPT = "meta_corrupt"
+#: Slot không phục vụ tầng năng lực được yêu cầu (hoặc là slot chỉ-embedding không nhận lượt chat).
+SKIP_TIER = "tier_not_served"
+#: Nhà cung cấp báo hết hạn mức (HTTP 4xx phân loại QUOTA_EXHAUSTED): nghỉ tới 00:00 UTC.
+SKIP_QUOTA_EXHAUSTED = "quota_exhausted"
+#: `free_quota_only`: hết số dư / quá hạn hạn mức miễn phí theo số liệu Owner nhập — không bao giờ dùng quá để phát sinh phí.
+SKIP_FREE_QUOTA_EXHAUSTED = "free_quota_exhausted"
+SKIP_FREE_QUOTA_EXPIRED = "free_quota_expired"
 CAP_REASONS = frozenset({SKIP_REQUEST_CAP, SKIP_TOKEN_CAP, SKIP_RPM, SKIP_TPM})
+#: Hết hạn mức của NHÀ CUNG CẤP (khác trần của ta): tự chỉ hết khi sang ngày/Owner cập nhật -> báo `ai_budget_exhausted`.
+QUOTA_REASONS = frozenset({SKIP_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED})
 #: Hết MỖI NGÀY: chỉ sang ngày mới (UTC) mới có lại -> báo `ai_budget_exhausted` kèm giờ reset.
 DAILY_CAP_REASONS = frozenset({SKIP_REQUEST_CAP, SKIP_TOKEN_CAP})
 #: Tạm thời: hết trong vài giây (cửa sổ RPM/TPM trượt 60 s) hoặc vài phút (cooldown) -> KHÔNG được báo như hết hạn ngày,
@@ -86,7 +99,7 @@ def exhausted_event(candidates: Sequence[Tuple[ProviderSlot, Optional[str]]]) ->
             return ErrorEvent(code="ai_busy", message="Trợ lý AI đang bận — thử lại sau ít giây.")
         return ErrorEvent(code="ai_provider_unavailable",
                           message="Các nhà cung cấp AI đang tạm nghỉ — thử lại sau ít phút.")
-    if reasons & DAILY_CAP_REASONS:
+    if reasons & (DAILY_CAP_REASONS | QUOTA_REASONS):
         return ErrorEvent(code="ai_budget_exhausted", message="Trợ lý AI đã dùng hết hạn mức hiện có — thử lại sau.")
     return ErrorEvent(code="ai_no_provider", message="Chưa có nhà cung cấp AI nào khả dụng.")
 
@@ -131,9 +144,15 @@ def weighted_order(slots: Sequence[ProviderSlot], rng: random.Random,
 SkipFn = Callable[[ProviderSlot, str, int], Optional[str]]
 
 
+GroupOrderFn = Callable[[List[ProviderSlot]], List[ProviderSlot]]
+
+
 def plan(cfg: ControlConfig, *, mode: str, workload: str, rng: random.Random,
          skip_reason: SkipFn, est_tokens: int = 0,
-         balance: Optional[BalanceFn] = None) -> List[Tuple[ProviderSlot, Optional[str]]]:
+         balance: Optional[BalanceFn] = None,
+         group_order: Optional[GroupOrderFn] = None) -> List[Tuple[ProviderSlot, Optional[str]]]:
+    """`group_order` (mặc định None = hành vi cũ) sắp lại các slot CÙNG MỘT bước loại provider sau khi đã sắp theo ưu tiên +
+    cân bằng — chỗ cắm cho "ưu tiên hạn mức miễn phí sắp hết hạn" (đang NGỦ ĐÔNG: control plane chỉ truyền khi được bật)."""
     c = cfg.controls
     if not c.ai_enabled:
         return []
@@ -146,6 +165,8 @@ def plan(cfg: ControlConfig, *, mode: str, workload: str, rng: random.Random,
     for step in profile.steps:
         if step in PROVIDER_TYPES:
             group = weighted_order([s for s in cfg.slots.values() if s.provider_type == step], rng, balance)
+            if group_order is not None:
+                group = group_order(group)
         else:
             group = [cfg.slots[step]] if step in cfg.slots else []
         for s in group:
@@ -164,16 +185,32 @@ class ControlledGateway:
 
     def stream(self, messages: List[ChatTurn], *, mode: str, user_ref: str = "",
                workload: Optional[str] = None, cancel: Optional[Callable[[], bool]] = None,
-               on_attempt: Optional[Callable[[str, str], None]] = None) -> Iterator[StreamEvent]:
+               on_attempt: Optional[Callable[[str, str], None]] = None,
+               tier: Optional[str] = None) -> Iterator[StreamEvent]:
         """`cancel()` -> True nghĩa là không còn ai đọc kết quả (client đã ngắt/dừng): không được BẮT ĐẦU thêm lời gọi nhà
         cung cấp nào nữa. Nó chỉ chặn được lần thử KẾ TIẾP — một lần thử đang chờ mạng thì tự hết hạn theo timeout của chính
         nó — nhưng đủ để một lượt bị bỏ không đi hết cả chuỗi slot, mỗi slot tốn một lượt quota thật.
 
         `on_attempt(slot_id, model)` được gọi NGAY TRƯỚC mỗi lời gọi nhà cung cấp (trên luồng bơm). `ProviderServed` chỉ phát ra
         khi đã có token đầu, nên một lượt bị client bỏ ngang LÚC nhà cung cấp còn đang xử lý trước đây không để lại dấu vết slot
-        nào: nhà cung cấp đã bị gọi thật nhưng trần toàn cục không đếm — N tài khoản x 5 lượt "gửi rồi ngắt" né được trần 150."""
+        nào: nhà cung cấp đã bị gọi thật nhưng trần toàn cục không đếm — N tài khoản x 5 lượt "gửi rồi ngắt" né được trần 150.
+
+        `tier` (mặc định None = hành vi cũ, không route nào truyền) chỉ chọn các slot khai báo phục vụ tầng năng lực đó
+        (`CAPABILITY_TIERS`); gói đăng ký không bao giờ gắn trực tiếp với tên model — chỉ với tầng."""
         plane = self._plane
         clock = getattr(plane, "_clock", None) or time.monotonic
+        note_latency = getattr(plane, "note_latency", None)
+        note_quota_out = getattr(plane, "note_quota_exhausted", None)
+
+        def _lat(target: ProviderSlot, t_call: float, ttft_ms: Optional[int], ok: bool) -> None:
+            """TTFT + tổng thời gian của MỘT lời gọi (đo ở gateway, mọi nhà cung cấp như nhau). Phép đo phụ: lỗi không làm hỏng lượt."""
+            if note_latency is None:
+                return
+            try:
+                note_latency(target, ttft_ms=ttft_ms, total_ms=int((clock() - t_call) * 1000), ok=ok)
+            except Exception:  # noqa: BLE001
+                log.warning("ai_control: latency accounting failed", exc_info=True)
+
         cfg = plane.snapshot()  # type: ignore[attr-defined]
         limits = MODE_LIMITS.get(mode, MODE_LIMITS["general"])
         max_ctx = min(limits["max_context_tokens"], cfg.controls.max_context_tokens)
@@ -181,7 +218,8 @@ class ControlledGateway:
         trimmed = trim_context(messages, max_tokens=max_ctx)
         est = sum(estimate_tokens(t.content) for t in trimmed) + max_out
         wl = workload or mode
-        candidates = plane.plan(cfg, mode=mode, workload=wl, est_tokens=est)  # type: ignore[attr-defined]
+        candidates = plane.plan(cfg, mode=mode, workload=wl, est_tokens=est,  # type: ignore[attr-defined]
+                                **({"tier": tier} if tier else {}))
         tried_any = False
         first_attempt_at = 0.0
         for slot, reason in candidates:
@@ -195,7 +233,11 @@ class ControlledGateway:
             key = plane.secret_for(slot)  # type: ignore[attr-defined]
             if not key:
                 continue
-            provider = plane.provider_for(slot, key)  # type: ignore[attr-defined]
+            try:
+                provider = plane.provider_for(slot, key)  # type: ignore[attr-defined]
+            except ProviderError as exc:  # dựng provider thất bại (cổng đóng, endpoint sai…): bỏ qua slot, KHÔNG gọi gì ra ngoài
+                plane.note_error(slot, exc.code, getattr(exc, "category", None))  # type: ignore[attr-defined]
+                continue
             if not tried_any:
                 first_attempt_at = clock()
             tried_any = True
@@ -212,17 +254,31 @@ class ControlledGateway:
                 return
             req = GenerateRequest(messages=trimmed, model=slot.model, max_output_tokens=max_out, user_ref=user_ref)
             started = False
+            t_call = clock()
+            ttft_ms: Optional[int] = None
             try:
                 with contextlib.closing(provider.stream(req)) as events:
                     for ev in events:
                         if isinstance(ev, Delta) and not started:
                             started = True
+                            ttft_ms = int((clock() - t_call) * 1000)
                             yield ProviderServed(provider_name=slot.slot_id, model=slot.model)
                         yield ev
                 plane.breaker.record_success(slot.slot_id)  # type: ignore[attr-defined]
+                _lat(slot, t_call, ttft_ms, True)
                 return
             except ProviderError as exc:
                 category = getattr(exc, "category", None)
+                _lat(slot, t_call, ttft_ms, False)
+                if category == "QUOTA_EXHAUSTED" and note_quota_out is not None:
+                    # Nhà cung cấp nói hết hạn mức (khác hạn mức TỐC ĐỘ): không phải lỗi sức khoẻ, cũng không thử lại sau 30 s —
+                    # slot nghỉ tới 00:00 UTC (hoặc tới khi Owner reset). Chỉ loại Alibaba phát ra phân loại này.
+                    note_quota_out(slot, exc.code, category)
+                    if started:
+                        yield ErrorEvent(code="ai_provider_interrupted",
+                                         message="Kết nối tới nhà cung cấp AI bị gián đoạn giữa chừng — thử lại sau.")
+                        return
+                    continue
                 if exc.code == "provider_http_429" or exc.retry_after_s is not None:
                     plane.breaker.cool_down(  # type: ignore[attr-defined]
                         slot.slot_id, _clamp_cooldown(exc.retry_after_s))
@@ -243,6 +299,7 @@ class ControlledGateway:
             except Exception:  # noqa: BLE001 — same R1 backstop as AiGateway
                 log.warning("ai_control: slot %s raised an unexpected error", slot.slot_id, exc_info=True)
                 plane.breaker.record_failure(slot.slot_id)  # type: ignore[attr-defined]
+                _lat(slot, t_call, ttft_ms, False)
                 if started:
                     plane.note_failure(slot, "provider_unexpected_error")  # type: ignore[attr-defined]
                     yield ErrorEvent(code="ai_provider_interrupted", message="Nhà cung cấp AI gặp sự cố không mong đợi.")

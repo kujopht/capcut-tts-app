@@ -20,6 +20,7 @@ import threading
 from typing import Callable, Dict, Optional, Tuple
 
 from server.ai_assistant.control.model import ProviderSlot
+from server.llm_gateway.alibaba import AlibabaModelStudioProvider
 from server.llm_gateway.chat_provider import ChatProvider
 from server.llm_gateway.chat_providers import AzureOpenAIProvider, OpenAICompatChatProvider
 
@@ -30,6 +31,9 @@ def default_builder(slot: ProviderSlot, api_key: str) -> ChatProvider:
     if slot.provider_type == "azure_openai":
         p: ChatProvider = AzureOpenAIProvider(endpoint=slot.effective_endpoint(), api_key=api_key,
                                               deployment=slot.model, api_version=slot.api_version or "2024-06-01")
+    elif slot.provider_type == "alibaba":
+        # Adapter riêng (lớp con): host được kiểm lại, timeout tường minh, phân loại lỗi đóng, TTFT. Gemini không đi qua đây.
+        p = AlibabaModelStudioProvider(name=slot.slot_id, base_url=slot.effective_endpoint(), api_key=api_key)
     else:
         headers = {"X-Title": "Fanfic World"} if slot.provider_type == "openrouter" else None
         p = OpenAICompatChatProvider(name=slot.slot_id, base_url=slot.effective_endpoint(), api_key=api_key,

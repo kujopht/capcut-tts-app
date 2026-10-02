@@ -4,7 +4,7 @@ Dành cho Owner/người trực. Trạng thái hiện hành: **mở cho mọi ng
 
 Nguyên tắc khi có sự cố: **tắt khẩn cấp trước, điều tra sau.** Không bao giờ dán/ghi khoá, không liệt kê biến môi trường Render, không đưa ID người dùng vào issue/PR/chat công khai.
 
-Tài liệu liên quan: hợp đồng `AI_ASSISTANT_V1.md`, bảng điều khiển `AI_ADMIN_CONTROL_PLANE.md`, kế hoạch mở rộng `AI_PUBLIC_BETA_CHECKLIST.md` (phần trạng thái trong đó là ảnh chụp 2026-10-01; trạng thái hiện hành là tài liệu này).
+Tài liệu liên quan: hợp đồng `AI_ASSISTANT_V1.md`, bảng điều khiển `AI_ADMIN_CONTROL_PLANE.md`, nhà cung cấp Alibaba Model Studio (đã tích hợp, **ngủ đông**, cổng máy chủ `FAS_AI_ALIBABA_ENABLED` mặc định đóng) `ALIBABA_PROVIDER.md`, kế hoạch mở rộng `AI_PUBLIC_BETA_CHECKLIST.md` (phần trạng thái trong đó là ảnh chụp 2026-10-01; trạng thái hiện hành là tài liệu này).
 
 ---
 
@@ -126,6 +126,7 @@ Lý do để lỗi-trước-token không vào `requests`: trần 150 đo lượt
 6. **Tắt hẳn backend AI**: `FAS_AI_ASSISTANT_V1=0` rồi deploy backend.
 7. **Quay lại bản backend trước**: chạy lại `production-deploy.yml` với `ref=<SHA cũ>` và đúng lệnh tường minh ghi trong `CLAUDE.md` (không có lệnh deploy trần; không suy ra đích từ tài liệu cũ; Render build `main` hiện tại còn Cloudflare build SHA đã validate — **không để `main` di chuyển giữa lúc một run đang chờ duyệt**).
 8. **Cấu hình hỏng** (AI tắt, đọc được từng dòng nhưng cả cấu hình không hợp lệ): vẫn **xoá slot / sửa hồ sơ / reset cooldown** được từ `/admin/ai` để đưa về hợp lệ; thao tác khác trả 409.
+9. **Alibaba Model Studio** (nếu đã có): `FAS_AI_ALIBABA_ENABLED` về 0 + khởi động lại là cách chặn mọi request tới Alibaba mà không đụng Gemini (xem `ALIBABA_PROVIDER.md`). **Trước khi rút MÃ về bản cũ chưa biết loại `alibaba`, phải xoá mọi slot `alibaba`** — bản cũ coi một dòng slot lạ là cấu hình hỏng và tắt AI cho mọi người (kể cả Gemini).
 
 Hội thoại đã lưu không cần xoá khi rút lui; người dùng tự xoá trong cài đặt trợ lý.
 

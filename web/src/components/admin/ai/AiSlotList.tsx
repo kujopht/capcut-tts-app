@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 import type { AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
+import { coThongTinHanMuc, hostCuaEndpoint, moTaDoTre, moTaHanDung, nhanHanMuc } from "@/lib/admin/aiSlotView";
 import { AiQuotaBar } from "./AiQuotaBar";
 import { AiSlotForm } from "./AiSlotForm";
 
@@ -20,6 +21,9 @@ const NHAN_TRANG_THAI: Record<AiSlot["health"]["status"], string> = {
   MISSING_SECRET: "THIẾU KHOÁ",
   OVER_CAP: "OVER_CAP",
   DEGRADED: "DEGRADED",
+  GATE_CLOSED: "CHƯA BẬT Ở MÁY CHỦ",
+  QUOTA_EXHAUSTED: "NCC BÁO HẾT HẠN MỨC",
+  META_CORRUPT: "DỮ LIỆU SLOT HỎNG",
 };
 
 const LOP_TRANG_THAI: Record<AiSlot["health"]["status"], string> = {
@@ -29,6 +33,9 @@ const LOP_TRANG_THAI: Record<AiSlot["health"]["status"], string> = {
   MISSING_SECRET: "tt-tuchoi",
   OVER_CAP: "tt-tuchoi",
   DEGRADED: "tt-treo",
+  GATE_CLOSED: "tt-cho",
+  QUOTA_EXHAUSTED: "tt-tuchoi",
+  META_CORRUPT: "tt-tuchoi",
 };
 
 function thoiGianTuongDoi(iso: string | null): string {
@@ -95,7 +102,43 @@ function DongSlot({
 
       <dl className="admin-ho-so">
         <dt>Model</dt><dd>{slot.model}</dd>
+        <dt>Endpoint</dt><dd><code>{hostCuaEndpoint(slot.effective_endpoint)}</code></dd>
         <dt>Bật</dt><dd>{slot.enabled ? "Có" : "Không"}</dd>
+        {h.gate ? (
+          <>
+            <dt>Cổng máy chủ</dt>
+            <dd>
+              <code>{h.gate.env}</code>{" "}
+              <span className={`tt ${h.gate.open ? "tt-duyet" : "tt-tuchoi"}`}>
+                {h.gate.open ? "Đang mở" : "ĐÓNG — không có request nào tới nhà cung cấp"}
+              </span>
+            </dd>
+          </>
+        ) : null}
+        <dt>Tầng năng lực</dt>
+        <dd>{slot.tiers && slot.tiers.length ? slot.tiers.join(", ") : "chưa phân loại"}</dd>
+        <dt>Độ trễ</dt><dd>{moTaDoTre(h.latency)}</dd>
+        {coThongTinHanMuc(h.quota) && h.quota ? (
+          <>
+            <dt>Hạn mức miễn phí</dt>
+            <dd>
+              <span className={`tt ${nhanHanMuc(h.quota).lop}`}>{nhanHanMuc(h.quota).nhan}</span>
+              {h.quota.remaining !== null ? ` · còn ${h.quota.remaining.toLocaleString("vi-VN")} token` : ""}
+              {h.quota.expires_at ? ` · hết hạn ${new Date(h.quota.expires_at).toLocaleString("vi-VN")} (${moTaHanDung(h.quota)})` : ""}
+              {h.quota.only ? <span className="tt tt-cho"> chỉ dùng hạn mức miễn phí</span> : null}
+              {h.quota.provider_exhausted_today ? <span className="tt tt-tuchoi"> nhà cung cấp báo hết hôm nay</span> : null}
+              <span className="hint">
+                {" · "}số Owner nhập {thoiGianTuongDoi(h.quota.updated_at)} — không tự cập nhật, cập nhật lại từ trang nhà cung cấp
+              </span>
+            </dd>
+          </>
+        ) : null}
+        {h.meta_corrupt ? (
+          <>
+            <dt>Dữ liệu slot</dt>
+            <dd><span className="tt tt-tuchoi">Siêu dữ liệu trong kho hỏng — Sửa rồi Lưu để ghi đè</span></dd>
+          </>
+        ) : null}
         <dt>Ưu tiên / trọng số</dt><dd>{slot.priority} / {slot.weight}</dd>
         <dt>Thất bại liên tiếp</dt><dd>{h.consecutive_failures}</dd>
         <dt>Lần thành công gần nhất</dt><dd>{thoiGianTuongDoi(h.last_success_at)}</dd>
@@ -151,8 +194,11 @@ function DongSlot({
         ) : (
           <div className="row row-tight">
             <button type="button" className="btn btn-sm" onClick={onSua} disabled={dangGui}>Sửa</button>
-            <button type="button" className="btn btn-sm" onClick={onKiemTra} disabled={dangGui || !h.secret.present}
-                    title="Gửi MỘT request tối thiểu thật qua slot này (chạy được cả khi slot đang tắt)">
+            <button type="button" className="btn btn-sm" onClick={onKiemTra}
+                    disabled={dangGui || !h.secret.present || (!!h.gate && !h.gate.open)}
+                    title={h.gate && !h.gate.open
+                      ? `Cổng máy chủ đang đóng: đặt biến môi trường ${h.gate.env}=1 rồi khởi động lại dịch vụ`
+                      : "Gửi MỘT request tối thiểu thật qua slot này (chạy được cả khi slot đang tắt)"}>
               Kiểm tra
             </button>
             {h.status === "COOLDOWN" ? (

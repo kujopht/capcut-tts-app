@@ -19,7 +19,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 
 from server.ai_assistant.control.model import ConfigValidationError
 from server.ai_assistant.control.service import ControlConflict, ControlPlane
-from server.ai_assistant.control.store import ControlStoreUnavailable
+from server.ai_assistant.control.store import ControlSchemaOutdated, ControlStoreUnavailable
 
 
 #: Plain number: Starlette renamed the constant (…_ENTITY -> …_CONTENT) and
@@ -48,6 +48,9 @@ def build_ai_admin_router(plane: Optional[ControlPlane], *, reader: Callable[...
             raise HTTPException(status.HTTP_409_CONFLICT, {"code": "ai_admin_conflict", "message": str(exc)})
         except KeyError:
             raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "ai_admin_not_found", "message": "Không tìm thấy."})
+        except ControlSchemaOutdated as exc:
+            # Kho TỪ CHỐI ghi vì schema production chưa có thuộc tính/giá trị mới — không lưu gì, mọi thao tác khác vẫn chạy.
+            raise HTTPException(status.HTTP_409_CONFLICT, {"code": "ai_admin_schema_outdated", "message": str(exc)})
         except ControlStoreUnavailable:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 {"code": "ai_admin_store_unavailable", "message": "Kho cấu hình AI đang bận — thử lại sau."})

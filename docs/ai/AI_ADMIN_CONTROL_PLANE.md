@@ -20,13 +20,15 @@ Bảng điều khiển cho **Owner/Admin** để định tuyến provider, đặ
 
 `secrets.py::SecretResolver` đọc biến môi trường **lúc gọi** (không cache vào cấu hình). Đổi khoá = đổi biến môi trường + khởi động lại; vân tay đổi theo, client provider được dựng lại.
 
-**Khoá gắn với loại provider.** `secret_ref` phải bắt đầu bằng tên loại viết hoa: `GEMINI_…`, `GROQ_…`, `WORKERS_AI_…`, `QWEN_…`, `AZURE_OPENAI_…`, `OPENROUTER_…`. Nhờ vậy không thể trỏ lại một slot để gửi khoá Gemini tới endpoint Azure (hay loại khác).
+**Khoá gắn với loại provider.** `secret_ref` phải bắt đầu bằng tên loại viết hoa: `GEMINI_…`, `GROQ_…`, `WORKERS_AI_…`, `QWEN_…`, `AZURE_OPENAI_…`, `OPENROUTER_…`, `ALIBABA_…`. Nhờ vậy không thể trỏ lại một slot để gửi khoá Gemini tới endpoint Azure (hay loại khác).
 
 ## 2. Mô hình cấu hình
 
 ### Slot provider (`ProviderSlot`)
 
-`slot_id` (2–27 ký tự: id tài liệu usage là `{slot_id}_{yyyymmdd}` và Appwrite giới hạn 36 ký tự), `provider_type` (`gemini`, `groq`, `workers_ai`, `qwen`, `azure_openai`, `openrouter`), `label`, `secret_ref`, `model` (không có `..`; với Azure không có `/`), `enabled`, `endpoint` (bắt buộc với `workers_ai`/`azure_openai`; ≤300 ký tự; host nằm trong danh sách cho phép theo loại — chống SSRF), `api_version` (Azure), `priority` (0–99, nhỏ thử trước), `weight` (1–100), `daily_request_cap`, `daily_token_cap`, `rpm_soft_cap`, `tpm_soft_cap` (0 = không trần), `workloads` (`general`, `story`, `support`, `writer`, `web_search`), giá micro-USD / 1M token (vào/ra) để ước tính chi phí.
+> **Thêm 2026-10:** loại `alibaba` (Alibaba Model Studio, **ngủ đông**, cổng máy chủ `FAS_AI_ALIBABA_ENABLED`), trường `tiers` (tầng năng lực), `free_quota_remaining` / `free_quota_expires_at` / `free_quota_only` (hạn mức miễn phí), độ trễ/TTFT trong `health.latency`, trạng thái `GATE_CLOSED` / `QUOTA_EXHAUSTED` / `META_CORRUPT`. Chi tiết, bảng lỗi và migration: `ALIBABA_PROVIDER.md`. Cờ loại thiếu trong cấu hình cũ = tắt (khoá lạ vẫn là lỗi).
+
+`slot_id` (2–27 ký tự: id tài liệu usage là `{slot_id}_{yyyymmdd}` và Appwrite giới hạn 36 ký tự), `provider_type` (`gemini`, `groq`, `workers_ai`, `qwen`, `azure_openai`, `openrouter`, `alibaba`), `label`, `secret_ref`, `model` (không có `..`; với Azure không có `/`), `enabled`, `endpoint` (bắt buộc với `workers_ai`/`azure_openai`; ≤300 ký tự; host nằm trong danh sách cho phép theo loại — chống SSRF), `api_version` (Azure), `priority` (0–99, nhỏ thử trước), `weight` (1–100), `daily_request_cap`, `daily_token_cap`, `rpm_soft_cap`, `tpm_soft_cap` (0 = không trần), `workloads` (`general`, `story`, `support`, `writer`, `web_search`), giá micro-USD / 1M token (vào/ra) để ước tính chi phí.
 
 **Gemini project pool** = nhiều slot `provider_type=gemini`, mỗi slot một `secret_ref` riêng (`GEMINI_PROJECT_01`…). Cooldown, bộ đếm, sức khoẻ tính **theo slot**, nên project 03 bị 429 không kéo project 01 xuống.
 

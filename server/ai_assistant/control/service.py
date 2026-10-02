@@ -15,6 +15,7 @@ FAIL-CLOSED rules (the whole point of this module):
 """
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
@@ -27,15 +28,19 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Deque, Dict, List, Mapping, Optional, Tuple
 
+from server.ai_assistant.control.capability import (
+    EXPIRING_SOON_DAYS, free_quota_block_reason, free_quota_state, order_by_expiring_free_quota, serves_tier, tier_map,
+)
 from server.ai_assistant.control.model import (
-    DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS,
-    WORKLOADS, ConfigValidationError, ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, controls_to_dict,
-    controls_with, preset_matching, slot_from_dict, slot_to_dict, validate_config, validate_controls,
-    validate_profile, validate_slot,
+    CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, GATED_PROVIDER_TYPES,
+    MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS, WORKLOADS, ConfigValidationError,
+    ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, controls_to_dict, controls_with, preset_matching,
+    slot_from_dict, slot_meta, slot_to_dict, validate_config, validate_controls, validate_profile, validate_slot,
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import (
-    SKIP_COOLDOWN, SKIP_MISSING_SECRET, SKIP_REQUEST_CAP, SKIP_RPM, SKIP_SLOT_DISABLED, SKIP_TOKEN_CAP,
+    SKIP_COOLDOWN, SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED, SKIP_GATE_CLOSED, SKIP_META_CORRUPT,
+    SKIP_MISSING_SECRET, SKIP_QUOTA_EXHAUSTED, SKIP_REQUEST_CAP, SKIP_RPM, SKIP_SLOT_DISABLED, SKIP_TIER, SKIP_TOKEN_CAP,
     SKIP_TPM, SKIP_TYPE_DISABLED, SKIP_WORKLOAD, plan as _plan,
 )
 from server.ai_assistant.control.secrets import SecretResolver
@@ -44,7 +49,7 @@ from server.ai_assistant.control.store import (
 )
 from server.ai_assistant.gateway import DEFAULT_429_COOLDOWN_S
 from server.ai_assistant.scopes import SCOPE_GLOBAL, SCOPE_QA, SCOPE_USER
-from server.llm_gateway.chat_provider import ChatProvider, ChatTurn, GenerateRequest, ProviderError
+from server.llm_gateway.chat_provider import ChatProvider, ChatTurn, Delta, GenerateRequest, ProviderError, UsageEvent
 from server.llm_gateway.usage_limits import CircuitBreaker
 
 log = logging.getLogger("fanfic.ai_assistant")
@@ -82,6 +87,9 @@ PROBE_DAILY_CAP_PER_SLOT = 30
 PROBE_HISTORY = 5
 PROBE_STABLE_RUN = 3
 PROBE_STABLE_MAX_MS = 5000
+#: Latency accounting (`ControlPlane.note_latency`): the last LATENCY_WINDOW calls per slot, in-process (a restart clears it,
+#: like the breaker) — no Appwrite attribute is needed.
+LATENCY_WINDOW = 200
 
 
 def today_utc() -> str:
@@ -130,8 +138,16 @@ class ControlPlane:
                  factory: Optional[ProviderFactory] = None, breaker: Optional[CircuitBreaker] = None,
                  clock: Callable[[], float] = time.monotonic, rng: Optional[random.Random] = None,
                  active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
-                 user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None) -> None:
+                 user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
+                 alibaba_enabled: bool = False, prefer_free_quota: bool = False,
+                 wall_now: Optional[Callable[[], datetime]] = None) -> None:
         self.store = store
+        #: Cổng cấp MÁY CHỦ của các loại provider trong `GATED_PROVIDER_TYPES` (biến môi trường, mặc định ĐÓNG): đóng thì
+        #: không slot nào của loại đó được chọn, dựng provider, hay Kiểm tra — bất kể cấu hình trong `/admin/ai`.
+        self._gates: Dict[str, bool] = {t: bool(alibaba_enabled) for t in GATED_PROVIDER_TYPES}
+        #: "Ưu tiên hạn mức miễn phí sắp hết hạn" (`FAS_AI_PREFER_FREE_QUOTA`): đã cài sẵn nhưng NGỦ ĐÔNG, mặc định TẮT.
+        self._prefer_free_quota = bool(prefer_free_quota)
+        self._wall_now = wall_now or (lambda: datetime.now(timezone.utc))
         self.secrets = secrets or SecretResolver()
         self.factory = factory or ProviderFactory()
         self.breaker = breaker or CircuitBreaker(clock_fn=clock)
@@ -166,6 +182,11 @@ class ControlPlane:
         self._probe_counts: Dict[str, List[int]] = {}
         #: slot_id -> last PROBE_HISTORY probes: (at_iso, ok, latency_ms, code).
         self._probe_log: Dict[str, Deque[Tuple[str, bool, Optional[int], Optional[str]]]] = {}
+        #: slot_id -> last LATENCY_WINDOW calls: (at_iso, ttft_ms | None, total_ms | None, ok, from_probe). In-process.
+        self._latency: Dict[str, Deque[Tuple[str, Optional[int], Optional[int], bool, bool]]] = {}
+        #: slot_id -> UTC day (yyyymmdd) on which the PROVIDER said its quota is gone: the slot rests until 00:00 UTC
+        #: (or until the owner resets it). In-process like the breaker.
+        self._quota_out: Dict[str, str] = {}
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                              user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
@@ -258,13 +279,22 @@ class ControlPlane:
         return (input_tokens * slot.price_in_micro_per_mtok + output_tokens * slot.price_out_micro_per_mtok) // 1_000_000
 
     # ------------------------------------------------------------ routing hooks
+    def gate_open(self, provider_type: str) -> bool:
+        """Loại không có cổng máy chủ -> luôn mở; loại có cổng (`GATED_PROVIDER_TYPES`) chỉ mở khi biến môi trường bật."""
+        return provider_type not in GATED_PROVIDER_TYPES or self._gates.get(provider_type, False)
+
     def skip_reason(self, slot: ProviderSlot, workload: str, est_tokens: int,
-                    cfg: Optional[ControlConfig] = None, usage: Optional[Dict[str, UsageCounters]] = None) -> Optional[str]:
+                    cfg: Optional[ControlConfig] = None, usage: Optional[Dict[str, UsageCounters]] = None,
+                    tier: Optional[str] = None) -> Optional[str]:
         cfg = cfg or self.snapshot()
         if not slot.enabled:
             return SKIP_SLOT_DISABLED
         if not cfg.controls.provider_types.get(slot.provider_type, False):
             return SKIP_TYPE_DISABLED
+        if not self.gate_open(slot.provider_type):
+            return SKIP_GATE_CLOSED
+        if slot.meta_corrupt:
+            return SKIP_META_CORRUPT
         if workload not in slot.workloads:
             return SKIP_WORKLOAD
         if not self.secrets.status(slot.secret_ref).present:
@@ -283,6 +313,17 @@ class ControlPlane:
             return SKIP_RPM
         if slot.tpm_soft_cap and tok + est_tokens > slot.tpm_soft_cap:
             return SKIP_TPM
+        if not serves_tier(slot, tier):
+            return SKIP_TIER
+        with self._lock:
+            quota_out = self._quota_out.get(slot.slot_id) == today_utc()
+        if quota_out:
+            return SKIP_QUOTA_EXHAUSTED
+        blocked = free_quota_block_reason(slot, self._wall_now(), est_tokens)
+        if blocked == "expired":
+            return SKIP_FREE_QUOTA_EXPIRED
+        if blocked == "exhausted":
+            return SKIP_FREE_QUOTA_EXHAUSTED
         return None
 
     def balance_factor(self, slot: ProviderSlot, usage: Optional[Dict[str, UsageCounters]] = None) -> float:
@@ -311,16 +352,24 @@ class ControlPlane:
             factor *= BALANCE_PENALTY
         return factor
 
-    def plan(self, cfg: ControlConfig, *, mode: str, workload: str, est_tokens: int = 0):
+    def plan(self, cfg: ControlConfig, *, mode: str, workload: str, est_tokens: int = 0, tier: Optional[str] = None):
+        if tier is not None and tier not in CHAT_TIERS:
+            return []  # tầng không phục vụ được bằng đường chat (vd. EMBEDDING) -> không slot nào
         usage = self.usage_today()
+        order = (lambda group: order_by_expiring_free_quota(group, self._wall_now())) if self._prefer_free_quota else None
         return _plan(cfg, mode=mode, workload=workload, rng=self._rng, est_tokens=est_tokens,
-                     skip_reason=lambda s, w, e: self.skip_reason(s, w, e, cfg=cfg, usage=usage),
-                     balance=lambda s: self.balance_factor(s, usage))
+                     skip_reason=lambda s, w, e: self.skip_reason(s, w, e, cfg=cfg, usage=usage, tier=tier),
+                     balance=lambda s: self.balance_factor(s, usage), group_order=order)
 
     def secret_for(self, slot: ProviderSlot) -> Optional[str]:
         return self.secrets.resolve(slot.secret_ref)
 
     def provider_for(self, slot: ProviderSlot, key: str) -> ChatProvider:
+        # Lớp phòng thủ cuối cùng: dù có đường nào lọt qua `skip_reason`, loại có cổng đóng KHÔNG BAO GIỜ dựng được provider
+        # (nên không có request nào ra ngoài).
+        if not self.gate_open(slot.provider_type):
+            raise ProviderError("Loại provider này chưa được bật ở máy chủ.", transient=False,
+                                code="provider_gate_closed", category="PERMISSION_DENIED")
         return self.factory.get(slot, key)
 
     def note_attempt(self, slot: ProviderSlot, est_tokens: int) -> None:
@@ -356,6 +405,44 @@ class ControlPlane:
         self.note_failure(slot, code, category)
         self._bump_local(slot.slot_id, errors=1)
         self._safe_usage(slot.slot_id, errors=1)
+
+    def _mark_quota_out(self, slot: ProviderSlot, code: Optional[str], category: Optional[str]) -> None:
+        """The PROVIDER reported its quota gone: the slot rests until 00:00 UTC (state + sanitized last error only)."""
+        with self._lock:
+            self._quota_out[slot.slot_id] = today_utc()
+        self.note_failure(slot, code, category)
+
+    def note_quota_exhausted(self, slot: ProviderSlot, code: Optional[str] = "provider_http_429",
+                             category: Optional[str] = "QUOTA_EXHAUSTED") -> None:
+        """Live traffic hit a provider-side quota wall: not a health failure (no breaker counting, no 30 s retry) —
+        park the slot and count the failed request in the ledger."""
+        self._mark_quota_out(slot, code, category)
+        self._bump_local(slot.slot_id, errors=1)
+        self._safe_usage(slot.slot_id, errors=1)
+
+    def note_latency(self, slot: ProviderSlot, *, ttft_ms: Optional[int], total_ms: Optional[int], ok: bool,
+                     probe: bool = False) -> None:
+        """One provider call's time-to-first-token and total duration (measured at the gateway, same for every provider)."""
+        with self._lock:
+            self._latency.setdefault(slot.slot_id, deque(maxlen=LATENCY_WINDOW)).append(
+                (now_iso(), ttft_ms, total_ms, bool(ok), bool(probe)))
+
+    def latency_view(self, slot_id: str) -> Dict[str, Any]:
+        with self._lock:
+            samples = list(self._latency.get(slot_id, ()))
+
+        def stat(values: List[int]) -> Dict[str, Optional[int]]:
+            if not values:
+                return {"p50": None, "p95": None, "last": None}
+            ordered = sorted(values)
+            rank = lambda p: ordered[max(0, min(len(ordered) - 1, -(-len(ordered) * p // 100) - 1))]  # noqa: E731 nearest-rank
+            return {"p50": rank(50), "p95": rank(95), "last": values[-1]}
+
+        return {"window": LATENCY_WINDOW, "samples": len(samples), "ok": sum(1 for s in samples if s[3]),
+                "probe_samples": sum(1 for s in samples if s[4]),
+                "ttft_ms": stat([s[1] for s in samples if s[1] is not None]),
+                "total_ms": stat([s[2] for s in samples if s[2] is not None]),
+                "note": "trong tiến trình, mất khi deploy"}
 
     def record_turn(self, slot_id: str, input_tokens: int, output_tokens: int, status: str) -> None:
         """Called once per turn for the slot that SERVED it (route finalize)."""
@@ -445,10 +532,18 @@ class ControlPlane:
         snap = self.breaker.snapshot().get(slot.slot_id, {"consecutive_failures": 0, "open_for_s": 0.0})
         sec = self.secrets.status(slot.secret_ref)
         u = usage.get(slot.slot_id, UsageCounters())
+        with self._lock:
+            quota_out = self._quota_out.get(slot.slot_id) == today_utc()
         if not slot.enabled or not cfg.controls.provider_types.get(slot.provider_type, False):
             status = "DISABLED"
+        elif not self.gate_open(slot.provider_type):
+            status = "GATE_CLOSED"
+        elif slot.meta_corrupt:
+            status = "META_CORRUPT"
         elif not sec.present:
             status = "MISSING_SECRET"
+        elif quota_out:
+            status = "QUOTA_EXHAUSTED"
         elif snap["open_for_s"] > 0:
             status = "COOLDOWN"
         elif (slot.daily_request_cap and u.requests >= slot.daily_request_cap) or \
@@ -467,6 +562,12 @@ class ControlPlane:
                                 "output_tokens": u.output_tokens, "errors": u.errors,
                                 "rate_limited": u.rate_limited, "cost_micro_usd": u.cost_micro_usd},
                 "last_success_at": u.last_success_at or None,
+                # Siêu dữ liệu hạn mức miễn phí (ảnh chụp do Owner nhập) + cờ "nhà cung cấp báo hết hạn mức hôm nay".
+                "quota": {**free_quota_state(slot, self._wall_now()), "provider_exhausted_today": quota_out},
+                "latency": self.latency_view(slot.slot_id),
+                "gate": ({"env": GATED_PROVIDER_TYPES[slot.provider_type], "open": self.gate_open(slot.provider_type)}
+                         if slot.provider_type in GATED_PROVIDER_TYPES else None),
+                "meta_corrupt": slot.meta_corrupt,
                 **self.probe_view(slot.slot_id),
                 **self._last_error_fields(slot.slot_id)}
 
@@ -491,8 +592,13 @@ class ControlPlane:
                         "probe_stable_rule": {"run": PROBE_STABLE_RUN, "max_latency_ms": PROBE_STABLE_MAX_MS}},
             "provider_types": [{"type": t, "label": PROVIDER_LABELS[t],
                                 "enabled": bool(cfg.controls.provider_types.get(t, False)),
-                                "slot_count": sum(1 for s in cfg.slots.values() if s.provider_type == t)}
+                                "slot_count": sum(1 for s in cfg.slots.values() if s.provider_type == t),
+                                #: Cổng cấp máy chủ (biến môi trường) của loại này, hoặc None nếu loại không có cổng.
+                                "gate": ({"env": GATED_PROVIDER_TYPES[t], "open": self.gate_open(t)}
+                                         if t in GATED_PROVIDER_TYPES else None)}
                                for t in PROVIDER_TYPES],
+            #: Tầng năng lực -> các slot khai báo phục vụ tầng đó (Owner cấu hình; gói đăng ký chỉ ánh xạ tới TẦNG).
+            "capability_map": tier_map(cfg),
             "slots": slots,
             "profiles": [{"name": p.name, "steps": list(p.steps), "enabled": p.enabled}
                          for p in (cfg.profiles[n] for n in PROFILES if n in cfg.profiles)],
@@ -507,8 +613,16 @@ class ControlPlane:
                      "endpoint_hints": {
                          "workers_ai": "https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1",
                          "azure_openai": "https://<resource>.openai.azure.com hoặc https://<resource>.cognitiveservices.azure.com",
+                         "alibaba": "https://<máy chủ DashScope của tài khoản>/compatible-mode/v1 — máy chủ dạng "
+                                    "dashscope[-vùng].aliyuncs.com, đúng endpoint/vùng trong trang Model Studio của bạn",
                      },
-                     "secret_env_prefix": "FAS_AI_SECRET_"},
+                     "secret_env_prefix": "FAS_AI_SECRET_",
+                     # Tầng năng lực + quy tắc an toàn của loại có cổng: giao diện vẽ từ đây, không viết cứng tên provider.
+                     "capability_tiers": list(CAPABILITY_TIERS), "chat_tiers": list(CHAT_TIERS),
+                     "gated_types": {t: {"env": env, "open": self.gate_open(t)} for t, env in GATED_PROVIDER_TYPES.items()},
+                     "created_disabled_types": list(CREATED_DISABLED_TYPES),
+                     "free_quota": {"expiring_soon_days": EXPIRING_SOON_DAYS,
+                                    "prefer_expiring_active": self._prefer_free_quota}},
         }
 
     def overview(self) -> Dict[str, Any]:
@@ -549,6 +663,10 @@ class ControlPlane:
             "state": self.state, "day": today_utc(), "ai_enabled": c.ai_enabled,
             #: Thông tin runtime không nằm trong kho cấu hình: khán giả (`FAS_AI_AUDIENCE`), RPM/người, số luồng đang chạy.
             "runtime": runtime,
+            #: Cổng cấp máy chủ của các loại provider có cổng (đóng = không có request nào tới nhà cung cấp đó) và việc
+            #: "ưu tiên hạn mức miễn phí sắp hết hạn" có đang bật không (mặc định tắt).
+            "gates": {t: {"env": env, "open": self.gate_open(t)} for t, env in GATED_PROVIDER_TYPES.items()},
+            "free_quota_preference": self._prefer_free_quota,
             #: Lần QA của Owner đã NẰM TRONG `requests` ở trên (đi qua cùng slot, cùng trần toàn cục); đây chỉ là
             #: phần tách riêng để Owner thấy QA đã dùng bao nhiêu so với hạn mức QA.
             "qa": qa,
@@ -663,8 +781,15 @@ class ControlPlane:
     @_serialized
     def create_slot(self, actor: str, body: Mapping[str, Any]) -> Dict[str, Any]:
         cfg = self._fresh()
-        slot = slot_from_dict(body)
+        # `free_quota_updated_at` do MÁY CHỦ đóng dấu, client không đặt được.
+        slot = slot_from_dict({k: v for k, v in body.items() if k != "free_quota_updated_at"})
         validate_slot(slot)
+        if slot.provider_type in CREATED_DISABLED_TYPES and slot.enabled:
+            raise ConfigValidationError([{
+                "field": "enabled",
+                "message": "slot loại này luôn được tạo ở trạng thái TẮT — Kiểm tra slot rồi bật bằng một thao tác riêng"}])
+        if slot.free_quota_remaining is not None:
+            slot = replace(slot, free_quota_updated_at=now_iso())
         if slot.slot_id in cfg.slots:
             raise ControlConflict(f"Slot '{slot.slot_id}' đã tồn tại.")
         # More than MAX_SLOTS makes the whole config invalid on the next load
@@ -681,12 +806,19 @@ class ControlPlane:
         old = cfg.slots.get(slot_id)
         if old is None:
             raise KeyError(slot_id)
-        merged = {**slot_to_dict(old), **{k: v for k, v in body.items() if k != "slot_id"}, "slot_id": slot_id}
+        merged = {**slot_to_dict(old),
+                  **{k: v for k, v in body.items() if k not in ("slot_id", "free_quota_updated_at")}, "slot_id": slot_id}
         if merged.get("provider_type") != old.provider_type:
             raise ConfigValidationError([{"field": "provider_type", "message": "không đổi được loại của slot đã tạo"}])
         slot = slot_from_dict(merged)
         validate_slot(slot)
-        self.store.save_slot(slot)
+        if slot.free_quota_remaining != old.free_quota_remaining:  # số dư đổi -> đóng dấu ảnh chụp mới (hoặc xoá dấu)
+            slot = replace(slot, free_quota_updated_at=now_iso() if slot.free_quota_remaining is not None else "")
+        # Xoá `meta_json` đã lưu (khi siêu dữ liệu mới rỗng, hoặc dòng cũ bị hỏng) phải ghi tường minh; thường thì KHÔNG gửi gì.
+        if (slot_meta(old) or old.meta_corrupt) and not slot_meta(slot):
+            self.store.save_slot(slot, clear_meta=True)
+        else:
+            self.store.save_slot(slot)
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), slot_to_dict(slot)))
         return slot_to_dict(slot)
 
@@ -723,8 +855,14 @@ class ControlPlane:
             raise KeyError(slot_id)
         before = self.breaker.snapshot().get(slot_id, {}).get("open_for_s", 0.0)
         self.breaker.record_success(slot_id)
-        self._commit([AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="cooldown",
-                                 old_value=f"{round(before, 1)}s", new_value="0s (reset)")])
+        entries = [AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="cooldown",
+                              old_value=f"{round(before, 1)}s", new_value="0s (reset)")]
+        with self._lock:
+            parked = self._quota_out.pop(slot_id, None)
+        if parked:  # Owner đã cập nhật hạn mức bên nhà cung cấp: cho slot thử lại
+            entries.append(AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="provider_quota_exhausted",
+                                      old_value=f"nghỉ tới hết ngày {parked} UTC", new_value="đã gỡ (reset)"))
+        self._commit(entries)
 
     def _roll_probe_day(self) -> None:
         """Caller holds self._lock. Probe counters are per UTC day, like the usage ledger."""
@@ -776,6 +914,25 @@ class ControlPlane:
                                  old_value=before, new_value=name)])
         return out
 
+    @staticmethod
+    def _probe_stream(provider: ChatProvider, req: GenerateRequest, t0: float) -> Tuple[Optional[int], int]:
+        """Probe through `stream()`: (time-to-first-token ms, tokens). Empty text is a failure (`provider_empty`) like in
+        `generate()`; the text itself is dropped here — a probe never returns provider text."""
+        first: Optional[int] = None
+        text_len = 0
+        tokens = 0
+        with contextlib.closing(provider.stream(req)) as events:
+            for ev in events:
+                if isinstance(ev, Delta):
+                    if first is None:
+                        first = int((time.monotonic() - t0) * 1000)
+                    text_len += len(ev.text.strip())
+                elif isinstance(ev, UsageEvent):
+                    tokens = int(ev.input_tokens or 0) + int(ev.output_tokens or 0)
+        if text_len == 0:
+            raise ProviderError("empty probe answer", transient=True, code="provider_empty", category="EMPTY_RESPONSE")
+        return first, tokens
+
     def probe(self, actor: str, slot_id: str) -> Dict[str, Any]:
         """Owner health check: ONE real minimal request through this slot's own key, endpoint
         and model — works while the slot is disabled and the global switch is off, so a new
@@ -794,6 +951,13 @@ class ControlPlane:
         slot = cfg.slots.get(slot_id)
         if slot is None:
             raise KeyError(slot_id)
+        if not self.gate_open(slot.provider_type):
+            # Kiểm tra là một request thật tới nhà cung cấp: loại có cổng máy chủ đóng thì KHÔNG gửi gì (và không tính lượt kiểm).
+            raise ControlConflict(f"Loại {PROVIDER_LABELS.get(slot.provider_type, slot.provider_type)} chưa được bật ở máy "
+                                  f"chủ — đặt biến môi trường {GATED_PROVIDER_TYPES[slot.provider_type]}=1 rồi khởi động "
+                                  "lại dịch vụ. Chưa có request nào được gửi.")
+        if slot.meta_corrupt:
+            raise ControlConflict(f"Siêu dữ liệu của slot {slot_id} bị hỏng — lưu lại slot (sửa) để ghi đè trước khi kiểm.")
         now = self._clock()
         with self._lock:
             if now - self._probe_at.get(slot_id, -1e9) < PROBE_MIN_INTERVAL_S:
@@ -817,14 +981,27 @@ class ControlPlane:
                                   timeout_s=30.0)
             t0 = time.monotonic()
             try:
-                res = self.provider_for(slot, key).generate(req)
+                provider = self.provider_for(slot, key)
+                if getattr(provider, "probe_via_stream", False):
+                    # Cùng đường với lượt thật (stream) để đo được TTFT; các loại khác giữ nguyên `generate()`.
+                    ttft, tokens = self._probe_stream(provider, req, t0)
+                    out["ttft_ms"] = ttft
+                else:
+                    res = provider.generate(req)
+                    tokens = int(res.input_tokens or 0) + int(res.output_tokens or 0)
                 out.update(ok=True, latency_ms=int((time.monotonic() - t0) * 1000))
                 self.breaker.record_success(slot_id)
-                out["tokens"] = int(res.input_tokens or 0) + int(res.output_tokens or 0)
+                out["tokens"] = tokens
+                self.note_latency(slot, ttft_ms=out.get("ttft_ms"), total_ms=out["latency_ms"], ok=True, probe=True)
             except ProviderError as exc:
                 cat = getattr(exc, "category", None)
                 out["latency_ms"] = int((time.monotonic() - t0) * 1000)
-                if exc.code == "provider_http_429" or exc.retry_after_s is not None:
+                self.note_latency(slot, ttft_ms=out.get("ttft_ms"), total_ms=out["latency_ms"], ok=False, probe=True)
+                if cat == "QUOTA_EXHAUSTED":
+                    # Hết hạn mức của nhà cung cấp: slot nghỉ tới 00:00 UTC; không phải lỗi sức khoẻ, không cooldown 30 s,
+                    # và (như mọi lần kiểm) không chạm sổ sử dụng.
+                    self._mark_quota_out(slot, exc.code, cat)
+                elif exc.code == "provider_http_429" or exc.retry_after_s is not None:
                     self.breaker.cool_down(slot_id, exc.retry_after_s if exc.retry_after_s is not None
                                            else DEFAULT_429_COOLDOWN_S)
                     with self._lock:
@@ -841,8 +1018,8 @@ class ControlPlane:
                 out.update(code="provider_unexpected_error")
         self._note_probe(slot_id, out)
         out.pop("tokens", None)
-        result = (f"ok {out['latency_ms']}ms" if out["ok"]
-                  else f"{out['code']}" + (f"/{out['category']}" if out["category"] else ""))
+        result = ((f"ok {out['latency_ms']}ms" + (f" ttft {out['ttft_ms']}ms" if out.get("ttft_ms") is not None else ""))
+                  if out["ok"] else f"{out['code']}" + (f"/{out['category']}" if out["category"] else ""))
         self._commit([AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="probe",
                                  old_value=slot.model[:120], new_value=result[:200])])
         cur = self.snapshot()

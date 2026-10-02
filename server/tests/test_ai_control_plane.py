@@ -109,7 +109,10 @@ def plane_with(slots: List[ProviderSlot], *, controls: Optional[GlobalControls] 
     return ControlPlane(store, secrets=SecretResolver(env if env is not None else env_for(*slots)),
                         factory=ProviderFactory(builder=lambda s, k: providers[s.slot_id]),
                         breaker=CircuitBreaker(clock_fn=clk), clock=clk, rng=random.Random(seed),
-                        user_usage_fn=user_usage)
+                        user_usage_fn=user_usage,
+                        # Some routing tests use the legacy `qwen` (DashScope) type; its server gate is OPEN here on purpose —
+                        # the gate-closed behaviour is covered in test_ai_alibaba_control_plane.py.
+                        alibaba_enabled=True)
 
 
 def turns() -> List[ChatTurn]:

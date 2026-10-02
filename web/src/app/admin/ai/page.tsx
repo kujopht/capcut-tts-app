@@ -259,7 +259,7 @@ export default function AdminAi() {
             const ok = await chay(async () => {
               const { probe } = await aiControl.probeSlot(id);
               ketQua = probe.ok
-                ? `OK · ${probe.latency_ms} ms · ${probe.model}`
+                ? `OK · ${probe.latency_ms} ms${probe.ttft_ms != null ? ` (TTFT ${probe.ttft_ms} ms)` : ""} · ${probe.model}`
                 : `${probe.code ?? "lỗi"}${probe.category ? ` · ${probe.category}` : ""}`;
             }, { loai: "chung" }, "");
             if (ok) setThongBao(`Kiểm tra ${id}: ${ketQua}`);

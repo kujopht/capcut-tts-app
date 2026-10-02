@@ -36,7 +36,9 @@ def build_control_plane(settings: Any, *,
             store = _UnavailableStore()
     else:
         store = InMemoryControlStore()
-    return ControlPlane(store, active_users_fn=active_users_fn, user_usage_fn=user_usage_fn)
+    return ControlPlane(store, active_users_fn=active_users_fn, user_usage_fn=user_usage_fn,
+                        alibaba_enabled=bool(getattr(ai, "alibaba_enabled", False)),
+                        prefer_free_quota=bool(getattr(ai, "prefer_free_quota", False)))
 
 
 class _UnavailableStore:

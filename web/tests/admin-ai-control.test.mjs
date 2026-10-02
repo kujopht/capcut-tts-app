@@ -54,7 +54,7 @@ test("khong co chuoi giong khoa that trong ma giao dien (AIza…, sk-…, gsk_�
 });
 
 test("khong ten provider nao viet cung trong JS (chunk tai cong khai duoc) — nhan/quy tac lay tu meta", () => {
-  const PROVIDER = /gemini|groq|workers_ai|qwen|azure|openrouter|dashscope|cloudflare/i;
+  const PROVIDER = /gemini|groq|workers_ai|qwen|azure|openrouter|dashscope|cloudflare|alibaba|aliyun/i;
   for (const [f, src] of allUi()) {
     // Kieu union `AiProviderType` bi xoa khi bien dich — khong vao bundle.
     const code = codeOnly(src).replace(/export type AiProviderType =[\s\S]*?;/, "");
@@ -98,7 +98,8 @@ test("ket qua kiem slot chi co ok/do tre/ma loi da lam sach — khong co van ban
   const m = src.match(/export interface AiProbeResult \{([\s\S]*?)\}/);
   assert.ok(m, "thiếu AiProbeResult");
   const fields = [...m[1].matchAll(/^\s*(\w+)\??:/gm)].map((x) => x[1]).sort();
-  assert.deepEqual(fields, ["category", "code", "latency_ms", "model", "ok", "slot_id"]);
+  // `ttft_ms` (thời gian tới token chữ đầu, chỉ khi kiểm qua stream) là số — vẫn không có văn bản nào của nhà cung cấp.
+  assert.deepEqual(fields, ["category", "code", "latency_ms", "model", "ok", "slot_id", "ttft_ms"]);
 });
 
 test("loi 422 giu danh sach loi theo truong de hien canh o nhap", () => {

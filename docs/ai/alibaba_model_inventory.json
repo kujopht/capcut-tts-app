@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "provider": "alibaba",
+  "region": "ap-southeast-1",
+  "captured_at": "2026-10-03T06:04:06+00:00",
+  "models": [
+    {
+      "model_id": "qwen3.7-plus",
+      "status": "validated_candidate",
+      "tiers": ["SMART"],
+      "quota_unit": "tokens",
+      "free_quota_total": 1000000,
+      "free_quota_remaining": 992190,
+      "free_quota_snapshot_at": "2026-10-03T06:04:06+00:00",
+      "free_quota_expires_at": "2026-12-02T00:00:00+00:00",
+      "rpm": 15000,
+      "tpm": 5000000,
+      "thinking_support": "hybrid",
+      "thinking_default": "on",
+      "slot_thinking": "off",
+      "input_modalities": null,
+      "free_quota_only": "not_enabled",
+      "free_quota_only_note": "Owner bỏ qua công tắc Free Quota Only trên console ngày 2026-10-03 vì tài khoản Alibaba chưa gắn thẻ thanh toán (lời Owner, ta không tự kiểm chứng được). Cờ free_quota_only ở phía ứng dụng vì vậy để false.",
+      "observations": [
+        {
+          "measured_at": "2026-10-03T08:30:00+00:00",
+          "source": "canary Owner QA qua tuyến ALIBABA_CANARY, đo ở trình duyệt Owner (giờ làm tròn)",
+          "thinking": "off",
+          "samples": 6,
+          "ttft_ms_median": 1565,
+          "ttft_ms_max": 1916,
+          "total_ms_median": 6908,
+          "total_ms_max": 8678,
+          "output_tokens_min": 240,
+          "output_tokens_max": 400,
+          "note": "6 lượt hoàn chỉnh (chat, viết lại, truyện, viết tiếp, tạo lại, prompt dài), 0 lỗi/429. Cửa sổ độ trễ phía máy chủ của slot: TTFT p50 880 ms (8 mẫu, gồm cả 2 lượt thinking=on). Lượt bị dừng giữa chừng không tính. max_output_tokens=400 chặn được phần chữ hiển thị."
+        },
+        {
+          "measured_at": "2026-10-03T08:30:00+00:00",
+          "source": "canary Owner QA qua tuyến ALIBABA_CANARY, đo ở trình duyệt Owner (giờ làm tròn)",
+          "thinking": "on",
+          "samples": 2,
+          "ttft_ms_median": 20293,
+          "ttft_ms_max": 21977,
+          "total_ms_median": 26106,
+          "total_ms_max": 28658,
+          "output_tokens_min": 1233,
+          "output_tokens_max": 1482,
+          "note": "Cùng prompt với 2 lượt thinking=off (chat, viết lại): TTFT chậm ~12 lần, token ra gấp 3,7–6 lần, văn bản hiển thị gần như không khác. max_output_tokens=400 KHÔNG chặn token suy luận ẩn. Chỉ là SỐ ĐO: slot_thinking=on bị cấm cho tới khi có ngân sách suy luận riêng."
+        }
+      ],
+      "source": "ảnh chụp console Owner 2026-10-03 (Free Quota: 992,19K/1M, hết hạn 2026-12-02; 15.000 RPM, 5.000.000 TPM; thinking lai, mặc định bật) + canary 2026-10-03",
+      "notes": "Ứng viên SMART đã kiểm chứng với thinking=off (9 lượt thật, 0 lỗi). Model lai thinking MẶC ĐỊNH BẬT: slot PHẢI đặt thinking=off. input_modalities chưa được ghi nhận (không đoán) nên model này chưa READY để tạo thêm slot; slot alibaba-sg-01 đã có sẵn và đang ngủ đông."
+    }
+  ]
+}

@@ -20,9 +20,9 @@ export const BOSS_ATTACKS: Record<BossAttack, { telegraph: number; active: numbe
   blackLine: { telegraph: 45, active: 20, recover: 30 },
   marginCut: { telegraph: 36, active: 44, recover: 30 },
   rewrite: { telegraph: 30, active: 40, recover: 26 },
-  delete: { telegraph: 50, active: 90, recover: 24 },
+  delete: { telegraph: 54, active: 90, recover: 24 },
   brokenSentence: { telegraph: 30, active: 70, recover: 36 },
-  revisionRush: { telegraph: 24, active: 156, recover: 42 },
+  revisionRush: { telegraph: 24, active: 168, recover: 42 },
   memoryCollapse: { telegraph: 50, active: 720, recover: 0 },
 };
 
@@ -32,11 +32,11 @@ export const PHASE2_ATTACKS: readonly BossAttack[] = ["revisionSlash", "blackLin
 export const BOSS = {
   w: 24,
   h: 44,
-  maxHp: 50,
+  maxHp: 80,
   /** Vào giai đoạn 2 khi máu ≤ ngưỡng này (~56%). */
-  phase2At: 28,
+  phase2At: 44,
   /** Lần Memory Collapse thứ hai. */
-  collapse2At: 12,
+  collapse2At: 18,
   fragments: 4,
   fragmentHp: 2,
   fragmentRadius: 42,
@@ -488,7 +488,7 @@ export class Boss {
         this.lines.push({ horizontal: false, rect: { x, y: this.floorY - 12 * TILE, w, h: 12 * TILE }, t: 0, telegraph: spec.telegraph, active: spec.active });
       }
     } else if (a === "delete") {
-      const w = 5 * TILE;
+      const w = 4 * TILE;
       this.zones.push({ x: Math.max(this.left + w / 2, Math.min(this.right - w / 2, ctx.px)), w, t: 0, telegraph: BOSS_ATTACKS.delete.telegraph, active: BOSS_ATTACKS.delete.active });
     }
   }
@@ -513,7 +513,7 @@ export class Boss {
       case "rewrite": {
         if (this.step === 1 && this.t >= 8) {
           // xuất hiện sau lưng người chơi
-          const behind = ctx.px - this.facingOf(ctx.px) * 56;
+          const behind = ctx.px - this.facingOf(ctx.px) * 28;
           this.x = Math.max(this.left + BOSS.w / 2, Math.min(this.right - BOSS.w / 2, behind));
           this.visible = true;
           this.face(ctx.px);
@@ -521,8 +521,8 @@ export class Boss {
           this.t = 0;
           ctx.emit({ t: "fx", name: "inkSplash", x: this.x, y: this.y - 22, n: 10 });
           ctx.emit({ t: "sfx", name: "telegraph", x: this.x, y: this.y });
-        } else if (this.step === 2 && this.t >= 16) {
-          this.step = 3; // chém nhanh sau khi hiện ra (báo trước 16 khung)
+        } else if (this.step === 2 && this.t >= 24) {
+          this.step = 3; // chém sau khi hiện ra: 24 khung nhìn thấy trước khi lưỡi gươm có hiệu lực
           this.t = 0;
         } else if (this.step === 3 && this.t >= 7) {
           this.endActive();
@@ -536,7 +536,7 @@ export class Boss {
         if (this.t >= 20) this.endActive();
         break;
       case "revisionRush": {
-        // Ba cú lao nhịp 1-2-3: mỗi cú có phần báo trước 24 khung ở đầu (đứng chuẩn bị), rồi lao 18 khung, nghỉ 10.
+        // Ba cú lao nhịp 1-2-3: mỗi cú có 30 khung chuẩn bị (hướng khoá ở khung 22), rồi lao 16 khung, nghỉ 10.
         const seg = this.rushSegment();
         if (seg.kind === "windup") {
           this.step = seg.idx * 2; // chẵn = không chém
@@ -545,7 +545,7 @@ export class Boss {
             this.facing = this.lockX >= this.x ? 1 : -1;
             ctx.emit({ t: "sfx", name: "telegraph", x: this.x, y: this.y });
           }
-          if (seg.t < 16) {
+          if (seg.t < 22) {
             this.lockX = ctx.px;
             this.facing = this.lockX >= this.x ? 1 : -1;
           }
@@ -566,13 +566,13 @@ export class Boss {
   }
 
   private rushSegment(): { kind: "windup" | "dash" | "pause" | "done"; idx: number; t: number } {
-    // mỗi cú: windup 24 + dash 18 + pause 10 = 52 khung; 3 cú = 156
-    const per = 52;
+    // mỗi cú: windup 30 + dash 16 + pause 10 = 56 khung; 3 cú = 168
+    const per = 56;
     const idx = Math.floor(this.t / per);
     if (idx >= 3) return { kind: "done", idx, t: 0 };
     const t = this.t - idx * per;
-    if (t < 24) return { kind: "windup", idx, t };
-    if (t < 42) return { kind: "dash", idx, t: t - 24 };
+    if (t < 30) return { kind: "windup", idx, t };
+    if (t < 46) return { kind: "dash", idx, t: t - 30 };
     return { kind: "pause", idx, t: t - 42 };
   }
 
@@ -605,11 +605,10 @@ export class Boss {
         add(Math.cos(ang) * 1.7, Math.sin(ang) * 1.7);
       }
     } else if (pattern === 1) {
-      // hàng ngang bắn lần lượt (ba tầng cao khác nhau, giãn cách để đọc được)
+      // hàng thấp: ba viên sát mặt sàn, giãn 14 px — một cú nhảy đủ cao/dài vượt qua cả hàng, hoặc chém/lướt xuyên qua
       const dir = this.facing;
-      for (let i = 0; i < 4; i += 1) {
-        const s = { x: sx, y: this.floorY - 12 - i * 18, vx: dir * 1.6, vy: 0, life: 220, id: shotId++ };
-        s.x -= dir * i * 10; // lệch pha: viên sau cách viên trước 10px theo hướng bay
+      for (let i = 0; i < 3; i += 1) {
+        const s = { x: sx - dir * i * 14, y: this.floorY - 10, vx: dir * 1.5, vy: 0, life: 260, id: shotId++ };
         this.shots.push(s);
       }
     } else {

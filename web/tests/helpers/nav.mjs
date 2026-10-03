@@ -17,7 +17,7 @@ export function macroList() {
   // nhảy tại chỗ
   for (const hold of holds) list.push({ kind: "jump", dir: 0, hold, dirHold: 0, dash: null });
   // lướt mặt đất (cần Margin Step)
-  for (const dir of [-1, 1]) for (const at of [0]) list.push({ kind: "dash", dir, hold: 0, dirHold: 0, dash: at });
+  for (const dir of [-1, 1]) for (const at of [0]) list.push({ kind: "dash", dir, hold: 0, dirHold: 3, dash: at });
   // nhảy + hướng + lướt
   for (const dir of [-1, 1]) {
     for (const hold of holds) {
@@ -101,51 +101,78 @@ export function buildNav(core, roomId, opts = {}) {
 
   // ---- mô phỏng macro từ mỗi nút
   const edges = nodes.map(() => []);
-  const touches = nodes.map(() => []); // [{key, mi, frame, x, y}]
+  const touches = nodes.map(() => []); // [{key, mi, frame}]
   const noop = () => {};
+
+  /** Chạy một macro từ (x, y); trả kết quả đáp xuống + các "chạm". */
+  function sim(x0, y0, m) {
+    const p = new Player(x0, y0);
+    for (let w = 0; w < 2; w += 1) p.update({ map, input: NO_INPUT, abilities, emit: noop });
+    if (!p.onGround) return null;
+    const hits = [];
+    const seen = new Set();
+    const len = Math.max(m.hold, m.dirHold, (m.dash ?? -1) + 2);
+    let airborne = false;
+    let cut = false;
+    let settled = 0;
+    let f = 0;
+    const maxF = 260;
+    for (; f < maxF; f += 1) {
+      // Đầu vào của macro dừng ngay khi đáp xuống sau một pha bay (không chạy mù sau khi đáp).
+      if (!p.onGround) airborne = true;
+      else if (airborne) cut = true;
+      const input = !cut && f < len ? macroInput(m, f) : NO_INPUT;
+      p.update({ map, input, abilities, emit: noop });
+      const foot = p.foot;
+      const rect = footToRect(foot);
+      const dead = map.hitsSpike(foot) || p.y > map.pxH + 40;
+      let left = false;
+      for (const t of targets) {
+        if (seen.has(t.key) || !t.test(rect, p)) continue;
+        seen.add(t.key);
+        hits.push({ key: t.key, frame: f });
+        if (t.key.startsWith("exit:")) left = true; // chạm cửa = rời phòng: quỹ đạo kết thúc ở đây
+      }
+      if (dead || left) return { dead: true, hits };
+      const past = cut || f >= len;
+      if (past && p.onGround && !p.dashing && Math.abs(p.vx) < 0.05) {
+        settled += 1;
+        if (settled >= 3) break;
+      } else settled = 0;
+    }
+    if (f >= maxF || !p.onGround) return { dead: true, hits };
+    return { dead: false, hits, x: p.x, y: p.y, frames: f };
+  }
+
+  // Một cạnh chỉ được nhận nếu BỀN: cùng nơi đáp khi lệch điểm xuất phát ±1,5 px và lệch thời điểm lướt ±1 khung (người chơi thật không
+  // tái lập được từng khung — bot không được chọn lối "vừa khít từng pixel").
+  const JIT = [-1.5, 1.5];
   for (const n of nodes) {
     for (let mi = 0; mi < macros.length; mi += 1) {
       const m = macros[mi];
       if ((m.kind === "dash" || m.kind === "jumpDash") && !abilities.marginStep) continue;
-      const p = new Player(n.x, n.y);
-      for (let w = 0; w < 2; w += 1) p.update({ map, input: NO_INPUT, abilities, emit: noop });
-      if (!p.onGround) continue;
-      const seen = new Set();
-      let dead = false;
-      let settled = 0;
-      const maxF = 260;
-      let f = 0;
-      for (; f < maxF; f += 1) {
-        const input = f < Math.max(m.hold, m.dirHold, (m.dash ?? -1) + 2) ? macroInput(m, f) : NO_INPUT;
-        p.update({ map, input, abilities, emit: noop });
-        const foot = p.foot;
-        const rect = footToRect(foot);
-        if (map.hitsSpike(foot) || p.y > map.pxH + 40) {
-          dead = true;
-          for (const t of targets) if (!seen.has(t.key) && t.test(rect, p)) {
-            seen.add(t.key);
-            touches[n.id].push({ key: t.key, mi, frame: f });
-          }
+      const r0 = sim(n.x, n.y, m);
+      if (!r0) continue;
+      for (const h of r0.hits) touches[n.id].push({ key: h.key, mi, frame: h.frame });
+      if (r0.dead) continue;
+      let robust = true;
+      const variants = [];
+      for (const dx of JIT) variants.push([n.x + dx, n.y, m]);
+      if (m.dash !== null && m.dash > 0) {
+        variants.push([n.x, n.y, { ...m, dash: m.dash - 1 }]);
+        variants.push([n.x, n.y, { ...m, dash: m.dash + 1 }]);
+      }
+      for (const v of variants) {
+        const r = sim(v[0], v[1], v[2]);
+        if (!r || r.dead || Math.abs(r.x - r0.x) > 6 || r.y !== r0.y) {
+          robust = false;
           break;
         }
-        for (const t of targets) {
-          if (seen.has(t.key)) continue;
-          if (t.test(rect, p)) {
-            seen.add(t.key);
-            touches[n.id].push({ key: t.key, mi, frame: f });
-          }
-        }
-        const past = f >= Math.max(m.hold, m.dirHold, (m.dash ?? -1) + 2);
-        if (past && p.onGround && !p.dashing && Math.abs(p.vx) < 0.05) {
-          settled += 1;
-          if (settled >= 3) break;
-        } else settled = 0;
       }
-      if (dead || f >= maxF) continue;
-      if (!p.onGround) continue;
-      const to = snap(p.x, p.y);
+      if (!robust) continue;
+      const to = snap(r0.x, r0.y);
       if (to < 0 || to === n.id) continue;
-      edges[n.id].push({ to, mi, frames: f });
+      edges[n.id].push({ to, mi, frames: r0.frames });
     }
   }
 

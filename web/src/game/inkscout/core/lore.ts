@@ -24,7 +24,7 @@ export const CAPTIONS: Readonly<Record<string, Caption>> = {
   "stacks.sign": { text: "Nhãn kệ: \"DÃY CHƯA ĐẶT TÊN — 4.311 bản nháp\"" },
 
   // --- Echo (bóng ma bản thảo) ---
-  "echo.1": { who: "Echo", text: "Ngươi còn đứng được sao, Ink Scout? Mấy trang ở đây chỉ chịu hiện ra khi ngươi gọi chúng bằng Memory Pulse. Tìm chữ ẩn trên tường." },
+  "echo.1": { who: "Echo", text: "Ngươi còn đứng được sao, Ink Scout? Mấy trang ở đây chỉ chịu hiện ra khi ngươi gọi chúng bằng Memory Pulse — mà tiếng gọi chỉ vang được một quãng ngắn. Bước lên, gọi lại." },
   "echo.glyph": { who: "Bản nháp ẩn", text: "\"Nếu một câu chuyện chưa có hồi kết, nó có thôi là câu chuyện không?\" — Bản nháp số 0001." },
   "shrine.echo": { who: "Echo", text: "Đền Lề Trang. Nơi Tác giả viết ghi chú bên lề… Bệ thờ kia vẫn còn giữ một bước chân." },
   "secret.echo": { who: "Echo", text: "Ngươi lên được tận đây? Đúng rồi — Kho này luôn cất ký ức ở những nơi cần quay lại mới thấy." },

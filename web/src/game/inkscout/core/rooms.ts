@@ -179,8 +179,8 @@ function hall(): RoomDef {
 function echo(): RoomDef {
   const b = new RoomBuilder(28, 14).floor(11);
   b.hole(0, 8, 0, 10); // cửa trái → Đại Sảnh
-  b.glyph(17, 18, 8).glyph(21, 22, 6); // bệ glyph ẨN dẫn lên hốc ký ức (Memory Pulse mới lộ ra)
-  b.block(23, 6, 26, 7); // hốc ký ức
+  b.glyph(17, 18, 8).glyph(20, 21, 6); // bệ glyph ẨN dẫn lên hốc ký ức: Pulse lộ từng chặng (tầm 56 px) nên cần gọi lại khi đã bước lên bệ đầu
+  b.block(22, 6, 26, 7); // hốc ký ức
   return {
     id: "echo",
     name: "Phòng Vọng",
@@ -194,7 +194,7 @@ function echo(): RoomDef {
     things: [
       { kind: "echo", id: "echo.1", tx: 12, ty: 10, range: 52 },
       { kind: "glyphLore", id: "echo.glyph", tx: 15, ty: 10 },
-      { kind: "memory", id: 1, tx: 25, ty: 5 },
+      { kind: "memory", id: 1, tx: 24, ty: 5 },
     ],
     cycles: [],
   };
@@ -221,7 +221,6 @@ function stacks(): RoomDef {
       { kind: "hound", tx: 19, ty: 18, range: [14, 21] },
       { kind: "hound", tx: 30, ty: 18, range: [26, 33] },
       { kind: "tornPage", tx: 16, ty: 12 },
-      { kind: "tornPage", tx: 28, ty: 11 },
       { kind: "tornPage", tx: 38, ty: 12 },
       { kind: "scribble", tx: 29, ty: 14 },
     ],
@@ -274,9 +273,11 @@ function sealed(): RoomDef {
     enemies: [
       { kind: "hound", tx: 17, ty: 10, range: [14, 20] },
       { kind: "tornPage", tx: 23, ty: 6 },
-      { kind: "hound", tx: 28, ty: 10, range: [26, 32] },
     ],
-    things: [{ kind: "memory", id: 2, tx: 30, ty: 10 }],
+    things: [
+      { kind: "checkpoint", id: "sealed", tx: 27, ty: 10 },
+      { kind: "memory", id: 2, tx: 30, ty: 10 },
+    ],
     cycles: [],
   };
 }

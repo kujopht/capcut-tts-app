@@ -4,8 +4,8 @@ import type { EndingKind, MemoryId } from "./types";
  * Trạng thái lưu của Ink Scout: The Lost Chapter. CHỈ lưu cục bộ (không Appwrite, không mạng). Giao diện `SaveStore` bất đồng bộ để sau này
  * có thể thay bằng lưu đám mây mà lõi không đổi; bản `MemoryStore` dành cho test, `LocalStorageStore` (platform/storage.ts) cho trình duyệt.
  */
-export type CheckpointId = "start" | "hall" | "shrine" | "redacted" | "bookmark";
-export const CHECKPOINT_IDS: readonly CheckpointId[] = ["start", "hall", "shrine", "redacted", "bookmark"];
+export type CheckpointId = "start" | "hall" | "shrine" | "sealed" | "redacted" | "bookmark";
+export const CHECKPOINT_IDS: readonly CheckpointId[] = ["start", "hall", "shrine", "sealed", "redacted", "bookmark"];
 
 export interface SaveSettings {
   /** Hệ số rung màn hình: 0 = tắt, 0.5 = nhẹ, 1 = đủ. */
@@ -80,10 +80,8 @@ export function sanitizeSave(raw: unknown): SaveData {
   d.bestFrames = raw.bestFrames === null || raw.bestFrames === undefined ? null : num(raw.bestFrames, 1, MAX_FRAMES, MAX_FRAMES);
   // Nhất quán: ghi nhận đã có kết thúc/boss thì không thể còn ở điểm lưu trước đền hay thiếu Margin Step.
   if (d.ending !== null) d.bossDefeated = true;
-  if (d.checkpoint === "shrine" || d.checkpoint === "redacted" || d.checkpoint === "bookmark") {
-    // Điểm lưu sau Đền Lề không đạt được nếu chưa có Margin Step (khe 5 ô) — coi như tiến trình hỏng → về điểm đầu của vùng hợp lệ.
-    if (d.checkpoint !== "shrine" && !d.marginStep) d.checkpoint = "shrine";
-  }
+  // Điểm lưu sau Đền Lề không đạt được nếu chưa có Margin Step (khe 5 ô) — coi như tiến trình hỏng → về điểm an toàn của Đền Lề.
+  if ((d.checkpoint === "sealed" || d.checkpoint === "redacted" || d.checkpoint === "bookmark") && !d.marginStep) d.checkpoint = "shrine";
   return d;
 }
 

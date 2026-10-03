@@ -94,7 +94,16 @@ export function TouchControls({ input, marginStep, onPause }: Props) {
 
   return (
     <div className="isc-touch" data-testid="isc-touch">
-      <button type="button" className="isc-tb isc-tb-pause" aria-label="Tạm dừng" onClick={onPause}>
+      {/* Chạm dùng pointerup (không phụ thuộc `click` — bộ nhận dạng cử chỉ có thể nuốt click sau một cú kéo); bàn phím/đọc màn hình vẫn qua `click` (detail === 0). */}
+      <button
+        type="button"
+        className="isc-tb isc-tb-pause"
+        aria-label="Tạm dừng"
+        onPointerUp={onPause}
+        onClick={(e) => {
+          if (e.detail === 0) onPause();
+        }}
+      >
         <span aria-hidden="true">❚❚</span>
       </button>
       <div

@@ -461,10 +461,10 @@ export class Game {
           break;
         }
         case "memory":
-          if (!this.has(th.id) && this.near(th.tx, th.ty, 14, 28)) this.collectMemory(th.id, th.tx, th.ty);
+          if (!this.has(th.id) && this.near(th.tx, th.ty, 14, 16)) this.collectMemory(th.id, th.tx, th.ty);
           break;
         case "marginStep":
-          if (!this.save.marginStep && this.near(th.tx, th.ty, 14, 28)) this.collectMarginStep(th.tx, th.ty);
+          if (!this.save.marginStep && this.near(th.tx, th.ty, 14, 16)) this.collectMarginStep(th.tx, th.ty);
           break;
         case "echo":
         case "sign": {

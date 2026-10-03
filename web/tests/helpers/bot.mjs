@@ -95,6 +95,8 @@ export function createBot(core, game, opts = {}) {
   }
 
   let evade = 0;
+  const ignoreUntil = new Map();
+  let engaged = null;
 
   /**
    * Chiến thuật người thật: đứng ngoài tầm khi kẻ địch báo trước, NHẢY QUA cú lao khi nó tới, rồi áp sát chém trong lúc nó hồi phục.
@@ -106,11 +108,13 @@ export function createBot(core, game, opts = {}) {
     let best = null;
     let bestD = 1e9;
     for (const e of aliveEnemies()) {
+      if ((ignoreUntil.get(e.id) ?? 0) > game.frame) continue;
       const dx = e.x - p.x;
       const dy = e.y - p.y;
       const flying = e.spec.flying;
       const lim = wantInk ? 170 : flying ? 90 : 110;
-      const yl = wantInk ? 60 : flying ? 90 : 26;
+      // Kẻ đi bộ ở KHÁC tầng sàn thì không tới chém được — đừng đứng vung gươm vào khoảng không.
+      const yl = wantInk ? 60 : flying ? 90 : 14;
       if (Math.abs(dx) < lim && Math.abs(dy) < yl) {
         const d = Math.abs(dx) + Math.abs(dy) * 0.5;
         if (d < bestD) {
@@ -119,7 +123,18 @@ export function createBot(core, game, opts = {}) {
         }
       }
     }
-    if (!best) return null;
+    if (!best) {
+      engaged = null;
+      return null;
+    }
+    // Chống kẹt: giao chiến > 240 khung mà mục tiêu không mất máu ⇒ bỏ qua nó một lúc.
+    if (!engaged || engaged.id !== best.id) engaged = { id: best.id, hp: best.hp, since: game.frame };
+    else if (best.hp < engaged.hp) engaged = { id: best.id, hp: best.hp, since: game.frame };
+    else if (game.frame - engaged.since > 240) {
+      ignoreUntil.set(best.id, game.frame + 600);
+      engaged = null;
+      return null;
+    }
     stats.fights += 1;
     // Memory Pulse làm choáng mọi kẻ địch quanh mình: dùng Ink dư để mở "cửa sổ chém miễn phí" (trừ ở Phòng Vọng, nơi Ink dành cho bệ glyph).
     if (p.pulseT === 0 && p.ink >= p.pulseCost(game.abilities) && (game.roomId !== "echo" || p.hp <= 2)) {

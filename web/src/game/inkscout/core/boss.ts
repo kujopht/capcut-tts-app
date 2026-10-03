@@ -80,9 +80,16 @@ export class BossScheduler {
     const pool = phase === 1 ? PHASE1_ATTACKS : PHASE2_ATTACKS;
     if (this.bag.length === 0) this.refill(pool);
     // Lấy đòn đầu túi không trùng đòn trước; Revision Slash không dùng khi người chơi áp sát (bất công) — Margin Cut hợp hơn.
-    let idx = this.bag.findIndex((a) => a !== this.last && !(a === "revisionSlash" && dist < 28));
-    if (idx < 0) idx = 0;
-    const pick = this.bag.splice(idx, 1)[0];
+    const ok = (a: BossAttack): boolean => a !== this.last && !(a === "revisionSlash" && dist < 28);
+    const idx = this.bag.findIndex(ok);
+    let pick: BossAttack;
+    if (idx >= 0) {
+      pick = this.bag.splice(idx, 1)[0];
+    } else {
+      // Phần còn lại của túi toàn đòn không hợp lệ lúc này: bốc từ một túi mới (phần dư giữ lại cho lượt sau).
+      const fresh = this.freshBag(pool);
+      pick = fresh.find(ok) ?? fresh[0];
+    }
     this.last = pick;
     return pick;
   }
@@ -93,12 +100,16 @@ export class BossScheduler {
   }
 
   private refill(pool: readonly BossAttack[]): void {
+    this.bag = this.freshBag(pool);
+  }
+
+  private freshBag(pool: readonly BossAttack[]): BossAttack[] {
     const a = [...pool];
     for (let i = a.length - 1; i > 0; i -= 1) {
       const j = this.rng.int(i + 1);
       [a[i], a[j]] = [a[j], a[i]];
     }
-    this.bag = a;
+    return a;
   }
 }
 

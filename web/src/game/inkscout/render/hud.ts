@@ -80,7 +80,7 @@ export function drawHud(c: Ctx, game: Game, portrait: HTMLImageElement | null, t
   // thanh máu boss
   const b = game.boss;
   if (b && b.active && b.state !== "dead") {
-    const w = 220;
+    const w = 170;
     const x = (VIEW_W - w) >> 1;
     const y = VIEW_H - 14;
     r(c, C.ink, x - 2, y - 2, w + 4, 10);

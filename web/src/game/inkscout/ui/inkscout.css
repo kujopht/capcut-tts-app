@@ -474,7 +474,7 @@ body.isc-lock {
   position: absolute;
   left: max(12px, env(safe-area-inset-left));
   bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
-  width: min(46vw, 200px);
+  width: min(40vw, 200px);
   height: 92px;
   border-radius: 46px;
   border: 2px solid rgba(154, 240, 255, 0.5);
@@ -522,36 +522,39 @@ body.isc-lock {
 }
 /* màn hình ngang thấp (điện thoại xoay ngang): thu nhỏ để không che khung hình */
 @media (max-height: 460px) {
+  /* Hai cụm nút nằm gọn hai bên thanh máu boss (giữa đáy, rộng 170/384 khung hình) kể cả ở 568×320. */
   .isc-pad {
     height: 76px;
-    width: min(34vw, 180px);
-    padding: 0 18px;
+    width: min(24vw, 180px);
+    padding: 0 12px;
     bottom: max(10px, env(safe-area-inset-bottom));
   }
   .isc-actions {
     height: 132px;
-    width: min(40vw, 220px);
+    width: min(25vw, 150px);
     bottom: max(10px, env(safe-area-inset-bottom));
   }
   .isc-tb-jump {
+    right: 0;
+    bottom: 0;
     width: 66px;
     height: 66px;
   }
   .isc-tb-attack {
-    right: 76px;
+    right: 72px;
+    bottom: 4px;
     width: 58px;
     height: 58px;
-    bottom: 4px;
   }
   .isc-tb-pulse {
-    right: 52px;
-    bottom: 70px;
+    right: 60px;
+    bottom: 74px;
     width: 56px;
     height: 56px;
   }
   .isc-tb-dash {
-    right: 2px;
-    bottom: 76px;
+    right: 0;
+    bottom: 74px;
     width: 56px;
     height: 56px;
   }

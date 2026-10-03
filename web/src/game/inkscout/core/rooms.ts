@@ -261,6 +261,7 @@ function sealed(): RoomDef {
   b.hole(33, 11, 37, 13).spikes(33, 37, 13); // khe 3 (sát cửa phải)
   b.hole(0, 8, 0, 10);
   b.hole(39, 8, 39, 10);
+  b.platform(8, 26, 27).platform(6, 28, 32); // bậc thang hai tấm ván dẫn lên hốc Ký Ức II (tuỳ chọn, không nằm trên lối đi bắt buộc)
   return {
     id: "sealed",
     name: "Chồng Phong Ấn",
@@ -276,7 +277,7 @@ function sealed(): RoomDef {
     ],
     things: [
       { kind: "checkpoint", id: "sealed", tx: 27, ty: 10 },
-      { kind: "memory", id: 2, tx: 30, ty: 10 },
+      { kind: "memory", id: 2, tx: 30, ty: 5 },
     ],
     cycles: [],
   };

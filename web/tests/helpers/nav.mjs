@@ -68,6 +68,7 @@ export function buildNav(core, roomId, opts = {}) {
         if (map.rectHitsSolid({ x: x - 4, y: y - 16, w: 8, h: 16 })) continue;
         if (map.hitsSpike({ ...foot, y: y - 2 })) continue;
         if (!map.groundBelow(foot)) continue;
+        if (opts.excludeNode && opts.excludeNode({ x, y })) continue;
         const id = nodes.length;
         nodes.push({ id, x, y });
         index.set(`${Math.round(x / STEP)}:${y}`, id);
@@ -88,8 +89,8 @@ export function buildNav(core, roomId, opts = {}) {
   const targets = [];
   for (const ex of def.exits) targets.push({ key: `exit:${ex.to}`, test: (b) => rectsOverlap({ x: ex.tx * TILE, y: ex.ty * TILE, w: ex.tw * TILE, h: ex.th * TILE }, b) });
   for (const t of def.things) {
-    if (t.kind === "memory") targets.push({ key: `memory:${t.id}`, test: (b, p) => Math.abs(p.x - (t.tx * TILE + 8)) <= 14 && Math.abs(p.y - (t.ty + 1) * TILE) <= 28 });
-    else if (t.kind === "marginStep") targets.push({ key: "marginStep", test: (b, p) => Math.abs(p.x - (t.tx * TILE + 8)) <= 14 && Math.abs(p.y - (t.ty + 1) * TILE) <= 28 });
+    if (t.kind === "memory") targets.push({ key: `memory:${t.id}`, test: (b, p) => Math.abs(p.x - (t.tx * TILE + 8)) <= 14 && Math.abs(p.y - (t.ty + 1) * TILE) <= 16 });
+    else if (t.kind === "marginStep") targets.push({ key: "marginStep", test: (b, p) => Math.abs(p.x - (t.tx * TILE + 8)) <= 14 && Math.abs(p.y - (t.ty + 1) * TILE) <= 16 });
     else if (t.kind === "checkpoint") targets.push({ key: `checkpoint:${t.id}`, test: (b, p) => Math.abs(p.x - (t.tx * TILE + 8)) <= 18 && Math.abs(p.y - (t.ty + 1) * TILE) <= 26 });
     else if (t.kind === "bossTrigger") targets.push({ key: "bossTrigger", test: (b) => rectsOverlap({ x: t.tx * TILE, y: t.ty * TILE, w: t.tw * TILE, h: t.th * TILE }, b) });
     else if (t.kind === "endingTrigger") targets.push({ key: "endingTrigger", test: (b) => rectsOverlap({ x: t.tx * TILE, y: t.ty * TILE, w: t.tw * TILE, h: t.th * TILE }, b) });

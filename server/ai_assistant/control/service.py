@@ -32,7 +32,7 @@ from server.ai_assistant.control.capability import (
     EXPIRING_SOON_DAYS, free_quota_block_reason, free_quota_state, order_by_expiring_free_quota, serves_tier, tier_map,
 )
 from server.ai_assistant.control.model import (
-    CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, EXT_PROVIDER_TYPES,
+    CANARY_PROFILES, CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, EXT_PROVIDER_TYPES,
     GATED_PROVIDER_TYPES, MAX_EXT_SLOTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS,
     THINKING_TYPES, WORKLOADS,
     ConfigValidationError, ControlConfig, ExtStatus, GlobalControls, ProviderSlot, RoutingProfile, compose_profile,
@@ -299,7 +299,11 @@ class ControlPlane:
                 profiles[name] = effective
             else:  # no longer matches the legacy-visible profile (or invalid): dropped, so it can never override a Gemini edit
                 stale.append(name)
-        return ControlConfig(core.controls, slots, profiles, ExtStatus(ext.state, unreadable, tuple(sorted(stale))))
+        # Tuyến canary của Owner: CHỈ slot thuộc vùng tách biệt (Alibaba) — một dòng sửa tay trỏ vào slot Gemini bị loại ở đây,
+        # nên tuyến này không bao giờ kéo được lưu lượng sang một slot công khai.
+        canary = {n: tuple(s for s in steps if s in slots and slots[s].provider_type in EXT_PROVIDER_TYPES)
+                  for n, steps in ext.canaries.items()}
+        return ControlConfig(core.controls, slots, profiles, ExtStatus(ext.state, unreadable, tuple(sorted(stale))), canary)
 
     # ------------------------------------------------------------ usage (today)
     def usage_today(self) -> Dict[str, UsageCounters]:
@@ -494,14 +498,22 @@ class ControlPlane:
             factor *= BALANCE_PENALTY
         return factor
 
-    def plan(self, cfg: ControlConfig, *, mode: str, workload: str, est_tokens: int = 0, tier: Optional[str] = None):
+    def plan(self, cfg: ControlConfig, *, mode: str, workload: str, est_tokens: int = 0, tier: Optional[str] = None,
+             route: Optional[str] = None):
         if tier is not None and tier not in CHAT_TIERS:
             return []  # tầng không phục vụ được bằng đường chat (vd. EMBEDDING) -> không slot nào
         usage = self.usage_today()
         order = (lambda group: order_by_expiring_free_quota(group, self._wall_now())) if self._prefer_free_quota else None
         return _plan(cfg, mode=mode, workload=workload, rng=self._rng, est_tokens=est_tokens,
                      skip_reason=lambda s, w, e: self.skip_reason(s, w, e, cfg=cfg, usage=usage, tier=tier),
-                     balance=lambda s: self.balance_factor(s, usage), group_order=order)
+                     balance=lambda s: self.balance_factor(s, usage), group_order=order, route=route)
+
+    def canary_route_name(self, raw: Any) -> Optional[str]:
+        """Tên tuyến canary hợp lệ (đã cấu hình, có ít nhất một slot) ứng với giá trị client gửi, hoặc None. So khớp CHÍNH XÁC với
+        `CANARY_PROFILES` (không chuẩn hoá, không tiền tố, không chuỗi con) — một chuỗi lạ không bao giờ thành một tuyến."""
+        if not isinstance(raw, str) or raw not in CANARY_PROFILES:
+            return None
+        return raw if self.snapshot().canary.get(raw) else None
 
     def secret_for(self, slot: ProviderSlot) -> Optional[str]:
         return self.secrets.resolve(slot.secret_ref)
@@ -783,6 +795,8 @@ class ControlPlane:
             "slots": slots,
             "profiles": [{"name": p.name, "steps": list(p.steps), "enabled": p.enabled}
                          for p in (cfg.profiles[n] for n in PROFILES if n in cfg.profiles)],
+            #: Tuyến canary CHỈ dành cho lượt QA của Owner: không phải hồ sơ, không gán được cho chế độ nào.
+            "canary_profiles": [{"name": n, "steps": list(cfg.canary.get(n, ()))} for n in CANARY_PROFILES],
             "meta": {"provider_types": list(PROVIDER_TYPES), "workloads": list(WORKLOADS),
                      "profiles": list(PROFILES), "modes": list(MODES),
                      "default_endpoints": dict(DEFAULT_ENDPOINTS),
@@ -1032,6 +1046,7 @@ class ControlPlane:
         if old is None:
             raise KeyError(slot_id)
         using = [p.name for p in cfg.profiles.values() if slot_id in p.steps]
+        using += [n for n, steps in cfg.canary.items() if slot_id in steps]
         if using:
             raise ControlConflict("Slot đang được dùng trong hồ sơ: " + ", ".join(sorted(using)))
         if old.provider_type in EXT_PROVIDER_TYPES:
@@ -1039,6 +1054,33 @@ class ControlPlane:
         else:
             self.store.delete_slot(slot_id)
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), {}))
+
+    @_serialized
+    def update_canary(self, actor: str, name: str, steps: Any) -> Dict[str, Any]:
+        """Đặt/xoá TUYẾN CANARY của Owner (`CANARY_PROFILES`): danh sách id slot thuộc vùng tách biệt (Alibaba), theo thứ tự thử.
+        Danh sách rỗng = xoá tuyến (lượt QA xin nó bị từ chối). Không bao giờ chạm hồ sơ định tuyến công khai."""
+        if name not in CANARY_PROFILES:
+            raise ConfigValidationError([{"field": "name", "message": "tuyến canary không tồn tại: " + ", ".join(CANARY_PROFILES)}])
+        if not isinstance(steps, list) or any(not isinstance(s, str) for s in steps):
+            raise ConfigValidationError([{"field": "steps", "message": "danh sách id slot không hợp lệ"}])
+        cfg = self._fresh()
+        if cfg.ext.state not in ("ok", "empty"):
+            raise ControlConflict("Không đọc được kho Alibaba (collection ai_alibaba_config) — chưa thể đặt tuyến canary.")
+        if len(steps) > MAX_EXT_SLOTS or len(set(steps)) != len(steps):
+            raise ConfigValidationError([{"field": "steps", "message": "không lặp slot, tối đa " + str(MAX_EXT_SLOTS)}])
+        for s in steps:
+            slot = cfg.slots.get(s)
+            if slot is None or slot.provider_type not in EXT_PROVIDER_TYPES:
+                raise ConfigValidationError([{
+                    "field": "steps",
+                    "message": f"'{s}' không phải slot của vùng tách biệt (Alibaba) đã có — tuyến canary chỉ chứa slot loại này"}])
+        old = list(cfg.canary.get(name, ()))
+        if steps:
+            self.store.save_ext_canary(name, tuple(steps))
+        elif old:
+            self.store.delete_ext_canary(name)
+        self._commit(self._diff(actor, f"canary:{name}", {"steps": old}, {"steps": list(steps)}))
+        return {"name": name, "steps": list(steps)}
 
     @staticmethod
     def _next_stamp(previous: str) -> str:

@@ -153,12 +153,25 @@ GroupOrderFn = Callable[[List[ProviderSlot]], List[ProviderSlot]]
 def plan(cfg: ControlConfig, *, mode: str, workload: str, rng: random.Random,
          skip_reason: SkipFn, est_tokens: int = 0,
          balance: Optional[BalanceFn] = None,
-         group_order: Optional[GroupOrderFn] = None) -> List[Tuple[ProviderSlot, Optional[str]]]:
+         group_order: Optional[GroupOrderFn] = None,
+         route: Optional[str] = None) -> List[Tuple[ProviderSlot, Optional[str]]]:
     """`group_order` (mặc định None = hành vi cũ) sắp lại các slot CÙNG MỘT bước loại provider sau khi đã sắp theo ưu tiên +
-    cân bằng — chỗ cắm cho "ưu tiên hạn mức miễn phí sắp hết hạn" (đang NGỦ ĐÔNG: control plane chỉ truyền khi được bật)."""
+    cân bằng — chỗ cắm cho "ưu tiên hạn mức miễn phí sắp hết hạn" (đang NGỦ ĐÔNG: control plane chỉ truyền khi được bật).
+
+    `route` (mặc định None = hành vi cũ, route công khai KHÔNG BAO GIỜ truyền) = tên TUYẾN CANARY của Owner (`CANARY_PROFILES`): thay
+    toàn bộ việc chọn hồ sơ theo chế độ bằng danh sách slot của tuyến đó. Tên lạ/chưa cấu hình hoặc tuyến rỗng -> KHÔNG có slot nào
+    (không bao giờ rơi về hồ sơ mặc định, cũng không rơi về Gemini): lượt canary hỏng thì hỏng thấy được, không đổi chủ âm thầm.
+    Công tắc khẩn cấp vẫn thắng trước hết."""
     c = cfg.controls
     if not c.ai_enabled:
         return []
+    if route is not None:
+        out_canary: List[Tuple[ProviderSlot, Optional[str]]] = []
+        for sid in cfg.canary.get(route, ()):
+            s = cfg.slots.get(sid)
+            if s is not None and all(s.slot_id != o.slot_id for o, _ in out_canary):
+                out_canary.append((s, skip_reason(s, workload, est_tokens)))
+        return out_canary
     name = c.web_search_profile if workload == "web_search" else c.mode_profiles.get(mode, "")
     profile = cfg.profiles.get(name)
     if profile is None or not profile.enabled:
@@ -189,7 +202,7 @@ class ControlledGateway:
     def stream(self, messages: List[ChatTurn], *, mode: str, user_ref: str = "",
                workload: Optional[str] = None, cancel: Optional[Callable[[], bool]] = None,
                on_attempt: Optional[Callable[[str, str], None]] = None,
-               tier: Optional[str] = None) -> Iterator[StreamEvent]:
+               tier: Optional[str] = None, route: Optional[str] = None) -> Iterator[StreamEvent]:
         """`cancel()` -> True nghĩa là không còn ai đọc kết quả (client đã ngắt/dừng): không được BẮT ĐẦU thêm lời gọi nhà
         cung cấp nào nữa. Nó chỉ chặn được lần thử KẾ TIẾP — một lần thử đang chờ mạng thì tự hết hạn theo timeout của chính
         nó — nhưng đủ để một lượt bị bỏ không đi hết cả chuỗi slot, mỗi slot tốn một lượt quota thật.
@@ -199,7 +212,10 @@ class ControlledGateway:
         nào: nhà cung cấp đã bị gọi thật nhưng trần toàn cục không đếm — N tài khoản x 5 lượt "gửi rồi ngắt" né được trần 150.
 
         `tier` (mặc định None = hành vi cũ, không route nào truyền) chỉ chọn các slot khai báo phục vụ tầng năng lực đó
-        (`CAPABILITY_TIERS`); gói đăng ký không bao giờ gắn trực tiếp với tên model — chỉ với tầng."""
+        (`CAPABILITY_TIERS`); gói đăng ký không bao giờ gắn trực tiếp với tên model — chỉ với tầng.
+
+        `route` (mặc định None; CHỈ route đã xác thực Owner + QA mới truyền, không bao giờ từ giá trị client gửi thô) = tuyến canary của
+        Owner, xem `router.plan`. Có `route` thì KHÔNG có đường dự phòng nào ngoài các slot của tuyến."""
         plane = self._plane
         clock = getattr(plane, "_clock", None) or time.monotonic
         note_latency = getattr(plane, "note_latency", None)
@@ -222,7 +238,7 @@ class ControlledGateway:
         est = sum(estimate_tokens(t.content) for t in trimmed) + max_out
         wl = workload or mode
         candidates = plane.plan(cfg, mode=mode, workload=wl, est_tokens=est,  # type: ignore[attr-defined]
-                                **({"tier": tier} if tier else {}))
+                                **({"tier": tier} if tier else {}), **({"route": route} if route is not None else {}))
         tried_any = False
         first_attempt_at = 0.0
         for slot, reason in candidates:

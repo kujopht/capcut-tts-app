@@ -74,7 +74,8 @@ test("mọi lối vào đọc đúng bit máy chủ", () => {
   const story = codeOnly(read("components/ai/AskAiAssistantStoryEntry.tsx"));
   assert.match(story, /if \(!enabled \|\| !eligible\) return null;/);
   const companion = codeOnly(read("components/ai/companion/AiCompanionGate.tsx"));
-  assert.match(companion, /variant === "inline" \|\|\s*\(ai\.eligible &&/);
+  // Linh vật NỔI chỉ tải chunk ở desktop (điện thoại không bao giờ hiện nó) VÀ khi máy chủ xác nhận `eligible`.
+  assert.match(companion, /variant === "inline" \|\|\s*\(desktop && ai\.eligible &&/);
   const panel = codeOnly(read("components/ai/AiPanel.tsx"));
   assert.match(panel, /if \(access === false\) return null;/);
 });

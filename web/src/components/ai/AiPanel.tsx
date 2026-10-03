@@ -13,6 +13,7 @@
  */
 import { useRef } from "react";
 import { usePathname } from "next/navigation";
+import { focusNutMoAi, sauKhiVe } from "@/lib/ai/tieuDiem";
 import { useAi } from "./AiProvider";
 import { useChatDockOffset } from "./useChatDockOffset";
 import { AiControls } from "./AiControls";
@@ -21,7 +22,7 @@ import { AiComposer } from "./AiComposer";
 import { AiWriterBar } from "./AiWriterBar";
 
 export function AiPanel() {
-  const { enabled, access, availability, open } = useAi();
+  const { enabled, access, availability, open, closeAssistant } = useAi();
   const dockOffset = useChatDockOffset();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
@@ -41,6 +42,15 @@ export function AiPanel() {
       tabIndex={-1}
       aria-label={availability ? `${availability.name} — trợ lý AI` : "Trợ lý AI"}
       style={dockOffset ? ({ ["--ai-dock-offset" as string]: `${dockOffset}px` } as React.CSSProperties) : undefined}
+      onKeyDown={(e) => {
+        // Hộp thoại không-modal: Escape đóng và trả focus về nút mở (WAI-ARIA dialog). Bỏ qua khi đang gõ dấu bằng IME (Escape huỷ chữ
+        // đang soạn), khi popover cài đặt đang mở (nó tự đóng bằng Escape — chỉ đóng MỘT lớp mỗi lần bấm), và khi sự kiện đã được xử lý.
+        if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing) return;
+        if (panelRef.current?.querySelector(".ai-caidat")) return;
+        e.stopPropagation();
+        closeAssistant();
+        sauKhiVe(() => focusNutMoAi());
+      }}
     >
       <AiControls />
       <AiWriterBar />

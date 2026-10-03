@@ -1,6 +1,7 @@
 /**
  * Markdown TỐI GIẢN, AN TOÀN cho nội dung streaming của trợ lý AI — đoạn văn,
- * `**đậm**`, danh sách `- `/`1. `, và `` `code` `` inline. KHÔNG
+ * `**đậm**`, danh sách `- `/`1. `, `` `code` `` inline, và khối mã rào ba dấu huyền
+ * (tách khối ở `markdownBlocks.ts`, thuần và có test). KHÔNG
  * `dangerouslySetInnerHTML`: mọi thứ dựng bằng phần tử React thật, nên không
  * có đường nào để HTML/script do model sinh ra chạy được trong trang.
  *
@@ -8,6 +9,7 @@
  * nhất hợp lệ là trích dẫn `citations`, dựng riêng ở `AiConversation`).
  */
 import { Fragment } from "react";
+import { parseMarkdownLite } from "./markdownBlocks";
 
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   const out: React.ReactNode[] = [];
@@ -28,24 +30,30 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
 }
 
 export function renderMarkdownLite(content: string): React.ReactNode {
-  const doans = content.split(/\n{2,}/);
   return (
     <>
-      {doans.map((doan, di) => {
-        const dong = doan.split("\n").filter((d) => d.length > 0);
-        const laDanhSach = dong.length > 0 && dong.every((d) => /^\s*([-*]|\d+\.)\s+/.test(d));
-        if (laDanhSach) {
+      {parseMarkdownLite(content).map((b, di) => {
+        if (b.kind === "code") {
+          // Khối mã: cuộn ngang trong chính nó (dòng dài không làm bong bóng tràn); `tabIndex=0` để người dùng bàn phím cuộn được.
+          // Văn bản trần trong <code> — React tự thoát ký tự, không có đường nào chạy HTML/script do model sinh ra.
+          return (
+            <pre className="ai-md-code" key={`p${di}`} tabIndex={0} aria-label="Khối mã" data-lang={b.lang || undefined}>
+              <code>{b.text}</code>
+            </pre>
+          );
+        }
+        if (b.kind === "list") {
           return (
             <ul className="ai-md-ds" key={`p${di}`}>
-              {dong.map((d, li) => (
-                <li key={li}>{renderInline(d.replace(/^\s*([-*]|\d+\.)\s+/, ""), `p${di}l${li}`)}</li>
+              {b.items.map((d, li) => (
+                <li key={li}>{renderInline(d, `p${di}l${li}`)}</li>
               ))}
             </ul>
           );
         }
         return (
           <p className="ai-md-doan" key={`p${di}`}>
-            {doan.split("\n").map((dong2, li) => (
+            {b.lines.map((dong2, li) => (
               <Fragment key={li}>
                 {li > 0 ? <br /> : null}
                 {renderInline(dong2, `p${di}l${li}`)}

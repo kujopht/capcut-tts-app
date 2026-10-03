@@ -8,177 +8,12 @@
  * Mã thoát 1 nếu có kiểm tra FAIL. Mức "INFO" chỉ để báo số đo, không làm hỏng lần chạy.
  */
 import fs from "node:fs";
-import http from "node:http";
-import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildHarness } from "./build.mjs";
+import { ONLY, SHOTS, JSON_OUT, CHROME, results, record, check, info, sleep, serve, launchChrome, Cdp, Page, openPage } from "./lib.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const args = process.argv.slice(2);
-const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
-const ONLY = opt("--only") ? new RegExp(opt("--only")) : null;
-const SHOTS = opt("--shots");
-const JSON_OUT = opt("--json");
-const CHROME = process.env.CHROME_PATH ?? "C:/Program Files/Google/Chrome/Application/chrome.exe";
-
-const results = [];
-function record(id, vp, status, detail = "") {
-  results.push({ id, vp, status, detail });
-  const tag = status === "PASS" ? "  ok  " : status === "FAIL" ? " FAIL " : " info ";
-  console.log(`${tag} ${vp.padEnd(10)} ${id}${detail ? "  — " + detail : ""}`);
-}
-const check = (id, vp, cond, detail = "") => record(id, vp, cond ? "PASS" : "FAIL", cond ? "" : detail);
-const info = (id, vp, detail) => record(id, vp, "INFO", detail);
-
-// ----------------------------------------------------------------------------------------- hạ tầng: máy chủ tĩnh + Chrome + CDP
-function serve(dir) {
-  const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" };
-  const server = http.createServer((req, res) => {
-    const p = decodeURIComponent(new URL(req.url, "http://x").pathname);
-    const file = path.join(dir, p === "/" ? "index.html" : p);
-    if (!file.startsWith(dir) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-      res.writeHead(404).end();
-      return;
-    }
-    res.writeHead(200, { "Content-Type": types[path.extname(file)] ?? "application/octet-stream", "Cache-Control": "no-store" });
-    fs.createReadStream(file).pipe(res);
-  });
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port })));
-}
-
-async function launchChrome() {
-  const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-ui-qa-"));
-  const proc = spawn(CHROME, [
-    "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${userDir}`, "--no-first-run",
-    "--no-default-browser-check", "--disable-gpu", "--disable-features=CalculateNativeWinOcclusion,Translate",
-    "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--mute-audio",
-    "--enable-precise-memory-info", "about:blank",
-  ], { stdio: "ignore" });
-  const portFile = path.join(userDir, "DevToolsActivePort");
-  for (let i = 0; i < 150 && !fs.existsSync(portFile); i += 1) await new Promise((r) => setTimeout(r, 100));
-  if (!fs.existsSync(portFile)) throw new Error("Chrome không mở cổng DevTools");
-  const [port, wsPath] = fs.readFileSync(portFile, "utf8").trim().split("\n");
-  return { proc, userDir, wsUrl: `ws://127.0.0.1:${port}${wsPath}` };
-}
-
-class Cdp {
-  constructor(ws) {
-    this.ws = ws;
-    this.id = 0;
-    this.pending = new Map();
-    this.handlers = [];
-    ws.addEventListener("message", (m) => {
-      const msg = JSON.parse(m.data);
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        if (msg.error) reject(new Error(`${msg.error.message} (${JSON.stringify(msg.error.data ?? "")})`));
-        else resolve(msg.result);
-      } else if (msg.method) {
-        for (const h of this.handlers) h(msg);
-      }
-    });
-  }
-  static async connect(url) {
-    const ws = new WebSocket(url);
-    await new Promise((res, rej) => {
-      ws.addEventListener("open", res);
-      ws.addEventListener("error", rej);
-    });
-    return new Cdp(ws);
-  }
-  send(method, params = {}, sessionId) {
-    const id = ++this.id;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-    });
-  }
-  on(h) {
-    this.handlers.push(h);
-  }
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-class Page {
-  constructor(cdp, sessionId, targetId, ctxId) {
-    this.cdp = cdp;
-    this.sid = sessionId;
-    this.targetId = targetId;
-    this.ctxId = ctxId;
-    this.errors = [];
-    cdp.on((m) => {
-      if (m.sessionId !== sessionId) return;
-      if (m.method === "Runtime.exceptionThrown") this.errors.push(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text);
-      if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") {
-        this.errors.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
-      }
-    });
-  }
-  s(method, params) {
-    return this.cdp.send(method, params, this.sid);
-  }
-  async ev(expression) {
-    const r = await this.s("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
-    return r.result.value;
-  }
-  async wait(expression, timeout = 6000, label = expression) {
-    const end = Date.now() + timeout;
-    while (Date.now() < end) {
-      if (await this.ev(`!!(${expression})`)) return true;
-      await sleep(40);
-    }
-    throw new Error(`hết giờ chờ: ${label}`);
-  }
-  async click(selector) {
-    await this.ev(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.getBoundingClientRect().width > 0); if (!el) throw new Error(${JSON.stringify("không thấy " + selector)}); el.click(); })()`);
-  }
-  async focus(selector) {
-    await this.ev(`document.querySelector(${JSON.stringify(selector)}).focus()`);
-  }
-  async type(text) {
-    await this.s("Input.insertText", { text });
-  }
-  async key(key, { shift = false } = {}) {
-    const code = key === "Enter" ? 13 : key === "Escape" ? 27 : 0;
-    const base = { key, code: key, windowsVirtualKeyCode: code, modifiers: shift ? 8 : 0 };
-    await this.s("Input.dispatchKeyEvent", { type: "keyDown", ...base, ...(key === "Enter" ? { text: "\r" } : {}) });
-    await this.s("Input.dispatchKeyEvent", { type: "keyUp", ...base });
-  }
-  async shot(name) {
-    if (!SHOTS) return;
-    fs.mkdirSync(SHOTS, { recursive: true });
-    const { data } = await this.s("Page.captureScreenshot", { format: "png" });
-    fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(data, "base64"));
-  }
-  async close() {
-    await this.cdp.send("Target.closeTarget", { targetId: this.targetId }).catch(() => {});
-    await this.cdp.send("Target.disposeBrowserContext", { browserContextId: this.ctxId }).catch(() => {});
-  }
-}
-
-async function openPage(cdp, base, { width, height, mobile, hash, reducedMotion = false }) {
-  const { browserContextId } = await cdp.send("Target.createBrowserContext");
-  const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank", browserContextId });
-  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-  const p = new Page(cdp, sessionId, targetId, browserContextId);
-  await p.s("Page.enable");
-  await p.s("Runtime.enable");
-  await p.s("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: mobile ? 2 : 1, mobile });
-  await p.s("Emulation.setTouchEmulationEnabled", { enabled: mobile, maxTouchPoints: mobile ? 5 : 1 });
-  if (reducedMotion) await p.s("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-  await p.s("Page.navigate", { url: `${base}/index.html#${hash}` });
-  try {
-    await p.wait("window.__qa && document.readyState === 'complete'", 10000, "tải harness");
-  } catch (e) {
-    throw new Error(`${e.message}; lỗi trang: ${p.errors.slice(0, 3).join(" | ") || "(không có)"}; url=${await p.ev("location.href").catch(() => "?")}`);
-  }
-  return p;
-}
 
 // ----------------------------------------------------------------------------------------- dữ liệu thử
 const LONG_WORD = "Siêuthanhlịchsửvĩđạiphithườngkhôngthểchiara".repeat(4);
@@ -213,6 +48,8 @@ const MEASURE = `(() => {
   const name = (el) => (el.getAttribute('aria-label') || (el.className && el.className.toString().split(' ')[0]) || el.tagName).slice(0, 36);
   for (const el of root.querySelectorAll('*')) {
     if (!vis(el)) continue;
+    // Bên trong khối mã (\`pre.ai-md-code\`, tự cuộn ngang trong chính nó) phần tử con DÀI HƠN khung là chủ ý — chính khối \`pre\` vẫn bị kiểm.
+    if (!el.matches('pre.ai-md-code') && el.closest('pre.ai-md-code')) continue;
     const r = el.getBoundingClientRect();
     if (r.right > vw + 1 || r.left < -1) out.overflow.push(name(el) + ' [' + Math.round(r.left) + '..' + Math.round(r.right) + ']');
   }
@@ -309,6 +146,9 @@ scenario("layout", async (page, vp) => {
 
   await send(page, "Xin chào " + LONG_WORD + " " + URL_LONG, { script: { kind: "text", text: MD_BODY, chunk: 40, delay: 5 } });
   await measure(page, vp, "hội thoại dài (từ/URL/mã dài)");
+  const code = await page.ev(`(() => { const p = document.querySelector('pre.ai-md-code'); if (!p) return null; const b = p.closest('.ai-bong').getBoundingClientRect(), r = p.getBoundingClientRect(); return { scrolls: p.scrollWidth > p.clientWidth, inBubble: r.right <= b.right + 1 && r.left >= b.left - 1, inView: r.right <= innerWidth + 1 && r.left >= -1, tab: p.tabIndex, fence: document.querySelector('.ai-bong-assistant')?.innerText.includes('\`\`\`') }; })()`);
+  check("khối mã rào ba dấu huyền: dựng thành <pre>, cuộn ngang trong chính nó, không tràn bong bóng/khung, bàn phím cuộn được, không còn dấu rào thô", vp.name,
+    !!code && code.scrolls && code.inBubble && code.inView && code.tab === 0 && !code.fence, JSON.stringify(code));
   await page.shot(`${vp.name}-02-convo`);
 
   // hết lượt: dùng hết 5 lượt rồi xem khung báo
@@ -631,6 +471,118 @@ scenario("behaviour-focus", async (page, vp) => {
   const onLauncher = await page.ev(`document.activeElement?.classList?.contains('ai-launcher')`);
   check("đóng panel: focus trả về nút mở", vp.name, onLauncher, `activeElement=${await page.ev("document.activeElement?.tagName + '.' + document.activeElement?.className")}`);
 }, { viewports: VIEWPORTS.filter((v) => !isPageView(v)) });
+
+// Tương phản chữ (WCAG 1.4.3, ≥ 4.5:1 cho chữ thường): chữ tính từ `color` đã phân giải, nền = các lớp nền (rgba/color(srgb)) xếp chồng trong
+// chuỗi tổ tiên rồi đặt lên `--bg` của trang. Kính mờ (`backdrop-filter`) coi như trong suốt phía trên nền trang tối — xấp xỉ, thiên về an toàn.
+const CONTRAST = `(() => {
+  const parse = (s) => {
+    if (!s || s === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
+    let m = s.match(/^rgba?\\(([^)]+)\\)$/);
+    if (m) { const p = m[1].split(/[\\s,\\/]+/).filter(Boolean).map(Number); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; }
+    m = s.match(/^color\\(srgb ([^)]+)\\)$/);
+    if (m) { const p = m[1].split(/[\\s\\/]+/).filter(Boolean).map(Number); return { r: p[0] * 255, g: p[1] * 255, b: p[2] * 255, a: p.length > 3 ? p[3] : 1 }; }
+    return null;
+  };
+  const over = (t, b) => { const a = t.a + b.a * (1 - t.a); return a === 0 ? { r: 0, g: 0, b: 0, a: 0 } : { r: (t.r * t.a + b.r * b.a * (1 - t.a)) / a, g: (t.g * t.a + b.g * b.a * (1 - t.a)) / a, b: (t.b * t.a + b.b * b.a * (1 - t.a)) / a, a }; };
+  const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+  const page = parse(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().startsWith('#') ? (() => { const h = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(); return 'rgb(' + parseInt(h.slice(1, 3), 16) + ',' + parseInt(h.slice(3, 5), 16) + ',' + parseInt(h.slice(5, 7), 16) + ')'; })() : 'rgb(8,9,15)');
+  const bgOf = (el) => { const layers = []; for (let e = el; e; e = e.parentElement) { const c = parse(getComputedStyle(e).backgroundColor); if (c && c.a > 0) layers.push(c); } let acc = { ...page, a: 1 }; for (let i = layers.length - 1; i >= 0; i -= 1) acc = over(layers[i], acc); return acc; };
+  const out = [];
+  const targets = [['.ai-usage', 'dòng hạn mức'], ['.ai-usage-het', 'hết lượt (dòng hạn mức)'], ['.ai-loi span', 'banner lỗi'], ['.ai-bong-user', 'bong bóng người dùng'], ['.ai-bong-assistant .ai-bong-noidung', 'bong bóng trợ lý'],
+    ['.ai-bong-ghichu', 'ghi chú (Đã dừng)'], ['.ai-bong-chua-gui-nhan', 'nhãn Chưa gửi'], ['.ai-trong .hint', 'câu trạng thái rỗng'], ['.ai-bong-rong', 'bong bóng rỗng (Đã dừng/lỗi)'],
+    ['.ai-mode', 'ô chọn chế độ'], ['.ai-nut-tao-lai', 'nút Tạo lại'], ['.ai-panel-ten, .ai-trang .ai-panel-ten', 'tên trợ lý'], ['.ai-badge-ephemeral', 'huy hiệu không lưu'], ['.ai-lichsu-mo', 'mục lịch sử'], ['.ai-md-code', 'khối mã'], ['.ai-caidat-dong span', 'dòng cài đặt']];
+  for (const [sel, name] of targets) {
+    const el = document.querySelector(sel); if (!el) continue;
+    const cs = getComputedStyle(el); const fg = parse(cs.color); if (!fg) continue;
+    const bg = bgOf(el); const f = over(fg, bg);
+    const L1 = lum(f), L2 = lum(bg); const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+    out.push({ name, sel, ratio: Math.round(ratio * 100) / 100, size: parseFloat(cs.fontSize) });
+  }
+  const ta = document.querySelector('textarea.ai-o');
+  if (ta) { const ph = parse(getComputedStyle(ta, '::placeholder').color); const bg = bgOf(ta); if (ph) { const f = over(ph, bg); const L1 = lum(f), L2 = lum(bg); out.push({ name: 'placeholder ô soạn', sel: 'textarea::placeholder', ratio: Math.round(((Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05)) * 100) / 100, size: parseFloat(getComputedStyle(ta).fontSize) }); } }
+  return out;
+})()`;
+
+scenario("a11y-contrast", async (page, vp) => {
+  await ready(page, vp, "cora");
+  const seen = new Map();
+  const audit = async (label) => {
+    for (const r of await page.ev(CONTRAST)) {
+      const prev = seen.get(r.name);
+      if (!prev || r.ratio < prev.ratio) seen.set(r.name, { ...r, label });
+    }
+  };
+  await audit("rỗng");
+  await send(page, "tương phản", { script: { kind: "text", text: "Một đoạn trả lời có `mã nội tuyến`.\n\n```js\nconst a = 1;\n```", chunk: 30, delay: 5 } });
+  await audit("hội thoại");
+  await send(page, "gây lỗi", { script: { kind: "sse_error", code: "ai_provider_unavailable" } });
+  await audit("lỗi");
+  await page.ev(`__qa.script.push({ kind: 'hang' })`);
+  await page.focus("textarea.ai-o"); await page.type("dừng"); await page.key("Enter");
+  await page.wait("document.querySelector('.ai-nut-dung')", 4000, "Dừng");
+  await page.click(".ai-nut-dung");
+  await page.wait("!document.querySelector('.ai-nut-dung')", 4000, "đã dừng");
+  await audit("đã dừng");
+  await page.ev(`__qa.setUsed('cora', 4)`);
+  await send(page, "lượt cuối", { script: { kind: "ok", words: 4 } });
+  await audit("hết lượt");
+  await page.click("button[aria-label='Lịch sử hội thoại']");
+  await page.wait("document.querySelector('.ai-lichsu')", 3000, "lịch sử");
+  await audit("lịch sử");
+  await page.click("button[aria-label='Cài đặt ký ức']");
+  await page.wait("document.querySelector('.ai-caidat')", 3000, "cài đặt");
+  await audit("cài đặt");
+  const rows = [...seen.values()].sort((a, b) => a.ratio - b.ratio);
+  for (const r of rows) {
+    const ok = r.ratio >= 4.5;
+    record(`tương phản ${r.name} (${r.label}, ${r.size}px)`, vp.name, ok ? "PASS" : "FAIL", ok ? "" : `${r.ratio}:1 < 4.5:1 — ${r.sel}`);
+  }
+  info("tương phản thấp nhất", vp.name, rows.slice(0, 3).map((r) => `${r.name} ${r.ratio}`).join(" · "));
+}, { viewports: VIEWPORTS.filter((v) => v.name === "desktop" || v.name === "390") });
+
+scenario("behaviour-escape-close", async (page, vp) => {
+  await ready(page, vp, "hana");
+  // Popover cài đặt đang mở: Escape chỉ đóng MỘT lớp (popover), panel còn nguyên.
+  await page.click("button[aria-label='Cài đặt ký ức']");
+  await page.wait("document.querySelector('.ai-caidat')", 3000, "popover");
+  await page.focus("textarea.ai-o");
+  await page.key("Escape");
+  await sleep(150);
+  check("Escape khi popover cài đặt mở: popover đóng, panel vẫn mở", vp.name, !(await page.ev(`!!document.querySelector('.ai-caidat')`)) && (await page.ev(`!!document.querySelector('.ai-panel')`)));
+  // Escape khi chỉ có panel: đóng panel và trả focus về nút mở.
+  await page.focus("textarea.ai-o");
+  await page.key("Escape");
+  await page.wait("!document.querySelector('.ai-panel')", 3000, "panel đóng bằng Escape");
+  await sleep(150);
+  check("Escape: panel đóng, focus trả về nút mở", vp.name, await page.ev(`document.activeElement?.classList?.contains('ai-launcher')`), await page.ev("document.activeElement?.tagName + '.' + document.activeElement?.className"));
+  // Đang gõ dấu bằng IME: Escape huỷ chữ đang soạn, KHÔNG đóng panel.
+  await page.click(".ai-launcher");
+  await page.wait("document.querySelector('.ai-panel textarea.ai-o')", 4000, "panel");
+  await page.ev(`(() => { const ta = document.querySelector('textarea.ai-o'); ta.focus(); ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, isComposing: true })); })()`);
+  await sleep(150);
+  check("Escape khi đang soạn bằng IME: panel không đóng", vp.name, await page.ev(`!!document.querySelector('.ai-panel')`));
+}, { viewports: VIEWPORTS.filter((v) => !isPageView(v)) });
+
+scenario("behaviour-composer-grow", async (page, vp) => {
+  await ready(page, vp, "ivy");
+  const h = () => page.ev(`(() => { const t = document.querySelector('textarea.ai-o'); return { client: t.clientHeight, offset: t.offsetHeight, scroll: t.scrollHeight, max: parseFloat(getComputedStyle(t).maxHeight) }; })()`);
+  const h0 = await h();
+  await page.focus("textarea.ai-o");
+  await page.type("dòng một\ndòng hai\ndòng ba\ndòng bốn\ndòng năm");
+  await sleep(100);
+  const h1 = await h();
+  check("ô soạn nhiều dòng: GIÃN cao hơn lúc rỗng (không chỉ 2 dòng)", vp.name, h1.offset > h0.offset + 10, `${h0.offset} → ${h1.offset}`);
+  check("ô soạn giãn không vượt max-height", vp.name, h1.offset <= h1.max + 1, `${h1.offset} > max ${h1.max}`);
+  await page.type("\n" + "dòng thêm\n".repeat(12));
+  await sleep(100);
+  const h2 = await h();
+  check("ô soạn rất dài: dừng ở max-height rồi cuộn trong ô", vp.name, h2.offset <= h2.max + 1 && h2.scroll > h2.client, JSON.stringify(h2));
+  await page.ev(`(() => { const t = document.querySelector('textarea.ai-o'); const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; set.call(t, ''); t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await sleep(100);
+  const h3 = await h();
+  check("xoá hết chữ: ô soạn co lại như lúc đầu", vp.name, Math.abs(h3.offset - h0.offset) <= 2, `${h0.offset} → ${h3.offset}`);
+  await measure(page, vp, "ô soạn giãn");
+});
 
 scenario("behaviour-scroll-follow", async (page, vp) => {
   // Hai điều mà bài kiểm "cuộn lên thì không bị giật xuống" KHÔNG phủ (reviewer): vẫn bám đáy khi người dùng không cuộn,

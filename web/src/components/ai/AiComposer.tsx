@@ -10,6 +10,7 @@
  * `AiWriterBar.tsx`) chèn được một câu mở đầu vào đây; người dùng VẪN phải
  * tự bấm Gửi (§6 — mọi hành động chỉ đọc, không có gì tự gửi thay người).
  */
+import { useLayoutEffect, useRef } from "react";
 import { useAi } from "./AiProvider";
 import { daHetLuot, dinhDangGio } from "@/lib/ai/hanMuc";
 import { FanficIcon } from "@/components/icons/FanficIcon";
@@ -24,6 +25,18 @@ export function AiComposer() {
   const hetLuot = daHetLuot(hanMuc);
   const gioLamMoi = hanMuc ? dinhDangGio(hanMuc.reset_at) : "";
   const khoa = tatDangNhap || hetLuot;
+
+  // Ô soạn TỰ GIÃN theo nội dung (tới `max-height` của `.ai-o`, vượt thì cuộn trong ô): trước đây cố định 2 dòng nên tin dài/nhiều dòng
+  // chỉ thấy 2 dòng. Đo `scrollHeight` sau khi trả `height` về auto; cộng viền vì `box-sizing: border-box`.
+  const oRef = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    const el = oRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    // Đang ẩn (panel nổi `display:none` ở ≤1023px): `scrollHeight` = 0 — đừng ghim chiều cao 0, để CSS quyết khi hiện lại.
+    const h = el.scrollHeight;
+    el.style.height = h > 0 ? `${h + (el.offsetHeight - el.clientHeight)}px` : "";
+  }, [draft]);
 
   const gui = () => {
     const trimmed = draft.trim();
@@ -42,6 +55,7 @@ export function AiComposer() {
       }}
     >
       <textarea
+        ref={oRef}
         className="ai-o"
         rows={2}
         maxLength={TOI_DA_KY_TU}

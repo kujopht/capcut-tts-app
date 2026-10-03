@@ -12,7 +12,31 @@ import { daHetLuot, dinhDangGio, nhanHanMuc, thongDiepHetLuot } from "@/lib/ai/h
 import { focusNutMoAi, sauKhiVe } from "@/lib/ai/tieuDiem";
 import { FanficIcon } from "@/components/icons/FanficIcon";
 import { AI_COMPANION_ENABLED } from "@/lib/features";
-import { CompanionSettings } from "./companion/CompanionSettings";
+
+/**
+ * Mục cài đặt của linh vật (Ẩn / Giảm chuyển động / Đặt lại vị trí) nạp LƯỜI qua `import()` thuần — như `AiCompanionGate`. Cờ TẮT →
+ * `settingsLoader` là `null` nên không còn nhánh nào tham chiếu module đó: không một byte mã linh vật nằm trong JS ban đầu (trước đây
+ * `import` tĩnh kéo `companionPrefs` vào chunk chung dù cờ tắt, đo ≈ +0,4 KB gzip trên MỌI trang).
+ */
+type SettingsComponent = () => React.ReactNode;
+const settingsLoader: (() => Promise<SettingsComponent>) | null = AI_COMPANION_ENABLED
+  ? () => import("./companion/CompanionSettings").then((m) => m.CompanionSettings)
+  : null;
+
+function CompanionSettingsSlot() {
+  const [Comp, setComp] = useState<SettingsComponent | null>(null);
+  useEffect(() => {
+    if (!settingsLoader) return;
+    let alive = true;
+    settingsLoader().then((c) => {
+      if (alive) setComp(() => c);
+    }).catch(() => { /* không tải được — popover vẫn đủ các mục của trợ lý */ });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return Comp ? <Comp /> : null;
+}
 
 /*
  * Dòng hạn mức dưới tiêu đề (`nhanHanMuc`) CHỈ nói về hạn mức RIÊNG của người đang dùng: "Hôm nay còn 3/5 lượt hỏi ·
@@ -97,7 +121,7 @@ function AiSettingsPopover({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       )}
-      {AI_COMPANION_ENABLED ? <CompanionSettings /> : null}
+      {AI_COMPANION_ENABLED ? <CompanionSettingsSlot /> : null}
     </div>
   );
 }

@@ -61,8 +61,13 @@ export interface CompanionInput {
   responseStarted?: boolean;
 }
 
-/** Lỗi nghĩa là "không có AI để hỏi" → linh vật nghỉ (offline), không phải "bối rối" (error). */
-const OFFLINE_CODES = new Set(["network_error", "ai_not_enabled", "disabled_by_admin", "ai_no_provider"]);
+/**
+ * Lỗi nghĩa là "không có AI để hỏi" → linh vật nghỉ (offline/sleepy), không phải "bối rối" (error).
+ * `ai_budget_exhausted`: hết lượt hôm nay (hay công suất chung) không phải một lỗi — trợ lý không hỏng, chỉ là chưa hỏi thêm được tới
+ * lúc đặt lại; banner của panel đã nói rõ. Linh vật "ngủ" cho khớp ("AI không sẵn sàng: offline" — HANDOFF §6) thay vì làm mặt
+ * bối rối với một người chỉ vừa chạm hạn mức.
+ */
+const OFFLINE_CODES = new Set(["network_error", "ai_not_enabled", "disabled_by_admin", "ai_no_provider", "ai_budget_exhausted"]);
 
 export function isOfflineError(code: string | null | undefined): boolean {
   return !!code && OFFLINE_CODES.has(code);

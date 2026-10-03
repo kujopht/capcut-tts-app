@@ -279,95 +279,159 @@ class TestCsvImport(unittest.TestCase):
         self.assertEqual(inv.from_csv(template + "\n")["models"], [])
 
 
-PASTE_ROWS = (
-    "qwen3.8-livetranslate-flash-realtime    语音模型    \n剩 1M / 共 1M\n2026/12/15剩余 74 天    \n未开启    \n"
-    "qwen3-tts-flash    语音模型    \n剩 10K / 共 10K\n2026/12/02剩余 61 天    \n未开启    \n"
-    "text-embedding-v4    向量模型    \n剩 900K / 共 1M\n2026/12/02剩余 61 天    \n已开启    \n"
-    "qwen-voice-design    语音模型    \n剩 10 / 共 10\n2026/12/02剩余 61 天    \n未开启\n")
+HEADER = "模型 Code\n模型类型\n剩余额度\n到期时间\n状态\n用完即停\n"
+
+
+def block(model, category, remaining, total, expiry, state="已开启"):
+    """Một khối model đúng như bảng console: id+danh mục, số dư, hạn dùng, và (nếu có) giá trị cột 用完即停."""
+    out = f"{model}    {category}    \n剩 {remaining} / 共 {total}\n{expiry}    \n"
+    return out + (f"{state}    \n" if state else "")
+
+
+PASTE_ROWS = (HEADER
+              + block("qwen3.7-plus", "大语言模型", "984.2K", "1M", "2026/12/02剩余 61 天")
+              + block("qwen-plus", "大语言模型", "970.67K", "1M", "2026/10/03剩余 1 天")
+              + block("qwen3-tts-flash", "语音模型", "10K", "10K", "2026/12/02剩余 61 天", "未开启")
+              + HEADER  # ngắt trang: tiêu đề lặp lại giữa bảng
+              + block("text-embedding-v4", "向量模型", "900K", "1M", "2026/12/02剩余 61 天")
+              + block("qwen-voice-design", "语音模型", "10", "10", "2026/12/02剩余 61 天", "未开启"))
+GOOD = block("qwen-good", "大语言模型", "1M", "1M", "2026/12/02剩余 61 天")
+GOOD2 = GOOD.replace("qwen-good", "qwen-good2")
 
 
 class TestConsolePaste(unittest.TestCase):
-    def test_the_console_table_is_read_exactly_and_nothing_is_guessed(self) -> None:
-        entries, snap = inv.parse_console_free_quota(PASTE_ROWS)
-        self.assertEqual(snap, "2026-10-02T00:00:00+00:00", "ngày chụp suy ra từ '剩余 N 天' (74/61 ngày đều cho 2026-10-02)")
-        self.assertEqual([e["model_id"] for e in entries],
-                         ["qwen3.8-livetranslate-flash-realtime", "qwen3-tts-flash", "text-embedding-v4", "qwen-voice-design"])
-        a, b, c, d = entries
+    def test_header_blocks_and_rows_are_read_exactly_and_nothing_is_guessed(self) -> None:
+        p = inv.parse_console_free_quota(PASTE_ROWS)
+        self.assertEqual(p.issues, ())
+        self.assertEqual(p.snapshot_at, "2026-10-03T00:00:00+00:00", "ngày chụp = ngày hết hạn − (N − 1): 12/02 còn 61 ngày và 10/03 còn 1 ngày cùng cho 10/03")
+        self.assertEqual([e["model_id"] for e in p.entries],
+                         ["qwen3.7-plus", "qwen-plus", "qwen3-tts-flash", "text-embedding-v4", "qwen-voice-design"])
+        a, b, c, d, e = p.entries
         self.assertEqual((a["console_category"], a["free_quota_total"], a["free_quota_remaining"], a["free_quota_expires_at"], a["free_quota_only"]),
-                         ("语音模型", 1_000_000, 1_000_000, "2026-12-15T00:00:00+00:00", "not_enabled"))
-        self.assertEqual((b["free_quota_total"], c["free_quota_remaining"], c["free_quota_total"], c["free_quota_only"], d["free_quota_total"]),
-                         (10_000, 900_000, 1_000_000, "confirmed_on", 10))
-        self.assertEqual(c["console_category"], "向量模型")
-        for e in entries:
+                         ("大语言模型", 1_000_000, 984_200, "2026-12-02T00:00:00+00:00", "confirmed_on"))
+        self.assertEqual((b["free_quota_remaining"], b["free_quota_expires_at"]), (970_670, "2026-10-03T00:00:00+00:00"))
+        self.assertEqual((c["free_quota_total"], c["free_quota_only"], d["console_category"], e["free_quota_total"]), (10_000, "not_enabled", "向量模型", 10))
+        for ent in p.entries:
             for unknown in ("tiers", "quota_unit", "rpm", "tpm", "thinking_support", "input_modalities", "slot_thinking"):
-                self.assertNotIn(unknown, e, "bản dán không có thông tin này: không được điền hộ")
-            self.assertEqual(e["free_quota_snapshot_at"], snap)
+                self.assertNotIn(unknown, ent, "bản dán không có thông tin này: không được điền hộ")
+            self.assertEqual(ent["free_quota_snapshot_at"], p.snapshot_at)
 
-    def test_an_explicit_capture_time_wins_and_inconsistent_days_left_demand_one(self) -> None:
-        _, snap = inv.parse_console_free_quota(PASTE_ROWS, captured_at="2026-10-04T03:00:00+07:00")
-        self.assertEqual(snap, "2026-10-03T20:00:00+00:00")
-        mixed = PASTE_ROWS.replace("2026/12/15剩余 74 天", "2026/12/15剩余 70 天")
-        with self.assertRaises(ValueError) as cm:
-            inv.parse_console_free_quota(mixed)
-        self.assertIn("captured-at", str(cm.exception))
-        with self.assertRaises(ValueError):
-            inv.parse_console_free_quota(PASTE_ROWS, captured_at="2026-10-04T03:00:00")  # không múi giờ
+    def test_a_block_without_the_last_line_is_a_warning_and_the_state_stays_unknown(self) -> None:
+        text = HEADER + block("qwen3.6-plus-2026-04-02", "大语言模型", "1M", "1M", "2026/12/02剩余 61 天", None) \
+            + HEADER + block("qwen3.8-max", "大语言模型", "1M", "1M", "2026/12/02剩余 61 天")
+        p = inv.parse_console_free_quota(text)
+        self.assertEqual(p.errors, [])
+        self.assertEqual([(i["code"], i["line"], i["model_id"]) for i in p.warnings], [("missing_state", 7, "qwen3.6-plus-2026-04-02")])
+        first, second = p.entries
+        self.assertNotIn("free_quota_only", first, "không có dòng 用完即停 => chưa biết, KHÔNG đoán")
+        self.assertEqual(second["free_quota_only"], "confirmed_on")
 
-    def test_malformed_text_is_an_error_with_a_line_number_never_a_silently_dropped_model(self) -> None:
+    def test_capture_day_counts_the_expiry_day_inclusively_and_explicit_time_wins(self) -> None:
+        self.assertEqual(inv.parse_console_free_quota(HEADER + block("qwen-x", "大语言模型", "1M", "1M", "2026/10/03剩余 1 天")).snapshot_at,
+                         "2026-10-03T00:00:00+00:00")
+        conflict = inv.parse_console_free_quota(PASTE_ROWS.replace("2026/10/03剩余 1 天", "2026/10/08剩余 1 天"))
+        self.assertEqual(conflict.snapshot_at, "")
+        self.assertEqual([i["code"] for i in conflict.errors], ["capture_day_conflict"])
+        self.assertIn("2026-10-08", conflict.errors[0]["message"])
+        explicit = inv.parse_console_free_quota(PASTE_ROWS.replace("2026/10/03剩余 1 天", "2026/10/08剩余 1 天"), captured_at="2026-10-04T03:00:00+07:00")
+        self.assertEqual((explicit.snapshot_at, explicit.errors), ("2026-10-03T20:00:00+00:00", []))
+        bad = inv.parse_console_free_quota(PASTE_ROWS, captured_at="2026-10-04T03:00:00")  # không múi giờ
+        self.assertEqual([i["code"] for i in bad.errors], ["bad_captured_at"])
+
+    def test_every_malformed_block_is_reported_with_its_line_and_dropped_never_silent(self) -> None:
+        x = block("qwen-x", "大语言模型", "1M", "1M", "2026/12/02剩余 61 天")
         cases = {
-            "truncated paste": PASTE_ROWS.rsplit("\n", 2)[0] + "\n",
-            "bad quota line": PASTE_ROWS.replace("剩 10K / 共 10K", "10K of 10K"),
-            "bad expiry line": PASTE_ROWS.replace("2026/12/02剩余 61 天", "2026-12-02 61 days", 1),
-            "unknown state": PASTE_ROWS.replace("已开启", "也许"),
-            "impossible date": PASTE_ROWS.replace("2026/12/15", "2026/13/45"),
-            "garbage number": PASTE_ROWS.replace("剩 900K", "剩 lots"),
-            "bad head line": PASTE_ROWS.replace("qwen3-tts-flash    语音模型", "语音模型"),
-            "duplicate model": PASTE_ROWS + PASTE_ROWS.split("\n", 4)[0] + "\n剩 1M / 共 1M\n2026/12/15剩余 74 天\n未开启\n",
-            "empty": "  \n\n",
+            "unreadable quota line": (x.replace("剩 1M / 共 1M", "1M of 1M"), "bad_line", True),
+            "unreadable expiry line": (x.replace("2026/12/02剩余 61 天", "2026-12-02 61 days"), "bad_line", True),
+            "impossible date": (x.replace("2026/12/02", "2026/13/45"), "bad_date", True),
+            "garbage number": (x.replace("剩 1M / 共 1M", "剩 lots / 共 1M"), "bad_number", True),
+            "remaining above total": (x.replace("剩 1M / 共 1M", "剩 2M / 共 1M"), "quota_over_total", True),
+            "truncated after the quota line": ("\n".join(x.split("\n")[:2]) + "\n", "incomplete_row", True),
+            "duplicate model": (x + x, "duplicate_model", False),
+            "stray state line": (x + "已开启\n", "orphan_line", False),
+            "stray quota line": (x + "剩 1M / 共 1M\n", "orphan_line", False),
+            "digit-leading id read as a header": (x.replace("qwen-x", "10K"), "bad_line", True),
+            "incomplete header": ("模型 Code\n模型类型\n" + x, "header_incomplete", False),
+            "unknown state text": (x.replace("已开启", "也许"), "bad_line", False),
         }
-        for name, text in cases.items():
-            with self.subTest(name), self.assertRaises(ValueError):
-                inv.parse_console_free_quota(text)
-        with self.assertRaises(ValueError) as cm:
-            inv.parse_console_free_quota(PASTE_ROWS.replace("剩 10K / 共 10K", "10K of 10K"))
-        self.assertIn("dòng 6", str(cm.exception))
-        with self.assertRaises(ValueError) as cm:
-            inv.parse_console_free_quota(cases["truncated paste"])
-        self.assertIn("bị cắt", str(cm.exception), "người dùng phải được nói rõ là bản dán thiếu dòng, không phải một lỗi Python khó hiểu")
+        for name, (text, code, dropped) in cases.items():
+            with self.subTest(name):
+                p = inv.parse_console_free_quota(HEADER + GOOD + text + GOOD2)
+                self.assertIn(code, [i["code"] for i in p.errors], [i["code"] for i in p.issues])
+                for i in p.errors:
+                    self.assertTrue(i["message"])
+                    self.assertGreater(i["line"], 0)
+                ids = [e["model_id"] for e in p.entries]
+                self.assertIn("qwen-good", ids)
+                self.assertIn("qwen-good2", ids, "một khối hỏng không được làm mất các khối lành")
+                if dropped:
+                    self.assertNotIn("qwen-x", ids)
+        p = inv.parse_console_free_quota(HEADER + GOOD + cases["unreadable quota line"][0] + GOOD2)
+        self.assertIn(("bad_line", 12), [(i["code"], i["line"]) for i in p.errors], "header 6 dòng + khối lành 4 dòng => dòng hạn mức hỏng là dòng 12")
+        with self.assertRaises(ValueError):
+            inv.parse_console_free_quota("  \n\n")
+
+    def test_counts_are_verified_independently_of_the_reader(self) -> None:
+        p = inv.parse_console_free_quota(PASTE_ROWS)
+        self.assertEqual(inv.verify_console_counts(PASTE_ROWS, p), [])
+        raw = inv.raw_line_counts(PASTE_ROWS)
+        self.assertEqual(raw["heads_by_category"], {"大语言模型": 2, "语音模型": 2, "向量模型": 1})
+        self.assertEqual((raw["quota_lines"], raw["expiry_lines"], raw["state_on"], raw["state_off"], raw["header_blocks"]), (5, 5, 3, 2, 2))
+        lost = inv.ConsoleParse(p.entries[1:], p.snapshot_at, p.issues)  # một model "biến mất" mà không được báo
+        problems = inv.verify_console_counts(PASTE_ROWS, lost)
+        self.assertTrue(any("danh mục" in x for x in problems), problems)
+        text = PASTE_ROWS + block("qwen-y", "大语言模型", "1M", "1M", "2026/12/02剩余 61 天", None)
+        q = inv.parse_console_free_quota(text)
+        self.assertEqual(inv.verify_console_counts(text, q), [], "thiếu dòng trạng thái đã được tính vào đối chiếu (cảnh báo missing_state)")
 
     def test_merge_adds_new_models_and_refreshes_only_what_the_console_decides(self) -> None:
         base = doc(full_entry(model_id="qwen3-tts-flash", tiers=["FAST"], rpm=777, observations=[], notes="tay",
-                              free_quota_remaining=5, free_quota_total=10_000, free_quota_only="confirmed_on"))
+                              free_quota_remaining=5, free_quota_total=10_000, free_quota_only="confirmed_on"),
+                   full_entry(model_id="qwen-voice-design", free_quota_only="confirmed_on"), notes="Ghi chú của Owner.\n" + inv._LEGACY_CONSOLE_NOTE_PREFIX + " cũ")
         snapshot = json.dumps(base, sort_keys=True)
-        entries, snap = inv.parse_console_free_quota(PASTE_ROWS)
-        merged, rep = inv.merge_console(base, entries, snap)
+        p = inv.parse_console_free_quota(PASTE_ROWS + block("qwen-voice-design", "语音模型", "10", "10", "2026/12/02剩余 61 天", None).replace("qwen-voice-design", "qwen-voice-x"))
+        merged, rep = inv.merge_console(base, list(p.entries), p.snapshot_at)
         self.assertEqual(json.dumps(base, sort_keys=True), snapshot, "đầu vào không bị sửa")
-        self.assertEqual((rep["added"], rep["refreshed"], rep["unchanged"]),
-                         (["qwen3.8-livetranslate-flash-realtime", "text-embedding-v4", "qwen-voice-design"], ["qwen3-tts-flash"], []))
+        self.assertEqual(rep["added"], ["qwen3.7-plus", "qwen-plus", "text-embedding-v4", "qwen-voice-x"])
+        self.assertEqual(rep["refreshed"], ["qwen3-tts-flash", "qwen-voice-design"])
         mine = next(m for m in merged["models"] if m["model_id"] == "qwen3-tts-flash")
         self.assertEqual((mine["free_quota_remaining"], mine["free_quota_only"], mine["console_category"]), (10_000, "not_enabled", "语音模型"),
                          "console làm mới số dư/Free Quota Only/danh mục")
         self.assertEqual((mine["tiers"], mine["rpm"], mine["notes"], mine["quota_unit"]), (["FAST"], 777, "tay", "tokens"),
                          "tầng/RPM/ghi chú/đơn vị do Owner ghi KHÔNG bị ghi đè")
+        self.assertIn("confirmed_on -> not_enabled", mine["free_quota_only_note"], "đổi trạng thái Free Quota Only được ghi lại, không âm thầm")
         new = next(m for m in merged["models"] if m["model_id"] == "text-embedding-v4")
         self.assertEqual((new["tiers"], new["quota_unit"], new["rpm"], new["status"]), ([], None, None, "inventoried"))
-        self.assertIn("quota_unit=null", merged["notes"])
-        again, rep2 = inv.merge_console(merged, entries, snap)
-        self.assertEqual((rep2["added"], rep2["refreshed"], len(rep2["unchanged"])), ([], [], 4), "chạy lại là idempotent")
-        self.assertEqual(again["notes"], merged["notes"], "ghi chú chung không bị lặp")
+        nostate = next(m for m in merged["models"] if m["model_id"] == "qwen-voice-x")
+        self.assertIsNone(nostate["free_quota_only"], "khối thiếu dòng 用完即停: chưa biết")
+        self.assertEqual(merged["notes"].split("\n")[0], "Ghi chú của Owner.", "ghi chú của Owner được giữ")
+        self.assertEqual(len([n for n in merged["notes"].split("\n") if n.startswith(inv.CONSOLE_NOTE_MARK)]), 1)
+        self.assertNotIn("cũ", merged["notes"], "ghi chú console phiên bản đầu bị thay")
+        again, rep2 = inv.merge_console(merged, list(p.entries), p.snapshot_at)
+        self.assertEqual((rep2["added"], rep2["refreshed"], len(rep2["unchanged"])), ([], [], 6), "chạy lại là idempotent")
+        self.assertEqual(again, merged)
         inv.parse_inventory(again)
 
+    def test_a_block_that_now_lacks_the_state_never_erases_a_known_one(self) -> None:
+        base = doc(full_entry(model_id="qwen-y", free_quota_only="confirmed_on"))
+        p = inv.parse_console_free_quota(HEADER + block("qwen-y", "大语言模型", "1M", "1M", "2026/12/02剩余 61 天", None))
+        merged, rep = inv.merge_console(base, list(p.entries), p.snapshot_at)
+        self.assertEqual(merged["models"][0]["free_quota_only"], "confirmed_on")
+        self.assertEqual(rep["refreshed"], ["qwen-y"])
+
     def test_every_pasted_model_stays_incomplete_until_the_owner_supplies_the_rest(self) -> None:
-        entries, snap = inv.parse_console_free_quota(PASTE_ROWS)
-        merged, _ = inv.merge_console(doc(), entries, snap)
+        p = inv.parse_console_free_quota(PASTE_ROWS)
+        merged, _ = inv.merge_console(doc(), list(p.entries), p.snapshot_at)
         parsed = inv.parse_inventory(merged)
         for m in parsed.models:
             state, why = inv.readiness(m, NOW)
-            self.assertEqual(state, inv.INCOMPLETE, m.model_id)
+            self.assertIn(state, (inv.INCOMPLETE, inv.BLOCKED), m.model_id)
             for field in ("tiers", "quota_unit", "rpm", "tpm", "thinking_support", "input_modalities"):
                 self.assertIn(field, inv.missing(m), (m.model_id, field))
             with self.assertRaises(inv.InventoryError):
                 inv.to_slot_dict(m, slot_id="alibaba-sg-02", secret_ref="ALIBABA_SG_02", endpoint=BASE, now=NOW)
+        self.assertEqual(inv.readiness(parsed.get("qwen-plus"), datetime(2026, 10, 4, tzinfo=timezone.utc))[0], inv.BLOCKED,
+                         "hạn dùng 2026-10-03 (00:00 UTC, thận trọng) đã qua")
 
 
 class TestShippedInventory(unittest.TestCase):
@@ -382,8 +446,11 @@ class TestShippedInventory(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertEqual((m.tiers, m.slot_thinking, m.status), (("SMART",), "off", "validated_candidate"))
         self.assertEqual((m.thinking_support, m.thinking_default, m.rpm, m.tpm), ("hybrid", "on", 15_000, 5_000_000))
-        self.assertEqual((m.free_quota_total, m.free_quota_remaining, m.free_quota_expires_at), (1_000_000, 992_190, "2026-12-02T00:00:00+00:00"))
-        self.assertEqual(m.free_quota_only, "not_enabled")
+        self.assertEqual((m.free_quota_total, m.free_quota_remaining, m.free_quota_expires_at), (1_000_000, 984_200, "2026-12-02T00:00:00+00:00"))
+        self.assertEqual((m.free_quota_snapshot_at, m.quota_unit), ("2026-10-03T00:00:00+00:00", "tokens"))
+        self.assertEqual(m.free_quota_only, "confirmed_on", "bảng đầy đủ: cột 用完即停 của qwen3.7-plus = 已开启 (trước đó Owner chưa bật)")
+        self.assertIn("confirmed_on", m.free_quota_only_note)
+        self.assertIn("VẪN là false", m.free_quota_only_note, "cờ phía ứng dụng của slot chưa đổi")
 
     def test_the_canary_measurements_and_the_reasoning_finding_are_on_record(self) -> None:
         by_mode = {o.thinking: o for o in self.inv.get("qwen3.7-plus").observations}
@@ -402,32 +469,50 @@ class TestShippedInventory(unittest.TestCase):
 
     def test_the_pasted_console_table_is_in_the_inventory_exactly_and_cannot_drift_from_its_source(self) -> None:
         paste = (ROOT / "docs" / "ai" / "alibaba_free_quota_console_paste.txt").read_text(encoding="utf-8")
-        entries, snap = inv.parse_console_free_quota(paste)
-        self.assertEqual(len(entries), 49)
-        self.assertEqual(snap, "2026-10-02T00:00:00+00:00")
-        self.assertEqual(len(self.inv.models), 50, "49 model từ bản dán + qwen3.7-plus")
-        for e in entries:
+        p = inv.parse_console_free_quota(paste)
+        self.assertEqual((len(p.entries), p.errors, len(p.warnings), p.snapshot_at), (249, [], 2, "2026-10-03T00:00:00+00:00"))
+        self.assertEqual(inv.verify_console_counts(paste, p), [], "số đếm thô khớp số model đọc được theo từng danh mục")
+        self.assertEqual({m.model_id for m in self.inv.models}, {e["model_id"] for e in p.entries}, "mỗi model ID là một mục riêng, không thiếu không thừa")
+        self.assertEqual(len(self.inv.models), 249)
+        for e in p.entries:
             m = self.inv.get(e["model_id"])
-            self.assertIsNotNone(m, e["model_id"])
             self.assertEqual((m.console_category, m.free_quota_total, m.free_quota_remaining, m.free_quota_snapshot_at,
                               m.free_quota_expires_at, m.free_quota_only),
                              (e["console_category"], e["free_quota_total"], e["free_quota_remaining"], e["free_quota_snapshot_at"],
-                              e["free_quota_expires_at"], e["free_quota_only"]), e["model_id"])
+                              e["free_quota_expires_at"], e.get("free_quota_only")), e["model_id"])
+        # Số đếm tay (grep độc lập trên bản dán khi nhập): 102 + 67 + 21 + 53 + 6 = 249.
         cats = {}
-        for e in entries:
-            cats[e["console_category"]] = cats.get(e["console_category"], 0) + 1
-        self.assertEqual(cats, {"语音模型": 43, "向量模型": 6})
+        for m in self.inv.models:
+            cats[m.console_category] = cats.get(m.console_category, 0) + 1
+        self.assertEqual(cats, {"大语言模型": 102, "视觉模型": 67, "多模态模型": 21, "语音模型": 53, "向量模型": 6})
+        self.assertEqual(sorted(w["model_id"] for w in p.warnings), ["fun-asr-2025-11-07", "qwen3.6-plus-2026-04-02"])
+        for mid in ("fun-asr-2025-11-07", "qwen3.6-plus-2026-04-02"):
+            self.assertIsNone(self.inv.get(mid).free_quota_only, "thiếu dòng 用完即停: chưa biết, không đoán")
 
     def test_nothing_beyond_the_paste_was_guessed_for_the_pasted_models(self) -> None:
         pasted = [m for m in self.inv.models if m.model_id != "qwen3.7-plus"]
-        self.assertEqual(len(pasted), 49)
+        self.assertEqual(len(pasted), 248)
+        blocked = []
         for m in pasted:
             self.assertEqual((m.tiers, m.quota_unit, m.rpm, m.tpm, m.thinking_support, m.thinking_default, m.input_modalities, m.slot_thinking,
                               m.status, m.observations),
                              ((), None, None, None, None, None, None, "provider_default", "inventoried", ()), m.model_id)
-            self.assertEqual(inv.readiness(m, NOW)[0], inv.INCOMPLETE, m.model_id)
+            state = inv.readiness(m, NOW)[0]
+            self.assertIn(state, (inv.INCOMPLETE, inv.BLOCKED), m.model_id)
+            if state == inv.BLOCKED:
+                blocked.append(m.model_id)
+        self.assertEqual(sorted(blocked), ["qwen-plus", "qwen-turbo"], "hai model hết hạn 2026-10-03 (00:00 UTC, thận trọng)")
         self.assertIn("quota_unit=null", self.inv.notes)
         self.assertIn("Free Quota Only", self.inv.notes)
+        self.assertEqual(len([n for n in self.inv.notes.split("\n") if n.startswith(inv.CONSOLE_NOTE_MARK)]), 1)
+        self.assertNotIn("không kèm tiêu đề cột", self.inv.notes, "câu của phiên bản đầu (bản dán không có tiêu đề) đã sai và đã bị thay")
+
+    def test_the_catalogue_has_the_models_the_owner_cares_about_and_the_baseline_is_untouched(self) -> None:
+        for mid in ("qwen3.7-plus", "qwen-plus", "qwen-max", "qwen3-coder-plus", "qwen-vl-max", "qwen-mt-plus", "wan2.7-t2v", "qwen-image-2.0-pro",
+                    "qwen3.5-omni-plus", "qwen3-tts-flash", "text-embedding-v4", "qwen3-rerank", "qwq-plus", "qwen-plus-character", "glm-5.3", "kimi-k3"):
+            self.assertIsNotNone(self.inv.get(mid), mid)
+        tiered = [m.model_id for m in self.inv.models if m.tiers]
+        self.assertEqual(tiered, ["qwen3.7-plus"], "chỉ baseline đã kiểm chứng có tầng; báo cáo ứng viên KHÔNG ghi vào tiers")
 
     def test_no_secret_or_account_specific_value_is_in_the_inventory_file(self) -> None:
         low = self.raw.lower()
@@ -453,7 +538,7 @@ class TestCli(unittest.TestCase):
     def test_validate_and_report_on_the_shipped_file(self) -> None:
         code, out, _ = self.run_cli("validate", str(SHIPPED))
         self.assertEqual(code, 0)
-        self.assertIn("HỢP LỆ: 50 model", out)
+        self.assertIn("HỢP LỆ: 249 model", out)
         code, out, _ = self.run_cli("report", str(SHIPPED), "--now", "2026-10-04T00:00:00+00:00")
         self.assertEqual(code, 0)
         self.assertIn("qwen3.7-plus", out)
@@ -466,10 +551,10 @@ class TestCli(unittest.TestCase):
     def test_brief_report_counts_every_state_and_category(self) -> None:
         code, out, _ = self.run_cli("report", str(SHIPPED), "--brief", "--now", "2026-10-04T00:00:00+00:00")
         self.assertEqual(code, 0)
-        self.assertIn("Tổng 50 model: READY 0 · INCOMPLETE 50 · BLOCKED 0", out)
-        self.assertIn("向量模型 6", out)
-        self.assertIn("语音模型 43", out)
-        self.assertIn("quota_unit [49 model]", out)
+        self.assertIn("Tổng 249 model: READY 0 · INCOMPLETE 247 · BLOCKED 2", out)
+        for cat in ("向量模型 6", "语音模型 53", "大语言模型 102", "视觉模型 67", "多模态模型 21"):
+            self.assertIn(cat, out)
+        self.assertIn("quota_unit [248 model]", out)
         self.assertNotIn("=> INCOMPLETE", out, "--brief không liệt kê từng model")
 
     def test_parse_console_is_idempotent_on_the_shipped_inventory_and_rejects_garbage(self) -> None:
@@ -479,14 +564,19 @@ class TestCli(unittest.TestCase):
             out_file = Path(tmp) / "moi.json"
             code, _, err = self.run_cli("parse-console", str(paste), "--into", str(SHIPPED), "--out", str(out_file))
             self.assertEqual(code, 0)
-            self.assertIn("Đọc 49 model", err)
-            self.assertIn("thêm 0, làm mới 0, không đổi 49", err)
+            self.assertIn("Đọc 249 model", err)
+            self.assertIn("thêm 0, làm mới 0, không đổi 249", err)
+            self.assertIn("Đối chiếu số đếm: KHỚP", err)
+            self.assertIn("大语言模型: 102 → 102", err)
+            self.assertIn("Thiếu đơn vị hạn mức (quota_unit): 249/249", err)
+            self.assertEqual(err.count("CẢNH BÁO dòng"), 2)
             self.assertEqual(json.loads(out_file.read_text(encoding="utf-8")), json.loads(SHIPPED.read_text(encoding="utf-8")))
             bad = Path(tmp) / "hong.txt"
             bad.write_text("qwen3-tts-flash    语音模型\n剩 10K / 共 10K\n", encoding="utf-8")
             code, out, err = self.run_cli("parse-console", str(bad))
             self.assertEqual((code, out), (1, ""))
-            self.assertIn("Văn bản dán lỗi", err)
+            self.assertIn("LỖI dòng 1 [incomplete_row]", err)
+            self.assertIn("Không ghi kết quả vì còn lỗi", err)
             code, _, err = self.run_cli("parse-console", str(Path(tmp) / "khong_co.txt"))
             self.assertEqual(code, 1)
             self.assertIn("KHÔNG TÌM THẤY", err)
@@ -498,8 +588,9 @@ class TestCli(unittest.TestCase):
             paste.write_text(PASTE_ROWS, encoding="utf-8")
             code, out, err = self.run_cli("parse-console", str(paste), "--captured-at", "2026-10-04T00:00:00+00:00")
             self.assertEqual(code, 0)
-            self.assertIn("thêm 4", err)
-            self.assertEqual(len(inv.parse_inventory(json.loads(out)).models), 4)
+            self.assertIn("thêm 5", err)
+            self.assertIn("大语言模型: 2 → 2", err)
+            self.assertEqual(len(inv.parse_inventory(json.loads(out)).models), 5)
 
     def test_a_missing_or_broken_file_is_an_error_not_a_crash(self) -> None:
         code, out, _ = self.run_cli("validate", str(ROOT / "docs" / "ai" / "khong_co.json"))

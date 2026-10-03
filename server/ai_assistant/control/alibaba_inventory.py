@@ -38,6 +38,8 @@ from server.llm_gateway.alibaba import THINKING_MODES
 
 INVENTORY_VERSION = 1
 PROVIDER = "alibaba"
+#: Trần số model trong một tệp kiểm kê (bảng Free Quota thật đã có 250 dòng; đặt rộng để một lần dán lớn hơn không bị từ chối vô cớ).
+MAX_MODELS = 1000
 
 STATUSES: Tuple[str, ...] = ("inventoried", "benchmarked", "validated_candidate", "rejected")
 QUOTA_UNITS: Tuple[str, ...] = ("tokens", "calls", "characters", "images", "seconds")
@@ -285,8 +287,8 @@ def parse_inventory(raw: Any) -> Inventory:
     captured = _ts(errors, "captured_at", raw.get("captured_at"))
     models_raw = raw.get("models")
     models: List[ModelEntry] = []
-    if not isinstance(models_raw, list) or len(models_raw) > 200:
-        _err(errors, "models", "danh sách, tối đa 200 model")
+    if not isinstance(models_raw, list) or len(models_raw) > MAX_MODELS:
+        _err(errors, "models", f"danh sách, tối đa {MAX_MODELS} model")
     else:
         seen = set()
         for i, m in enumerate(models_raw):
@@ -449,65 +451,194 @@ def entry_template() -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------------------------ console paste import
-#: Bảng Free Quota của console (tiếng Trung) dán nguyên văn: mỗi model 4 dòng —
-#:   <id model>    <danh mục>        |  剩 <còn lại> / 共 <tổng>  |  <YYYY/MM/DD>剩余 <N> 天  |  未开启 | 已开启
-_CONSOLE_HEAD = re.compile(r"^(?P<id>[A-Za-z0-9][A-Za-z0-9._:/@-]*)\s+(?P<category>\S.*)$")
+#: Bảng Free Quota của console (tiếng Trung) dán nguyên văn. Tiêu đề cột (lặp lại ở mỗi trang, đúng 6 dòng):
+#:   模型 Code / 模型类型 / 剩余额度 / 到期时间 / 状态 / 用完即停
+#: Mỗi model là một khối 3–4 dòng:
+#:   <id model>    <模型类型>  |  剩 <còn lại> / 共 <tổng>  |  <YYYY/MM/DD>剩余 <N> 天  |  [已开启 | 未开启]
+#: Dòng cuối là giá trị của cột `用完即停` ("dừng khi dùng hết" = Free Quota Only); cột `状态` không có chữ trong bản dán. Khối có thể THIẾU
+#: dòng cuối (đo thật: hàng bị ngắt trang, và một hàng ở cuối bảng) -> cảnh báo `missing_state`, trạng thái để chưa biết — không đoán.
+_CONSOLE_HEADER: Tuple[str, ...] = ("模型 Code", "模型类型", "剩余额度", "到期时间", "状态", "用完即停")
+#: id model trên console luôn bắt đầu bằng CHỮ CÁI (qwen…, wan…, glm…, text-embedding…): nhờ vậy một dòng số/ngày bị hỏng (ví dụ "10K of 10K") không bị đọc
+#: nhầm thành tiêu đề của một model, mà bị báo `bad_line`.
+_CONSOLE_HEAD = re.compile(r"^(?P<id>[A-Za-z][A-Za-z0-9._:/@-]*)\s+(?P<category>\S.*)$")
 _CONSOLE_QUOTA = re.compile(r"^剩\s*(?P<remaining>\S+)\s*/\s*共\s*(?P<total>\S+)$")
 _CONSOLE_EXPIRY = re.compile(r"^(?P<y>\d{4})/(?P<m>\d{1,2})/(?P<d>\d{1,2})\s*剩余\s*(?P<days>\d+)\s*天$")
 _CONSOLE_FQO = {"未开启": "not_enabled", "已开启": "confirmed_on"}
 #: Trường do CONSOLE quyết định: lần dán sau làm mới chúng; mọi trường khác (tầng, RPM, TPM, thinking, số đo…) là của Owner/benchmark và KHÔNG bị ghi đè.
 CONSOLE_FIELDS: Tuple[str, ...] = ("console_category", "free_quota_total", "free_quota_remaining", "free_quota_snapshot_at",
                                    "free_quota_expires_at", "free_quota_only")
-CONSOLE_NOTE = ("Nhập từ bảng Free Quota của console do Owner dán nguyên văn (docs/ai/alibaba_free_quota_console_paste.txt). Giới hạn của nguồn: "
-                "(1) bảng KHÔNG ghi đơn vị hạn mức nên quota_unit=null (đừng suy ra token); (2) '10K', '1M' là số làm tròn của console; "
-                "(3) hạn dùng chỉ có NGÀY — lưu là 00:00 UTC của ngày đó (có thể lệch tới 1 ngày so với giờ console); (4) bản dán không kèm tiêu đề cột: "
-                "'未开启/已开启' được đọc là trạng thái Free Quota Only (chưa bật/đã bật) — chờ Owner xác nhận; (5) thời điểm chụp suy ra từ "
-                "'剩余 N 天' (mọi dòng cùng cho một ngày) hoặc do người gọi cấp; (6) bản dán chỉ gồm các danh mục có mặt trong đó.")
+CONSOLE_NOTE_MARK = "[console] "
+#: Ghi chú chung của phiên bản đầu (chưa có dấu): vẫn được nhận ra và THAY, để một tệp cũ không giữ lại câu đã sai.
+_LEGACY_CONSOLE_NOTE_PREFIX = "Nhập từ bảng Free Quota của console do Owner dán nguyên văn"
+CONSOLE_NOTE = (CONSOLE_NOTE_MARK + "Nhập từ bảng Free Quota của console do Owner dán nguyên văn (docs/ai/alibaba_free_quota_console_paste.txt). "
+                "Giới hạn của nguồn: (1) bảng KHÔNG có cột đơn vị nên quota_unit=null (đừng suy ra token; riêng qwen3.7-plus đã đối chiếu được: số dư giảm đúng "
+                "bằng token ta đã tiêu); (2) '10K', '1M', '984.2K' là số làm tròn của console; (3) hạn dùng chỉ có NGÀY: lưu là 00:00 UTC của ngày đó, "
+                "sớm hơn hạn thật tới ~1 ngày (thận trọng); (4) tiêu đề cột có trong bản dán; dòng cuối mỗi khối được đọc là cột `用完即停` (Free Quota Only: "
+                "已开启=bật, 未开启=chưa bật), vì cột `状态` không có chữ — vị trí này là suy ra, chờ Owner xác nhận; khối thiếu dòng này thì để chưa biết; "
+                "(5) ngày chụp = ngày hết hạn − (N − 1) với '剩余 N 天' (console đếm cả ngày hết hạn; kiểm chứng bằng số dư qwen3.7-plus phản ánh cả canary "
+                "ngày 2026-10-03) hoặc do người gọi cấp; giờ trong ngày chưa biết (lưu 00:00 UTC); (6) console xếp một số model vào danh mục không khớp tên "
+                "(ví dụ wan2.2-kf2v-flash nằm ở 大语言模型 với hạn mức 50): danh mục là bằng chứng, không phải khả năng.")
 
 
-def parse_console_free_quota(text: str, *, captured_at: str = "") -> Tuple[List[Dict[str, Any]], str]:
-    """Đọc văn bản dán từ bảng Free Quota -> (danh sách entry kiểu JSON, thời điểm chụp ISO). NGHIÊM: dòng/khối sai định dạng -> ValueError kèm số dòng
-    (không bao giờ im lặng bỏ qua một model). Không đoán: quota_unit=null, tầng=[], RPM/TPM/thinking/đa phương thức chưa biết."""
-    lines = [(i, raw.strip()) for i, raw in enumerate(text.splitlines(), 1) if raw.strip()]
+@dataclass(frozen=True)
+class ConsoleParse:
+    """Kết quả đọc bản dán: entry hợp lệ + MỌI vấn đề theo từng dòng (không dừng ở lỗi đầu tiên). `error` = dòng/khối không dùng được (bị loại,
+    không bao giờ im lặng); `warning` = dùng được nhưng thiếu một mẩu (ví dụ không có dòng 用完即停)."""
+    entries: Tuple[Dict[str, Any], ...]
+    snapshot_at: str
+    issues: Tuple[Dict[str, Any], ...]
+
+    @property
+    def errors(self) -> List[Dict[str, Any]]:
+        return [i for i in self.issues if i["kind"] == "error"]
+
+    @property
+    def warnings(self) -> List[Dict[str, Any]]:
+        return [i for i in self.issues if i["kind"] == "warning"]
+
+
+def _issue(kind: str, code: str, line: int, message: str, model_id: str = "") -> Dict[str, Any]:
+    return {"kind": kind, "code": code, "line": line, "model_id": model_id, "message": message}
+
+
+def parse_console_free_quota(text: str, *, captured_at: str = "") -> ConsoleParse:
+    """Đọc văn bản dán từ bảng Free Quota -> `ConsoleParse` (entry kiểu JSON + thời điểm chụp ISO + MỌI vấn đề theo dòng). Khối 3–4 dòng, tiêu đề cột bị
+    bỏ qua, dòng lạ/số sai/ngày không tồn tại/id lặp -> `error` kèm số dòng và khối đó BỊ LOẠI (không bao giờ im lặng); thiếu dòng cuối ->
+    `warning`. Không đoán: quota_unit=null, tầng=[], RPM/TPM/thinking/đa phương thức chưa biết. Văn bản rỗng -> ValueError."""
+    lines = [(n, raw.strip()) for n, raw in enumerate(text.splitlines(), 1) if raw.strip()]
     if not lines:
         raise ValueError("không có dòng nào để đọc")
-    if len(lines) % 4:
-        raise ValueError(f"số dòng có chữ ({len(lines)}) không chia hết cho 4 (mỗi model đúng 4 dòng) — bản dán bị cắt?")
-    parsed: List[Dict[str, Any]] = []
+    issues: List[Dict[str, Any]] = []
+    blocks: List[Dict[str, Any]] = []
+    cur: Optional[Dict[str, Any]] = None
+
+    def close() -> None:
+        nonlocal cur
+        if cur is None:
+            return
+        if cur["quota"] is None or cur["expiry"] is None:
+            issues.append(_issue("error", "incomplete_row", cur["line"],
+                                 f"model '{cur['id']}': thiếu dòng " + ("hạn mức" if cur["quota"] is None else "hạn dùng") + " (bản dán bị cắt?)", cur["id"]))
+        else:
+            blocks.append(cur)
+        cur = None
+
+    i = 0
+    while i < len(lines):
+        n, s = lines[i]
+        if s == _CONSOLE_HEADER[0]:
+            close()
+            rest = _CONSOLE_HEADER[1:]
+            if tuple(x for _, x in lines[i + 1:i + 1 + len(rest)]) == rest:
+                i += len(_CONSOLE_HEADER)
+                continue
+            issues.append(_issue("error", "header_incomplete", n, "tiêu đề cột không đủ/sai thứ tự (cần: " + " / ".join(_CONSOLE_HEADER) + ")"))
+        elif s in _CONSOLE_FQO:
+            if cur is not None and cur["expiry"] is not None and cur["state"] is None:
+                cur["state"], cur["state_line"] = s, n
+            else:
+                issues.append(_issue("error", "orphan_line", n, f"dòng trạng thái {s!r} không thuộc khối model nào"))
+        elif _CONSOLE_QUOTA.match(s):
+            if cur is not None and cur["quota"] is None and cur["expiry"] is None:
+                cur["quota"], cur["quota_line"] = _CONSOLE_QUOTA.match(s), n
+            else:
+                issues.append(_issue("error", "orphan_line", n, f"dòng hạn mức không thuộc khối model nào hoặc bị lặp: {s!r}"))
+        elif _CONSOLE_EXPIRY.match(s):
+            if cur is not None and cur["quota"] is not None and cur["expiry"] is None:
+                cur["expiry"], cur["expiry_line"] = _CONSOLE_EXPIRY.match(s), n
+            else:
+                issues.append(_issue("error", "orphan_line", n, f"dòng hạn dùng không thuộc khối model nào hoặc bị lặp: {s!r}"))
+        elif _CONSOLE_HEAD.match(s):
+            close()
+            mh = _CONSOLE_HEAD.match(s)
+            cur = {"id": mh["id"], "category": mh["category"].strip(), "line": n, "quota": None, "expiry": None, "state": None}
+        else:
+            issues.append(_issue("error", "bad_line", n, f"không nhận ra dòng: {s!r}"))
+        i += 1
+    close()
+
+    entries: List[Dict[str, Any]] = []
     capture_days: Dict[str, List[str]] = {}
-    for k in range(0, len(lines), 4):
-        (n1, head), (n2, quota), (n3, expiry), (n4, state) = lines[k:k + 4]
-        mh, mq, me = _CONSOLE_HEAD.match(head), _CONSOLE_QUOTA.match(quota), _CONSOLE_EXPIRY.match(expiry)
-        if not mh:
-            raise ValueError(f"dòng {n1}: không đọc được '<id model> <danh mục>': {head!r}")
-        if not mq:
-            raise ValueError(f"dòng {n2}: không đọc được '剩 X / 共 Y': {quota!r}")
-        if not me:
-            raise ValueError(f"dòng {n3}: không đọc được '<YYYY/MM/DD>剩余 N 天': {expiry!r}")
-        if state not in _CONSOLE_FQO:
-            raise ValueError(f"dòng {n4}: trạng thái lạ {state!r} (chỉ nhận: {', '.join(_CONSOLE_FQO)})")
+    seen: Dict[str, int] = {}
+    for b in blocks:
+        mid = b["id"]
+        if mid in seen:
+            issues.append(_issue("error", "duplicate_model", b["line"], f"model '{mid}' xuất hiện hai lần (lần đầu ở dòng {seen[mid]}); bản thứ hai bị loại", mid))
+            continue
         try:
-            remaining, total = parse_human_int(mq["remaining"]), parse_human_int(mq["total"])
-            expires = datetime(int(me["y"]), int(me["m"]), int(me["d"]), tzinfo=timezone.utc)
+            remaining, total = parse_human_int(b["quota"]["remaining"]), parse_human_int(b["quota"]["total"])
         except ValueError as exc:
-            raise ValueError(f"dòng {n2}-{n3}: {exc}") from exc
-        if any(p["model_id"] == mh["id"] for p in parsed):
-            raise ValueError(f"dòng {n1}: model '{mh['id']}' xuất hiện hai lần trong bản dán (bản dán bị lặp?)")
-        capture_days.setdefault((expires - timedelta(days=int(me["days"]))).date().isoformat(), []).append(mh["id"])
-        parsed.append({
-            "model_id": mh["id"], "console_category": mh["category"].strip(), "free_quota_total": total, "free_quota_remaining": remaining,
-            "free_quota_expires_at": expires.isoformat(timespec="seconds"), "free_quota_only": _CONSOLE_FQO[state]})
+            issues.append(_issue("error", "bad_number", b["quota_line"], f"model '{mid}': {exc}", mid))
+            continue
+        if remaining > total:
+            issues.append(_issue("error", "quota_over_total", b["quota_line"], f"model '{mid}': còn lại ({remaining}) lớn hơn tổng ({total})", mid))
+            continue
+        try:
+            expires = datetime(int(b["expiry"]["y"]), int(b["expiry"]["m"]), int(b["expiry"]["d"]), tzinfo=timezone.utc)
+        except ValueError:
+            issues.append(_issue("error", "bad_date", b["expiry_line"], f"model '{mid}': ngày không tồn tại", mid))
+            continue
+        seen[mid] = b["line"]
+        # Console đếm CẢ ngày hết hạn ('剩余 1 天' vào chính ngày hết hạn): ngày chụp = ngày hết hạn − (N − 1).
+        capture_days.setdefault((expires - timedelta(days=int(b["expiry"]["days"]) - 1)).date().isoformat(), []).append(mid)
+        entry: Dict[str, Any] = {"model_id": mid, "console_category": b["category"], "free_quota_total": total, "free_quota_remaining": remaining,
+                                 "free_quota_expires_at": expires.isoformat(timespec="seconds")}
+        if b["state"] is None:
+            issues.append(_issue("warning", "missing_state", b["line"],
+                                 f"model '{mid}': không có dòng 已开启/未开启 (cột 用完即停) — free_quota_only để chưa biết", mid))
+        else:
+            entry["free_quota_only"] = _CONSOLE_FQO[b["state"]]
+        entries.append(entry)
+
+    snap = ""
     if captured_at:
-        snap = normalize_timestamp(captured_at)
-        if snap is None:
-            raise ValueError("captured_at phải là ISO-8601 CÓ múi giờ")
-    else:
-        if len(capture_days) != 1:
-            raise ValueError("'剩余 N 天' cho nhiều ngày chụp khác nhau (" + ", ".join(sorted(capture_days)) + ") — hãy cấp --captured-at")
+        snap = normalize_timestamp(captured_at) or ""
+        if not snap:
+            issues.append(_issue("error", "bad_captured_at", 0, "captured_at phải là ISO-8601 CÓ múi giờ"))
+    elif len(capture_days) == 1:
         snap = next(iter(capture_days)) + "T00:00:00+00:00"
-    for p in parsed:
-        p["free_quota_snapshot_at"] = snap
-    return parsed, snap
+    elif capture_days:
+        issues.append(_issue("error", "capture_day_conflict", 0, "'剩余 N 天' cho nhiều ngày chụp khác nhau (" +
+                             ", ".join(f"{d}: {len(m)} model" for d, m in sorted(capture_days.items())) + ") — hãy cấp --captured-at"))
+    if snap:
+        for e in entries:
+            e["free_quota_snapshot_at"] = snap
+    return ConsoleParse(tuple(entries), snap, tuple(issues))
+
+
+def raw_line_counts(text: str) -> Dict[str, Any]:
+    """Đếm THÔ theo regex trên toàn văn bản (không dùng bộ đọc ở trên) — để đối chiếu độc lập số model theo danh mục."""
+    heads: Dict[str, int] = {}
+    for m in re.finditer(r"^[A-Za-z][A-Za-z0-9._:/@-]*[ \t]+(\S[^\r\n]*?)[ \t]*$", text, re.M):
+        heads[m.group(1)] = heads.get(m.group(1), 0) + 1
+    return {"heads_by_category": heads,
+            "quota_lines": len(re.findall(r"^[ \t]*剩 ", text, re.M)),
+            "expiry_lines": len(re.findall(r"^[ \t]*\d{4}/\d{1,2}/\d{1,2}剩余 \d+ 天", text, re.M)),
+            "state_on": len(re.findall(r"^[ \t]*已开启[ \t]*$", text, re.M)),
+            "state_off": len(re.findall(r"^[ \t]*未开启[ \t]*$", text, re.M)),
+            "header_blocks": len(re.findall(r"^[ \t]*模型 Code[ \t]*$", text, re.M))}
+
+
+def verify_console_counts(text: str, parsed: ConsoleParse) -> List[str]:
+    """Đối chiếu số đếm thô với kết quả đọc. Trả danh sách điểm LỆCH (rỗng = khớp hoàn toàn): theo danh mục, tổng, dòng hạn mức/hạn dùng,
+    và số dòng trạng thái = số model − số cảnh báo missing_state."""
+    raw = raw_line_counts(text)
+    problems: List[str] = []
+    rows = sum(raw["heads_by_category"].values())
+    parsed_by_cat: Dict[str, int] = {}
+    for e in parsed.entries:
+        parsed_by_cat[e["console_category"]] = parsed_by_cat.get(e["console_category"], 0) + 1
+    if parsed_by_cat != raw["heads_by_category"]:
+        problems.append(f"số model theo danh mục lệch: thô {raw['heads_by_category']} ≠ đọc {parsed_by_cat}")
+    for name in ("quota_lines", "expiry_lines"):
+        if raw[name] != rows:
+            problems.append(f"{name}={raw[name]} ≠ số dòng tiêu đề model ({rows})")
+    missing_state = len([i for i in parsed.issues if i["code"] == "missing_state"])
+    if raw["state_on"] + raw["state_off"] != rows - missing_state:
+        problems.append(f"dòng trạng thái ({raw['state_on'] + raw['state_off']}) ≠ model ({rows}) − thiếu trạng thái ({missing_state})")
+    if len(parsed.entries) + len(parsed.errors) < rows:
+        problems.append("có model bị mất mà không được báo lỗi")
+    return problems
 
 
 def merge_console(raw: Mapping[str, Any], entries: List[Dict[str, Any]], snapshot_at: str) -> Tuple[Dict[str, Any], Dict[str, List[str]]]:
@@ -527,13 +658,20 @@ def merge_console(raw: Mapping[str, Any], entries: List[Dict[str, Any]], snapsho
             index[e["model_id"]] = fresh
             report["added"].append(e["model_id"])
             continue
-        changed = [f for f in CONSOLE_FIELDS if existing.get(f) != e.get(f)]
+        # Chỉ trường CÓ trong dòng đọc mới làm mới: một khối thiếu dòng 用完即停 (chưa biết bây giờ) không được xoá giá trị đã biết.
+        changed = [f for f in CONSOLE_FIELDS if f in e and existing.get(f) != e.get(f)]
+        old_fqo = existing.get("free_quota_only")
         for f in changed:
-            existing[f] = e.get(f)
+            existing[f] = e[f]
+        if "free_quota_only" in changed and old_fqo is not None:
+            stamp = (snapshot_at or "")[:10]
+            existing["free_quota_only_note"] = ((existing.get("free_quota_only_note") or "") + f" | Console {stamp}: free_quota_only {old_fqo} -> "
+                                                f"{existing['free_quota_only']}.").strip(" |")
         report["refreshed" if changed else "unchanged"].append(e["model_id"])
     if snapshot_at and (not out.get("captured_at") or normalize_timestamp(out["captured_at"]) is None or snapshot_at > out["captured_at"]):
         out["captured_at"] = snapshot_at
-    note = out.get("notes") or ""
-    if CONSOLE_NOTE not in note:
-        out["notes"] = (note + "\n" if note else "") + CONSOLE_NOTE
+    # Ghi chú chung của lần nhập console được THAY (không nhân đôi) mỗi lần: phần ghi chú khác của Owner giữ nguyên.
+    kept = [p for p in (out.get("notes") or "").split("\n")
+            if p and not p.startswith(CONSOLE_NOTE_MARK) and not p.startswith(_LEGACY_CONSOLE_NOTE_PREFIX)]
+    out["notes"] = "\n".join(kept + [CONSOLE_NOTE])
     return out, report

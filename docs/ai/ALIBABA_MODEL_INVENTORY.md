@@ -49,6 +49,7 @@ python scripts/alibaba_inventory.py validate docs/ai/alibaba_model_inventory.jso
 python scripts/alibaba_inventory.py report   docs/ai/alibaba_model_inventory.json   # mức sẵn sàng, phủ theo tầng, dữ liệu còn thiếu + lấy ở đâu
 python scripts/alibaba_inventory.py report   docs/ai/alibaba_model_inventory.json --brief   # chỉ đếm theo mức sẵn sàng/danh mục + dữ liệu còn thiếu
 python scripts/alibaba_inventory.py parse-console <văn bản dán từ bảng Free Quota> --into docs/ai/alibaba_model_inventory.json --out moi.json
+python scripts/alibaba_inventory.py candidates docs/ai/alibaba_model_inventory.json --paste docs/ai/alibaba_free_quota_console_paste.txt --md docs/ai/ALIBABA_CAPABILITY_CANDIDATES.md   # báo cáo ứng viên 12 nhóm
 python scripts/alibaba_inventory.py from-csv bang.csv --captured-at <ISO> --region ap-southeast-1 > kiem_ke.json
 python scripts/alibaba_inventory.py slot docs/ai/alibaba_model_inventory.json <model_id> --slot-id alibaba-sg-02 --secret-ref ALIBABA_SG_02 --endpoint <endpoint workspace>
 python scripts/alibaba_inventory.py template                                          # khung MỘT model (model_id để trống có chủ ý)
@@ -60,28 +61,40 @@ Mã thoát: 0 ổn, 1 không hợp lệ, 2 model chưa READY (không in payload)
 
 ### Nhập thẳng từ bảng Free Quota của console (`parse-console`)
 
-Dán nguyên văn bảng (4 dòng mỗi model: `<id>  <danh mục>` · `剩 X / 共 Y` · `<YYYY/MM/DD>剩余 N 天` · `未开启|已开启`) vào một tệp rồi chạy lệnh trên. Nghiêm ngặt: dòng sai khuôn dạng,
-bản dán bị cắt, id lặp, ngày không tồn tại → lỗi kèm **số dòng**, không bao giờ im lặng bỏ qua một model. Gộp: model mới được thêm; model đã có chỉ được **làm mới các trường do console quyết định**
-(`console_category`, tổng/còn lại, thời điểm chụp, hạn dùng, Free Quota Only) — tầng, RPM, TPM, thinking, đa phương thức, số đo do Owner/benchmark ghi **không bao giờ bị ghi đè**; chạy lại là idempotent.
-Giới hạn của nguồn (ghi vào `notes` của tệp): bảng **không có đơn vị** (→ `quota_unit=null`); `10K`/`1M` là số làm tròn của console; hạn dùng chỉ có NGÀY (lưu 00:00 UTC của ngày đó, có thể lệch tới 1 ngày); thời điểm chụp suy ra từ
-`剩余 N 天` (các dòng phải cùng cho một ngày, không thì phải cấp `--captured-at`); bản dán không kèm tiêu đề cột nên `未开启/已开启` được đọc là Free Quota Only **chưa bật/đã bật — chờ Owner xác nhận**.
+Dán nguyên văn bảng vào một tệp rồi chạy lệnh trên. Khuôn của bảng: tiêu đề cột 6 dòng (`模型 Code / 模型类型 / 剩余额度 / 到期时间 / 状态 / 用完即停`, lặp lại mỗi trang) rồi mỗi model một khối **3–4 dòng**:
+`<id>  <模型类型>` · `剩 X / 共 Y` · `<YYYY/MM/DD>剩余 N 天` · `[已开启|未开启]`. Dòng cuối là giá trị cột **`用完即停`** ("dừng khi dùng hết" = Free Quota Only); cột `状态` không có chữ trong bản dán. Khối có thể **thiếu dòng cuối**
+(hàng bị ngắt trang) → cảnh báo `missing_state`, trạng thái để chưa biết, không đoán.
+
+Bộ đọc gom **mọi** vấn đề theo từng dòng thay vì dừng ở lỗi đầu tiên: dòng lạ (`bad_line`), khối thiếu dòng hạn mức/hạn dùng (`incomplete_row`), số không đọc được (`bad_number`), còn lại > tổng (`quota_over_total`), ngày không tồn tại (`bad_date`),
+id lặp (`duplicate_model`), dòng mồ côi (`orphan_line`), tiêu đề cột sai (`header_incomplete`), các dòng cho nhiều ngày chụp khác nhau (`capture_day_conflict`). Khối lỗi **bị loại và được báo kèm số dòng**, khối lành vẫn được đọc; còn lỗi thì CLI **không ghi** kết quả.
+CLI in bảng **số model theo danh mục console (đếm thô bằng regex độc lập → đọc được)**, số dòng hạn mức/hạn dùng/trạng thái/tiêu đề, và "Đối chiếu số đếm: KHỚP/LỆCH" (số dòng trạng thái phải bằng số model trừ số cảnh báo `missing_state`).
+
+Gộp: model mới được thêm; model đã có chỉ được **làm mới các trường do console quyết định** (`console_category`, tổng/còn lại, thời điểm chụp, hạn dùng, Free Quota Only; khối thiếu dòng trạng thái KHÔNG xoá giá trị đã biết) — tầng, RPM, TPM, thinking, đa phương thức,
+số đo do Owner/benchmark ghi **không bao giờ bị ghi đè**; một lần đổi Free Quota Only được ghi vào `free_quota_only_note`; ghi chú chung `[console]` được thay (không nhân đôi); chạy lại là idempotent.
+
+Giới hạn của nguồn (ghi vào `notes` của tệp): bảng **không có cột đơn vị** (→ `quota_unit=null`; riêng `qwen3.7-plus` đã đối chiếu = tokens); `10K`/`1M`/`984.2K` là số làm tròn của console; hạn dùng chỉ có NGÀY (lưu 00:00 UTC của ngày đó, sớm hơn hạn thật tới ~1 ngày — thận trọng);
+**ngày chụp = ngày hết hạn − (N − 1)** với `剩余 N 天` (console đếm cả ngày hết hạn; bằng chứng: số dư `qwen3.7-plus` 984.2K đã phản ánh canary ngày 2026-10-03, và `qwen-plus` còn "1 ngày" vào đúng ngày hết hạn — phiên bản đầu của công cụ này trừ `N` và suy ra sai 2026-10-02, đã sửa);
+vị trí dòng cuối ↔ cột `用完即停` là suy ra từ tiêu đề cột (chờ Owner xác nhận).
 
 ## 2. Bản ghi hiện tại
 
-`qwen3.7-plus` — **SMART, `slot_thinking=off`**, `validated_candidate`: hạn mức 992.190/1.000.000 token (ảnh chụp 2026-10-03, hết hạn 2026-12-02), 15.000 RPM,
-5.000.000 TPM, thinking lai **mặc định bật**, Free Quota Only `not_enabled` (Owner bỏ qua công tắc vì tài khoản chưa gắn thẻ — lời Owner, ta không tự kiểm chứng).
-Số đo canary (6 lượt `off`, 2 lượt `on`) nằm ở `observations`. `input_modalities` **chưa ghi nhận** nên `report` báo `INCOMPLETE` (slot `alibaba-sg-01` đã có và đang ngủ đông;
-mức sẵn sàng chỉ nói về việc tạo THÊM slot từ kiểm kê).
+`qwen3.7-plus` — **baseline SMART đã kiểm chứng, `slot_thinking=off`**, `validated_candidate`: còn 984.200/1.000.000 token (bảng đầy đủ, ngày chụp 2026-10-03; số dư khớp ước tính của ta 992.190 − 7.918 token canary), hết hạn 2026-12-02,
+15.000 RPM, 5.000.000 TPM, thinking lai **mặc định bật**, đơn vị `tokens` (đối chiếu được). **Free Quota Only trên console nay là `confirmed_on`** (cột `用完即停` = 已开启; sáng 2026-10-03 Owner còn bỏ qua công tắc) — nhưng cờ `free_quota_only` ở phía
+ứng dụng của slot `alibaba-sg-01` VẪN là `false` (chưa đổi; slot đang ngủ đông). Số đo canary (6 lượt `off`, 2 lượt `on`) nằm ở `observations`. `input_modalities` **chưa ghi nhận** nên `report` báo `INCOMPLETE`.
 
-**49 model từ bảng Free Quota (Owner dán, chụp 2026-10-02 theo `剩余 N 天`)** — nguồn gốc nguyên văn ở `docs/ai/alibaba_free_quota_console_paste.txt`; bài kiểm khoá tệp JSON không được lệch khỏi nguồn này.
-Gồm **43 model `语音模型`** (TTS: `qwen3-tts-*`, `cosyvoice-v3-*`, `qwen-audio-3.0-tts-*`; nhận dạng giọng nói: `qwen3-asr-*`, `fun-asr*`, `qwen-audio-3.x-asr-*`; dịch trực tiếp: `*-livetranslate-*`; `qwen3-omni-30b-a3b-captioner`;
-`qwen-voice-design`) và **6 model `向量模型`** (`text-embedding-v3/v4`, `qwen3.7-text-embedding`, `tongyi-embedding-vision-flash/plus`, `qwen3-rerank`). Số dư đều còn nguyên (còn = tổng); hạn dùng 2026-12-01, 12-02, 12-15 hoặc 12-20;
-Free Quota Only đều `未开启`. Tất cả đang **INCOMPLETE** (chưa có tầng, đơn vị, RPM/TPM, thinking, đa phương thức) — **không có gì được đoán**.
+**249 model từ bảng Free Quota đầy đủ (Owner dán, ngày chụp 2026-10-03)** — mỗi model ID là một mục hạn mức riêng (id + số dư + hạn dùng + ảnh chụp riêng); nguồn gốc nguyên văn ở `docs/ai/alibaba_free_quota_console_paste.txt`, và bài kiểm khoá tệp JSON không được lệch khỏi nguồn này.
+Đếm thô độc lập khớp số đọc được theo từng danh mục: **大语言模型 102 · 视觉模型 67 · 多模态模型 21 · 语音模型 53 · 向量模型 6 = 249**; 249 dòng hạn mức, 249 dòng hạn dùng, 247 dòng trạng thái (đúng 2 khối thiếu: `qwen3.6-plus-2026-04-02`, `fun-asr-2025-11-07`), 2 khối tiêu đề; **0 dòng parse lỗi**, 2 cảnh báo.
+Free Quota Only (cột `用完即停`): bật 159 · chưa bật 88 · chưa biết 2. **Thiếu đơn vị hạn mức: 248/249** (bảng không có cột đơn vị). 247 model INCOMPLETE (chưa có tầng, đơn vị, RPM/TPM, thinking, đa phương thức), 2 BLOCKED (`qwen-plus`, `qwen-turbo`: hết hạn 2026-10-03) — **không có gì được đoán**.
 
-Hai điều bản dán cho thấy:
-* **Không có model chat nào trong bản dán** (ngoài `qwen3.7-plus` đã có): chưa thấy các dòng văn bản/đa phương thức thường (ứng viên FAST/ADVANCED/TRANSLATION/VISION). Bảng đầy đủ còn các danh mục khác.
-* **Các model giọng nói không khớp tầng chat nào** trong sáu tầng, và không đi qua router chat (cần TTS/ASR riêng — gần với `desktop_app/providers` của sản phẩm TTS hơn là `ControlledGateway`). Cần Owner quyết:
-  để chúng ngoài định tuyến chat (chỉ lưu kiểm kê), hay mở một đường tích hợp riêng sau. Gợi ý theo danh mục (không lưu thành tầng): `向量模型` → `EMBEDDING` (riêng `qwen3-rerank` là mô hình xếp hạng lại, Owner quyết); `语音模型` → chưa có tầng tương ứng.
+Báo cáo **ứng viên năng lực** theo 12 nhóm (FAST, SMART, ADVANCED, DEEP, CODING, CHARACTER, TRANSLATION, VISION, IMAGE, VIDEO, AUDIO, EMBEDDING/RERANK) nằm ở `docs/ai/ALIBABA_CAPABILITY_CANDIDATES.md` (sinh tự động bằng `candidates`, có bài kiểm so từng ký tự). **Chỉ là gợi ý**: `CAPABILITY_TIERS` của slot (6 tầng, đang
+được bộ kiểm tra slot ở production dùng) KHÔNG đổi và `tiers` không bị ghi cho model nào ngoài baseline. Bằng chứng có hai bậc — `category` (danh mục console tự nói) và `name` (dấu hiệu trong tên: chỉ là giả thuyết, luật nào bắn được ghi rõ); 23 model không đủ bằng chứng nằm ở "unclassified".
+
+Điều dữ liệu thật cho thấy:
+* **Danh mục console không đồng nghĩa khả năng**: `wan2.2-kf2v-flash` (tên là model video) nằm ở `大语言模型` với hạn mức 50 — báo cáo đánh dấu và xếp nó vào VIDEO theo tên.
+* **Cỡ hạn mức gợi ý đơn vị nhưng không xác nhận**: `1M` (văn bản/đa phương thức/vector) giống token; `10–200` (ảnh/video) giống số lần; `10K/36K/1K/10` (giọng nói) có thể là ký tự/giây/lần. Chỉ `qwen3.7-plus` đã đối chiếu.
+* **Hạn mức còn bị tiêu từ nơi khác**: 12 model đã mất một phần (`qwen-plus` −29.330, `qwen3.7-plus` −15.800 trong đó ~7,9K là canary của ta, `qwen3.5-flash` −330, …) trong khi ta chỉ từng gọi `qwen3.7-plus` — đúng giới hạn "tài khoản có thể có nơi tiêu hạn mức khác" ở `ALIBABA_PROVIDER.md` mục 7.
+* **Model giọng nói (53) không khớp tầng chat nào** và không đi qua router chat (TTS/ASR gần với `desktop_app/providers` của sản phẩm TTS hơn là `ControlledGateway`); 21 model omni (`多模态模型`) được gợi ý cả VISION và AUDIO nhưng đầu vào hỗ trợ chưa xác nhận. Owner quyết: chỉ lưu kiểm kê hay mở đường tích hợp riêng.
+* `qwen-plus` và `qwen-turbo` **hết hạn ngày 2026-10-03** (còn 970.670 / 999.990).
 
 ## 3. Thinking: quy tắc bắt buộc
 
@@ -95,7 +108,7 @@ Hai điều bản dán cho thấy:
 | Pha | Việc | Cần Owner |
 |---|---|---|
 | N0 (xong) | định dạng kiểm kê + công cụ + bản ghi `qwen3.7-plus` | — |
-| N1 | Owner gửi ảnh chụp console (mục 5); Claude chép vào kiểm kê, `report` cho biết model nào READY, tầng nào còn trống | ảnh chụp |
+| N1 (một phần xong) | bảng Free Quota đầy đủ đã vào kiểm kê (249 model) + báo cáo ứng viên; còn đơn vị, RPM/TPM, thinking, đa phương thức (mục 5); `report` cho biết model nào READY, tầng nào còn trống | thông tin còn thiếu (mục 5) |
 | N2 | Owner chọn model nào vào tầng nào; tạo slot **TẮT** từ kiểm kê (`slot …` → `POST /api/admin/ai/slots`), không thêm vào hồ sơ nào | duyệt |
 | N3 | probe + benchmark từng model qua tuyến Owner-only (như `ALIBABA_CANARY`), ghi `observations` | duyệt (có gọi Alibaba thật, tốn hạn mức) |
 | N4 | định tuyến công khai theo **tầng** (gói/tính năng → tầng → slot), vẫn không gắn gói với tên model; Gemini giữ nguyên là nền | duyệt riêng |
@@ -105,15 +118,13 @@ Máy móc đã có sẵn ở router (`plan(..., tier=…)`, `serves_tier`, `tier
 
 ## 5. Owner cần cung cấp gì (ảnh chụp Model Studio — cắt bỏ khoá API / WorkspaceId)
 
-0. **Đã có (2026-10-03):** phần bảng Free Quota gồm 43 model `语音模型` + 6 model `向量模型` (bản dán văn bản). **Còn thiếu:** các danh mục khác của bảng — nhất là **model văn bản/chat và đa phương thức** (ứng viên
-   FAST/ADVANCED/TRANSLATION/VISION), vì bản dán không có dòng nào ngoài giọng nói và vector.
-1. **Phần còn lại của bảng Free Quota** (Model usage → tab **Free Quota**; dán nguyên văn như lần trước, hoặc chụp mọi trang). Với **mỗi model** cần: *tên model đầy đủ* · *còn lại / tổng* ·
-   ***đơn vị*** (token/ảnh/giây/ký tự/lần — **bản dán lần trước không có đơn vị**) · *ngày hết hạn* · *cột/công tắc **Free Quota Only***. **Kèm tiêu đề các cột** (để xác nhận `未开启/已开启` đúng là Free Quota Only) và **ngày giờ + múi giờ** lúc chụp.
-2. **Trang chi tiết (model card) của TỪNG model muốn dùng** (ưu tiên ứng viên cho FAST, ADVANCED, TRANSLATION, VISION, EMBEDDING; SMART đã có qwen3.7-plus): *danh mục/khả năng* ·
-   *giới hạn tốc độ **RPM** và **TPM*** · *đầu vào hỗ trợ* (văn bản/ảnh/âm thanh/video) · *chế độ thinking* (không có / lai bật-tắt được / chỉ-thinking) và *mặc định bật hay tắt*.
-3. **Bổ sung cho `qwen3.7-plus`** (đang thiếu): đầu vào hỗ trợ (đa phương thức hay chỉ văn bản).
-4. **Quyết định của Owner**: model nào là ứng viên cho tầng nào (không suy từ tên); có muốn bật **Free Quota Only** trên console cho từng model hay không (tài khoản hiện chưa gắn thẻ;
-   thay đổi có hiệu lực không tức thì, ~30 phút).
-5. Nếu console cho **xuất bảng** (CSV/Excel) thì gửi luôn tệp đó — nhập CSV nhanh và ít sai hơn đọc ảnh.
+0. **Đã có (2026-10-03):** toàn bộ bảng Free Quota (249 model, cả 5 danh mục, kèm tiêu đề cột). Còn lại là những thứ **bảng không có**:
+1. **Đơn vị hạn mức** của từng danh mục (token / ký tự / giây / ảnh / video / lần) — bảng chỉ có con số. Cách nhanh nhất: xem trang giá/chi tiết của một model đại diện mỗi danh mục (và `qwen-image*`/`wan*` cho ảnh/video, `qwen3-tts*`/`qwen3-asr*`/`fun-asr*` cho giọng nói).
+2. **Xác nhận một điều**: dòng cuối mỗi khối (`已开启/未开启`) đúng là cột **`用完即停`** (Free Quota Only), không phải cột `状态`. Và với 2 khối thiếu dòng này (`qwen3.6-plus-2026-04-02`, `fun-asr-2025-11-07`) thì công tắc đang bật hay chưa.
+3. **Trang chi tiết (model card) của TỪNG model muốn dùng** — ưu tiên ứng viên mỗi nhóm trong báo cáo ứng viên: *giới hạn tốc độ **RPM** và **TPM***, *đầu vào hỗ trợ* (văn bản/ảnh/âm thanh/video), *chế độ thinking* (không có / lai bật-tắt được / chỉ-thinking) và *mặc định bật hay tắt*.
+   Với 23 model "chưa đủ bằng chứng" (`glm-5.x`, `kimi-k3`, `deepseek-*`, `qwen3-8b/14b/32b`, `qwen3.5-*b`, `qwen3.8-27b`, `qwen3.8-2.4t-a95b`, …) cần model card để biết thuộc nhóm nào.
+4. **Bổ sung cho `qwen3.7-plus`**: đầu vào chỉ văn bản hay đa phương thức.
+5. **Quyết định của Owner**: duyệt (hoặc sửa) các gợi ý trong `ALIBABA_CAPABILITY_CANDIDATES.md`; 53 model giọng nói chỉ lưu kiểm kê hay mở đường tích hợp TTS/ASR riêng; có muốn bật cờ `free_quota_only` phía ứng dụng cho slot canary nay khi console đã bật (`confirmed_on`) hay không.
+6. Nếu console cho **xuất bảng** (CSV/Excel) thì gửi luôn tệp đó — nhập CSV nhanh và ít sai hơn đọc ảnh.
 
 Không cần gửi: khoá API, WorkspaceId, endpoint (đã có sẵn). Không có lượt gọi Alibaba thật nào được thực hiện cho tới khi Owner duyệt pha N3.

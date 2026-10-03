@@ -4,6 +4,7 @@ Công cụ dòng lệnh cho kiểm kê model Alibaba (NGOẠI TUYẾN: chỉ đ�
     python scripts/alibaba_inventory.py validate docs/ai/alibaba_model_inventory.json
     python scripts/alibaba_inventory.py report   docs/ai/alibaba_model_inventory.json
     python scripts/alibaba_inventory.py parse-console docs/ai/alibaba_free_quota_console_paste.txt --into docs/ai/alibaba_model_inventory.json --out moi.json
+    python scripts/alibaba_inventory.py candidates docs/ai/alibaba_model_inventory.json --paste docs/ai/alibaba_free_quota_console_paste.txt --md bao_cao.md
     python scripts/alibaba_inventory.py from-csv bang.csv --captured-at 2026-10-04T03:00:00+00:00 > kiem_ke.json
     python scripts/alibaba_inventory.py slot docs/ai/alibaba_model_inventory.json <model_id> --slot-id alibaba-sg-02 \
         --secret-ref ALIBABA_SG_02 --endpoint <endpoint của workspace>
@@ -25,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from server.ai_assistant.control import alibaba_candidates as cand  # noqa: E402
 from server.ai_assistant.control import alibaba_inventory as inv  # noqa: E402
 from server.ai_assistant.control.model import CAPABILITY_TIERS, ConfigValidationError  # noqa: E402
 
@@ -130,7 +132,30 @@ def cmd_parse_console(args: argparse.Namespace) -> int:
     """Đọc văn bản dán từ bảng Free Quota (tiếng Trung) và gộp vào kiểm kê. In JSON mới ra stdout, hoặc ghi vào --out; tóm tắt ra stderr."""
     try:
         text = Path(args.paste).read_text(encoding="utf-8-sig")
-        entries, snap = inv.parse_console_free_quota(text, captured_at=args.captured_at)
+        parsed = inv.parse_console_free_quota(text, captured_at=args.captured_at)
+        entries, snap = list(parsed.entries), parsed.snapshot_at
+        problems = inv.verify_console_counts(text, parsed)
+        raw = inv.raw_line_counts(text)
+        by_cat: dict = {}
+        for e in entries:
+            by_cat[e["console_category"]] = by_cat.get(e["console_category"], 0) + 1
+        sys.stderr.write("Số model theo danh mục console (thô → đọc được):\n")
+        for cat in sorted(set(raw["heads_by_category"]) | set(by_cat)):
+            sys.stderr.write(f"  {cat}: {raw['heads_by_category'].get(cat, 0)} → {by_cat.get(cat, 0)}\n")
+        sys.stderr.write(f"  Tổng: {sum(raw['heads_by_category'].values())} → {len(entries)} · dòng hạn mức {raw['quota_lines']} · dòng hạn dùng "
+                         f"{raw['expiry_lines']} · dòng trạng thái {raw['state_on'] + raw['state_off']} (bật {raw['state_on']}, chưa bật {raw['state_off']}) "
+                         f"· khối tiêu đề {raw['header_blocks']}\n")
+        sys.stderr.write("Đối chiếu số đếm: " + ("KHỚP" if not problems else "LỆCH") + "\n")
+        for p in problems:
+            sys.stderr.write(f"  ! {p}\n")
+        for i in parsed.errors:
+            sys.stderr.write(f"LỖI dòng {i['line']} [{i['code']}]: {i['message']}\n")
+        for i in parsed.warnings:
+            sys.stderr.write(f"CẢNH BÁO dòng {i['line']} [{i['code']}]: {i['message']}\n")
+        sys.stderr.write(f"Thiếu đơn vị hạn mức (quota_unit): {len(entries)}/{len(entries)} model — bảng không có cột đơn vị.\n")
+        if parsed.errors or problems:
+            sys.stderr.write("Không ghi kết quả vì còn lỗi/lệch ở trên.\n")
+            return 1
         base = (json.loads(Path(args.into).read_text(encoding="utf-8")) if args.into else
                 {"version": inv.INVENTORY_VERSION, "provider": inv.PROVIDER, "region": args.region, "captured_at": snap, "models": []})
         merged, rep = inv.merge_console(base, entries, snap)
@@ -157,6 +182,35 @@ def cmd_parse_console(args: argparse.Namespace) -> int:
     sys.stderr.write(f"Đọc {len(entries)} model (chụp {snap}): thêm {len(rep['added'])}, làm mới {len(rep['refreshed'])}, "
                      f"không đổi {len(rep['unchanged'])}.\n")
     return 0
+
+
+def cmd_candidates(args: argparse.Namespace) -> int:
+    """Báo cáo ỨNG VIÊN năng lực (gợi ý, không phải tầng định tuyến; không ghi vào kiểm kê)."""
+    data = _load(args.file)
+    if data is None:
+        return 1
+    try:
+        paste = Path(args.paste).read_text(encoding="utf-8-sig") if args.paste else None
+        rep = cand.build_report(data, paste)
+    except FileNotFoundError as exc:
+        sys.stderr.write(f"KHÔNG TÌM THẤY: {exc.filename}\n")
+        return 1
+    except ValueError as exc:
+        sys.stderr.write(f"Bản dán lỗi: {exc}\n")
+        return 1
+    if args.md:
+        Path(args.md).write_text(cand.render_markdown(rep), encoding="utf-8", newline="\n")
+    if args.json:
+        Path(args.json).write_text(json.dumps(rep, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    _out(f"{rep['models']} model, mốc {rep['as_of'][:10]}. Ứng viên theo nhóm (gợi ý, KHÔNG phải tầng định tuyến):")
+    for cls in cand.CANDIDATE_CLASSES:
+        rows = rep["classes"][cls]
+        _out(f"  {cls:<17} {len(rows):>3}  (category {sum(1 for r in rows if r['strength'] == cand.STRONG)}, name {sum(1 for r in rows if r['strength'] == cand.WEAK)})")
+    _out(f"  chưa đủ bằng chứng: {len(rep['unclassified'])}")
+    p = rep["parse"]
+    if p is not None:
+        _out(f"Parse nguồn: {'SẠCH' if not p['errors'] and not p['count_problems'] else 'CÓ VẤN ĐỀ'} — {p['rows']} → {p['entries']}, lỗi {len(p['errors'])}, cảnh báo {len(p['warnings'])}")
+    return 1 if (p is not None and (p["errors"] or p["count_problems"])) else 0
 
 
 def cmd_slot(args: argparse.Namespace) -> int:
@@ -197,6 +251,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     s.add_argument("--captured-at", default=""); s.add_argument("--region", default="ap-southeast-1"); s.set_defaults(fn=cmd_parse_console)
     s = sub.add_parser("from-csv"); s.add_argument("csv"); s.add_argument("--captured-at", default=""); s.add_argument("--region", default="")
     s.set_defaults(fn=cmd_from_csv)
+    s = sub.add_parser("candidates"); s.add_argument("file"); s.add_argument("--paste", default=""); s.add_argument("--md", default="")
+    s.add_argument("--json", default=""); s.set_defaults(fn=cmd_candidates)
     s = sub.add_parser("slot"); s.add_argument("file"); s.add_argument("model_id"); s.add_argument("--slot-id", required=True)
     s.add_argument("--secret-ref", required=True); s.add_argument("--endpoint", required=True); s.add_argument("--workloads", default="general")
     s.set_defaults(fn=cmd_slot)

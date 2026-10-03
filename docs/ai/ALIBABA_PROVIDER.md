@@ -342,6 +342,8 @@ thường, lịch sử đã lưu, danh sách hội thoại hay availability. V�
   `ALIBABA_CANARY` được **giữ nguyên, không xoá**; `qwen` cũ ĐÓNG; không hồ sơ nào chứa Alibaba; `FAS_AI_PREFER_FREE_QUOTA` chưa đặt. Cổng máy chủ `FAS_AI_ALIBABA_ENABLED` là biến môi trường
   của Render (Owner tự quyết có đóng thêm hay không; slot tắt + cờ loại tắt đã đủ để không có lượt nào tới Alibaba).
 * Chưa kiểm: ánh xạ lỗi thật, 429, `Retry-After`, chế độ `support`, web search.
+* **Bảng Free Quota đầy đủ (2026-10-03)**: `qwen3.7-plus` còn 984.2K/1M (khớp ước tính của ta: 992.190 − 7.918 token canary) và console nay cho **`用完即停` = 已开启** (Free Quota Only). Cờ `free_quota_only` ở phía ứng dụng của slot
+  `alibaba-sg-01` vẫn `false` — Owner quyết có bật hay không. Kiểm kê 249 model và báo cáo ứng viên theo 12 nhóm: `docs/ai/ALIBABA_MODEL_INVENTORY.md`, `docs/ai/ALIBABA_CAPABILITY_CANDIDATES.md`.
 
 Bước tiếp theo — kiểm kê hạn mức và định tuyến theo tầng — xem `docs/ai/ALIBABA_MODEL_INVENTORY.md`.
 

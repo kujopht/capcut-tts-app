@@ -1,0 +1,563 @@
+/* Ink Scout: The Lost Chapter — mọi lớp đều tiền tố `isc-` để không đụng phần còn lại của site. */
+
+html.isc-lock,
+body.isc-lock {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* ------------------------------------------------------------------ menu / thẻ chi tiết */
+.isc-menu {
+  max-width: 980px;
+  margin-inline: auto;
+}
+.isc-hero {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 28px;
+  align-items: center;
+  padding: 22px;
+  border-radius: 18px;
+  border: 1px solid var(--brand-line);
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(139, 108, 255, 0.22), transparent 55%),
+    radial-gradient(90% 120% at 100% 100%, rgba(34, 211, 238, 0.14), transparent 60%),
+    var(--bg-1);
+}
+.isc-hero-art {
+  display: grid;
+  place-items: center;
+}
+.isc-hero-art img {
+  width: 100%;
+  max-width: 200px;
+  height: auto;
+  filter: drop-shadow(0 0 22px rgba(34, 211, 238, 0.35));
+}
+.isc-eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  color: var(--accent);
+}
+.isc-title {
+  margin: 0 0 10px;
+  font-size: clamp(26px, 5vw, 40px);
+  line-height: 1.1;
+  background: linear-gradient(90deg, #c3b3ff, #9af0ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.isc-lead {
+  margin: 0 0 16px;
+  color: var(--text-2);
+  max-width: 56ch;
+  line-height: 1.55;
+}
+.isc-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.isc-confirm {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  font-size: 14px;
+}
+.isc-progress {
+  margin: 12px 0 0;
+}
+.isc-error {
+  color: #ff9aa8;
+  margin-top: 10px;
+}
+.isc-info {
+  padding: 16px 18px;
+}
+.isc-ctl-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.isc-h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--text);
+}
+.isc-keys {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  line-height: 1.8;
+  font-size: 14px;
+}
+.isc-keys kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--brand-line);
+  background: var(--bg-2);
+  font: 600 12px/1.5 ui-monospace, monospace;
+  text-align: center;
+  color: var(--text);
+}
+@media (max-width: 720px) {
+  .isc-hero {
+    grid-template-columns: 1fr;
+    padding: 16px;
+    text-align: center;
+  }
+  .isc-hero-art img {
+    max-width: 120px;
+  }
+  .isc-cta {
+    justify-content: center;
+  }
+  .isc-lead {
+    margin-inline: auto;
+  }
+  .isc-ctl-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------------ màn chơi toàn màn hình */
+.isc-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  background: #04050b;
+  color: #eceff7;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+  overscroll-behavior: none;
+  font-family: inherit;
+}
+.isc-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.isc-stage[data-portrait="true"] .isc-wrap {
+  align-items: flex-start;
+}
+.isc-view {
+  position: relative;
+  flex: none;
+  background: #000;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(139, 108, 255, 0.25);
+}
+.isc-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: none;
+}
+.isc-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #04050b;
+  color: #9af0ff;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+}
+.isc-pause-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(154, 240, 255, 0.4);
+  background: rgba(10, 14, 34, 0.7);
+  color: #cfe9ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.isc-pause-btn:hover {
+  background: rgba(34, 211, 238, 0.22);
+}
+.isc-orient {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #7e8aa6;
+  pointer-events: none;
+}
+.isc-savefail {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #ffd27a;
+  background: rgba(10, 14, 34, 0.8);
+  border-radius: 6px;
+}
+
+/* lớp chữ phủ lên canvas — cỡ chữ co theo --u (số px CSS cho mỗi điểm ảnh nội bộ), có sàn đọc được */
+.isc-cap {
+  position: absolute;
+  left: calc(var(--u, 1px) * 118);
+  right: calc(var(--u, 1px) * 10);
+  top: calc(var(--u, 1px) * 8);
+  padding: 0.45em 0.7em;
+  border: 1px solid rgba(154, 240, 255, 0.32);
+  border-radius: 6px;
+  background: rgba(8, 10, 22, 0.86);
+  font-size: max(12px, calc(var(--u, 1px) * 6.4));
+  line-height: 1.38;
+  pointer-events: none;
+}
+.isc-cap-who {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 0.82em;
+  letter-spacing: 0.06em;
+  color: #9af0ff;
+}
+.isc-boss-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--u, 1px) * 22);
+  text-align: center;
+  font-weight: 800;
+  font-size: max(10px, calc(var(--u, 1px) * 5.2));
+  letter-spacing: 0.34em;
+  color: #ff9aa8;
+  text-shadow: 0 1px 0 #000;
+  pointer-events: none;
+}
+.isc-dead {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--u, 1px) * 70);
+  text-align: center;
+  font-size: max(13px, calc(var(--u, 1px) * 7));
+  color: #ffb3bf;
+  pointer-events: none;
+}
+.isc-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(88%, calc(var(--u, 1px) * 300));
+  max-height: 94%;
+  overflow: auto;
+  padding: max(12px, calc(var(--u, 1px) * 9)) max(14px, calc(var(--u, 1px) * 12));
+  border-radius: 10px;
+  border: 1px solid rgba(139, 108, 255, 0.55);
+  background: rgba(8, 10, 24, 0.95);
+  box-shadow: 0 0 40px rgba(139, 108, 255, 0.25);
+  text-align: center;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.isc-h {
+  margin: 0 0 8px;
+  font-size: max(15px, calc(var(--u, 1px) * 9));
+  line-height: 1.2;
+}
+.isc-gold {
+  color: #f3e3a2;
+}
+.isc-cyan {
+  color: #9af0ff;
+}
+.isc-line {
+  margin: 0 0 6px;
+  font-size: max(12px, calc(var(--u, 1px) * 6.2));
+  line-height: 1.5;
+  color: #dfe5f5;
+}
+.isc-big {
+  font-size: max(14px, calc(var(--u, 1px) * 7.2));
+}
+.isc-boon {
+  margin: 8px 0 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  font-size: max(12px, calc(var(--u, 1px) * 5.8));
+  color: #9af0ff;
+}
+.isc-tap,
+.isc-note {
+  margin: 8px 0 0;
+  font-size: max(11px, calc(var(--u, 1px) * 5));
+  color: #8e9bb8;
+}
+.isc-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin: 8px 0;
+}
+.isc-stats div {
+  padding: 6px;
+  border-radius: 8px;
+  background: rgba(139, 108, 255, 0.12);
+}
+.isc-stats dt {
+  font-size: 11px;
+  color: #8e9bb8;
+}
+.isc-stats dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.isc-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 10px;
+}
+.isc-row-wrap {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.isc-label {
+  font-size: 13px;
+  color: #b8c2dc;
+}
+.isc-btn {
+  min-height: 44px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(154, 240, 255, 0.4);
+  background: rgba(24, 30, 66, 0.85);
+  color: #eaf6ff;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.isc-btn:hover {
+  background: rgba(34, 211, 238, 0.2);
+}
+.isc-btn-primary {
+  background: linear-gradient(180deg, #8b6cff, #6d4aef);
+  border-color: #a78bfa;
+  font-weight: 700;
+}
+.isc-btn:focus-visible,
+.isc-seg-b:focus-visible,
+.isc-pause-btn:focus-visible {
+  outline: 2px solid #9af0ff;
+  outline-offset: 2px;
+}
+.isc-seg {
+  display: inline-flex;
+  border: 1px solid rgba(154, 240, 255, 0.35);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.isc-seg-b {
+  min-width: 54px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: #cfd8ee;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.isc-seg-b[aria-checked="true"] {
+  background: rgba(139, 108, 255, 0.5);
+  color: #fff;
+  font-weight: 700;
+}
+.isc-choices {
+  flex-wrap: wrap;
+}
+.isc-choice {
+  display: grid;
+  gap: 4px;
+  max-width: 46%;
+  min-width: 120px;
+  text-align: left;
+}
+.isc-choice span {
+  font-size: 12px;
+  color: #aab6d2;
+}
+.isc-choice.is-on {
+  border-color: #f3e3a2;
+  box-shadow: 0 0 0 1px #f3e3a2, 0 0 18px rgba(243, 227, 162, 0.35);
+}
+.isc-intro {
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(90% 90% at 50% 20%, #1a2150, #04050b 70%);
+}
+.isc-intro-box {
+  max-width: 560px;
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+}
+.isc-intro-art {
+  display: block;
+  margin: 0 auto 14px;
+  filter: drop-shadow(0 0 18px rgba(34, 211, 238, 0.4));
+}
+
+/* ------------------------------------------------------------------ nút chạm */
+.isc-touch {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.isc-touch * {
+  -webkit-tap-highlight-color: transparent;
+}
+.isc-tb {
+  appearance: none;
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid rgba(154, 240, 255, 0.55);
+  background: rgba(20, 26, 60, 0.62);
+  color: #eaf6ff;
+  font-size: 28px;
+  line-height: 1;
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  padding: 0;
+}
+.isc-tb:active {
+  background: rgba(34, 211, 238, 0.55);
+  transform: scale(0.94);
+}
+.isc-tb-pause {
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  width: 48px;
+  height: 48px;
+  font-size: 14px;
+  border-radius: 12px;
+}
+.isc-pad {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
+  width: min(46vw, 200px);
+  height: 92px;
+  border-radius: 46px;
+  border: 2px solid rgba(154, 240, 255, 0.5);
+  background: rgba(20, 26, 60, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  color: #cfe9ff;
+  font-size: 26px;
+  pointer-events: auto;
+  touch-action: none;
+}
+.isc-actions {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
+  width: min(54vw, 236px);
+  height: 164px;
+  pointer-events: none;
+}
+.isc-tb-jump {
+  right: 0;
+  bottom: 0;
+  width: 80px;
+  height: 80px;
+}
+.isc-tb-attack {
+  right: 90px;
+  bottom: 6px;
+  width: 70px;
+  height: 70px;
+}
+.isc-tb-pulse {
+  right: 62px;
+  bottom: 88px;
+  width: 60px;
+  height: 60px;
+}
+.isc-tb-dash {
+  right: 4px;
+  bottom: 94px;
+  width: 60px;
+  height: 60px;
+}
+/* màn hình ngang thấp (điện thoại xoay ngang): thu nhỏ để không che khung hình */
+@media (max-height: 460px) {
+  .isc-pad {
+    height: 76px;
+    width: min(34vw, 180px);
+    padding: 0 18px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  .isc-actions {
+    height: 132px;
+    width: min(40vw, 220px);
+    bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  .isc-tb-jump {
+    width: 66px;
+    height: 66px;
+  }
+  .isc-tb-attack {
+    right: 76px;
+    width: 58px;
+    height: 58px;
+    bottom: 4px;
+  }
+  .isc-tb-pulse {
+    right: 52px;
+    bottom: 70px;
+    width: 56px;
+    height: 56px;
+  }
+  .isc-tb-dash {
+    right: 2px;
+    bottom: 76px;
+    width: 56px;
+    height: 56px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .isc-tb:active {
+    transform: none;
+  }
+}

@@ -58,6 +58,23 @@ export const GAMES: readonly GameInfo[] = [
   },
 ];
 
+/**
+ * Thẻ của "Ink Scout: The Lost Chapter" — chỉ là DỮ LIỆU; trang Giải trí chỉ nối nó vào danh sách khi `GAME_INK_SCOUT_ENABLED` bật (cờ ở
+ * `lib/features.ts`). Game có trang riêng (`href`), chạy hoàn toàn trên trình duyệt, lưu cục bộ, không nói chuyện với máy chủ → không tính XP.
+ */
+export const INK_SCOUT_GAME: GameInfo = {
+  id: "ink-scout-lost-chapter",
+  title: "Ink Scout: The Lost Chapter",
+  desc: "Hành động 2D kiểu metroidvania: xuống Kho Lưu Trữ bị lãng quên, gom ba Mảnh Ký Ức và đối mặt với The Redactor.",
+  icon: "🗡️",
+  color: "#8b6cff",
+  cheDo: "solo",
+  nguoiChoi: "1",
+  thoiLuong: "20–35 phút",
+  xp: null,
+  href: "/entertainment/ink-scout",
+};
+
 export function nhanCheDo(c: CheDoGame): string {
   return c === "solo" ? "Chơi đơn" : "Phòng 2 người";
 }

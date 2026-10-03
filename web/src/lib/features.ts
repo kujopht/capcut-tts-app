@@ -68,3 +68,11 @@ export const AI_ASSISTANT_ENABLED = process.env.NEXT_PUBLIC_AI_ASSISTANT_ENABLED
  */
 export const AI_COMPANION_ENABLED =
   AI_ASSISTANT_ENABLED && process.env.NEXT_PUBLIC_AI_COMPANION_ENABLED === "1";
+
+/**
+ * `GAME_INK_SCOUT_ENABLED` — game hành động 2D "Ink Scout: The Lost Chapter" (`src/game/inkscout/`, `docs/games/INK_SCOUT_LOST_CHAPTER.md`).
+ * TẮT mặc định; KHÔNG bật ở production khi chưa có chủ phê duyệt. Tắt thì: thẻ game không hiện ở trang Giải trí, route `/entertainment/ink-scout`
+ * chỉ trả một thông báo tĩnh, và KHÔNG một byte mã game nào được tải (runtime chỉ `import()` khi người chơi bấm Chơi). Giá trị đọc lúc BUILD.
+ * Bật = build với `NEXT_PUBLIC_GAME_INK_SCOUT_ENABLED=1`.
+ */
+export const GAME_INK_SCOUT_ENABLED = process.env.NEXT_PUBLIC_GAME_INK_SCOUT_ENABLED === "1";

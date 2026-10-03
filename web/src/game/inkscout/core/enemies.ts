@@ -140,7 +140,21 @@ export class Enemy {
     if (this.spec.flying) this.vy = -0.6;
     // Đòn trúng cắt ngang pha telegraph/lướt của kẻ nhỏ (người chơi được thưởng vì phản ứng đúng); Broken Character không bị cắt.
     if (this.kind !== "broken") {
-      if (this.state === "notice" || this.state === "telegraph" || this.state === "crouch") this.setState("recover", 18);
+      if (this.state === "telegraph") {
+        // Torn Page (không có pha "recover"): bị ngắt thì bay về chỗ neo.
+        this.state = "return";
+        this.t = 0;
+        this.vx = 0;
+        this.vy = 0;
+      } else if (this.state === "dive") {
+        this.state = "return";
+        this.t = 0;
+        this.vx = 0;
+        this.vy = 0;
+      } else if (this.state === "notice" || this.state === "crouch" || this.state === "lunge" || this.state === "charge" || this.state === "skid") {
+        // Bị chém giữa chừng (kể cả lúc đang lao) ⇒ cú lao bị ngắt, kẻ địch lảo đảo rồi hồi — không tiếp tục lao với vận tốc hất lùi.
+        this.setState("recover", 18);
+      }
     }
     if (this.kind === "broken" && !this.enraged && this.hp <= this.maxHp / 2 && this.hp > 0) {
       this.enraged = true;

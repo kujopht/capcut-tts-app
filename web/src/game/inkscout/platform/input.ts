@@ -69,6 +69,8 @@ export class InputSource {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
     this.onAnyKey?.();
+    // Enter/Space đang nằm trên một nút/liên kết/ô chọn của hộp thoại DOM thì để trình duyệt kích hoạt nó (không nuốt, không ánh xạ thành hành động game).
+    if ((e.code === "Space" || e.code === "Enter") && t && (t.tagName === "BUTTON" || t.tagName === "A" || t.tagName === "SUMMARY" || (t.getAttribute?.("role") ?? "") === "radio")) return;
     if (e.code === "Escape" || e.code === "KeyP") {
       if (!e.repeat) this.onPause?.();
       e.preventDefault();
@@ -101,6 +103,8 @@ export class InputSource {
 
   // ---- nút chạm
   press(button: ButtonName, pointerId: number): void {
+    // Nút chạm cũng là cử chỉ người dùng: thử mở khoá âm thanh (trình duyệt di động có thể đã hết "cửa sổ cử chỉ" sau lúc tải bất đồng bộ).
+    this.onAnyKey?.();
     let s = this.touch.get(button);
     if (!s) this.touch.set(button, (s = new Set()));
     s.add(pointerId);

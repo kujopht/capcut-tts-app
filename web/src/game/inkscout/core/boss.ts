@@ -420,7 +420,13 @@ export class Boss {
     const dist = Math.abs(ctx.px - this.x);
     // Memory Collapse thứ hai: một lần khi máu thấp.
     if (this.phase === 2 && this.collapses === 1 && this.hp <= BOSS.collapse2At) {
-      this.beginCollapse(ctx);
+      // Cũng đi qua pha báo trước đầy đủ (boss trượt ra giữa phòng, ký ức rung lên) — không bao giờ xuất hiện đột ngột.
+      this.attack = "memoryCollapse";
+      this.state = "telegraph";
+      this.t = 0;
+      this.step = 0;
+      ctx.emit({ t: "sfx", name: "telegraph", x: this.x, y: this.y });
+      ctx.emit({ t: "caption", id: "boss.collapse" });
       return;
     }
     this.attack = this.sched.next(this.phase, dist);
@@ -444,6 +450,13 @@ export class Boss {
     }
     if (this.t === 1) this.spawnTelegraphHazards(ctx, a);
     if (a === "rewrite" && this.t === 1) this.visible = true;
+    if (a === "memoryCollapse") {
+      // Trượt về giữa phòng trong lúc báo trước rồi mới bung các mảnh.
+      const mid = (this.left + this.right) / 2;
+      this.moveTo(this.x + Math.max(-4, Math.min(4, mid - this.x)));
+      if (this.t >= spec.telegraph) this.beginCollapse(ctx);
+      return;
+    }
     if (this.t >= spec.telegraph) {
       this.state = "active";
       this.t = 0;
@@ -653,7 +666,8 @@ export class Boss {
         id: fragId++, angle: (i / BOSS.fragments) * Math.PI * 2, hp: BOSS.fragmentHp, cracked: i < cracked, flash: 0, fireT: 80 + i * 40, x: this.x, y: this.y - 26,
       });
     }
-    ctx.emit({ t: "caption", id: "boss.collapse" });
+    // Lần hai đã nói lúc bắt đầu báo trước; chỉ lần đầu (đi từ pha khựng sang) mới nói ở đây.
+    if (this.collapses === 1) ctx.emit({ t: "caption", id: "boss.collapse" });
     ctx.emit({ t: "sfx", name: "bossPhase", x: this.x, y: this.y });
   }
 

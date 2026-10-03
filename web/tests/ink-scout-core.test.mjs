@@ -441,3 +441,112 @@ test("mọi dữ liệu phòng hợp lệ: spawn/cửa/thực thể nằm trong 
   const kinds = new Set(ids.flatMap((id) => room(id).enemies.map((e) => e.kind)));
   assert.deepEqual([...kinds].sort(), ["broken", "hound", "scribble", "tornPage"]);
 });
+
+test("hết máu ở khung nào thì chết ở khung đó: không qua cửa/nhặt đồ/hồi máu/kích hoạt kết thúc khi đang chết (review độc lập #1)", () => {
+  // đứng trên mốc kết thúc với 1 máu rồi bị đánh chết đúng khung đó
+  const g = new Game({ seed: 1 });
+  g.save.bossDefeated = true;
+  g.qaGoto("ending", "left");
+  g.player.place(11 * TILE, 11 * TILE - 16);
+  g.player.hp = 1;
+  g.player.invuln = 0;
+  g.player.takeHit(0, 1, noop);
+  g.step(NO_INPUT);
+  assert.equal(g.mode, "dead", `mode ${g.mode}`);
+  // đứng trong bán kính Dấu Trang với 0 máu: không được hồi đầy máu
+  const h = new Game({ seed: 1 });
+  h.qaGoto("hall", "left");
+  h.player.place(6 * TILE + 8, 19 * TILE);
+  h.player.hp = 1;
+  h.player.invuln = 0;
+  h.player.takeHit(0, 1, noop);
+  h.step(NO_INPUT);
+  assert.equal(h.mode, "dead");
+  assert.equal(h.player.hp, 0);
+  // đứng trên Ký Ức với 0 máu: không mở hộp đọc
+  const k = new Game({ seed: 1 });
+  k.qaGoto("secret", "left");
+  k.player.place(12 * TILE + 8, 10 * TILE);
+  k.player.hp = 1;
+  k.player.invuln = 0;
+  k.player.takeHit(0, 1, noop);
+  k.step(NO_INPUT);
+  assert.equal(k.mode, "dead");
+  assert.deepEqual(k.save.memories, []);
+});
+
+test("Torn Page bị chém lúc báo trước không bị kẹt: quay về chỗ neo rồi lại tuần tra (review độc lập #3)", () => {
+  const map = arena();
+  const page = new Enemy({ kind: "tornPage", tx: 20, ty: 10 });
+  for (let f = 0; f < 200 && page.state !== "telegraph"; f += 1) page.update({ map, px: page.x + 40, py: 17 * TILE, emit: noop });
+  assert.equal(page.state, "telegraph");
+  page.hit(1, 1, noop);
+  const seen = new Set();
+  for (let f = 0; f < 400; f += 1) {
+    page.update({ map, px: 9999, py: 17 * TILE, emit: noop });
+    seen.add(page.state);
+  }
+  assert.ok(seen.has("return") && seen.has("hover"), `trạng thái đã thấy: ${[...seen]}`);
+  assert.equal(page.state, "hover", "không kẹt ở trạng thái không lối ra");
+});
+
+test("cửa đấu trường: cửa trái còn mở cho tới khi boss thức (lùi được); cửa phải khoá từ đầu; boss thức ⇒ khoá cả hai (review độc lập vòng 2 #1)", () => {
+  const s = defaultSave();
+  s.marginStep = true;
+  s.checkpoint = "bookmark";
+  const g = new Game({ save: s, seed: 3 });
+  g.qaGoto("arena", "left");
+  assert.equal(g.doorLocked("left"), false, "vừa vào: cửa trái mở");
+  assert.equal(g.doorLocked("right"), true, "cửa phải khoá (không bỏ qua boss)");
+  assert.equal(g.boss.state, "dormant");
+  g.player.place(4 * TILE + 8, 11 * TILE);
+  g.step(NO_INPUT);
+  assert.equal(g.doorLocked("left"), true, "boss thức ⇒ khoá cửa trái");
+  assert.equal(g.bossLocked, true);
+  assert.notEqual(g.boss.state, "dormant");
+});
+
+test("chém trúng kẻ đang lao thì ngắt cú lao (Hound charge, Scribble lunge, Torn Page dive) — không tiếp tục lao với vận tốc hất lùi (review vòng 2 #2)", () => {
+  const map = arena();
+  const hound = new Enemy({ kind: "hound", tx: 20, ty: 16 });
+  for (let f = 0; f < 200 && hound.state !== "charge"; f += 1) hound.update({ map, px: hound.x - 100, py: hound.y, emit: noop });
+  assert.equal(hound.state, "charge");
+  hound.hit(1, 1, noop);
+  assert.equal(hound.state, "recover");
+  const scribble = new Enemy({ kind: "scribble", tx: 20, ty: 16 });
+  for (let f = 0; f < 200 && scribble.state !== "lunge"; f += 1) scribble.update({ map, px: scribble.x - 40, py: scribble.y, emit: noop });
+  assert.equal(scribble.state, "lunge");
+  scribble.hit(1, 1, noop);
+  assert.equal(scribble.state, "recover");
+  const page = new Enemy({ kind: "tornPage", tx: 20, ty: 10 });
+  for (let f = 0; f < 300 && page.state !== "dive"; f += 1) page.update({ map, px: page.x + 40, py: 17 * TILE, emit: noop });
+  assert.equal(page.state, "dive");
+  page.hit(1, 1, noop);
+  assert.equal(page.state, "return");
+  // Broken Character có giáp: không bị ngắt đòn đập
+  const broken = new Enemy({ kind: "broken", tx: 20, ty: 16 });
+  for (let f = 0; f < 300 && broken.state !== "slam"; f += 1) broken.update({ map, px: broken.x - 40, py: broken.y, emit: noop });
+  assert.equal(broken.state, "slam");
+  broken.hit(1, 1, noop);
+  assert.equal(broken.state, "slam");
+});
+
+test("chết/hồi sinh xoá hit-stop còn sót: game vừa hồi sinh không bị đóng băng (review vòng 2 #4)", () => {
+  const g = new Game({ seed: 1 });
+  g.qaGoto("entrance", "start");
+  for (let f = 0; f < 3; f += 1) g.step(NO_INPUT);
+  // Đòn chạm gây hit-stop và cũng là đòn chí mạng, cùng một khung.
+  g.enemies = [new Enemy({ kind: "scribble", tx: Math.floor(g.player.x / TILE), ty: 10 })];
+  g.enemies[0].x = g.player.x;
+  g.player.hp = 1;
+  g.player.invuln = 0;
+  g.step(NO_INPUT);
+  assert.equal(g.mode, "dead");
+  assert.equal(g.hitStop, 0, "chết ⇒ không còn hit-stop dở dang");
+  for (let f = 0; f < 120; f += 1) g.step(NO_INPUT);
+  assert.equal(g.mode, "play");
+  const t0 = g.roomT;
+  g.step(NO_INPUT);
+  g.step(NO_INPUT);
+  assert.ok(g.roomT >= t0 + 2, "phòng vừa hồi sinh chạy ngay (không đứng hình)");
+});

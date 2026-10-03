@@ -193,7 +193,7 @@ test("công bằng: bot chậm phản ứng 20 khung (0,33 s) hạ được The 
   assert.ok(results.every((r) => r.seconds >= 25 && r.seconds <= 400), JSON.stringify(results));
 });
 
-test("ba Ký Ức giúp thật: ít sát thương nhận hơn nhờ +1 máu và Pulse rẻ", () => {
+test("ba Ký Ức đổi cơ chế thật (+1 máu tối đa, Pulse rẻ hơn) và trận vẫn thắng được ở cả hai trạng thái", () => {
   const r0 = fight(8, 20, []);
   const r3 = fight(8, 20, [1, 2, 3]);
   assert.ok(r0.game.save.bossDefeated && r3.game.save.bossDefeated);
@@ -201,4 +201,49 @@ test("ba Ký Ức giúp thật: ít sát thương nhận hơn nhờ +1 máu và 
   assert.equal(r3.game.abilities.pulseCheap, true);
   assert.ok(ENDINGS.restore.pages.length >= 3);
   void defaultSave;
+});
+
+test("Memory Collapse lần hai cũng có báo trước đầy đủ — mảnh không bung đột ngột (review độc lập #2)", () => {
+  const b = newBoss(9);
+  const c = ctx({ px: 40, memories: 1 });
+  runUntil(b, (x) => x.state === "neutral", 400, c);
+  b.hp = BOSS.phase2At + 1;
+  b.hit(1, noop);
+  runUntil(b, (x) => x.state === "collapse", 400, c);
+  b.pulseFragments(b.x, b.y - 26, 200, noop); // phá lần một ⇒ choáng
+  assert.equal(b.state, "stunned");
+  assert.equal(b.collapses, 1);
+  b.hp = BOSS.collapse2At;
+  runUntil(b, (x) => x.state === "telegraph", 600, c);
+  assert.equal(b.state, "telegraph");
+  assert.equal(b.attack, "memoryCollapse");
+  let frames = 0;
+  while (b.state === "telegraph" && frames < 200) {
+    assert.ok(!b.hazards().some((h) => h.kind === "fragment"), "mảnh không gây sát thương lúc báo trước");
+    assert.equal(b.fragments.length, 0);
+    b.update(c);
+    frames += 1;
+  }
+  assert.ok(frames >= BOSS_ATTACKS.memoryCollapse.telegraph, `báo trước ${frames} khung`);
+  assert.equal(b.state, "collapse");
+  assert.equal(b.fragments.length, BOSS.fragments);
+  assert.equal(b.collapses, 2);
+});
+
+test("Memory Collapse lần hai chỉ nói MỘT câu (không lặp lúc mảnh bung) (review vòng 2 #3)", () => {
+  const caps = [];
+  const emit = (e) => {
+    if (e.t === "caption") caps.push(e.id);
+  };
+  const b = newBoss(9);
+  const c = ctx({ px: 40, memories: 1, emit });
+  runUntil(b, (x) => x.state === "neutral", 400, c);
+  b.hp = BOSS.phase2At + 1;
+  b.hit(1, emit);
+  runUntil(b, (x) => x.state === "collapse", 400, c);
+  b.pulseFragments(b.x, b.y - 26, 200, emit);
+  b.hp = BOSS.collapse2At;
+  caps.length = 0;
+  runUntil(b, (x) => x.state === "collapse", 800, c);
+  assert.deepEqual(caps.filter((x) => x === "boss.collapse"), ["boss.collapse"]);
 });

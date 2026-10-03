@@ -203,7 +203,8 @@ export class Game {
         const right = (def.tiles[0].length - 1) * TILE;
         const seed = (this.seed ^ Math.imul(this.save.deaths + 1, 0x9e3779b1)) >>> 0;
         this.boss = new Boss(11 * TILE, TILE, right, seed);
-        this.setDoors(def, true, true);
+        // Cửa PHẢI (sang Phòng Kết Thúc) khoá từ đầu để không bỏ qua boss; cửa TRÁI vẫn mở cho tới khi boss thức (còn lùi được).
+        this.setDoors(def, false, true);
       }
     }
     this.player.place(at.x, at.y);
@@ -239,6 +240,7 @@ export class Game {
     p.ink = 0;
     p.invuln = PLAYER.invulnFrames;
     p.hurt = 0;
+    this.hitStop = 0;
     this.mode = "play";
     this.deadT = 0;
     const cp = checkpointSpawn(this.save.checkpoint);
@@ -308,6 +310,11 @@ export class Game {
 
     this.resolveDamage();
     this.resolveEnvironment();
+    // Hết máu ở khung này ⇒ chết NGAY, trước khi chạm vật thể/Dấu Trang/cửa/mốc kết thúc (không được hồi máu, nhặt đồ hay qua cửa lúc đang chết).
+    if (p.hp <= 0) {
+      this.die();
+      return;
+    }
     this.processThings();
     if (this.mode !== "play") return;
     if (this.checkExits()) return;
@@ -552,6 +559,7 @@ export class Game {
   private die(): void {
     this.mode = "dead";
     this.deadT = 0;
+    this.hitStop = 0;
     this.save.deaths += 1;
     this.player.hp = 0;
     this.emit({ t: "sfx", name: "death" });

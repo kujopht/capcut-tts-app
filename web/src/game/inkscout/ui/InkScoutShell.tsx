@@ -66,7 +66,7 @@ export default function InkScoutShell() {
 
   // Khoá cuộn trang khi đang ở màn chơi/mở đầu; luôn mở khoá khi rời.
   useEffect(() => {
-    if (phase === "menu") return;
+    if (phase !== "intro" && phase !== "stage") return;
     const root = document.documentElement;
     root.classList.add("isc-lock");
     document.body.classList.add("isc-lock");
@@ -184,12 +184,19 @@ export default function InkScoutShell() {
     window.setTimeout(() => r.input.release("confirm", 9001), 90);
   }, []);
 
+  // Lựa chọn cuối không thể hoàn tác: chạm lần đầu chỉ CHỌN (kể cả lựa chọn đang sáng sẵn), chạm lần hai vào cùng lựa chọn mới xác nhận.
+  const armedRef = useRef<0 | 1 | null>(null);
   const choose = useCallback(
     (i: 0 | 1) => {
       const r = rtRef.current;
       if (!r) return;
-      if (r.game.endingChoice === i) tapConfirm();
-      else r.game.endingChoice = i;
+      if (armedRef.current === i) {
+        armedRef.current = null;
+        tapConfirm();
+      } else {
+        armedRef.current = i;
+        r.game.endingChoice = i;
+      }
     },
     [tapConfirm],
   );
@@ -353,7 +360,7 @@ export default function InkScoutShell() {
           ) : null}
         </div>
       </div>
-      {coarse && ready && rt && ui && ui.mode !== "complete" ? <TouchControls input={rt.input} marginStep={ui.marginStep} onPause={() => rt.pause()} /> : null}
+      {coarse && ready && rt && ui && !ui.paused && (ui.mode === "play" || ui.mode === "dead") ? <TouchControls input={rt.input} marginStep={ui.marginStep} onPause={() => rt.pause()} /> : null}
       {coarse && size.portrait ? <p className="isc-orient" style={{ top: size.h + 6 }}>Xoay ngang màn hình để chơi thoải mái hơn.</p> : null}
     </div>
   );

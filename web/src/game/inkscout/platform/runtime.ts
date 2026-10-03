@@ -69,6 +69,8 @@ export async function createRuntime(opts: RuntimeOptions): Promise<RuntimeHandle
   } else {
     save = prev ?? defaultSave();
   }
+  // Lần đầu (chưa có cài đặt đã lưu) mà hệ điều hành yêu cầu giảm chuyển động ⇒ tắt rung màn hình theo mặc định.
+  if (!prev && typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) save.settings.shake = 0;
 
   const game = new Game({ save, seed: opts.seed ?? (Math.floor(Math.random() * 0x7fffffff) | 1) });
   let portrait: HTMLImageElement | null = null;
@@ -92,6 +94,8 @@ export async function createRuntime(opts: RuntimeOptions): Promise<RuntimeHandle
   let listeners = 0;
   let caption: UiSnapshot["caption"] = null;
   let captionUntil = 0;
+  /** Thời gian còn lại của lời thoại lúc tạm dừng (để không hết hạn trong khi game đứng yên). */
+  let captionRemain = 0;
   let lastUiKey = "";
   let mood: Mood = "explore";
   instances += 1;
@@ -156,7 +160,7 @@ export async function createRuntime(opts: RuntimeOptions): Promise<RuntimeHandle
       }
     }
     // Boss thức dậy → nhạc căng lên.
-    if (game.boss && game.boss.active && mood !== "boss") {
+    if (game.boss && game.boss.active && game.boss.state !== "dying" && mood !== "boss") {
       mood = "boss";
       audio.setMood(mood);
     }
@@ -219,13 +223,14 @@ export async function createRuntime(opts: RuntimeOptions): Promise<RuntimeHandle
       if (n === MAX_STEPS_PER_FRAME) acc = 0;
     }
     renderer.render(game);
-    if (caption && performance.now() > captionUntil) caption = null;
+    if (caption && !paused && performance.now() > captionUntil) caption = null;
     pushUi();
   };
 
   const pause = (): void => {
     if (paused || destroyed || game.mode === "complete") return;
     paused = true;
+    captionRemain = caption ? Math.max(0, captionUntil - performance.now()) : 0;
     input.releaseAll();
     audio.suspend();
     persist();
@@ -236,6 +241,7 @@ export async function createRuntime(opts: RuntimeOptions): Promise<RuntimeHandle
   const resume = (): void => {
     if (!paused || destroyed) return;
     paused = false;
+    if (caption) captionUntil = performance.now() + captionRemain;
     last = 0;
     acc = 0;
     audio.resume();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import type { ButtonName, InputSource } from "../platform/input";
 
 /**
@@ -48,7 +48,11 @@ function HoldButton({ input, button, label, hint, className }: { input: InputSou
 
 export function TouchControls({ input, marginStep, onPause }: Props) {
   const pad = useRef<HTMLDivElement | null>(null);
-  const side = useRef<-1 | 0 | 1>(0);
+  /** Hướng đang giữ của TỪNG con trỏ (hai ngón cùng chạm vùng đi không làm nhả nhầm nhau). */
+  const sides = useRef(new Map<number, -1 | 0 | 1>());
+
+  // Gỡ khỏi DOM (mở hộp thoại/tạm dừng/kết thúc) khi ngón còn đang giữ nút ⇒ không bao giờ có sự kiện nhả; nhả hết ở đây để không "kẹt phím".
+  useEffect(() => () => input.releaseAll(), [input]);
 
   const apply = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -59,10 +63,11 @@ export function TouchControls({ input, marginStep, onPause }: Props) {
       const dead = r.width * 0.08;
       const next: -1 | 0 | 1 = dx < -dead ? -1 : dx > dead ? 1 : 0;
       const id = POINTER_BASE + 100 + e.pointerId;
-      if (next === side.current) return;
-      if (side.current === -1) input.release("left", id);
-      if (side.current === 1) input.release("right", id);
-      side.current = next;
+      const cur = sides.current.get(e.pointerId) ?? 0;
+      if (next === cur) return;
+      if (cur === -1) input.release("left", id);
+      if (cur === 1) input.release("right", id);
+      sides.current.set(e.pointerId, next);
       if (next === -1) input.press("left", id);
       if (next === 1) input.press("right", id);
     },
@@ -87,7 +92,7 @@ export function TouchControls({ input, marginStep, onPause }: Props) {
       const id = POINTER_BASE + 100 + e.pointerId;
       input.release("left", id);
       input.release("right", id);
-      side.current = 0;
+      sides.current.delete(e.pointerId);
     },
     [input],
   );

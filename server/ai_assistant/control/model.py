@@ -114,6 +114,9 @@ SECRET_REF_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 MODEL_RE = re.compile(r"^[A-Za-z0-9._:/@-]{1,120}$")
 API_VERSION_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}(-preview)?$")
 MAX_SLOTS = 40
+#: Trần RIÊNG cho slot của vùng tách biệt (Alibaba) — không tính vào `MAX_SLOTS` của các collection cũ, để Alibaba không chặn việc
+#: tạo slot Gemini (và ngược lại). 20 slot + 6 dòng route luôn nhỏ hơn một trang đọc (100 dòng).
+MAX_EXT_SLOTS = 20
 MAX_STEPS = 12
 MAX_INT = 1_000_000_000
 
@@ -171,6 +174,16 @@ class RoutingProfile:
     name: str
     steps: Tuple[str, ...]
     enabled: bool = True
+    #: Chỉ khi chạy: `updated_at` của dòng `ai_routing_profiles` (cột đã có sẵn ở production, mã cũ cũng ghi nó mỗi lần lưu). Dùng làm
+    #: DẤU của lần ghi: một dòng Alibaba chỉ được áp khi mang đúng dấu này (xem `compose_profile`). Không bao giờ do client đặt.
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class ExtRoute:
+    """Dòng `r-<hồ sơ>` của vùng tách biệt: danh sách bước ĐẦY ĐỦ (kể cả bước Alibaba) + dấu của lần ghi hồ sơ mà nó đi kèm."""
+    steps: Tuple[str, ...]
+    stamp: str = ""
 
 
 def _default_types() -> Dict[str, bool]:
@@ -222,9 +235,13 @@ class ControlConfig:
 
 
 def is_ext_step(step: str, slots: Mapping[str, ProviderSlot]) -> bool:
-    """Bước hồ sơ thuộc vùng tách biệt: một loại `EXT_PROVIDER_TYPES` hoặc id của một slot thuộc loại đó."""
-    if step in EXT_PROVIDER_TYPES:
-        return True
+    """Bước hồ sơ thuộc vùng tách biệt: một loại `EXT_PROVIDER_TYPES` hoặc id của một slot thuộc loại đó.
+
+    PHẢI giải một chuỗi bước giống hệt `router.plan`: TÊN LOẠI thắng id slot (`step in PROVIDER_TYPES` được xét trước). Nếu không,
+    một slot Alibaba tên `gemini` sẽ khiến bước `gemini` bị coi là của Alibaba và bị tách khỏi hồ sơ bản cũ đọc — Gemini mất khỏi
+    hồ sơ khi vùng tách biệt không đọc được hoặc sau khi rút mã. (Id slot trùng tên loại còn bị từ chối lúc tạo.)"""
+    if step in PROVIDER_TYPES:
+        return step in EXT_PROVIDER_TYPES
     s = slots.get(step)
     return s is not None and s.provider_type in EXT_PROVIDER_TYPES
 
@@ -256,19 +273,29 @@ def sanitize_core(cfg: ControlConfig) -> ControlConfig:
     return replace(cfg, slots=slots, profiles=profiles, ext=replace(cfg.ext, unreadable=cfg.ext.unreadable + touched))
 
 
-def compose_profile(base: RoutingProfile, route: Optional[Tuple[str, ...]], slots: Mapping[str, ProviderSlot]) -> Tuple[RoutingProfile, bool]:
+def same_second(a: str, b: str) -> bool:
+    """Hai mốc ISO-8601 có múi giờ trùng nhau tới GIÂY (Appwrite trả `…:12.000+00:00`, ta ghi `…:12+00:00`). Rỗng/sai → False."""
+    na, nb = normalize_timestamp(a) if a else None, normalize_timestamp(b) if b else None
+    return na is not None and na == nb
+
+
+def compose_profile(base: RoutingProfile, route: Optional[ExtRoute], slots: Mapping[str, ProviderSlot]) -> Tuple[RoutingProfile, bool]:
     """Hồ sơ HIỆU LỰC = hồ sơ bản cũ đọc được (`base`) + bước Alibaba của vùng tách biệt (`route`, danh sách ĐẦY ĐỦ).
 
-    Một `route` chỉ được áp khi nó KHỚP đúng `base` (bỏ các bước Alibaba thì phải ra đúng `base.steps`), mọi bước hợp lệ, không
-    lặp, vừa trần bước. Không khớp (vd. ai đó sửa hồ sơ trong lúc vùng tách biệt không đọc được) thì `route` bị BỎ và hồ sơ
-    chạy như bản cũ đọc: bước Alibaba không bao giờ ghi đè một thay đổi về Gemini. (Quy tắc "Alibaba không là đường DUY NHẤT của
-    hồ sơ" được thi hành lúc GHI — `ControlPlane.update_profile` — vì API là thứ duy nhất tạo ra dòng này.) Trả (hồ sơ, đã áp?)."""
-    if route is None:
+    Một `route` chỉ được áp khi, đồng thời: (1) mang đúng DẤU của dòng hồ sơ cũ (`route.stamp` = `base.updated_at`, tới giây) — bất
+    kỳ lần ghi nào của dòng hồ sơ cũ sau đó (bản cũ sau khi rút mã, hoặc bản mới sửa hồ sơ lúc vùng tách biệt không đọc được/không
+    xoá được dòng) đổi dấu và làm dòng Alibaba MỒ CÔI VĨNH VIỄN — kể cả khi các bước sau đó tình cờ trùng lại; (2) nó KHỚP đúng
+    `base` (bỏ các bước Alibaba thì phải ra đúng `base.steps`); (3) mọi bước hợp lệ, không lặp, vừa trần bước. Không đạt thì `route`
+    bị BỎ và hồ sơ chạy như bản cũ đọc: bước Alibaba không bao giờ ghi đè một thay đổi về Gemini. (Quy tắc "Alibaba không là đường
+    DUY NHẤT của hồ sơ" được thi hành lúc GHI — `ControlPlane.update_profile` — vì API là thứ duy nhất tạo ra dòng này.)
+    Trả (hồ sơ, đã áp?)."""
+    if route is None or not same_second(route.stamp, base.updated_at):
         return base, False
-    legacy, _ext = split_steps(route, slots)
-    ok = (legacy == base.steps and len(set(route)) == len(route) and len(route) <= MAX_STEPS
-          and all(s in PROVIDER_TYPES or s in slots for s in route))
-    return (replace(base, steps=tuple(route)), True) if ok else (base, False)
+    steps = tuple(route.steps)
+    legacy, _ext = split_steps(steps, slots)
+    ok = (legacy == base.steps and len(set(steps)) == len(steps) and len(steps) <= MAX_STEPS
+          and all(s in PROVIDER_TYPES or s in slots for s in steps))
+    return (replace(base, steps=steps), True) if ok else (base, False)
 
 
 def default_profiles() -> Dict[str, RoutingProfile]:

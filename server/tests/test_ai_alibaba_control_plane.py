@@ -41,7 +41,7 @@ from server.ai_assistant.control.router import (
 from server.ai_assistant.control.secrets import SecretResolver
 from server.ai_assistant.control.service import ControlConflict, ControlPlane, today_utc
 from server.ai_assistant.control.store import (
-    AppwriteControlStore, ControlSchemaOutdated, ControlStoreUnavailable, InMemoryControlStore,
+    AppwriteControlStore, ControlSchemaOutdated, ControlStoreUnavailable, InMemoryControlStore, now_iso,
 )
 from server.ai_assistant.gateway import ErrorEvent, ProviderServed
 from server.llm_gateway.chat_provider import (
@@ -110,9 +110,10 @@ def persist_profile(st: InMemoryControlStore, p: RoutingProfile, slots: Dict[str
     """Store a profile the way `ControlPlane.update_profile` does: legacy-visible steps in the legacy row, the full list as an
     Alibaba route when it has Alibaba steps."""
     legacy, ext_steps = split_steps(p.steps, slots)
-    st.profiles[p.name] = replace(p, steps=legacy)
+    stamp = now_iso()  # the route is valid only for THIS write of the legacy row (same stamp), exactly as update_profile does
+    st.save_profile(replace(p, steps=legacy), stamp=stamp)
     if ext_steps:
-        st.save_ext_route(p.name, p.steps)
+        st.save_ext_route(p.name, p.steps, stamp=stamp)
 
 
 def build_plane(slots: List[ProviderSlot], *, gate: bool = True, alibaba_type: Optional[bool] = True,
@@ -238,7 +239,8 @@ class TestProductionCompatibility(unittest.TestCase):
                                  free_quota_remaining=5, free_quota_expires_at="2026-12-31T00:00:00+00:00",
                                  free_quota_only=True, free_quota_updated_at="2026-10-02T00:00:00+00:00",
                                  label="L" * 60, model="m" * 120, endpoint=BASE + "/" + "p" * 200))
-        st2.save_ext_route("FREE_FIRST", ("gemini", "alibaba", "groq", "workers_ai", "openrouter", "azure_openai", "qwen"))
+        st2.save_ext_route("FREE_FIRST", ("gemini", "alibaba", "groq", "workers_ai", "openrouter", "azure_openai", "qwen"),
+                           stamp="2026-10-03T10:11:12+00:00")
         for row in fake.cols["ai_alibaba_config"].values():
             self.assertLessEqual(set(row) - {"$id"}, set(ext), f"missing from the ext schema: {set(row) - set(ext)}")
             self.assertLess(len(row["data_json"]), ext["data_json"][3], "the payload fits its attribute")

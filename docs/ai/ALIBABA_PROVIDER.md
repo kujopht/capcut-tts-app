@@ -188,11 +188,21 @@ là **không để mã cũ thấy chúng**:
 | Cờ loại `alibaba` | khoá thêm trong `provider_types_json` | bỏ qua khoá lạ (mã cũ chỉ đọc 6 khoá của nó) |
 | Sử dụng/audit | collection chung (chỉ số đếm / chuỗi) | không kiểm tra |
 
-* **Hồ sơ hiệu lực** = phần bản cũ đọc được + dòng `r-…`, và dòng `r-…` **chỉ được áp khi khớp đúng** phần bản cũ (bỏ bước Alibaba phải ra đúng
-  `steps_json`). Nếu bản cũ chạy một thời gian rồi Owner sửa hồ sơ ở đó, dòng Alibaba cũ không khớp → **bị bỏ** (không bao giờ ghi đè thay đổi
-  về Gemini) và `/admin/ai` báo "hồ sơ … có bước Alibaba bị bỏ".
-* Lúc ghi hồ sơ có bước Alibaba, phần Alibaba ghi **trước**: nếu collection chưa có/không với tới thì lỗi sạch (409), chưa đổi gì. Hồ sơ có bước
+* **Hồ sơ hiệu lực** = phần bản cũ đọc được + dòng `r-…`, và dòng `r-…` **chỉ được áp khi đồng thời**: (1) mang đúng **dấu** của dòng hồ sơ cũ — dấu
+  chính là `updated_at` của dòng `ai_routing_profiles` (cột đã có sẵn ở production, bản cũ cũng ghi nó mỗi lần lưu), được ghi vào CẢ HAI dòng trong
+  cùng một lần lưu và luôn tăng nghiêm ngặt; (2) bỏ bước Alibaba phải ra đúng `steps_json`; (3) mọi bước hợp lệ, không lặp, vừa trần. Mọi lần ghi dòng hồ sơ
+  cũ về sau — bản cũ sau khi rút mã, hay bản mới sửa hồ sơ lúc vùng này không với tới/không xoá được dòng — đổi dấu và làm dòng Alibaba **mồ côi vĩnh
+  viễn, kể cả khi các bước tình cờ trùng lại** (không "sống lại"). Dòng bị bỏ **không bao giờ ghi đè thay đổi về Gemini**, và `/admin/ai` báo "hồ sơ …
+  có bước Alibaba bị bỏ". Nghĩa là lệnh "gỡ bước Alibaba" của Owner không thể bị lờ đi chỉ vì lần xoá dòng route thất bại.
+* Lúc ghi hồ sơ có bước Alibaba, phần Alibaba ghi **trước**: nếu collection chưa có/không với tới thì lỗi sạch (409), chưa đổi gì; nếu ghi dòng hồ sơ cũ thất
+  bại SAU đó thì dòng Alibaba cũ được trả lại (cố gắng hết sức — nếu cũng thất bại thì dòng mới không có dấu khớp nên không được áp). Hồ sơ có bước
   Alibaba **phải còn ít nhất một bước loại khác** — Alibaba không bao giờ là đường duy nhất của một chế độ.
+* Một chuỗi bước được giải **giống hệt `router.plan`**: tên LOẠI thắng id slot. Vì vậy id slot **không được trùng tên một loại provider** (`gemini`, `qwen`,
+  `groq`, `alibaba`…): tạo mới bị từ chối, dòng trong vùng này mang id như vậy bị coi là không đọc được. Mỗi dòng phải có `$id` đúng bằng `s-<id>` /
+  `r-<hồ sơ>` suy từ `kind`/`key` — dòng "bóng" (id khác key) bị bỏ, nên xoá/tắt qua API luôn tác động vào dòng thật.
+* Trần slot **riêng theo vùng** (`MAX_SLOTS` cho collection cũ, `MAX_EXT_SLOTS` = 20 cho Alibaba): slot Alibaba không chiếm chỗ của slot Gemini. Tạo slot Alibaba
+  khi không đọc được vùng này bị từ chối (không kiểm được trùng id, tránh ghi đè mù). Một trang đọc đầy (≥ 100 dòng) không thể hợp lệ và được coi là
+  suy giảm (`unavailable`) thay vì cắt bớt âm thầm.
 * `AppwriteControlStore.save_slot` **từ chối** slot loại Alibaba, `save_profile` từ chối bước `alibaba` (lỗi lập trình, không ghi gì): không đường nào
   đưa chúng vào collection cũ. Nếu có (sửa tay) thì mã mới **bỏ qua + đếm** chứ không định tuyến, và không làm cấu hình hỏng.
 * **Đọc vùng này không bao giờ làm hỏng cấu hình Gemini:** collection thiếu / kho không với tới / dòng hỏng / lỗi trình phân tích chỉ cho ra một

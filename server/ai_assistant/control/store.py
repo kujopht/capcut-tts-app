@@ -44,7 +44,7 @@ from urllib.parse import quote
 import httpx
 
 from server.ai_assistant.control.model import (
-    EXT_PROVIDER_TYPES, MAX_STEPS, PROFILES, PROVIDER_TYPES, SLOT_ID_RE, ConfigValidationError, ControlConfig,
+    EXT_PROVIDER_TYPES, MAX_STEPS, PROFILES, PROVIDER_TYPES, ConfigValidationError, ControlConfig, ExtRoute,
     GlobalControls, ProviderSlot, RoutingProfile, default_profiles, slot_from_dict, slot_meta, slot_to_dict, slot_with_meta,
     validate_slot,
 )
@@ -115,7 +115,7 @@ class ExtPartition:
     """What the isolated partition holds, already parsed. `routes` = profile name -> the FULL step list (Alibaba steps included)
     the owner saved; the service decides whether it still matches the legacy-visible profile (`model.compose_profile`)."""
     slots: Dict[str, ProviderSlot] = field(default_factory=dict)
-    routes: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
+    routes: Dict[str, ExtRoute] = field(default_factory=dict)
     state: str = "empty"
     #: Rows that could not be used at all (bad JSON, wrong shape, duplicate/mismatched id, a non-Alibaba slot): counted only.
     unreadable: int = 0
@@ -123,23 +123,33 @@ class ExtPartition:
 
 #: `data_json` attribute size in `ai_alibaba_config` (scripts/setup_appwrite.py): a slot is < 1.2 KB, a route < 0.5 KB.
 EXT_DATA_MAX = 4000
+#: One read page of the partition. MAX_EXT_SLOTS + 6 routes is far below it, so a FULL page means something is wrong.
+EXT_PAGE = 100
 
 
 def parse_ext_rows(rows: List[Dict[str, Any]]) -> ExtPartition:
     """Rows of the isolated partition -> `ExtPartition`. Shared by the in-memory and the Appwrite store so tests of malformed
     data exercise the real parser. NEVER raises: one bad row costs that row (counted), never the others and never Gemini."""
     slots: Dict[str, ProviderSlot] = {}
-    routes: Dict[str, Tuple[str, ...]] = {}
+    routes: Dict[str, ExtRoute] = {}
     bad = 0
     for r in rows:
         try:
             kind, key = str(r.get("kind") or ""), str(r.get("key") or "")
+            # The document id MUST be the one the writers derive from (kind, key): a row whose id disagrees with its own key is a
+            # shadow (`delete_ext_slot(y)` removes `s-y`, never the `s-x` row that claims key `y`), so it is never trusted.
+            expected = {"slot": EXT_SLOT_PREFIX, "route": EXT_ROUTE_PREFIX}.get(kind, "\0") + key
+            if str(r.get("$id") or "") != expected:
+                raise ValueError("document id does not match kind/key")
             data = json.loads(r.get("data_json") or "")
             if not isinstance(data, dict):
                 raise ValueError("payload is not an object")
             if kind == "slot":
                 slot = slot_from_dict(data)
-                if slot.slot_id != key or slot.provider_type not in EXT_PROVIDER_TYPES or key in slots:
+                # A slot id equal to a provider-TYPE name is refused (the router resolves a step as a type first, so such a slot
+                # could never be addressed by id and would confuse the step split) — create_slot refuses it too.
+                if slot.slot_id != key or slot.provider_type not in EXT_PROVIDER_TYPES or key in slots \
+                        or key in PROVIDER_TYPES:
                     raise ValueError("slot row does not belong here")
                 try:
                     validate_slot(slot)
@@ -148,11 +158,11 @@ def parse_ext_rows(rows: List[Dict[str, Any]]) -> ExtPartition:
                     slot = replace(slot, meta_corrupt=True)
                 slots[key] = slot
             elif kind == "route":
-                steps = data.get("steps")
+                steps, stamp = data.get("steps"), data.get("stamp", "")
                 if key not in PROFILES or key in routes or not isinstance(steps, list) or len(steps) > MAX_STEPS \
-                        or any(not isinstance(s, str) for s in steps):
+                        or any(not isinstance(s, str) for s in steps) or not isinstance(stamp, str):
                     raise ValueError("route row does not belong here")
-                routes[key] = tuple(steps)
+                routes[key] = ExtRoute(tuple(steps), stamp)
             else:
                 raise ValueError("unknown kind")
         except (ValueError, TypeError, AttributeError, ConfigValidationError):
@@ -175,9 +185,9 @@ class ControlStore(Protocol):
     def delete_slot(self, slot_id: str) -> None: ...
     def save_ext_slot(self, s: ProviderSlot) -> None: ...
     def delete_ext_slot(self, slot_id: str) -> None: ...
-    def save_ext_route(self, profile: str, steps: Tuple[str, ...]) -> None: ...
+    def save_ext_route(self, profile: str, steps: Tuple[str, ...], *, stamp: str) -> None: ...
     def delete_ext_route(self, profile: str) -> None: ...
-    def save_profile(self, p: RoutingProfile) -> None: ...
+    def save_profile(self, p: RoutingProfile, *, stamp: str = "") -> None: ...
     def add_audit(self, entries: List[AuditEntry]) -> None: ...
     def list_audit(self, limit: int = 50) -> List[AuditEntry]: ...
     def add_usage(self, slot_id: str, day: str, *, requests: int = 0, input_tokens: int = 0,
@@ -264,7 +274,7 @@ class InMemoryControlStore:
                 raise ControlSchemaOutdated("collection ai_alibaba_config chưa có — chạy migration trước.", status=404)
             if self.ext_fault:
                 raise ControlStoreUnavailable("Kho cấu hình AI đang bận.", status=503)
-            self.ext_rows[doc_id] = {"kind": kind, "key": key, "data_json": payload, "updated_at": now_iso()}
+            self.ext_rows[doc_id] = {"$id": doc_id, "kind": kind, "key": key, "data_json": payload, "updated_at": now_iso()}
 
     def _ext_drop(self, doc_id: str) -> None:
         with self._lock:
@@ -279,16 +289,16 @@ class InMemoryControlStore:
     def delete_ext_slot(self, slot_id: str) -> None:
         self._ext_drop(EXT_SLOT_PREFIX + slot_id)
 
-    def save_ext_route(self, profile: str, steps: Tuple[str, ...]) -> None:
-        self._ext_put(EXT_ROUTE_PREFIX + profile, "route", profile, {"steps": list(steps)})
+    def save_ext_route(self, profile: str, steps: Tuple[str, ...], *, stamp: str) -> None:
+        self._ext_put(EXT_ROUTE_PREFIX + profile, "route", profile, {"steps": list(steps), "stamp": stamp})
 
     def delete_ext_route(self, profile: str) -> None:
         self._ext_drop(EXT_ROUTE_PREFIX + profile)
 
-    def save_profile(self, p: RoutingProfile) -> None:
+    def save_profile(self, p: RoutingProfile, *, stamp: str = "") -> None:
         _refuse_ext_profile(p)
         with self._lock:
-            self.profiles[p.name] = p
+            self.profiles[p.name] = replace(p, updated_at=stamp or now_iso())
 
     def add_audit(self, entries: List[AuditEntry]) -> None:
         with self._lock:
@@ -471,7 +481,7 @@ class AppwriteControlStore:
         try:
             return RoutingProfile(name=str(r["name"]),
                                   steps=tuple(str(s) for s in _json_list(r.get("steps_json"), "steps_json")),
-                                  enabled=bool(r.get("enabled", True)))
+                                  enabled=bool(r.get("enabled", True)), updated_at=str(r.get("updated_at") or ""))
         except (KeyError, TypeError, ValueError) as exc:
             raise ControlConfigCorrupt("ai_routing_profiles: bad row") from exc
 
@@ -516,24 +526,32 @@ class AppwriteControlStore:
     def delete_slot(self, slot_id: str) -> None:
         self._call("DELETE", f"{self._docs(T_SLOTS)}/{quote(slot_id)}")
 
-    def save_profile(self, p: RoutingProfile) -> None:
+    def save_profile(self, p: RoutingProfile, *, stamp: str = "") -> None:
+        """`stamp` (optional) is the `updated_at` to write — the service passes the same value to the Alibaba route row so the
+        route is valid only for THIS write of the legacy row. Same attribute, same format as before: nothing new for production."""
         _refuse_ext_profile(p)
         self._put(T_PROFILES, p.name, {"name": p.name, "steps_json": json.dumps(list(p.steps)),
-                                       "enabled": p.enabled, "updated_at": now_iso()})
+                                       "enabled": p.enabled, "updated_at": stamp or now_iso()})
 
     # ---- the isolated partition (module docstring) ----
     def load_ext(self) -> ExtPartition:
         """NEVER raises: a missing collection, an unreachable store or a bad row is a STATUS, so this call can never be the
         reason `load()` — and with it Gemini's configuration — fails."""
         try:
-            body = self._call("GET", self._docs(T_EXT), queries=[self._q("limit", values=[100])])
+            body = self._call("GET", self._docs(T_EXT), queries=[self._q("limit", values=[EXT_PAGE])])
         except ControlStoreUnavailable:
             return ExtPartition(state="unavailable")
         if body is None:  # 404: the collection does not exist yet (migration not run)
             return ExtPartition(state="schema_missing")
         try:
             rows = body.get("documents") if isinstance(body, dict) else None
-            return parse_ext_rows(rows if isinstance(rows, list) else [])
+            rows = rows if isinstance(rows, list) else []
+            if len(rows) >= EXT_PAGE:
+                # A full page can never be legitimate (≤ MAX_EXT_SLOTS slots + 6 routes) and may hide real rows behind junk:
+                # degraded, so no Alibaba slot is used rather than half of them.
+                log.error("ai_control: isolated partition returned a full page — treated as unavailable")
+                return ExtPartition(state="unavailable")
+            return parse_ext_rows(rows)
         except Exception:  # noqa: BLE001 — a parser bug must never reach the legacy configuration
             log.error("ai_control: isolated partition could not be parsed — treated as unavailable")
             return ExtPartition(state="unavailable")
@@ -542,10 +560,18 @@ class AppwriteControlStore:
         body = {"kind": kind, "key": key, "data_json": _ext_payload(data), "updated_at": now_iso()}
         outdated = ("Schema Appwrite chưa có collection/thuộc tính của vùng Alibaba (ai_alibaba_config) — chạy migration "
                     "trước (docs/ai/ALIBABA_PROVIDER.md, mục Migration schema).")
+        path = f"{self._docs(T_EXT)}/{quote(doc_id)}"
         try:
-            if self._call("PATCH", f"{self._docs(T_EXT)}/{quote(doc_id)}", body={"data": body}) is None:
-                if self._call("POST", self._docs(T_EXT),
-                              body={"documentId": doc_id, "data": body, "permissions": []}) is None:
+            if self._call("PATCH", path, body={"data": body}) is None:
+                try:
+                    created = self._call("POST", self._docs(T_EXT),
+                                         body={"documentId": doc_id, "data": body, "permissions": []})
+                except ControlStoreUnavailable as exc:
+                    if exc.status != 409:
+                        raise
+                    # Another instance created the row between our PATCH (404) and POST: update it instead of failing.
+                    created = self._call("PATCH", path, body={"data": body})
+                if created is None:
                     # PATCH and POST both 404: the COLLECTION is missing. Without this a write would "succeed" and store nothing.
                     raise ControlSchemaOutdated(outdated, status=404)
         except ControlSchemaOutdated:
@@ -562,8 +588,8 @@ class AppwriteControlStore:
     def delete_ext_slot(self, slot_id: str) -> None:
         self._call("DELETE", f"{self._docs(T_EXT)}/{quote(EXT_SLOT_PREFIX + slot_id)}")
 
-    def save_ext_route(self, profile: str, steps: Tuple[str, ...]) -> None:
-        self._ext_put(EXT_ROUTE_PREFIX + profile, "route", profile, {"steps": list(steps)})
+    def save_ext_route(self, profile: str, steps: Tuple[str, ...], *, stamp: str) -> None:
+        self._ext_put(EXT_ROUTE_PREFIX + profile, "route", profile, {"steps": list(steps), "stamp": stamp})
 
     def delete_ext_route(self, profile: str) -> None:
         self._call("DELETE", f"{self._docs(T_EXT)}/{quote(EXT_ROUTE_PREFIX + profile)}")

@@ -33,7 +33,7 @@ from server.ai_assistant.control.capability import (
 )
 from server.ai_assistant.control.model import (
     CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, EXT_PROVIDER_TYPES,
-    GATED_PROVIDER_TYPES, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS, WORKLOADS,
+    GATED_PROVIDER_TYPES, MAX_EXT_SLOTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS, WORKLOADS,
     ConfigValidationError, ControlConfig, ExtStatus, GlobalControls, ProviderSlot, RoutingProfile, compose_profile,
     controls_to_dict, controls_with, preset_matching, normalize_timestamp, sanitize_core, slot_from_dict, slot_meta,
     slot_to_dict, split_steps, validate_config, validate_controls, validate_profile, validate_slot,
@@ -967,12 +967,24 @@ class ControlPlane:
                 "message": "slot loại này luôn được tạo ở trạng thái TẮT — Kiểm tra slot rồi bật bằng một thao tác riêng"}])
         if slot.free_quota_remaining is not None:
             slot = replace(slot, free_quota_updated_at=now_iso())
+        if slot.slot_id in PROVIDER_TYPES:
+            # A step is resolved as a provider TYPE first (`router.plan`), so a slot named like a type could never be addressed by
+            # id — and would blur which steps belong to which storage. (Only NEW slots: existing ids are never re-validated.)
+            raise ConfigValidationError([{"field": "slot_id", "message": "không được trùng tên một loại provider (" +
+                                          ", ".join(PROVIDER_TYPES) + ")"}])
         if slot.slot_id in cfg.slots:
             raise ControlConflict(f"Slot '{slot.slot_id}' đã tồn tại.")
-        # More than MAX_SLOTS makes the whole config invalid on the next load
-        # (AI fail-closed), so refuse the slot that would cross the line.
-        if len(cfg.slots) >= MAX_SLOTS:
-            raise ConfigValidationError([{"field": "slots", "message": f"tối đa {MAX_SLOTS} slot — xoá bớt slot không dùng"}])
+        ext_type = slot.provider_type in EXT_PROVIDER_TYPES
+        if ext_type and cfg.ext.state == "unavailable":
+            # Uniqueness cannot be checked while the partition cannot be read, and a write would PATCH-overwrite an invisible slot.
+            raise ControlConflict("Không đọc được kho Alibaba lúc này — chưa thể tạo slot Alibaba (không kiểm được trùng id). "
+                                  "Thử lại sau.")
+        # More than MAX_SLOTS makes the whole config invalid on the next load (AI fail-closed), so refuse the slot that would
+        # cross the line. The Alibaba partition has its OWN cap and neither partition's slots count against the other's.
+        same_store = [s for s in cfg.slots.values() if (s.provider_type in EXT_PROVIDER_TYPES) == ext_type]
+        cap = MAX_EXT_SLOTS if ext_type else MAX_SLOTS
+        if len(same_store) >= cap:
+            raise ConfigValidationError([{"field": "slots", "message": f"tối đa {cap} slot — xoá bớt slot không dùng"}])
         self._save_slot(slot)
         self._commit(self._diff(actor, f"slot:{slot.slot_id}", {}, slot_to_dict(slot)))
         return slot_to_dict(slot)
@@ -1020,6 +1032,27 @@ class ControlPlane:
             self.store.delete_slot(slot_id)
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), {}))
 
+    @staticmethod
+    def _next_stamp(previous: str) -> str:
+        """Dấu của một lần ghi hồ sơ = `updated_at` của dòng hồ sơ cũ, tới giây, và LUÔN lớn hơn dấu trước (hai lần sửa trong cùng một
+        giây vẫn ra hai dấu khác nhau)."""
+        now = now_iso()
+        prev = normalize_timestamp(previous) if previous else None
+        if prev is not None and now <= prev:  # cùng định dạng UTC `+00:00` tới giây nên so chuỗi là so thời gian
+            now = (datetime.fromisoformat(prev) + timedelta(seconds=1)).isoformat(timespec="seconds")
+        return now
+
+    def _restore_route(self, name: str, old: Optional[RoutingProfile], cfg: ControlConfig) -> None:
+        """Ghi hồ sơ cũ thất bại SAU khi dòng Alibaba mới đã ghi: trả dòng Alibaba về như cũ (cùng dấu cũ nên hợp lệ lại) hoặc xoá nó.
+        Cố gắng hết sức — thất bại ở đây vẫn an toàn (dòng mới mang dấu chưa từng được ghi cho dòng hồ sơ cũ nên bị bỏ qua)."""
+        try:
+            if old is not None and split_steps(old.steps, cfg.slots)[1]:
+                self.store.save_ext_route(name, old.steps, stamp=old.updated_at)
+            else:
+                self.store.delete_ext_route(name)
+        except Exception:  # noqa: BLE001
+            log.warning("ai_control: could not restore the Alibaba route of %s after a failed profile write — it is ignored", name)
+
     @_serialized
     def update_profile(self, actor: str, name: str, steps: List[str], enabled: bool) -> Dict[str, Any]:
         cfg = self._fresh(repair=True)
@@ -1043,16 +1076,26 @@ class ControlPlane:
         old = cfg.profiles.get(name)
         # Hồ sơ lưu ở collection CŨ chỉ mang phần bản cũ đọc được (không `alibaba`, không id slot Alibaba) — nếu không bản cũ
         # coi hồ sơ là hỏng và tắt AI. Phần Alibaba ghi TRƯỚC ở vùng tách biệt: kho chưa migrate/không với tới thì lỗi sạch,
-        # chưa đổi gì; còn nếu ghi hồ sơ thất bại sau đó, dòng Alibaba không còn khớp hồ sơ cũ nên bị bỏ qua (không áp).
-        if ext_steps:
-            self.store.save_ext_route(name, p.steps)
-        elif cfg.ext.state in ("ok", "unavailable"):
-            try:
-                self.store.delete_ext_route(name)
-            except ControlStoreUnavailable:
-                log.warning("ai_control: stale Alibaba route for %s not removed — it no longer matches the profile, so it is ignored",
-                            name)
-        self.store.save_profile(replace(p, steps=legacy))
+        # chưa đổi gì. Cả hai dòng mang CÙNG MỘT DẤU (`updated_at` của dòng hồ sơ cũ, luôn tăng nghiêm ngặt): dòng Alibaba chỉ
+        # có hiệu lực cho đúng lần ghi này. Nên nếu ghi hồ sơ thất bại sau đó, hay xoá dòng Alibaba thất bại (kho không với
+        # tới), hay bản cũ/bản mới sửa hồ sơ về sau — dòng Alibaba cũ mất dấu và mồ côi vĩnh viễn, kể cả khi các bước tình cờ
+        # trùng lại. Không bao giờ có trường hợp "lệnh gỡ bước Alibaba bị lờ đi".
+        stamp = self._next_stamp(old.updated_at if old else "")
+        wrote_route = False
+        try:
+            if ext_steps:
+                self.store.save_ext_route(name, p.steps, stamp=stamp)
+                wrote_route = True
+            elif cfg.ext.state in ("ok", "unavailable"):
+                try:
+                    self.store.delete_ext_route(name)
+                except ControlStoreUnavailable:
+                    log.warning("ai_control: Alibaba route for %s not deleted — the profile gets a new stamp, so it is ignored", name)
+            self.store.save_profile(replace(p, steps=legacy), stamp=stamp)
+        except Exception:
+            if wrote_route:
+                self._restore_route(name, old, cfg)
+            raise
         self._commit(self._diff(actor, f"profile:{name}",
                                 {"steps": list(old.steps), "enabled": old.enabled} if old else {},
                                 {"steps": list(p.steps), "enabled": p.enabled}))

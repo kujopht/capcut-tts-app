@@ -30,7 +30,7 @@ import httpx
 
 from server.ai_assistant.control.model import (
     DEFAULT_MODE_PROFILES, DEFAULT_PROFILE_STEPS, GATED_PROVIDER_TYPES, LEGACY_QWEN_PROFILE_STEPS, PROFILES,
-    ConfigValidationError, GlobalControls, ProviderSlot, RoutingProfile, slot_to_dict,
+    ConfigValidationError, ExtRoute, GlobalControls, ProviderSlot, RoutingProfile, is_ext_step, slot_to_dict, split_steps,
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import SKIP_GATE_CLOSED, ControlledGateway
@@ -51,6 +51,7 @@ from server.tests.test_ai_control_plane import FAKE_KEY, Clock, Scripted, _FakeA
 from server.tests.test_ai_e2e_regression import World, ev
 
 ALL_TYPES_ON = {**{t: True for t in LEGACY_TYPES}, "alibaba": True}
+STAMP = "2026-10-03T10:11:12+00:00"
 
 
 # ------------------------------------------------------------------ rig: a production-shaped, Appwrite-backed plane
@@ -387,14 +388,22 @@ class TestMalformedAlibabaConfiguration(unittest.TestCase):
 
     def test_a_route_that_names_a_slot_that_does_not_exist_is_dropped_not_fatal(self) -> None:
         rig = Rig().configure(alibaba=False)
+        rig.store.save_profile(RoutingProfile("FREE_FIRST", ("gemini-01", "gemini-02")), stamp=STAMP)  # a stored legacy row
+        # a route carrying the CORRECT stamp, so only its content can make it stale
         _ext_rows(rig)["r-FREE_FIRST"] = {"$id": "r-FREE_FIRST", "kind": "route", "key": "FREE_FIRST",
-                                          "data_json": json.dumps({"steps": ["ghost-slot", "gemini-01", "gemini-02"]})}
-        self._assert_gemini_unaffected(rig)
-        self.assertEqual(rig.plane.snapshot().ext.stale_routes, ("FREE_FIRST",))
+                                          "data_json": json.dumps({"steps": ["ghost-slot", "gemini-01", "gemini-02"],
+                                                                   "stamp": STAMP})}
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(rig.plane.state, "ok")
+        self.assertEqual(cfg.profiles["FREE_FIRST"].steps, ("gemini-01", "gemini-02"))
+        self.assertEqual(served(rig.turn("general")), ["gemini-01"])
+        self.assertEqual(cfg.ext.stale_routes, ("FREE_FIRST",))
 
     def test_a_route_that_disagrees_with_the_legacy_profile_is_dropped(self) -> None:
         rig = Rig().configure()
-        _ext_rows(rig)["r-FREE_FIRST"]["data_json"] = json.dumps({"steps": ["alibaba-01", "gemini-02", "gemini-01"]})
+        row = _ext_rows(rig)["r-FREE_FIRST"]
+        row["data_json"] = json.dumps({**json.loads(row["data_json"]), "steps": ["alibaba-01", "gemini-02", "gemini-01"]})
         rig.plane.invalidate()
         cfg = rig.plane.snapshot()
         self.assertEqual(cfg.profiles["FREE_FIRST"].steps, ("gemini-01", "gemini-02"))
@@ -524,7 +533,7 @@ class TestMalformedAlibabaConfiguration(unittest.TestCase):
         rig.store.save_ext_slot(huge)  # the largest legal slot fits
         self.assertLess(len(rig.fake.cols[T_EXT]["s-alibaba-77"]["data_json"]), EXT_DATA_MAX)
         with self.assertRaises(ValueError):
-            rig.store.save_ext_route("WRITER", tuple("s" * 27 for _ in range(12)) + ("x" * 4000,))
+            rig.store.save_ext_route("WRITER", tuple("s" * 27 for _ in range(12)) + ("x" * 4000,), stamp=STAMP)
 
     def test_parse_ext_rows_itself_never_raises(self) -> None:
         junk: List[Dict[str, Any]] = [{}, {"kind": None}, {"kind": "slot", "key": "k", "data_json": None},
@@ -763,6 +772,211 @@ class TestLegacyQwenRetired(unittest.TestCase):
                               "qwen": {"env": "FAS_AI_QWEN_LEGACY_ENABLED", "open": False}})
 
 
+# ================================================================== second-round review findings
+
+
+class _Switchable(_Writes):
+    """Fake Appwrite whose ext collection / profile collection / ext deletes can be broken on demand."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ext_down = False        # GET/PATCH/POST/DELETE on ai_alibaba_config -> 503
+        self.ext_delete_down = False  # only DELETE on ai_alibaba_config -> 503
+        self.profiles_down = False   # PATCH/POST on ai_routing_profiles -> 503
+        self.dead_after_ext_write = False  # once an ext write happened, EVERYTHING fails
+        self._ext_writes = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        in_ext = "/collections/ai_alibaba_config/" in path
+        if self.dead_after_ext_write and self._ext_writes:
+            return httpx.Response(503, json={"message": "busy"})
+        if in_ext and (self.ext_down or (self.ext_delete_down and request.method == "DELETE")):
+            return httpx.Response(503, json={"message": "busy"})
+        if self.profiles_down and request.method in ("PATCH", "POST") and "/collections/ai_routing_profiles/" in path:
+            return httpx.Response(503, json={"message": "busy"})
+        if in_ext and request.method in ("PATCH", "POST"):
+            self._ext_writes += 1
+        return super().__call__(request)
+
+
+class TestSecondRoundReviewFindings(unittest.TestCase):
+    # ---- finding 1: a step resolves exactly as the router resolves it ----
+    def test_a_slot_named_like_a_provider_type_never_changes_how_steps_split(self) -> None:
+        ali_named_gemini = a_slot("gemini")  # what a hostile/careless row could claim
+        self.assertFalse(is_ext_step("gemini", {"gemini": ali_named_gemini}), "a TYPE name is resolved as the type, like router.plan")
+        self.assertTrue(is_ext_step("alibaba", {}))
+        self.assertFalse(is_ext_step("groq", {"groq": a_slot("groq")}))
+        self.assertEqual(split_steps(("azure_openai", "gemini"), {"gemini": ali_named_gemini}),
+                         (("azure_openai", "gemini"), ()), "Gemini stays in the legacy-visible profile")
+
+    def test_such_a_slot_cannot_be_created_and_a_row_claiming_it_is_unreadable(self) -> None:
+        rig = Rig().configure(alibaba=False)
+        for bad_id in ("gemini", "qwen", "groq", "alibaba", "azure_openai"):
+            with self.assertRaises(ConfigValidationError, msg=bad_id) as ctx:
+                rig.plane.create_slot("owner", {**slot_to_dict(a_slot("alibaba-77")), "slot_id": bad_id,
+                                                "secret_ref": "ALIBABA_X77", "enabled": False})
+            self.assertEqual(ctx.exception.errors[0]["field"], "slot_id")
+            _ext_rows(rig)["s-" + bad_id] = _slot_row(bad_id)  # a well-formed Alibaba slot row that merely uses a type name
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(cfg.ext.unreadable, 5, "all five hostile rows were refused")
+        self.assertFalse({"gemini", "qwen", "groq", "alibaba", "azure_openai"} & set(cfg.slots) - {"gemini-01", "gemini-02"})
+        self.assertEqual(rig.plane.update_profile("owner", "WEB_SEARCH", ["gemini"], True)["steps"], ["gemini"],
+                         "WEB_SEARCH = [gemini] stays saveable (it used to be misread as 'Alibaba only')")
+
+    # ---- finding 2 / 4 (+ cross-family #2): a removed or half-written Alibaba step can never come back ----
+    def test_a_failed_route_delete_cannot_keep_or_resurrect_a_removed_alibaba_step(self) -> None:
+        fake = _Switchable()
+        rig = Rig(fake).configure()
+        self.assertEqual(rig.plane.snapshot().profiles["WRITER"].steps, ("alibaba", "azure_openai", "gemini"))
+        fake.ext_delete_down = True  # the owner removes the Alibaba step but the route row cannot be deleted
+        out = rig.plane.update_profile("owner", "WRITER", ["azure_openai", "gemini"], True)  # legacy steps do NOT change
+        self.assertEqual(out["steps"], ["azure_openai", "gemini"])
+        fake.ext_delete_down = False
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(cfg.profiles["WRITER"].steps, ("azure_openai", "gemini"), "the operator's removal is honoured")
+        self.assertEqual(cfg.ext.stale_routes, ("WRITER",), "…and the orphan row is reported")
+
+    def test_two_gemini_edits_during_an_outage_cannot_resurrect_the_old_route(self) -> None:
+        fake = _Switchable()
+        rig = Rig(fake).configure()
+        fake.ext_down = True
+        rig.plane.invalidate()
+        rig.plane.update_profile("owner", "FREE_FIRST", ["gemini-02", "gemini-01"], True)
+        rig.plane.update_profile("owner", "FREE_FIRST", ["gemini-01", "gemini-02"], True)  # back to the route's own base
+        fake.ext_down = False
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(cfg.profiles["FREE_FIRST"].steps, ("gemini-01", "gemini-02"), "no Alibaba step the owner removed")
+        self.assertEqual(cfg.ext.stale_routes, ("FREE_FIRST",))
+        self.assertEqual(served(rig.turn("general")), ["gemini-01"])
+
+    def test_the_old_release_editing_back_to_the_same_steps_also_orphans_the_route(self) -> None:
+        from server.config import AppwriteSettings
+        rig = Rig().configure()
+        aw = AppwriteSettings(endpoint="https://appwrite.example/v1", project_id="p", api_key="k", database_id="db")
+        old = old_store.AppwriteControlStore(aw, client=httpx.Client(transport=httpx.MockTransport(rig.fake)))
+        with mock.patch.object(old_store, "now_iso", return_value="2031-01-01T00:00:00+00:00"):
+            old.save_profile(old_model.RoutingProfile("FREE_FIRST", ("gemini-01", "gemini-02")))  # SAME steps as the base
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(cfg.profiles["FREE_FIRST"].steps, ("gemini-01", "gemini-02"))
+        self.assertEqual(cfg.ext.stale_routes, ("FREE_FIRST",), "the old release re-saved the profile: the route is no longer ours")
+
+    def test_a_failure_between_the_two_writes_restores_the_previous_route(self) -> None:
+        fake = _Switchable()
+        rig = Rig(fake).configure()
+        before = rig.plane.snapshot().profiles["FREE_FIRST"].steps
+        fake.profiles_down = True
+        with self.assertRaises(ControlStoreUnavailable):
+            rig.plane.update_profile("owner", "FREE_FIRST", ["gemini-01", "alibaba-01", "gemini-02"], True)
+        fake.profiles_down = False
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(cfg.profiles["FREE_FIRST"].steps, before, "the error left the previous (valid) state in place")
+        self.assertEqual(cfg.ext.stale_routes, ())
+
+    def test_if_even_the_restore_fails_the_half_written_route_is_not_applied(self) -> None:
+        fake = _Switchable()
+        rig = Rig(fake).configure()
+        fake.profiles_down = True
+        fake._ext_writes = 0  # noqa: SLF001 — count from here: the route write succeeds, then EVERYTHING (profile write + restore) fails
+        fake.dead_after_ext_write = True
+        with self.assertRaises(ControlStoreUnavailable):
+            rig.plane.update_profile("owner", "FREE_FIRST", ["gemini-01", "alibaba-01", "gemini-02"], True)
+        fake.profiles_down = False
+        fake.dead_after_ext_write = False
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        # The new route's legacy projection equals the stored steps, yet it must NOT apply: it was never stamped onto the row.
+        self.assertEqual(cfg.profiles["FREE_FIRST"].steps, ("gemini-01", "gemini-02"))
+        self.assertEqual(cfg.ext.stale_routes, ("FREE_FIRST",))
+        old_release_view(rig.fake)
+
+    def test_two_edits_in_the_same_second_still_get_different_stamps(self) -> None:
+        rig = Rig().configure()
+        fixed = "2036-01-01T00:00:00+00:00"
+        with mock.patch("server.ai_assistant.control.service.now_iso", return_value=fixed):
+            rig.plane.update_profile("owner", "STORY", ["gemini-01", "alibaba-01", "gemini-02"], True)
+            first = rig.fake.cols[T_PROFILES]["STORY"]["updated_at"]
+            rig.plane.update_profile("owner", "STORY", ["gemini-01", "gemini-02"], True)
+            second = rig.fake.cols[T_PROFILES]["STORY"]["updated_at"]
+        self.assertEqual(first, fixed)
+        self.assertGreater(second, first, "the stamp is strictly increasing, even inside one second")
+
+    # ---- finding 3: ids and pages ----
+    def test_a_row_whose_document_id_disagrees_with_its_key_is_a_shadow_and_is_ignored(self) -> None:
+        rig = Rig().configure()
+        genuine = _ext_rows(rig)["s-alibaba-01"]
+        _ext_rows(rig)["s-zzz"] = {**genuine, "$id": "s-zzz"}  # claims key alibaba-01, lives under another id
+        _ext_rows(rig)["r-STORY"] = {"$id": "r-STORY", "kind": "route", "key": "WRITER",
+                                     "data_json": json.dumps({"steps": ["alibaba", "gemini"], "stamp": STAMP})}
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(cfg.ext.unreadable, 2)
+        self.assertIn("alibaba-01", cfg.slots)
+        # the API's delete/disable address the REAL row, which is the only one that counts
+        rig.plane.update_slot("owner", "alibaba-01", {"enabled": False})
+        rig.plane.invalidate()
+        self.assertFalse(rig.plane.snapshot().slots["alibaba-01"].enabled)
+
+    def test_a_full_page_of_rows_is_treated_as_degraded_not_silently_truncated(self) -> None:
+        rig = Rig().configure(alibaba=False)
+        for i in range(100):
+            _ext_rows(rig)[f"junk-{i}"] = {"$id": f"junk-{i}", "kind": "slot", "key": f"k{i}", "data_json": "{}"}
+        rig.plane.invalidate()
+        self.assertEqual(rig.plane.snapshot().ext.state, "unavailable")
+        self.assertEqual(rig.plane.state, "ok")
+        self.assertEqual(served(rig.turn("general")), ["gemini-01"])
+
+    # ---- finding 5: caps per partition, and no blind overwrite ----
+    def test_slot_caps_are_per_partition(self) -> None:
+        from server.tests.test_ai_alibaba_control_plane import build_plane
+        from server.ai_assistant.control.model import MAX_EXT_SLOTS
+        slots = [a_slot(f"alibaba-{i:02d}", enabled=False) for i in range(MAX_EXT_SLOTS)] + [slot("gemini-01")]
+        p = build_plane(slots)
+        with self.assertRaises(ConfigValidationError):
+            p.create_slot("owner", {**slot_to_dict(a_slot("alibaba-99")), "enabled": False})
+        out = p.create_slot("owner", {**slot_to_dict(slot("gemini-02")), "enabled": False})  # Alibaba slots do not use up Gemini's room
+        self.assertEqual(out["slot_id"], "gemini-02")
+
+    def test_creating_an_alibaba_slot_needs_a_readable_partition(self) -> None:
+        st = InMemoryControlStore()
+        st.controls = GlobalControls(ai_enabled=True, provider_types=dict(ALL_TYPES_ON), version=1)
+        body = {**slot_to_dict(a_slot("alibaba-01")), "enabled": False}
+        st.ext_fault = "unavailable"
+        p = ControlPlane(st)
+        with self.assertRaises(ControlConflict):
+            p.create_slot("owner", body)
+        self.assertEqual(st.ext_rows, {}, "nothing was written blind")
+        st.ext_fault = "schema_missing"
+        with self.assertRaises(ControlSchemaOutdated):
+            p.create_slot("owner", body)
+
+    def test_a_create_race_409_is_retried_as_an_update(self) -> None:
+        class Racy(_FakeAppwrite):
+            posts = 0
+
+            def __call__(self, request: httpx.Request) -> httpx.Response:
+                if "/collections/ai_alibaba_config/" in request.url.path:
+                    if request.method == "PATCH" and not self.cols.get(T_EXT, {}).get("s-alibaba-01"):
+                        return httpx.Response(404, json={})
+                    if request.method == "POST":
+                        Racy.posts += 1
+                        # another instance created the row in between
+                        self.cols.setdefault(T_EXT, {})["s-alibaba-01"] = {"$id": "s-alibaba-01", "kind": "slot",
+                                                                           "key": "alibaba-01", "data_json": "{}"}
+                        return httpx.Response(409, json={"message": "exists"})
+                return super().__call__(request)
+
+        st, fake = _appwrite_store(Racy())
+        st.save_ext_slot(a_slot())  # no exception: the 409 became a PATCH
+        self.assertEqual(Racy.posts, 1)
+        self.assertIn('"alibaba-01"', fake.cols[T_EXT]["s-alibaba-01"]["data_json"])
+
+
 # ================================================================== the in-memory store behaves like Appwrite
 
 
@@ -771,9 +985,10 @@ class TestInMemoryPartition(unittest.TestCase):
         st = InMemoryControlStore()
         self.assertEqual(st.load_ext().state, "empty")
         st.save_ext_slot(a_slot())
-        st.save_ext_route("WRITER", ("alibaba", "gemini"))
+        st.save_ext_route("WRITER", ("alibaba", "gemini"), stamp=STAMP)
         ext = st.load_ext()
-        self.assertEqual((ext.state, sorted(ext.slots), ext.routes), ("ok", ["alibaba-01"], {"WRITER": ("alibaba", "gemini")}))
+        self.assertEqual((ext.state, sorted(ext.slots), ext.routes),
+                         ("ok", ["alibaba-01"], {"WRITER": ExtRoute(("alibaba", "gemini"), STAMP)}))
         st.delete_ext_route("WRITER")
         st.delete_ext_slot("alibaba-01")
         self.assertEqual(st.load_ext().state, "empty")

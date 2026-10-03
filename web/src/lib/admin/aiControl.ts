@@ -38,6 +38,9 @@ export type AiSlotHealthStatus =
 /** Tầng năng lực của một model — KHÔNG phải tên model hay gói đăng ký; gói/tính năng sau này ánh xạ tới tầng. */
 export type AiCapabilityTier = "FAST" | "SMART" | "ADVANCED" | "TRANSLATION" | "VISION" | "EMBEDDING";
 
+/** `provider_default` = không gửi gì (model tự quyết); `off`/`on` = ép tắt/bật suy luận. Danh sách thật do máy chủ cấp (`meta.thinking_modes`). */
+export type AiThinkingMode = "provider_default" | "off" | "on";
+
 /** Cổng cấp máy chủ của một loại provider: `env` là TÊN biến môi trường (đổi cần deploy), `open` = đang mở. */
 export interface AiGateInfo {
   env: string;
@@ -208,6 +211,8 @@ export interface AiSlot {
   /** `true` = slot KHÔNG BAO GIỜ được dùng khi hạn mức miễn phí hết/quá hạn (không để phát sinh phí). */
   free_quota_only?: boolean;
   free_quota_updated_at?: string;
+  /** Chế độ suy luận (thinking) của model; chỉ loại trong `meta.thinking_types` nhận giá trị khác `provider_default`. */
+  thinking?: AiThinkingMode;
   effective_endpoint: string;
   health: AiSlotHealth;
 }
@@ -265,6 +270,9 @@ export interface AiConfigMeta {
   /** Các tầng năng lực chọn được cho một slot, và phần chat phục vụ được (EMBEDDING dùng API khác). */
   capability_tiers?: AiCapabilityTier[];
   chat_tiers?: AiCapabilityTier[];
+  /** Các chế độ thinking chọn được, và loại provider nào có điều khiển này (loại khác không hiện ô chọn). */
+  thinking_modes?: AiThinkingMode[];
+  thinking_types?: string[];
   /** Loại có cổng cấp máy chủ → tên biến môi trường + đang mở hay không. */
   gated_types?: Record<string, AiGateInfo>;
   /** Loại mà slot LUÔN được tạo ở trạng thái tắt (bật bằng thao tác riêng sau khi Kiểm tra). */
@@ -340,6 +348,7 @@ export interface AiSlotInput {
   free_quota_remaining?: number | null;
   free_quota_expires_at?: string;
   free_quota_only?: boolean;
+  thinking?: AiThinkingMode;
 }
 
 export interface AiGlobalPatch {

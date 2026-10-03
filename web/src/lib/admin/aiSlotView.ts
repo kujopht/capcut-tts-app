@@ -3,7 +3,18 @@
  * test thẳng bằng `node --test` (xem `web/tests/admin-ai-alibaba.test.mjs`). Không tên provider nào viết cứng ở đây — nhãn,
  * tên biến môi trường và quy tắc đều đến từ `meta`/`health` của server.
  */
-import type { AiFreeQuotaState, AiIsolatedStore, AiLatencyStat, AiSlotLatency, AiSlotQuota } from "./aiControl";
+import type { AiFreeQuotaState, AiIsolatedStore, AiLatencyStat, AiSlotLatency, AiSlotQuota, AiThinkingMode } from "./aiControl";
+
+const NHAN_THINKING: Record<AiThinkingMode, string> = {
+  provider_default: "Mặc định của nhà cung cấp (không gửi gì)",
+  off: "Tắt",
+  on: "Bật",
+};
+
+/** Nhãn của chế độ thinking; giá trị lạ (máy chủ mới hơn) hiện nguyên văn thay vì vỡ trang. */
+export function nhanThinking(mode: string | undefined): string {
+  return (mode && (NHAN_THINKING as Record<string, string>)[mode]) || (mode ? mode : NHAN_THINKING.provider_default);
+}
 
 /**
  * Những câu cảnh báo về kho lưu tách biệt mà Owner cần đọc — rỗng khi không có gì đáng nói. Câu chữ do MÁY CHỦ viết (nó nói

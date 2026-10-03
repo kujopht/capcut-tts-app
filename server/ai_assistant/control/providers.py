@@ -33,7 +33,8 @@ def default_builder(slot: ProviderSlot, api_key: str) -> ChatProvider:
                                               deployment=slot.model, api_version=slot.api_version or "2024-06-01")
     elif slot.provider_type == "alibaba":
         # Adapter riêng (lớp con): host được kiểm lại, timeout tường minh, phân loại lỗi đóng, TTFT. Gemini không đi qua đây.
-        p = AlibabaModelStudioProvider(name=slot.slot_id, base_url=slot.effective_endpoint(), api_key=api_key)
+        p = AlibabaModelStudioProvider(name=slot.slot_id, base_url=slot.effective_endpoint(), api_key=api_key,
+                                       thinking=slot.thinking)
     else:
         headers = {"X-Title": "Fanfic World"} if slot.provider_type == "openrouter" else None
         p = OpenAICompatChatProvider(name=slot.slot_id, base_url=slot.effective_endpoint(), api_key=api_key,
@@ -51,7 +52,8 @@ class ProviderFactory:
 
     def get(self, slot: ProviderSlot, api_key: str) -> ChatProvider:
         fp = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
-        key = (slot.provider_type, slot.effective_endpoint(), slot.model, slot.api_version, fp)
+        # `thinking` is part of the key: changing a slot's mode must rebuild its client (the payload shape depends on it).
+        key = (slot.provider_type, slot.effective_endpoint(), slot.model, slot.api_version, slot.thinking, fp)
         with self._lock:
             hit = self._cache.get(slot.slot_id)
             if hit and hit[0] == key:

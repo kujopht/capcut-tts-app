@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import type { AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
 import {
-  coThongTinHanMuc, hostCuaEndpoint, moTaDoTre, moTaHanDung, moTaKhoaChan, moTaUocTinh, nhanHanMuc,
+  coThongTinHanMuc, hostCuaEndpoint, moTaDoTre, moTaHanDung, moTaKhoaChan, moTaUocTinh, nhanHanMuc, nhanThinking,
 } from "@/lib/admin/aiSlotView";
 import { AiQuotaBar } from "./AiQuotaBar";
 import { AiSlotForm } from "./AiSlotForm";
@@ -119,6 +119,12 @@ function DongSlot({
         ) : null}
         <dt>Tầng năng lực</dt>
         <dd>{slot.tiers && slot.tiers.length ? slot.tiers.join(", ") : "chưa phân loại"}</dd>
+        {slot.thinking && slot.thinking !== "provider_default" ? (
+          <>
+            <dt>Thinking</dt>
+            <dd>{nhanThinking(slot.thinking)}</dd>
+          </>
+        ) : null}
         <dt>Độ trễ</dt><dd>{moTaDoTre(h.latency)}</dd>
         {coThongTinHanMuc(h.quota) && h.quota ? (
           <>

@@ -13,8 +13,10 @@
  */
 
 import { useState } from "react";
-import type { AiCapabilityTier, AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
-import { datetimeLocalSangIso, isoSangDatetimeLocal } from "@/lib/admin/aiSlotView";
+import type {
+  AiCapabilityTier, AiConfigMeta, AiProviderType, AiSlot, AiSlotInput, AiThinkingMode,
+} from "@/lib/admin/aiControl";
+import { datetimeLocalSangIso, isoSangDatetimeLocal, nhanThinking } from "@/lib/admin/aiSlotView";
 
 interface LoiTruong {
   field: string;
@@ -37,7 +39,7 @@ const TRUONG_FORM = new Set([
   "slot_id", "provider_type", "label", "secret_ref", "model", "endpoint", "api_version",
   "priority", "weight", "daily_request_cap", "daily_token_cap", "rpm_soft_cap", "tpm_soft_cap",
   "workloads", "price_in_micro_per_mtok", "price_out_micro_per_mtok",
-  "tiers", "free_quota_remaining", "free_quota_expires_at", "free_quota_only",
+  "tiers", "free_quota_remaining", "free_quota_expires_at", "free_quota_only", "thinking",
 ]);
 
 export function AiSlotForm({
@@ -84,11 +86,14 @@ export function AiSlotForm({
   );
   const [quotaExpires, setQuotaExpires] = useState(isoSangDatetimeLocal(slot?.free_quota_expires_at));
   const [quotaOnly, setQuotaOnly] = useState(slot?.free_quota_only ?? false);
+  const [thinking, setThinking] = useState<AiThinkingMode>(slot?.thinking ?? "provider_default");
 
   // Loại mà server khai báo "luôn tạo ở trạng thái tắt": ô bật bị khoá khi TẠO MỚI (bật bằng thao tác riêng sau khi Kiểm tra).
   const taoMacDinhTat = !suaSlot && (meta.created_disabled_types ?? []).includes(providerType);
   const canEndpoint = meta.requires_endpoint.includes(providerType);
   const canApiVersion = meta.uses_api_version.includes(providerType);
+  // Ô thinking chỉ hiện cho loại mà MÁY CHỦ khai báo có điều khiển này (không viết cứng tên provider).
+  const canThinking = (meta.thinking_types ?? []).includes(providerType);
   const goiYEndpoint = meta.endpoint_hints[providerType] ?? "";
   // Ví dụ dựng từ loại đang chọn — không viết cứng tên provider nào.
   const viDuRef = `${providerType.toUpperCase()}_PROJECT_01`;
@@ -126,6 +131,8 @@ export function AiSlotForm({
       free_quota_remaining: quotaRemaining.trim() === "" ? null : Number(quotaRemaining),
       free_quota_expires_at: datetimeLocalSangIso(quotaExpires),
       free_quota_only: quotaOnly,
+      // Loại không có điều khiển này thì KHÔNG gửi trường (máy chủ từ chối giá trị khác provider_default).
+      ...(canThinking ? { thinking } : {}),
     };
     if (!suaSlot) {
       payload.slot_id = slotId;
@@ -309,6 +316,23 @@ export function AiSlotForm({
           </div>
           <LoiDuoi loi={loiTruong} truong="workloads" />
         </fieldset>
+
+        {canThinking ? (
+          <label className="stack-1">
+            <span className="hint">Thinking (suy luận của model)</span>
+            <select className="input" value={thinking} onChange={(e) => setThinking(e.target.value as AiThinkingMode)}>
+              {(meta.thinking_modes ?? ["provider_default"]).map((m) => (
+                <option key={m} value={m}>{nhanThinking(m)}</option>
+              ))}
+            </select>
+            <span className="hint">
+              Model lai (hybrid) thường MẶC ĐỊNH bật suy luận: tốn token và độ trễ, và với giới hạn token nhỏ có thể không trả
+              lời gì. &ldquo;Tắt&rdquo; gửi lệnh tắt tường minh; &ldquo;Mặc định&rdquo; không gửi gì. Nội dung suy luận không bao giờ
+              hiện ra cho người dùng, dù chọn gì.
+            </span>
+            <LoiDuoi loi={loiTruong} truong="thinking" />
+          </label>
+        ) : null}
 
         <details className="stack-2">
           <summary className="hint">Tầng năng lực &amp; hạn mức miễn phí (tuỳ chọn)</summary>

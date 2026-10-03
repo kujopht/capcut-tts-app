@@ -169,6 +169,36 @@ test("tổng quan: thẻ kho tách biệt chỉ hiện khi có gì để nói, �
   assert.match(types, /isolated_store\?: AiIsolatedStore/);
 });
 
+// ------------------------------------------------------------------ thinking (điều khiển suy luận theo slot)
+
+test("nhanThinking: nhãn cho từng chế độ, giá trị lạ không làm vỡ trang", () => {
+  assert.match(v.nhanThinking("provider_default"), /Mặc định/);
+  assert.equal(v.nhanThinking("off"), "Tắt");
+  assert.equal(v.nhanThinking("on"), "Bật");
+  assert.match(v.nhanThinking(undefined), /Mặc định/, "slot do máy chủ cũ trả (chưa có trường) = mặc định");
+  assert.equal(v.nhanThinking("future_mode"), "future_mode", "chế độ của máy chủ mới hơn hiện nguyên văn");
+});
+
+test("form + danh sách slot: ô thinking chỉ hiện cho loại MÁY CHỦ khai báo, chỉ gửi khi hiện, lỗi hiện cạnh ô", () => {
+  const form = codeOnly(read("components/admin/ai/AiSlotForm.tsx"));
+  assert.match(form, /\(meta\.thinking_types \?\? \[\]\)\.includes\(providerType\)/, "điều kiện đến từ meta, không viết cứng loại");
+  assert.match(form, /\.\.\.\(canThinking \? \{ thinking \} : \{\}\)/, "loại không có điều khiển thì không gửi trường");
+  assert.match(form, /truong="thinking"/);
+  assert.match(form, /"thinking",\n?\]\);|"free_quota_only", "thinking"/, "thinking nằm trong TRUONG_FORM để lỗi hiện cạnh ô");
+  const list = codeOnly(read("components/admin/ai/AiSlotList.tsx"));
+  assert.match(list, /slot\.thinking && slot\.thinking !== "provider_default"/);
+  assert.match(list, /nhanThinking\(slot\.thinking\)/);
+});
+
+test("AiThinkingMode (TS) liệt kê đúng THINKING_MODES của backend", () => {
+  const py = readPy("llm_gateway/alibaba.py");
+  const tuple = py.match(/THINKING_MODES = \(([^)]*)\)/)[1];
+  const backend = [...tuple.matchAll(/"(\w+)"/g)].map((m) => m[1]).sort();
+  const ts = read("lib/admin/aiControl.ts").match(/export type AiThinkingMode =([\s\S]*?);/)[1];
+  const front = [...ts.matchAll(/"(\w+)"/g)].map((m) => m[1]).sort();
+  assert.deepEqual(front, backend);
+});
+
 // ------------------------------------------------------------------ chống trôi giữa TS và backend
 
 test("AiIsolatedStoreState (TS) liệt kê đúng EXT_STATES của backend", () => {

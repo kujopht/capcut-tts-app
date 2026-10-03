@@ -137,4 +137,11 @@ def build_ai_admin_router(plane: Optional[ControlPlane], *, reader: Callable[...
         b = _body(body)
         return {"profile": _run(lambda: _plane().update_profile(p.user_id, name, b.get("steps"), b.get("enabled", True)))}
 
+    @r.put("/api/admin/ai/canary-profiles/{name}")
+    def put_canary(name: str, body: Any = Body(...), p: Any = Depends(owner)) -> Dict[str, Any]:
+        """OWNER: the Owner-only canary route (slots of the isolated partition only). Not a routing profile: no mode, no default
+        fallback and no public request can select it — only an authenticated Owner QA request, decided server-side."""
+        b = _body(body)
+        return {"canary": _run(lambda: _plane().update_canary(p.user_id, name, b.get("steps")))}
+
     return r

@@ -87,6 +87,10 @@ class MessageIn(BaseModel):
     #: người khác cờ bị BỎ QUA (lượt tính như lượt thường, không báo lỗi). Lượt QA ghi vào sổ QA riêng, không
     #: ăn vào hạn mức người dùng thường, nhưng VẪN bị công tắc khẩn cấp và trần toàn cục chặn.
     qa: bool = False
+    #: Tuyến canary của Owner (`control.model.CANARY_PROFILES`), CHỈ có hiệu lực khi lượt đi làn QA (Owner + `qa: true` + control plane
+    #: bật). Với MỌI người khác (và Owner không đặt `qa`) trường này bị BỎ QUA hoàn toàn — không báo lỗi, không đổi định tuyến, không là
+    #: "oracle" cho biết tuyến có tồn tại không. Kiểu `Any` để một giá trị lạ không bao giờ thành lỗi 422 cho người dùng thường.
+    qa_route: Any = None
 
 
 class PreferencesIn(BaseModel):
@@ -470,6 +474,14 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
         # khẩn cấp, trần toàn cục, slot, RPM) áp y hệt lượt thường.
         qa = rt.qa_lane(profile.user_id, payload.qa)
         ledger_user = qa_ledger_user(profile.user_id) if qa else profile.user_id
+        # Tuyến canary: quyết định ở ĐÂY, phía máy chủ, và CHỈ khi `qa` (đã xác thực Owner) là True. Giá trị của client chỉ được so
+        # khớp chính xác với danh sách tên cố định; Owner xin một tuyến không có/chưa cấu hình thì bị TỪ CHỐI (không bao giờ rơi
+        # lặng lẽ về hồ sơ thường, kẻo tưởng đã thử Alibaba mà thật ra là Gemini). Người khác: trường bị bỏ qua, không phản hồi gì.
+        canary_route: Optional[str] = None
+        if qa and payload.qa_route is not None:
+            canary_route = await run_in_threadpool(rt.control.canary_route_name, payload.qa_route)
+            if canary_route is None:
+                raise HTTPException(422, {"code": "ai_canary_unavailable", "message": "Tuyến QA không có hoặc chưa được cấu hình."})
         if rt.control is not None:
             # Kill switch + global/per-user daily ceilings from the control
             # plane (reads the store -> off the event loop).
@@ -746,7 +758,8 @@ def build_ai_router(rt: AiRuntime, *, resolve_profile: Callable[[Optional[str]],
                 # lượt đã bị bỏ (xem `ControlledGateway.stream`). Đặt ở `finally` bên dưới trên MỌI đường thoát.
                 gen = rt.gateway.stream(turns, mode=conv.mode,
                                        user_ref=_hashed_user_ref(rt, profile.user_id), workload=workload,
-                                       cancel=gateway_cancel.is_set, on_attempt=_note_attempt)
+                                       cancel=gateway_cancel.is_set, on_attempt=_note_attempt,
+                                       **({"route": canary_route} if canary_route is not None else {}))
                 # The provider generator runs on the pump's own thread
                 # (never on the event loop, contract §0.2) and is closed
                 # THERE under `contextlib.closing` (R3) the moment

@@ -293,9 +293,43 @@ Mốc dừng: `ALIBABA_SG_01_CANARY_PROBE_VERIFIED` (slot vẫn TẮT, chưa có
 Nếu probe lỗi: để slot TẮT, không đổi định tuyến, đọc `last_error_category` (đã làm sạch) và đối chiếu bảng mục 4; Gemini không bị ảnh hưởng. Không cố ý làm cạn hạn
 mức hay tạo tải lớn để thử giới hạn tốc độ.
 
+## 12c. Tuyến canary chỉ-Owner `ALIBABA_CANARY` (chat thật, KHÔNG công khai)
+
+Mục tiêu: chạy vài lượt chat thật qua `alibaba-sg-01` mà **không** thêm Alibaba vào hồ sơ định tuyến nào. Đây **không phải một hồ sơ** (`PROFILES`) —
+nó là một danh mục riêng `CANARY_PROFILES = ("ALIBABA_CANARY",)` nằm NGOÀI không gian tên hồ sơ, nên không `mode_profiles`, `web_search_profile`,
+`PUT /api/admin/ai/profiles/<tên>` hay hồ sơ mặc định nào trỏ tới nó được (validator từ chối).
+
+**Ai chọn được nó** — đúng một trường hợp: request đã xác thực của **Owner** (`FAS_OWNER_USER_IDS`) **và** đi làn QA (`qa: true`) **và** gửi
+`qa_route: "ALIBABA_CANARY"`. Quyết định ở phía máy chủ (`server/ai_assistant/routes.py`): giá trị của client chỉ được **so khớp chính xác** với danh sách tên
+cố định (không chuẩn hoá, không tiền tố), rồi gateway chỉ nhận tên đã được máy chủ xác nhận — không bao giờ nhận chuỗi thô của client.
+
+| Người gọi | Kết quả |
+|---|---|
+| Người dùng thường / ẩn danh / Owner không `qa:true` | Trường `qa_route` (và mọi trường lạ: `route`, `profile`, `provider`, `slot_id`, `model`…, header, query) **bị bỏ qua**; lượt chạy hồ sơ thường, đếm vào hạn mức thường; ẩn danh vẫn 401 |
+| Owner + `qa:true` + `qa_route` đúng tên, tuyến đã cấu hình | Chỉ các slot của tuyến; lượt đếm vào sổ QA (`qa_ledger_user`), bị công tắc khẩn cấp + trần toàn cục + trần QA ràng buộc như mọi lượt |
+| Owner + `qa:true` + `qa_route` sai tên / chưa cấu hình / sai kiểu | **422 `ai_canary_unavailable`** — không echo giá trị, không tốn gì; **không** rơi lặng lẽ về Gemini (kẻo tưởng đã thử Alibaba) |
+
+**Không có đường dự phòng**: slot canary lỗi / tắt / cổng đóng thì lượt Owner báo lỗi (SSE `error` đã làm sạch), Gemini **không** được gọi thay. Tuyến chỉ chứa slot
+của vùng tách biệt (Alibaba): lưu ở collection `ai_alibaba_config` (hàng `c-ALIBABA_CANARY`, `{"steps": [...]}`), nên bản mã cũ (3f86706) không đọc, và một hàng sửa tay
+trỏ vào slot Gemini bị loại khi dựng cấu hình. Slot đang nằm trong tuyến không xoá được (409). `qa_route` không có hiệu lực "dính" giữa các lượt: lượt tiếp theo/regenerate
+phải gửi lại nếu muốn.
+
+Quản trị: `PUT /api/admin/ai/canary-profiles/ALIBABA_CANARY` body `{"steps": ["alibaba-sg-01"]}` (OWNER-only, có audit `canary:ALIBABA_CANARY`; `steps: []` = xoá tuyến);
+`GET /api/admin/ai/config` có `canary_profiles`.
+
+Giữ nguyên: Gemini công khai, hạn mức người dùng/toàn cục, `qwen` cũ ĐÓNG, `FAS_AI_PREFER_FREE_QUOTA` chưa đặt, slot Alibaba không nằm trong hồ sơ mặc định nào.
+Kiểm: `server/tests/test_ai_alibaba_canary.py` (25 bài, đã kiểm đột biến 12/12: bỏ điều kiện `qa`, chuyển giá trị thô của client xuống gateway, mở PUT cho ADMIN,
+bỏ lọc loại slot, bỏ chặn xoá slot, chuẩn hoá tên, rơi về hồ sơ thường, vượt công tắc khẩn cấp… đều làm bài kiểm đỏ). Bất biến "chỉ một điểm gọi đã xác thực mới đẩy
+`route` xuống gateway" được ghim bằng bài kiểm tĩnh (thêm một điểm gọi mới ở bất kỳ tệp sản xuất nào là bài đỏ — phải sửa bài kiểm một cách có chủ đích); `CANARY_PROFILES` và
+`PROFILES` không giao nhau được khẳng định ngay lúc import (`model.py`).
+
+Hệ quả khi rút mã về bản trước khi có tuyến này: bản cũ không biết loại hàng `canary`, đếm hàng `c-ALIBABA_CANARY` vào `unreadable` của vùng Alibaba (con số trên `/admin/ai`
+tăng 1) — chỉ là bộ đếm; không slot/hồ sơ nào bị ảnh hưởng và Gemini giữ nguyên.
+
 ## 13. Rút lui
 
-Nhanh nhất: `FAS_AI_ALIBABA_ENABLED` về 0 + khởi động lại (hoặc công tắc tổng ở `/admin/ai`); tắt cờ loại `alibaba`; tắt/xoá slot. Không thay đổi hạn
+Nhanh nhất: `FAS_AI_ALIBABA_ENABLED` về 0 + khởi động lại (hoặc công tắc tổng ở `/admin/ai`); tắt cờ loại `alibaba`; tắt/xoá slot; xoá tuyến canary
+(`PUT …/canary-profiles/ALIBABA_CANARY` với `steps: []`). Không thay đổi hạn
 mức công khai, hồ sơ mặc định hay slot Gemini ở bất kỳ bước nào.
 
 Rút **mã** về bản trước khi có Alibaba (kể cả khi slot/hồ sơ Alibaba đã được lưu): **không cần dọn gì trước**. Dữ liệu Alibaba nằm ở collection mà

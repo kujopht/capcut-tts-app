@@ -469,8 +469,14 @@ class TestCapabilityTiers(unittest.TestCase):
     def test_no_chat_route_asks_for_a_tier_yet(self) -> None:
         import inspect
         from server.ai_assistant import routes
-        # The one gateway call of the chat route ends at `on_attempt=_note_attempt)`: no `tier=` argument is passed.
-        self.assertIn("cancel=gateway_cancel.is_set, on_attempt=_note_attempt)", inspect.getsource(routes))
+        # The one gateway call of the chat route passes NO `tier=`; its only optional extra is `route`, and that comes from the
+        # server-decided `canary_route` (Owner + QA), never from a raw request value.
+        src = inspect.getsource(routes)
+        call = src[src.index("gen = rt.gateway.stream("):]
+        call = call[:call.index("pump = StreamPump")]
+        self.assertNotIn("tier=", call)
+        self.assertIn('**({"route": canary_route} if canary_route is not None else {})', call)
+        self.assertNotIn("payload.qa_route", call, "the raw client value never reaches the gateway call")
 
 
 # ================================================================== free-quota metadata

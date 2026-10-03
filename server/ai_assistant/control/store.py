@@ -44,7 +44,7 @@ from urllib.parse import quote
 import httpx
 
 from server.ai_assistant.control.model import (
-    EXT_PROVIDER_TYPES, MAX_STEPS, PROFILES, PROVIDER_TYPES, ConfigValidationError, ControlConfig, ExtRoute,
+    CANARY_PROFILES, EXT_PROVIDER_TYPES, MAX_STEPS, PROFILES, PROVIDER_TYPES, ConfigValidationError, ControlConfig, ExtRoute,
     GlobalControls, ProviderSlot, RoutingProfile, default_profiles, slot_from_dict, slot_meta, slot_to_dict, slot_with_meta,
     validate_slot,
 )
@@ -54,7 +54,7 @@ T_SETTINGS, T_SLOTS, T_PROFILES, T_USAGE, T_AUDIT = (
     "ai_provider_usage_daily", "ai_admin_audit")
 #: Vùng lưu trữ tách biệt của các loại `EXT_PROVIDER_TYPES` (docstring đầu tệp). Id dòng: `s-<slot_id>` / `r-<hồ sơ>`.
 T_EXT = "ai_alibaba_config"
-EXT_SLOT_PREFIX, EXT_ROUTE_PREFIX = "s-", "r-"
+EXT_SLOT_PREFIX, EXT_ROUTE_PREFIX, EXT_CANARY_PREFIX = "s-", "r-", "c-"
 SETTINGS_ID = "global"
 
 
@@ -119,6 +119,8 @@ class ExtPartition:
     state: str = "empty"
     #: Rows that could not be used at all (bad JSON, wrong shape, duplicate/mismatched id, a non-Alibaba slot): counted only.
     unreadable: int = 0
+    #: Owner-only canary routes (`model.CANARY_PROFILES`): name -> slot ids. Rows `c-<NAME>`; no legacy counterpart, no stamp.
+    canaries: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
 
 
 #: `data_json` attribute size in `ai_alibaba_config` (scripts/setup_appwrite.py): a slot is < 1.2 KB, a route < 0.5 KB.
@@ -132,13 +134,14 @@ def parse_ext_rows(rows: List[Dict[str, Any]]) -> ExtPartition:
     data exercise the real parser. NEVER raises: one bad row costs that row (counted), never the others and never Gemini."""
     slots: Dict[str, ProviderSlot] = {}
     routes: Dict[str, ExtRoute] = {}
+    canaries: Dict[str, Tuple[str, ...]] = {}
     bad = 0
     for r in rows:
         try:
             kind, key = str(r.get("kind") or ""), str(r.get("key") or "")
             # The document id MUST be the one the writers derive from (kind, key): a row whose id disagrees with its own key is a
             # shadow (`delete_ext_slot(y)` removes `s-y`, never the `s-x` row that claims key `y`), so it is never trusted.
-            expected = {"slot": EXT_SLOT_PREFIX, "route": EXT_ROUTE_PREFIX}.get(kind, "\0") + key
+            expected = {"slot": EXT_SLOT_PREFIX, "route": EXT_ROUTE_PREFIX, "canary": EXT_CANARY_PREFIX}.get(kind, "\0") + key
             if str(r.get("$id") or "") != expected:
                 raise ValueError("document id does not match kind/key")
             data = json.loads(r.get("data_json") or "")
@@ -163,11 +166,17 @@ def parse_ext_rows(rows: List[Dict[str, Any]]) -> ExtPartition:
                         or any(not isinstance(s, str) for s in steps) or not isinstance(stamp, str):
                     raise ValueError("route row does not belong here")
                 routes[key] = ExtRoute(tuple(steps), stamp)
+            elif kind == "canary":
+                steps = data.get("steps")
+                if key not in CANARY_PROFILES or key in canaries or not isinstance(steps, list) or len(steps) > MAX_STEPS \
+                        or any(not isinstance(s, str) for s in steps):
+                    raise ValueError("canary row does not belong here")
+                canaries[key] = tuple(steps)
             else:
                 raise ValueError("unknown kind")
         except Exception:  # noqa: BLE001 — the contract is NEVER raises: whatever one row does (even OverflowError…) costs that row
             bad += 1
-    return ExtPartition(slots, routes, "ok" if (slots or routes or bad) else "empty", bad)
+    return ExtPartition(slots, routes, "ok" if (slots or routes or canaries or bad) else "empty", bad, canaries)
 
 
 def _ext_payload(data: Dict[str, Any]) -> str:
@@ -187,6 +196,8 @@ class ControlStore(Protocol):
     def delete_ext_slot(self, slot_id: str) -> None: ...
     def save_ext_route(self, profile: str, steps: Tuple[str, ...], *, stamp: str) -> None: ...
     def delete_ext_route(self, profile: str) -> None: ...
+    def save_ext_canary(self, name: str, steps: Tuple[str, ...]) -> None: ...
+    def delete_ext_canary(self, name: str) -> None: ...
     def save_profile(self, p: RoutingProfile, *, stamp: str = "") -> None: ...
     def add_audit(self, entries: List[AuditEntry]) -> None: ...
     def list_audit(self, limit: int = 50) -> List[AuditEntry]: ...
@@ -294,6 +305,12 @@ class InMemoryControlStore:
 
     def delete_ext_route(self, profile: str) -> None:
         self._ext_drop(EXT_ROUTE_PREFIX + profile)
+
+    def save_ext_canary(self, name: str, steps: Tuple[str, ...]) -> None:
+        self._ext_put(EXT_CANARY_PREFIX + name, "canary", name, {"steps": list(steps)})
+
+    def delete_ext_canary(self, name: str) -> None:
+        self._ext_drop(EXT_CANARY_PREFIX + name)
 
     def save_profile(self, p: RoutingProfile, *, stamp: str = "") -> None:
         _refuse_ext_profile(p)
@@ -594,6 +611,12 @@ class AppwriteControlStore:
 
     def delete_ext_route(self, profile: str) -> None:
         self._call("DELETE", f"{self._docs(T_EXT)}/{quote(EXT_ROUTE_PREFIX + profile)}")
+
+    def save_ext_canary(self, name: str, steps: Tuple[str, ...]) -> None:
+        self._ext_put(EXT_CANARY_PREFIX + name, "canary", name, {"steps": list(steps)})
+
+    def delete_ext_canary(self, name: str) -> None:
+        self._call("DELETE", f"{self._docs(T_EXT)}/{quote(EXT_CANARY_PREFIX + name)}")
 
     # ---- audit ----
     def add_audit(self, entries: List[AuditEntry]) -> None:

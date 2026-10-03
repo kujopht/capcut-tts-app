@@ -57,8 +57,15 @@ MAX_QUOTA = 10 ** 12
 #: (không có gì để điều khiển, và một giá trị khác sẽ im lặng không có tác dụng). Cấu hình theo LOẠI, không theo tên model:
 #: model nào cần chế độ nào là lựa chọn của Owner trên từng slot.
 THINKING_TYPES: Tuple[str, ...] = ("alibaba",)
+#: TUYẾN CANARY CỦA OWNER: danh sách slot chỉ dành cho lượt QA của Owner (`qa: true`), KHÔNG PHẢI hồ sơ định tuyến. Cố ý không nằm trong
+#: `PROFILES`: vì vậy `mode_profiles`/`web_search_profile` không thể trỏ tới nó, `PUT /profiles/<tên>` không tạo được nó, và không
+#: chế độ hội thoại nào chọn được nó. Chỉ MÁY CHỦ chọn nó, sau khi đã xác thực Owner + cờ QA (xem `AiRuntime.qa_lane`); tên do client
+#: gửi chỉ được so khớp chính xác với danh sách này. Chỉ chứa id slot thuộc vùng tách biệt (Alibaba), lưu ở đó, bản cũ không đọc.
+CANARY_PROFILES: Tuple[str, ...] = ("ALIBABA_CANARY",)
 WORKLOADS: Tuple[str, ...] = ("general", "story", "support", "writer", "web_search")
 PROFILES: Tuple[str, ...] = ("FREE_FIRST", "QUALITY_FIRST", "WRITER", "STORY", "SUPPORT_SAFE", "WEB_SEARCH")
+# Bất biến cô lập: một tên tuyến canary mà cũng là tên hồ sơ sẽ cho `mode_profiles`/`PUT /profiles` trỏ tới nó. Hỏng ngay lúc import.
+assert not set(CANARY_PROFILES) & set(PROFILES), "CANARY_PROFILES must stay disjoint from PROFILES"
 MODES: Tuple[str, ...] = ("general", "story", "support", "writer")
 WEB_SEARCH_TOOLS: Tuple[str, ...] = ("off",)
 
@@ -239,6 +246,8 @@ class ControlConfig:
     slots: Dict[str, ProviderSlot]
     profiles: Dict[str, RoutingProfile]
     ext: ExtStatus = field(default_factory=ExtStatus)
+    #: Tuyến canary của Owner: tên (`CANARY_PROFILES`) -> id slot, theo thứ tự thử. Rỗng/thiếu = không có tuyến (lượt QA xin nó bị từ chối).
+    canary: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
 
 
 def is_ext_step(step: str, slots: Mapping[str, ProviderSlot]) -> bool:

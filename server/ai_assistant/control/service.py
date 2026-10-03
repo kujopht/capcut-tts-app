@@ -289,7 +289,10 @@ class ControlPlane:
         stale: List[str] = []
         for name, route in ext.routes.items():
             base = profiles.get(name)
-            effective, applied = compose_profile(base, route, slots) if base is not None else (None, False)
+            try:
+                effective, applied = compose_profile(base, route, slots) if base is not None else (None, False)
+            except Exception:  # noqa: BLE001 — a bad Alibaba row can drop ITS route, never the configuration load
+                effective, applied = None, False
             if applied and effective is not None:
                 profiles[name] = effective
             else:  # no longer matches the legacy-visible profile (or invalid): dropped, so it can never override a Gemini edit
@@ -1036,9 +1039,10 @@ class ControlPlane:
     def _next_stamp(previous: str) -> str:
         """Dấu của một lần ghi hồ sơ = `updated_at` của dòng hồ sơ cũ, tới giây, và LUÔN lớn hơn dấu trước (hai lần sửa trong cùng một
         giây vẫn ra hai dấu khác nhau)."""
-        now = now_iso()
+        raw = now_iso()
+        now = normalize_timestamp(raw) or raw  # cùng định dạng UTC `+00:00` tới giây với `prev` nên so chuỗi là so thời gian
         prev = normalize_timestamp(previous) if previous else None
-        if prev is not None and now <= prev:  # cùng định dạng UTC `+00:00` tới giây nên so chuỗi là so thời gian
+        if prev is not None and now <= prev:
             now = (datetime.fromisoformat(prev) + timedelta(seconds=1)).isoformat(timespec="seconds")
         return now
 

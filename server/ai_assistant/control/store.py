@@ -165,7 +165,7 @@ def parse_ext_rows(rows: List[Dict[str, Any]]) -> ExtPartition:
                 routes[key] = ExtRoute(tuple(steps), stamp)
             else:
                 raise ValueError("unknown kind")
-        except (ValueError, TypeError, AttributeError, ConfigValidationError):
+        except Exception:  # noqa: BLE001 — the contract is NEVER raises: whatever one row does (even OverflowError…) costs that row
             bad += 1
     return ExtPartition(slots, routes, "ok" if (slots or routes or bad) else "empty", bad)
 
@@ -562,18 +562,19 @@ class AppwriteControlStore:
                     "trước (docs/ai/ALIBABA_PROVIDER.md, mục Migration schema).")
         path = f"{self._docs(T_EXT)}/{quote(doc_id)}"
         try:
-            if self._call("PATCH", path, body={"data": body}) is None:
+            for _attempt in range(2):  # a second pass only after a create race (409): another instance made/removed the row
+                if self._call("PATCH", path, body={"data": body}) is not None:
+                    return
                 try:
-                    created = self._call("POST", self._docs(T_EXT),
-                                         body={"documentId": doc_id, "data": body, "permissions": []})
+                    if self._call("POST", self._docs(T_EXT), body={"documentId": doc_id, "data": body, "permissions": []}) is not None:
+                        return
                 except ControlStoreUnavailable as exc:
                     if exc.status != 409:
                         raise
-                    # Another instance created the row between our PATCH (404) and POST: update it instead of failing.
-                    created = self._call("PATCH", path, body={"data": body})
-                if created is None:
-                    # PATCH and POST both 404: the COLLECTION is missing. Without this a write would "succeed" and store nothing.
-                    raise ControlSchemaOutdated(outdated, status=404)
+                    continue  # created by someone else between our PATCH (404) and POST: update it instead of failing
+                # PATCH and POST both 404: the COLLECTION is missing. Without this a write would "succeed" and store nothing.
+                raise ControlSchemaOutdated(outdated, status=404)
+            raise ControlStoreUnavailable("Kho cấu hình AI đang bận (xung đột khi tạo dòng).", status=409)
         except ControlSchemaOutdated:
             raise
         except ControlStoreUnavailable as exc:

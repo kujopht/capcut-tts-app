@@ -275,7 +275,10 @@ def sanitize_core(cfg: ControlConfig) -> ControlConfig:
 
 def same_second(a: str, b: str) -> bool:
     """Hai mốc ISO-8601 có múi giờ trùng nhau tới GIÂY (Appwrite trả `…:12.000+00:00`, ta ghi `…:12+00:00`). Rỗng/sai → False."""
-    na, nb = normalize_timestamp(a) if a else None, normalize_timestamp(b) if b else None
+    try:
+        na, nb = normalize_timestamp(a) if a else None, normalize_timestamp(b) if b else None
+    except Exception:  # noqa: BLE001 — defence in depth: a comparison on stored text must never raise into a config load
+        return False
     return na is not None and na == nb
 
 
@@ -418,11 +421,13 @@ def normalize_timestamp(raw: str) -> Optional[str]:
     """ISO-8601 CÓ múi giờ -> chuỗi UTC chuẩn (`2026-12-31T00:00:00+00:00`), hoặc None nếu không hợp lệ/không có múi giờ."""
     try:
         t = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
-    except (TypeError, ValueError):
+        if t.tzinfo is None:
+            return None
+        # `astimezone` raises OverflowError for an instant that is out of range once moved to UTC (e.g. `0001-01-01T00:00:00+05:00`):
+        # a hostile/garbled stamp must read as "invalid", never as an exception out of a config load.
+        return t.astimezone(timezone.utc).isoformat(timespec="seconds")
+    except (TypeError, ValueError, OverflowError):
         return None
-    if t.tzinfo is None:
-        return None
-    return t.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 def validate_profile(profile: RoutingProfile, slots: Mapping[str, ProviderSlot]) -> None:

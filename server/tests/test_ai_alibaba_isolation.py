@@ -955,6 +955,48 @@ class TestSecondRoundReviewFindings(unittest.TestCase):
         with self.assertRaises(ControlSchemaOutdated):
             p.create_slot("owner", body)
 
+    # ---- cross-family round 2: hostile timestamps can never raise into a configuration load ----
+    def test_garbled_or_out_of_range_timestamps_are_just_invalid_never_an_exception(self) -> None:
+        from server.ai_assistant.control.model import normalize_timestamp, same_second
+        for raw in ("not-a-date", "💀", "", "2026-13-45T99:00:00+00:00", "0001-01-01T00:00:00+05:00",
+                    "9999-12-31T23:59:59-05:00", "2026-10-03T10:00:00"):  # last: no timezone
+            self.assertIsNone(normalize_timestamp(raw), raw)
+            self.assertFalse(same_second(raw, STAMP), raw)
+            self.assertFalse(same_second(STAMP, raw), raw)
+        self.assertTrue(same_second("2026-10-03T10:11:12.000Z", STAMP), "Appwrite's millisecond / Z form equals our seconds form")
+        self.assertTrue(same_second("2026-10-03T17:11:12+07:00", STAMP))
+
+    def test_a_hostile_stamp_or_date_in_the_partition_drops_that_row_and_gemini_never_notices(self) -> None:
+        rig = Rig().configure()
+        for i, hostile in enumerate(("💀", "0001-01-01T00:00:00+05:00", "9999-12-31T23:59:59-05:00")):
+            route = _ext_rows(rig)["r-FREE_FIRST"]
+            route["data_json"] = json.dumps({**json.loads(route["data_json"]), "stamp": hostile})
+            rig.plane.invalidate()
+            cfg = rig.plane.snapshot()
+            self.assertEqual(rig.plane.state, "ok", hostile)
+            self.assertEqual(cfg.profiles["FREE_FIRST"].steps, ("gemini-01", "gemini-02"), hostile)
+            self.assertEqual(cfg.ext.stale_routes, ("FREE_FIRST",), hostile)
+            self.assertEqual(served(rig.turn("general")), ["gemini-01"], hostile)
+        # the same garbage inside a SLOT payload (a quota date) costs only that row
+        bad_slot = a_slot("alibaba-09", free_quota_remaining=5)
+        row = _slot_row("alibaba-09", free_quota_expires_at="0001-01-01T00:00:00+05:00")
+        _ext_rows(rig)["s-alibaba-09"] = row
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(rig.plane.state, "ok")
+        self.assertTrue("alibaba-09" not in cfg.slots or cfg.slots["alibaba-09"].meta_corrupt)
+        self.assertEqual(served(rig.turn("general")), ["gemini-01"])
+        del bad_slot
+
+    def test_a_route_that_blows_up_inside_compose_drops_only_itself(self) -> None:
+        rig = Rig().configure()
+        with mock.patch("server.ai_assistant.control.service.compose_profile", side_effect=OverflowError("boom")):
+            rig.plane.invalidate()
+            cfg = rig.plane.snapshot()
+        self.assertEqual(rig.plane.state, "ok")
+        self.assertEqual(set(cfg.ext.stale_routes), {"FREE_FIRST", "WRITER"})
+        self.assertEqual(cfg.profiles["FREE_FIRST"].steps, ("gemini-01", "gemini-02"))
+
     def test_a_create_race_409_is_retried_as_an_update(self) -> None:
         class Racy(_FakeAppwrite):
             posts = 0

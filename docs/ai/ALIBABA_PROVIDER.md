@@ -194,6 +194,10 @@ là **không để mã cũ thấy chúng**:
   cũ về sau — bản cũ sau khi rút mã, hay bản mới sửa hồ sơ lúc vùng này không với tới/không xoá được dòng — đổi dấu và làm dòng Alibaba **mồ côi vĩnh
   viễn, kể cả khi các bước tình cờ trùng lại** (không "sống lại"). Dòng bị bỏ **không bao giờ ghi đè thay đổi về Gemini**, và `/admin/ai` báo "hồ sơ …
   có bước Alibaba bị bỏ". Nghĩa là lệnh "gỡ bước Alibaba" của Owner không thể bị lờ đi chỉ vì lần xoá dòng route thất bại.
+* **Giới hạn đã biết (đều thất bại theo hướng an toàn — Gemini không bao giờ bị ảnh hưởng):** (a) bản cũ hay bản mới lưu lại một hồ sơ sẽ làm bước Alibaba của
+  hồ sơ đó mất hiệu lực cho tới khi Owner đặt lại ở `/admin/ai` — `/admin/ai` báo rõ; (b) hai instance cùng sửa MỘT hồ sơ trong cùng khoảnh khắc (Appwrite
+  không có ghi có điều kiện; `_serialized` chỉ khoá trong một tiến trình) có thể làm bước Alibaba của hồ sơ đó mất hiệu lực — cũng báo rõ, đặt lại là xong.
+  Mốc thời gian hỏng/tràn số (vd. `0001-01-01T00:00:00+05:00`) chỉ làm dòng đó "không hợp lệ", không bao giờ ném lỗi vào lúc nạp cấu hình.
 * Lúc ghi hồ sơ có bước Alibaba, phần Alibaba ghi **trước**: nếu collection chưa có/không với tới thì lỗi sạch (409), chưa đổi gì; nếu ghi dòng hồ sơ cũ thất
   bại SAU đó thì dòng Alibaba cũ được trả lại (cố gắng hết sức — nếu cũng thất bại thì dòng mới không có dấu khớp nên không được áp). Hồ sơ có bước
   Alibaba **phải còn ít nhất một bước loại khác** — Alibaba không bao giờ là đường duy nhất của một chế độ.

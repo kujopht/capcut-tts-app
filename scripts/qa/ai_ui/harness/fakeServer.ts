@@ -9,13 +9,22 @@
  *   { kind: "http", status: number, body: unknown }          từ chối trước khi bắt đầu luồng (429, 503…)
  *   { kind: "sse_error", partial?: string, code: string, scope?: string }
  *   { kind: "hang" }                                         mở luồng rồi im lặng cho tới khi bị Dừng
+ *
+ * Nhịp thời gian (cho QA linh vật — mọi trường đều TUỲ CHỌN, mặc định giữ nguyên hành vi cũ), trên "ok" và "text":
+ *   metaDelay  ms chờ TRƯỚC khung `meta` (máy chủ đang dựng ngữ cảnh: chương/thư viện)  → linh vật "searching" ở chế độ Truyện
+ *   pre        ms giữa `meta` và token đầu (chờ nhà cung cấp; failover diễn ra ở đây)  → "thinking"
+ *   ping       gửi nhịp tim `: ping` trong khoảng `pre` (như máy chủ thật khi nhà cung cấp im lặng) — KHÔNG đổi trạng thái
+ *   leak       (ok/text/sse_error) máy chủ "lỡ" nhét tên nhà cung cấp / model / khe / hạn mức chung vào mọi khung SSE và thông điệp lỗi.
+ *              Máy chủ thật không làm vậy; đây là bài thử "client có bao giờ vẽ ra thứ nó không được biết không" — QA quét DOM tìm LEAK_*.
  */
 
+const LEAK = { provider: "LEAK_PROVIDER_gemini", model: "LEAK_MODEL_id_9.9", slot: "LEAK_SLOT_07", api_key_fingerprint: "LEAK_FP_ab12", provider_quota: { remaining: 4242424 } };
+
 type Step =
-  | { kind: "ok"; words?: number; delay?: number }
-  | { kind: "text"; text: string; chunk?: number; delay?: number }
+  | { kind: "ok"; words?: number; delay?: number; metaDelay?: number; pre?: number; ping?: boolean; leak?: boolean }
+  | { kind: "text"; text: string; chunk?: number; delay?: number; metaDelay?: number; pre?: number; ping?: boolean; leak?: boolean }
   | { kind: "http"; status: number; body: unknown }
-  | { kind: "sse_error"; partial?: string; code: string; scope?: string }
+  | { kind: "sse_error"; partial?: string; code: string; scope?: string; leak?: boolean }
   | { kind: "eof"; partial?: string }
   | { kind: "hang" };
 
@@ -226,7 +235,20 @@ export function installFakeServer(): void {
         try {
           c.messages.push({ message_id: `u${counter}`, role: "user", content: body.content, status: "complete",
                             citations: [], created_at: now() });
-          push("meta", { message_id: assistantId, conversation_id: c.conversation_id });
+          // Nhịp cho QA linh vật: máy chủ thật dựng ngữ cảnh TRƯỚC `meta` (chế độ Truyện), rồi nhà cung cấp có thể im lặng một lúc
+          // (failover nội bộ diễn ra ở đây) trước token đầu — client chỉ thấy khoảng im + nhịp tim `: ping`, không bao giờ thấy lỗi.
+          const metaDelay = "metaDelay" in step ? step.metaDelay ?? 0 : 0;
+          const pre = "pre" in step ? step.pre ?? 0 : 0;
+          const ping = "ping" in step ? !!step.ping : false;
+          const leak = "leak" in step && step.leak ? LEAK : {};
+          if (metaDelay) await sleep(metaDelay, signal);
+          push("meta", { message_id: assistantId, conversation_id: c.conversation_id, ...leak });
+          if (pre) {
+            for (let waited = 0; waited < pre; waited += 250) {
+              await sleep(Math.min(250, pre - waited), signal);
+              if (ping) controller.enqueue(encoder.encode(": ping\n\n"));
+            }
+          }
           let text = "";
           if (step.kind === "hang") {
             await sleep(60_000, signal);
@@ -239,8 +261,8 @@ export function installFakeServer(): void {
             text = step.partial ?? "";
             if (text) push("delta", { text });
             used.set(user, (used.get(user) ?? 0) + (text ? 1 : 0));
-            push("usage", { input_tokens: 10, output_tokens: 5, used_today: 15, lane: "user", allowance: allowance() });
-            push("error", { code: step.code, message: "lỗi", scope: step.scope, reset_at: nextMidnightUtc() });
+            push("usage", { input_tokens: 10, output_tokens: 5, used_today: 15, lane: "user", allowance: allowance(), ...leak });
+            push("error", { code: step.code, message: step.leak ? `lỗi từ ${LEAK.provider} ${LEAK.slot} ${LEAK.model}` : "lỗi", scope: step.scope, reset_at: nextMidnightUtc(), ...leak });
             controller.close();
             return;
           } else {
@@ -263,8 +285,8 @@ export function installFakeServer(): void {
           c.messages.push({ message_id: assistantId, role: "assistant", content: text, status: "complete",
                             citations: [], created_at: now() });
           c.updated_at = now();
-          push("usage", { input_tokens: 10, output_tokens: 5, used_today: 15, lane: "user", allowance: allowance() });
-          push("done", { status: "complete" });
+          push("usage", { input_tokens: 10, output_tokens: 5, used_today: 15, lane: "user", allowance: allowance(), ...leak });
+          push("done", { status: "complete", ...leak });
           await sleep(qa.closeDelayMs, signal);
           if (qa.failAfterDone) {
             qa.lateErrors += 1;

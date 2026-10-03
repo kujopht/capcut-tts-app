@@ -21,26 +21,32 @@ const REPLACE = new Map([
   ["next/navigation", path.join(stubs, "next-navigation.ts")],
 ]);
 
-const stubPlugin = {
+/** `companion=false` (mặc định): linh vật thay bằng bản rỗng → harness chat không kéo mã linh vật. `companion=true`: dùng mã THẬT. */
+const makeStubPlugin = (companion) => ({
   name: "qa-stubs",
   setup(b) {
     b.onResolve({ filter: /.*/ }, (args) => {
       if (REPLACE.has(args.path)) return { path: REPLACE.get(args.path) };
-      // Linh vật Ink Scout luôn tắt trong QA: không kéo mã của nó (và thư viện của nó) vào bundle.
-      if (/(^|\/)companion\/AiCompanion$/.test(args.path) || (args.path === "./AiCompanion" && /companion/.test(args.importer))) {
+      if (!companion && (/(^|\/)companion\/AiCompanion$/.test(args.path) || (args.path === "./AiCompanion" && /companion/.test(args.importer)))) {
         return { path: path.join(stubs, "ai-companion.tsx") };
       }
       return undefined;
     });
   },
-};
+});
 
-export async function buildHarness() {
-  const out = path.join(here, "out");
+/**
+ * `buildHarness()` — harness chat (linh vật TẮT, cờ build = 0) -> out/.
+ * `buildHarness({ companion: true })` — harness linh vật (cờ build = 1, mã `AiCompanion` thật, shell có header/Chat Dock/thanh phát
+ * giả) -> out-companion/. Hai bản không dùng chung thư mục nên chạy song song được.
+ */
+export async function buildHarness({ companion = false, flag = "1" } = {}) {
+  // `companion` + flag "0": CÙNG shell/mã linh vật thật nhưng cờ build TẮT — để chứng minh "cờ tắt = 0 byte linh vật được tải".
+  const out = path.join(here, companion ? (flag === "1" ? "out-companion" : "out-companion-off") : "out");
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   await esbuild.build({
-    entryPoints: { entry: path.join(here, "harness/entry.tsx") },
+    entryPoints: { entry: path.join(here, companion ? "harness/entry-companion.tsx" : "harness/entry.tsx") },
     outdir: out,
     bundle: true,
     format: "iife",
@@ -60,17 +66,35 @@ export async function buildHarness() {
       "process.env": "{}",
       "process.env.NODE_ENV": '"production"',
       "process.env.NEXT_PUBLIC_AI_ASSISTANT_ENABLED": '"1"',
-      "process.env.NEXT_PUBLIC_AI_COMPANION_ENABLED": '"0"',
+      "process.env.NEXT_PUBLIC_AI_COMPANION_ENABLED": companion ? JSON.stringify(flag) : '"0"',
       "process.env.NEXT_PUBLIC_API_BASE": '"http://qa.local"',
     },
-    plugins: [stubPlugin],
+    plugins: [makeStubPlugin(companion)],
   });
   fs.copyFileSync(path.join(here, "harness/index.html"), path.join(out, "index.html"));
   return out;
 }
 
+/** Bundle `real/inject.ts` (máy chủ SSE giả + công cụ QA) thành MỘT script IIFE để chèn vào bản dựng Next thật. -> out-real/inject.js */
+export async function buildInject() {
+  const out = path.join(here, "out-real");
+  fs.mkdirSync(out, { recursive: true });
+  await esbuild.build({
+    entryPoints: { inject: path.join(here, "real/inject.ts") },
+    outdir: out,
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    target: "es2022",
+    logLevel: "warning",
+    tsconfig: path.join(web, "tsconfig.json"),
+    nodePaths: [path.join(web, "node_modules")],
+  });
+  return path.join(out, "inject.js");
+}
+
 if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}` || process.argv[1]?.endsWith("build.mjs")) {
-  buildHarness().then((o) => console.log("ok ->", o)).catch((e) => {
+  buildHarness({ companion: process.argv.includes("--companion") || process.argv.includes("--companion-off"), flag: process.argv.includes("--companion-off") ? "0" : "1" }).then((o) => console.log("ok ->", o)).catch((e) => {
     console.error(e.message ?? e);
     process.exit(1);
   });

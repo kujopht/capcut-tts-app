@@ -40,6 +40,21 @@ export function AiProviderTypes({
             <div key={p.type} className="row row-spread admin-hang">
               <span>
                 {p.label} <span className="hint">({p.slot_count} slot)</span>
+                {p.gate ? (
+                  <>
+                    {" "}
+                    <span className={`tt ${p.gate.open ? "tt-duyet" : "tt-tuchoi"}`}>
+                      {p.gate.open ? "Cổng máy chủ mở" : "Cổng máy chủ ĐÓNG"}
+                    </span>
+                    {!p.gate.open ? (
+                      <span className="hint">
+                        {" "}
+                        · không có request nào tới nhà cung cấp này cho tới khi đặt <code>{p.gate.env}=1</code> ở máy chủ
+                        và khởi động lại (bật ở đây không thay thế được)
+                      </span>
+                    ) : null}
+                  </>
+                ) : null}
               </span>
               <label className="row row-tight" style={{ gap: 6 }}>
                 <input

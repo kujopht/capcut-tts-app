@@ -121,6 +121,11 @@ def _build_provider(name: str, settings: Any) -> Optional[ChatProvider]:
                 tre_ms = 0.0
             return MockChatProvider(delay_s=tre_ms / 1000.0)
         if name == "qwen":
+            # `qwen` là đường DashScope CŨ, đã nghỉ hưu: chuỗi env cũ (khi control plane tắt) chỉ dựng nó khi cổng RIÊNG của nó
+            # mở. `FAS_AI_ALIBABA_ENABLED` (Model Studio) cố ý KHÔNG mở được cổng này.
+            if not getattr(ai, "qwen_legacy_enabled", False):
+                log.info("ai_assistant: provider 'qwen' bị bỏ — cổng máy chủ FAS_AI_QWEN_LEGACY_ENABLED đang đóng.")
+                return None
             return QwenDashScopeProvider(
                 api_key=ai.qwen_api_key, base_url=ai.qwen_base_url, model=ai.qwen_model)
         if name == "azure_openai":

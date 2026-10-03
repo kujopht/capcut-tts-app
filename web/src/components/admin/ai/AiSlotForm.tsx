@@ -13,7 +13,8 @@
  */
 
 import { useState } from "react";
-import type { AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
+import type { AiCapabilityTier, AiConfigMeta, AiProviderType, AiSlot, AiSlotInput } from "@/lib/admin/aiControl";
+import { datetimeLocalSangIso, isoSangDatetimeLocal } from "@/lib/admin/aiSlotView";
 
 interface LoiTruong {
   field: string;
@@ -36,6 +37,7 @@ const TRUONG_FORM = new Set([
   "slot_id", "provider_type", "label", "secret_ref", "model", "endpoint", "api_version",
   "priority", "weight", "daily_request_cap", "daily_token_cap", "rpm_soft_cap", "tpm_soft_cap",
   "workloads", "price_in_micro_per_mtok", "price_out_micro_per_mtok",
+  "tiers", "free_quota_remaining", "free_quota_expires_at", "free_quota_only",
 ]);
 
 export function AiSlotForm({
@@ -75,7 +77,16 @@ export function AiSlotForm({
   const [workloads, setWorkloads] = useState<string[]>(slot?.workloads ?? ["general"]);
   const [priceIn, setPriceIn] = useState(slot?.price_in_micro_per_mtok ?? 0);
   const [priceOut, setPriceOut] = useState(slot?.price_out_micro_per_mtok ?? 0);
+  const [tiers, setTiers] = useState<AiCapabilityTier[]>(slot?.tiers ?? []);
+  // Số dư hạn mức miễn phí giữ dạng CHUỖI để phân biệt "để trống" (= không biết) với 0.
+  const [quotaRemaining, setQuotaRemaining] = useState(
+    slot?.free_quota_remaining != null ? String(slot.free_quota_remaining) : "",
+  );
+  const [quotaExpires, setQuotaExpires] = useState(isoSangDatetimeLocal(slot?.free_quota_expires_at));
+  const [quotaOnly, setQuotaOnly] = useState(slot?.free_quota_only ?? false);
 
+  // Loại mà server khai báo "luôn tạo ở trạng thái tắt": ô bật bị khoá khi TẠO MỚI (bật bằng thao tác riêng sau khi Kiểm tra).
+  const taoMacDinhTat = !suaSlot && (meta.created_disabled_types ?? []).includes(providerType);
   const canEndpoint = meta.requires_endpoint.includes(providerType);
   const canApiVersion = meta.uses_api_version.includes(providerType);
   const goiYEndpoint = meta.endpoint_hints[providerType] ?? "";
@@ -87,13 +98,17 @@ export function AiSlotForm({
     setWorkloads((cur) => (on ? [...cur, w] : cur.filter((x) => x !== w)));
   };
 
+  const doiTier = (t: AiCapabilityTier, on: boolean) => {
+    setTiers((cur) => (on ? [...cur.filter((x) => x !== t), t] : cur.filter((x) => x !== t)));
+  };
+
   const nop = (e: React.FormEvent) => {
     e.preventDefault();
     const payload: AiSlotInput = {
       label,
       secret_ref: secretRef,
       model,
-      enabled,
+      enabled: taoMacDinhTat ? false : enabled,
       // Loại không hiện ô endpoint thì GIỮ giá trị cũ (mặc định rỗng = endpoint chuẩn).
       endpoint: canEndpoint ? endpoint : (slot?.endpoint ?? ""),
       api_version: canApiVersion ? apiVersion : "",
@@ -106,6 +121,11 @@ export function AiSlotForm({
       workloads,
       price_in_micro_per_mtok: priceIn,
       price_out_micro_per_mtok: priceOut,
+      tiers,
+      // Để trống = "không biết" (null), KHÔNG phải 0. Thời điểm ảnh chụp do MÁY CHỦ đóng dấu, không gửi từ đây.
+      free_quota_remaining: quotaRemaining.trim() === "" ? null : Number(quotaRemaining),
+      free_quota_expires_at: datetimeLocalSangIso(quotaExpires),
+      free_quota_only: quotaOnly,
     };
     if (!suaSlot) {
       payload.slot_id = slotId;
@@ -185,9 +205,15 @@ export function AiSlotForm({
         </label>
 
         <label className="row row-tight">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          <input type="checkbox" checked={taoMacDinhTat ? false : enabled} disabled={taoMacDinhTat}
+            onChange={(e) => setEnabled(e.target.checked)} />
           <span>Bật slot này</span>
         </label>
+        {taoMacDinhTat ? (
+          <span className="hint">
+            Slot loại này luôn được tạo ở trạng thái TẮT. Tạo xong, bấm Kiểm tra rồi mới Sửa để bật — bật là thao tác riêng.
+          </span>
+        ) : null}
 
         {canEndpoint ? (
           <label className="stack-1">
@@ -283,6 +309,52 @@ export function AiSlotForm({
           </div>
           <LoiDuoi loi={loiTruong} truong="workloads" />
         </fieldset>
+
+        <details className="stack-2">
+          <summary className="hint">Tầng năng lực &amp; hạn mức miễn phí (tuỳ chọn)</summary>
+          <fieldset className="stack-1">
+            <legend className="hint">Tầng năng lực slot phục vụ</legend>
+            <div className="row">
+              {(meta.capability_tiers ?? []).map((t) => (
+                <label key={t} className="row row-tight">
+                  <input type="checkbox" checked={tiers.includes(t)} onChange={(e) => doiTier(t, e.target.checked)} />
+                  <span>{t}</span>
+                </label>
+              ))}
+            </div>
+            <span className="hint">
+              Tầng mô tả LOẠI việc model làm được — không phải tên model, cũng không phải gói đăng ký của người dùng. Để trống
+              = chưa phân loại. EMBEDDING dùng API khác nên slot chỉ-EMBEDDING không nhận lượt chat.
+            </span>
+            <LoiDuoi loi={loiTruong} truong="tiers" />
+          </fieldset>
+
+          <div className="ai-admin-2cot">
+            <label className="stack-1">
+              <span className="hint">Số dư hạn mức miễn phí (token) — số bạn đọc từ trang nhà cung cấp</span>
+              <input className="input" type="number" min={0} value={quotaRemaining} placeholder="để trống = không biết"
+                onChange={(e) => setQuotaRemaining(e.target.value)} />
+              <LoiDuoi loi={loiTruong} truong="free_quota_remaining" />
+            </label>
+            <label className="stack-1">
+              <span className="hint">Hạn dùng của hạn mức miễn phí</span>
+              <input className="input" type="datetime-local" value={quotaExpires}
+                onChange={(e) => setQuotaExpires(e.target.value)} />
+              <LoiDuoi loi={loiTruong} truong="free_quota_expires_at" />
+            </label>
+          </div>
+          <label className="row row-tight">
+            <input type="checkbox" checked={quotaOnly} onChange={(e) => setQuotaOnly(e.target.checked)} />
+            <span>Chỉ dùng hạn mức miễn phí (khoá an toàn: hết số dư hoặc quá hạn thì KHÔNG BAO GIỜ dùng slot)</span>
+          </label>
+          <span className="hint">
+            Đây là ẢNH CHỤP do bạn nhập, không tự cập nhật; máy chủ ghi lại thời điểm bạn đổi số dư. Khoá chỉ-miễn-phí trừ lượng
+            slot đã phục vụ từ ngày nhập + dự phòng 5%, và từ chối khi số liệu quá 31 ngày — nhưng rào chặn phí thật là chế độ
+            &ldquo;chỉ dùng hạn mức miễn phí&rdquo; ở trang nhà cung cấp, hãy bật cả hai. Chưa có logic nào tự tiêu hạn mức sắp hết hạn trước
+            — tính năng đó đã cài sẵn nhưng đang TẮT.
+          </span>
+          <LoiDuoi loi={loiTruong} truong="free_quota_only" />
+        </details>
       </div>
 
       <div className="row row-tight">

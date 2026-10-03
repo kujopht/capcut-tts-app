@@ -15,6 +15,7 @@ FAIL-CLOSED rules (the whole point of this module):
 """
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
@@ -24,27 +25,32 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Deque, Dict, List, Mapping, Optional, Tuple
 
+from server.ai_assistant.control.capability import (
+    EXPIRING_SOON_DAYS, free_quota_block_reason, free_quota_state, order_by_expiring_free_quota, serves_tier, tier_map,
+)
 from server.ai_assistant.control.model import (
-    DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS,
-    WORKLOADS, ConfigValidationError, ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, controls_to_dict,
-    controls_with, preset_matching, slot_from_dict, slot_to_dict, validate_config, validate_controls,
-    validate_profile, validate_slot,
+    CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, EXT_PROVIDER_TYPES,
+    GATED_PROVIDER_TYPES, MAX_EXT_SLOTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS, WORKLOADS,
+    ConfigValidationError, ControlConfig, ExtStatus, GlobalControls, ProviderSlot, RoutingProfile, compose_profile,
+    controls_to_dict, controls_with, preset_matching, normalize_timestamp, sanitize_core, slot_from_dict, slot_meta,
+    slot_to_dict, split_steps, validate_config, validate_controls, validate_profile, validate_slot,
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import (
-    SKIP_COOLDOWN, SKIP_MISSING_SECRET, SKIP_REQUEST_CAP, SKIP_RPM, SKIP_SLOT_DISABLED, SKIP_TOKEN_CAP,
-    SKIP_TPM, SKIP_TYPE_DISABLED, SKIP_WORKLOAD, plan as _plan,
+    SKIP_COOLDOWN, SKIP_FREE_QUOTA_EXHAUSTED, SKIP_FREE_QUOTA_EXPIRED, SKIP_FREE_QUOTA_STALE, SKIP_GATE_CLOSED,
+    SKIP_META_CORRUPT, SKIP_MISSING_SECRET, SKIP_QUOTA_EXHAUSTED, SKIP_REQUEST_CAP, SKIP_RPM, SKIP_SLOT_DISABLED, SKIP_TIER,
+    SKIP_TOKEN_CAP, SKIP_TPM, SKIP_TYPE_DISABLED, SKIP_WORKLOAD, plan as _plan,
 )
 from server.ai_assistant.control.secrets import SecretResolver
 from server.ai_assistant.control.store import (
-    AuditEntry, ControlConfigCorrupt, ControlStore, ControlStoreUnavailable, UsageCounters, now_iso,
+    AuditEntry, ControlConfigCorrupt, ControlStore, ControlStoreUnavailable, ExtPartition, UsageCounters, now_iso,
 )
 from server.ai_assistant.gateway import DEFAULT_429_COOLDOWN_S
 from server.ai_assistant.scopes import SCOPE_GLOBAL, SCOPE_QA, SCOPE_USER
-from server.llm_gateway.chat_provider import ChatProvider, ChatTurn, GenerateRequest, ProviderError
+from server.llm_gateway.chat_provider import ChatProvider, ChatTurn, Delta, GenerateRequest, ProviderError, UsageEvent
 from server.llm_gateway.usage_limits import CircuitBreaker
 
 log = logging.getLogger("fanfic.ai_assistant")
@@ -82,6 +88,15 @@ PROBE_DAILY_CAP_PER_SLOT = 30
 PROBE_HISTORY = 5
 PROBE_STABLE_RUN = 3
 PROBE_STABLE_MAX_MS = 5000
+#: Latency accounting (`ControlPlane.note_latency`): the last LATENCY_WINDOW calls per slot, in-process (a restart clears it,
+#: like the breaker) — no Appwrite attribute is needed.
+LATENCY_WINDOW = 200
+#: A closed ledger day whose background read failed is not retried sooner than this (seconds).
+PREFETCH_RETRY_S = 30.0
+
+
+def _spawn_daemon(job: Callable[[], None]) -> None:
+    threading.Thread(target=job, name="ai-quota-prefetch", daemon=True).start()
 
 
 def today_utc() -> str:
@@ -130,8 +145,21 @@ class ControlPlane:
                  factory: Optional[ProviderFactory] = None, breaker: Optional[CircuitBreaker] = None,
                  clock: Callable[[], float] = time.monotonic, rng: Optional[random.Random] = None,
                  active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
-                 user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None) -> None:
+                 user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
+                 alibaba_enabled: bool = False, prefer_free_quota: bool = False,
+                 wall_now: Optional[Callable[[], datetime]] = None,
+                 background: Optional[Callable[[Callable[[], None]], None]] = None,
+                 qwen_legacy_enabled: bool = False) -> None:
         self.store = store
+        #: Runs a no-argument job OFF the request path (cache warm-up for the free-quota lock). Tests inject an inline runner.
+        self._background = background or _spawn_daemon
+        #: Cổng cấp MÁY CHỦ của các loại provider trong `GATED_PROVIDER_TYPES` (biến môi trường, mặc định ĐÓNG): đóng thì
+        #: không slot nào của loại đó được chọn, dựng provider, hay Kiểm tra — bất kể cấu hình trong `/admin/ai`. Mỗi loại
+        #: một cổng RIÊNG: `alibaba_enabled` (Model Studio) KHÔNG mở `qwen`, và `qwen_legacy_enabled` KHÔNG mở `alibaba`.
+        self._gates: Dict[str, bool] = {"alibaba": bool(alibaba_enabled), "qwen": bool(qwen_legacy_enabled)}
+        #: "Ưu tiên hạn mức miễn phí sắp hết hạn" (`FAS_AI_PREFER_FREE_QUOTA`): đã cài sẵn nhưng NGỦ ĐÔNG, mặc định TẮT.
+        self._prefer_free_quota = bool(prefer_free_quota)
+        self._wall_now = wall_now or (lambda: datetime.now(timezone.utc))
         self.secrets = secrets or SecretResolver()
         self.factory = factory or ProviderFactory()
         self.breaker = breaker or CircuitBreaker(clock_fn=clock)
@@ -166,6 +194,16 @@ class ControlPlane:
         self._probe_counts: Dict[str, List[int]] = {}
         #: slot_id -> last PROBE_HISTORY probes: (at_iso, ok, latency_ms, code).
         self._probe_log: Dict[str, Deque[Tuple[str, bool, Optional[int], Optional[str]]]] = {}
+        #: slot_id -> last LATENCY_WINDOW calls: (at_iso, ttft_ms | None, total_ms | None, ok, from_probe). In-process.
+        self._latency: Dict[str, Deque[Tuple[str, Optional[int], Optional[int], bool, bool]]] = {}
+        #: slot_id -> UTC day (yyyymmdd) on which the PROVIDER said its quota is gone: the slot rests until 00:00 UTC
+        #: (or until the owner resets it). In-process like the breaker.
+        self._quota_out: Dict[str, str] = {}
+        #: yyyymmdd (a COMPLETED UTC day) -> {slot_id: tokens served that day}, read once from the ledger and kept: a closed
+        #: day never changes. Only `free_quota_only` slots (and the admin quota view) ever ask for it.
+        self._past_usage: Dict[str, Dict[str, int]] = {}
+        self._prefetching: set = set()  # closed days a background fill is already reading
+        self._prefetch_failed: Dict[str, float] = {}  # day -> monotonic time of the last failed read
 
     def attach_usage_sources(self, *, active_users_fn: Optional[Callable[[str], Optional[int]]] = None,
                              user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
@@ -193,8 +231,7 @@ class ControlPlane:
             if self._cfg is not None and now - self._cfg_at < CACHE_TTL_S:
                 return self._cfg
         try:
-            cfg = self.store.load()
-            validate_config(cfg)
+            cfg = self._load_composed(validate=True)
             state = "ok" if (cfg.controls.version or cfg.slots) else "empty"
             with self._lock:
                 self._cfg, self._cfg_at, self._good_at, self.state = cfg, now, now, state
@@ -219,6 +256,48 @@ class ControlPlane:
     def _closed() -> ControlConfig:
         from server.ai_assistant.control.model import empty_config
         return empty_config()
+
+    def _load_composed(self, *, validate: bool) -> ControlConfig:
+        """The stored config as the routing/admin code sees it: the LEGACY collections (strictly validated, exactly as before
+        Alibaba existed — `validate=True`; a bad row there still fails closed) plus the isolated Alibaba partition layered on
+        top. The partition can only ADD slots/routes; whatever is wrong with it is a status, never a reason the legacy
+        configuration is rejected."""
+        core = sanitize_core(self.store.load())
+        if validate:
+            validate_config(core)
+        return self._compose(core, self._load_ext())
+
+    def _load_ext(self) -> ExtPartition:
+        try:
+            return self.store.load_ext()
+        except ControlStoreUnavailable:
+            return ExtPartition(state="unavailable")
+        except Exception:  # noqa: BLE001 — nothing about the Alibaba partition may take Gemini's configuration down with it
+            log.error("ai_control: isolated partition unreadable — Alibaba slots are off, the rest is unaffected")
+            return ExtPartition(state="unavailable")
+
+    @staticmethod
+    def _compose(core: ControlConfig, ext: ExtPartition) -> ControlConfig:
+        slots = dict(core.slots)
+        unreadable = core.ext.unreadable + ext.unreadable
+        for sid, s in ext.slots.items():
+            if sid in slots:  # same id in both collections: the legacy slot wins, the Alibaba row is ignored
+                unreadable += 1
+                continue
+            slots[sid] = s
+        profiles = dict(core.profiles)
+        stale: List[str] = []
+        for name, route in ext.routes.items():
+            base = profiles.get(name)
+            try:
+                effective, applied = compose_profile(base, route, slots) if base is not None else (None, False)
+            except Exception:  # noqa: BLE001 — a bad Alibaba row can drop ITS route, never the configuration load
+                effective, applied = None, False
+            if applied and effective is not None:
+                profiles[name] = effective
+            else:  # no longer matches the legacy-visible profile (or invalid): dropped, so it can never override a Gemini edit
+                stale.append(name)
+        return ControlConfig(core.controls, slots, profiles, ExtStatus(ext.state, unreadable, tuple(sorted(stale))))
 
     # ------------------------------------------------------------ usage (today)
     def usage_today(self) -> Dict[str, UsageCounters]:
@@ -245,6 +324,84 @@ class ControlPlane:
             self._usage, self._usage_day, self._usage_at = usage, day, now
             return {k: replace(v) for k, v in usage.items()}, True
 
+    def _past_day_tokens(self, day: str, block: bool = True) -> Optional[Dict[str, int]]:
+        """{slot_id: tokens} of a COMPLETED UTC day from the cache; with `block=True` a miss is read from the ledger (admin
+        views, the background prefetch). None = not cached / cannot be read right now."""
+        with self._lock:
+            hit = self._past_usage.get(day)
+        if hit is not None or not block:
+            return hit
+        try:
+            rows = self.store.usage_for_day(day)
+        except ControlStoreUnavailable:
+            return None
+        tokens = {sid: u.tokens for sid, u in rows.items()}
+        with self._lock:
+            self._past_usage[day] = tokens
+            for old in sorted(self._past_usage)[:-70]:  # bounded: ~2 snapshot windows
+                self._past_usage.pop(old, None)
+        return tokens
+
+    def _prefetch(self, days: List[str]) -> None:
+        """Warm the closed-day cache OFF the request path. A failed day is not retried for PREFETCH_RETRY_S, so an unreachable
+        store cannot make every request spawn a thread."""
+        now = self._clock()
+        with self._lock:
+            todo = [d for d in days if d not in self._prefetching and now - self._prefetch_failed.get(d, -1e9) >= PREFETCH_RETRY_S]
+            self._prefetching.update(todo)
+        if not todo:
+            return
+
+        def fill() -> None:
+            try:
+                for d in todo:
+                    if self._past_day_tokens(d, block=True) is None:
+                        with self._lock:
+                            self._prefetch_failed[d] = self._clock()
+            finally:
+                with self._lock:
+                    self._prefetching.difference_update(todo)
+
+        self._background(fill)
+
+    def _consumed_since_snapshot(self, slot: ProviderSlot, usage: Dict[str, UsageCounters], block: bool = True) -> Optional[int]:
+        """Tokens `slot` served since the UTC day of its server-stamped free-quota snapshot (that whole day counted — the
+        conservative side). `usage` = today's live counters. None = cannot be established: no stamp, a ledger day unreadable,
+        or an implausibly long window.
+
+        `block=False` is the ROUTING path: it only ever reads the cache. A closed day that is not cached yet makes the answer
+        None (the slot is skipped, fail closed) and is filled in the background — a month-old snapshot must never put dozens of
+        sequential ledger reads into a user's request."""
+        norm = normalize_timestamp(slot.free_quota_updated_at) if slot.free_quota_updated_at else None
+        if norm is None:  # validated on write and on load, but a routing path must never raise on a bad stamp
+            return None
+        stamped = datetime.fromisoformat(norm)
+        today = self._wall_now().astimezone(timezone.utc).date()
+        first = min(stamped.astimezone(timezone.utc).date(), today)
+        for attempt in (1, 2):
+            total = usage.get(slot.slot_id, UsageCounters()).tokens
+            missing: List[str] = []
+            day, steps = first, 0
+            while day < today:
+                key = day.strftime("%Y%m%d")
+                part = self._past_day_tokens(key, block=block)
+                if part is None:
+                    if block:
+                        return None
+                    missing.append(key)
+                else:
+                    total += part.get(slot.slot_id, 0)
+                day += timedelta(days=1)
+                steps += 1
+                if steps > 400:
+                    return None
+            if not missing:
+                return total
+            if attempt == 2:
+                return None
+            self._prefetch(missing)  # an inline executor (tests) has filled the cache by now; a thread has not
+        return None
+
     def _bump_local(self, slot_id: str, **delta: int) -> None:
         with self._lock:
             if self._usage_day != today_utc():
@@ -258,13 +415,22 @@ class ControlPlane:
         return (input_tokens * slot.price_in_micro_per_mtok + output_tokens * slot.price_out_micro_per_mtok) // 1_000_000
 
     # ------------------------------------------------------------ routing hooks
+    def gate_open(self, provider_type: str) -> bool:
+        """Loại không có cổng máy chủ -> luôn mở; loại có cổng (`GATED_PROVIDER_TYPES`) chỉ mở khi biến môi trường bật."""
+        return provider_type not in GATED_PROVIDER_TYPES or self._gates.get(provider_type, False)
+
     def skip_reason(self, slot: ProviderSlot, workload: str, est_tokens: int,
-                    cfg: Optional[ControlConfig] = None, usage: Optional[Dict[str, UsageCounters]] = None) -> Optional[str]:
+                    cfg: Optional[ControlConfig] = None, usage: Optional[Dict[str, UsageCounters]] = None,
+                    tier: Optional[str] = None) -> Optional[str]:
         cfg = cfg or self.snapshot()
         if not slot.enabled:
             return SKIP_SLOT_DISABLED
         if not cfg.controls.provider_types.get(slot.provider_type, False):
             return SKIP_TYPE_DISABLED
+        if not self.gate_open(slot.provider_type):
+            return SKIP_GATE_CLOSED
+        if slot.meta_corrupt:
+            return SKIP_META_CORRUPT
         if workload not in slot.workloads:
             return SKIP_WORKLOAD
         if not self.secrets.status(slot.secret_ref).present:
@@ -283,6 +449,21 @@ class ControlPlane:
             return SKIP_RPM
         if slot.tpm_soft_cap and tok + est_tokens > slot.tpm_soft_cap:
             return SKIP_TPM
+        if not serves_tier(slot, tier):
+            return SKIP_TIER
+        with self._lock:
+            quota_out = self._quota_out.get(slot.slot_id) == today_utc()
+        if quota_out:
+            return SKIP_QUOTA_EXHAUSTED
+        if slot.free_quota_only:  # chỉ khoá an toàn mới cần đọc lượng đã dùng từ sổ; slot thường không tốn thêm gì
+            consumed = self._consumed_since_snapshot(slot, usage if usage is not None else self.usage_today(), block=False)
+            blocked = free_quota_block_reason(slot, self._wall_now(), est_tokens, consumed)
+            if blocked == "expired":
+                return SKIP_FREE_QUOTA_EXPIRED
+            if blocked in ("stale", "unverifiable"):
+                return SKIP_FREE_QUOTA_STALE
+            if blocked == "exhausted":
+                return SKIP_FREE_QUOTA_EXHAUSTED
         return None
 
     def balance_factor(self, slot: ProviderSlot, usage: Optional[Dict[str, UsageCounters]] = None) -> float:
@@ -311,16 +492,24 @@ class ControlPlane:
             factor *= BALANCE_PENALTY
         return factor
 
-    def plan(self, cfg: ControlConfig, *, mode: str, workload: str, est_tokens: int = 0):
+    def plan(self, cfg: ControlConfig, *, mode: str, workload: str, est_tokens: int = 0, tier: Optional[str] = None):
+        if tier is not None and tier not in CHAT_TIERS:
+            return []  # tầng không phục vụ được bằng đường chat (vd. EMBEDDING) -> không slot nào
         usage = self.usage_today()
+        order = (lambda group: order_by_expiring_free_quota(group, self._wall_now())) if self._prefer_free_quota else None
         return _plan(cfg, mode=mode, workload=workload, rng=self._rng, est_tokens=est_tokens,
-                     skip_reason=lambda s, w, e: self.skip_reason(s, w, e, cfg=cfg, usage=usage),
-                     balance=lambda s: self.balance_factor(s, usage))
+                     skip_reason=lambda s, w, e: self.skip_reason(s, w, e, cfg=cfg, usage=usage, tier=tier),
+                     balance=lambda s: self.balance_factor(s, usage), group_order=order)
 
     def secret_for(self, slot: ProviderSlot) -> Optional[str]:
         return self.secrets.resolve(slot.secret_ref)
 
     def provider_for(self, slot: ProviderSlot, key: str) -> ChatProvider:
+        # Lớp phòng thủ cuối cùng: dù có đường nào lọt qua `skip_reason`, loại có cổng đóng KHÔNG BAO GIỜ dựng được provider
+        # (nên không có request nào ra ngoài).
+        if not self.gate_open(slot.provider_type):
+            raise ProviderError("Loại provider này chưa được bật ở máy chủ.", transient=False,
+                                code="provider_gate_closed", category="PERMISSION_DENIED")
         return self.factory.get(slot, key)
 
     def note_attempt(self, slot: ProviderSlot, est_tokens: int) -> None:
@@ -356,6 +545,44 @@ class ControlPlane:
         self.note_failure(slot, code, category)
         self._bump_local(slot.slot_id, errors=1)
         self._safe_usage(slot.slot_id, errors=1)
+
+    def _mark_quota_out(self, slot: ProviderSlot, code: Optional[str], category: Optional[str]) -> None:
+        """The PROVIDER reported its quota gone: the slot rests until 00:00 UTC (state + sanitized last error only)."""
+        with self._lock:
+            self._quota_out[slot.slot_id] = today_utc()
+        self.note_failure(slot, code, category)
+
+    def note_quota_exhausted(self, slot: ProviderSlot, code: Optional[str] = "provider_http_429",
+                             category: Optional[str] = "QUOTA_EXHAUSTED") -> None:
+        """Live traffic hit a provider-side quota wall: not a health failure (no breaker counting, no 30 s retry) —
+        park the slot and count the failed request in the ledger."""
+        self._mark_quota_out(slot, code, category)
+        self._bump_local(slot.slot_id, errors=1)
+        self._safe_usage(slot.slot_id, errors=1)
+
+    def note_latency(self, slot: ProviderSlot, *, ttft_ms: Optional[int], total_ms: Optional[int], ok: bool,
+                     probe: bool = False) -> None:
+        """One provider call's time-to-first-token and total duration (measured at the gateway, same for every provider)."""
+        with self._lock:
+            self._latency.setdefault(slot.slot_id, deque(maxlen=LATENCY_WINDOW)).append(
+                (now_iso(), ttft_ms, total_ms, bool(ok), bool(probe)))
+
+    def latency_view(self, slot_id: str) -> Dict[str, Any]:
+        with self._lock:
+            samples = list(self._latency.get(slot_id, ()))
+
+        def stat(values: List[int]) -> Dict[str, Optional[int]]:
+            if not values:
+                return {"p50": None, "p95": None, "last": None}
+            ordered = sorted(values)
+            rank = lambda p: ordered[max(0, min(len(ordered) - 1, -(-len(ordered) * p // 100) - 1))]  # noqa: E731 nearest-rank
+            return {"p50": rank(50), "p95": rank(95), "last": values[-1]}
+
+        return {"window": LATENCY_WINDOW, "samples": len(samples), "ok": sum(1 for s in samples if s[3]),
+                "probe_samples": sum(1 for s in samples if s[4]),
+                "ttft_ms": stat([s[1] for s in samples if s[1] is not None]),
+                "total_ms": stat([s[2] for s in samples if s[2] is not None]),
+                "note": "trong tiến trình, mất khi deploy"}
 
     def record_turn(self, slot_id: str, input_tokens: int, output_tokens: int, status: str) -> None:
         """Called once per turn for the slot that SERVED it (route finalize)."""
@@ -445,10 +672,18 @@ class ControlPlane:
         snap = self.breaker.snapshot().get(slot.slot_id, {"consecutive_failures": 0, "open_for_s": 0.0})
         sec = self.secrets.status(slot.secret_ref)
         u = usage.get(slot.slot_id, UsageCounters())
+        with self._lock:
+            quota_out = self._quota_out.get(slot.slot_id) == today_utc()
         if not slot.enabled or not cfg.controls.provider_types.get(slot.provider_type, False):
             status = "DISABLED"
+        elif not self.gate_open(slot.provider_type):
+            status = "GATE_CLOSED"
+        elif slot.meta_corrupt:
+            status = "META_CORRUPT"
         elif not sec.present:
             status = "MISSING_SECRET"
+        elif quota_out:
+            status = "QUOTA_EXHAUSTED"
         elif snap["open_for_s"] > 0:
             status = "COOLDOWN"
         elif (slot.daily_request_cap and u.requests >= slot.daily_request_cap) or \
@@ -467,13 +702,55 @@ class ControlPlane:
                                 "output_tokens": u.output_tokens, "errors": u.errors,
                                 "rate_limited": u.rate_limited, "cost_micro_usd": u.cost_micro_usd},
                 "last_success_at": u.last_success_at or None,
+                # Siêu dữ liệu hạn mức miễn phí (ảnh chụp do Owner nhập) + cờ "nhà cung cấp báo hết hạn mức hôm nay".
+                "quota": self._quota_view(slot, usage, quota_out),
+                "latency": self.latency_view(slot.slot_id),
+                "gate": ({"env": GATED_PROVIDER_TYPES[slot.provider_type], "open": self.gate_open(slot.provider_type)}
+                         if slot.provider_type in GATED_PROVIDER_TYPES else None),
+                "meta_corrupt": slot.meta_corrupt,
                 **self.probe_view(slot.slot_id),
                 **self._last_error_fields(slot.slot_id)}
+
+    def _quota_view(self, slot: ProviderSlot, usage: Dict[str, UsageCounters], provider_exhausted_today: bool) -> Dict[str, Any]:
+        """The admin's free-quota block: snapshot, estimated balance, and — for a `free_quota_only` slot — WHY the lock is
+        blocking it right now (`lock_block`: expired | stale | unverifiable | exhausted | None)."""
+        now = self._wall_now()
+        consumed = self._consumed_for_view(slot, usage)
+        return {**free_quota_state(slot, now, consumed), "lock_block": free_quota_block_reason(slot, now, 0, consumed),
+                "provider_exhausted_today": provider_exhausted_today}
+
+    def _consumed_for_view(self, slot: ProviderSlot, usage: Dict[str, UsageCounters]) -> Optional[int]:
+        """Consumption since the snapshot for the admin view — only where a balance exists; never raises (a view must render)."""
+        if slot.free_quota_remaining is None:
+            return None
+        try:
+            return self._consumed_since_snapshot(slot, usage)
+        except (ValueError, ControlStoreUnavailable):
+            return None
 
     def _last_error_fields(self, slot_id: str) -> Dict[str, Optional[str]]:
         e = self.last_error(slot_id) or {}
         return {"last_error_code": e.get("code"), "last_error_category": e.get("category"),
                 "last_error_at": e.get("at")}
+
+    @staticmethod
+    def _ext_view(cfg: ControlConfig) -> Dict[str, Any]:
+        """`notices` = những câu Owner cần đọc (rỗng khi bình thường). Luôn nói rõ Gemini KHÔNG bị ảnh hưởng."""
+        e = cfg.ext
+        notes: List[str] = []
+        if e.state == "schema_missing":
+            notes.append("Chưa chạy migration collection ai_alibaba_config (xem docs/ai/ALIBABA_PROVIDER.md) — chưa tạo được "
+                         "slot Alibaba. Gemini không bị ảnh hưởng.")
+        elif e.state == "unavailable":
+            notes.append("Không đọc được kho Alibaba lúc này — slot Alibaba tạm không dùng được. Gemini không bị ảnh hưởng.")
+        if e.unreadable:
+            notes.append(f"{e.unreadable} dòng trong kho Alibaba/cấu hình không đọc được (đã bỏ qua, không bao giờ được dùng). "
+                         "Gemini không bị ảnh hưởng.")
+        if e.stale_routes:
+            notes.append("Hồ sơ " + ", ".join(e.stale_routes) + " có bước Alibaba bị bỏ vì hồ sơ đã được sửa ở nơi khác "
+                         "(vd. sau khi rút mã về bản cũ). Đặt lại bước Alibaba nếu vẫn cần.")
+        return {"state": e.state, "unreadable": e.unreadable, "stale_routes": list(e.stale_routes), "notices": notes,
+                "title": "Kho Alibaba (vùng lưu riêng)"}
 
     def config_view(self) -> Dict[str, Any]:
         cfg = self.snapshot()
@@ -484,6 +761,9 @@ class ControlPlane:
                           "health": self.slot_health(s, cfg, usage)})
         return {
             "state": self.state,
+            #: Vùng lưu trữ tách biệt của Alibaba (state | unreadable | stale_routes | notices): lỗi ở đây KHÔNG bao giờ làm
+            #: `state` đổi. Tên trường trung tính + câu chữ do MÁY CHỦ cấp: JS công khai không viết cứng tên provider nào.
+            "isolated_store": self._ext_view(cfg),
             "controls": controls_to_dict(cfg.controls),
             "rollout": {"active_preset": preset_matching(cfg.controls),
                         "presets": {n: dict(v) for n, v in ROLLOUT_PRESETS.items()},
@@ -491,8 +771,13 @@ class ControlPlane:
                         "probe_stable_rule": {"run": PROBE_STABLE_RUN, "max_latency_ms": PROBE_STABLE_MAX_MS}},
             "provider_types": [{"type": t, "label": PROVIDER_LABELS[t],
                                 "enabled": bool(cfg.controls.provider_types.get(t, False)),
-                                "slot_count": sum(1 for s in cfg.slots.values() if s.provider_type == t)}
+                                "slot_count": sum(1 for s in cfg.slots.values() if s.provider_type == t),
+                                #: Cổng cấp máy chủ (biến môi trường) của loại này, hoặc None nếu loại không có cổng.
+                                "gate": ({"env": GATED_PROVIDER_TYPES[t], "open": self.gate_open(t)}
+                                         if t in GATED_PROVIDER_TYPES else None)}
                                for t in PROVIDER_TYPES],
+            #: Tầng năng lực -> các slot khai báo phục vụ tầng đó (Owner cấu hình; gói đăng ký chỉ ánh xạ tới TẦNG).
+            "capability_map": tier_map(cfg),
             "slots": slots,
             "profiles": [{"name": p.name, "steps": list(p.steps), "enabled": p.enabled}
                          for p in (cfg.profiles[n] for n in PROFILES if n in cfg.profiles)],
@@ -507,8 +792,17 @@ class ControlPlane:
                      "endpoint_hints": {
                          "workers_ai": "https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1",
                          "azure_openai": "https://<resource>.openai.azure.com hoặc https://<resource>.cognitiveservices.azure.com",
+                         "alibaba": "https://<máy chủ của tài khoản>/compatible-mode/v1 — máy chủ theo workspace "
+                                    "<WorkspaceId>.<vùng>.maas.aliyuncs.com (vd. vùng Singapore: ap-southeast-1) hoặc dạng cũ "
+                                    "dashscope[-vùng].aliyuncs.com; đúng endpoint/vùng trong trang Model Studio của bạn",
                      },
-                     "secret_env_prefix": "FAS_AI_SECRET_"},
+                     "secret_env_prefix": "FAS_AI_SECRET_",
+                     # Tầng năng lực + quy tắc an toàn của loại có cổng: giao diện vẽ từ đây, không viết cứng tên provider.
+                     "capability_tiers": list(CAPABILITY_TIERS), "chat_tiers": list(CHAT_TIERS),
+                     "gated_types": {t: {"env": env, "open": self.gate_open(t)} for t, env in GATED_PROVIDER_TYPES.items()},
+                     "created_disabled_types": list(CREATED_DISABLED_TYPES),
+                     "free_quota": {"expiring_soon_days": EXPIRING_SOON_DAYS,
+                                    "prefer_expiring_active": self._prefer_free_quota}},
         }
 
     def overview(self) -> Dict[str, Any]:
@@ -547,8 +841,13 @@ class ControlPlane:
                 runtime = None
         return {
             "state": self.state, "day": today_utc(), "ai_enabled": c.ai_enabled,
+            "isolated_store": self._ext_view(cfg),
             #: Thông tin runtime không nằm trong kho cấu hình: khán giả (`FAS_AI_AUDIENCE`), RPM/người, số luồng đang chạy.
             "runtime": runtime,
+            #: Cổng cấp máy chủ của các loại provider có cổng (đóng = không có request nào tới nhà cung cấp đó) và việc
+            #: "ưu tiên hạn mức miễn phí sắp hết hạn" có đang bật không (mặc định tắt).
+            "gates": {t: {"env": env, "open": self.gate_open(t)} for t, env in GATED_PROVIDER_TYPES.items()},
+            "free_quota_preference": self._prefer_free_quota,
             #: Lần QA của Owner đã NẰM TRONG `requests` ở trên (đi qua cùng slot, cùng trần toàn cục); đây chỉ là
             #: phần tách riêng để Owner thấy QA đã dùng bao nhiêu so với hạn mức QA.
             "qa": qa,
@@ -585,18 +884,18 @@ class ControlPlane:
         itself is still validated and AI stays fail-closed until the whole
         config is valid again."""
         try:
-            cfg = self.store.load()
+            core = sanitize_core(self.store.load())
         except ControlConfigCorrupt as exc:
             raise ControlConflict("Cấu hình AI đang hỏng — cần sửa trực tiếp ở kho trước khi chỉnh qua giao diện.") from exc
         except ControlStoreUnavailable as exc:
             raise ControlConflict("Không đọc được kho cấu hình AI — thử lại sau.") from exc
         try:
-            validate_config(cfg)
+            validate_config(core)
         except (ConfigValidationError, ValueError, TypeError) as exc:
             if not repair:
                 raise ControlConflict("Cấu hình AI đang không hợp lệ — chỉ xoá slot hoặc sửa hồ sơ định tuyến được "
                                       "cho tới khi hợp lệ trở lại.") from exc
-        return cfg
+        return self._compose(core, self._load_ext())
 
     @staticmethod
     def _val(v: Any) -> str:
@@ -663,17 +962,44 @@ class ControlPlane:
     @_serialized
     def create_slot(self, actor: str, body: Mapping[str, Any]) -> Dict[str, Any]:
         cfg = self._fresh()
-        slot = slot_from_dict(body)
+        # `free_quota_updated_at` do MÁY CHỦ đóng dấu, client không đặt được.
+        slot = slot_from_dict({k: v for k, v in body.items() if k != "free_quota_updated_at"})
         validate_slot(slot)
+        if slot.provider_type in CREATED_DISABLED_TYPES and slot.enabled:
+            raise ConfigValidationError([{
+                "field": "enabled",
+                "message": "slot loại này luôn được tạo ở trạng thái TẮT — Kiểm tra slot rồi bật bằng một thao tác riêng"}])
+        if slot.free_quota_remaining is not None:
+            slot = replace(slot, free_quota_updated_at=now_iso())
+        if slot.slot_id in PROVIDER_TYPES:
+            # A step is resolved as a provider TYPE first (`router.plan`), so a slot named like a type could never be addressed by
+            # id — and would blur which steps belong to which storage. (Only NEW slots: existing ids are never re-validated.)
+            raise ConfigValidationError([{"field": "slot_id", "message": "không được trùng tên một loại provider (" +
+                                          ", ".join(PROVIDER_TYPES) + ")"}])
         if slot.slot_id in cfg.slots:
             raise ControlConflict(f"Slot '{slot.slot_id}' đã tồn tại.")
-        # More than MAX_SLOTS makes the whole config invalid on the next load
-        # (AI fail-closed), so refuse the slot that would cross the line.
-        if len(cfg.slots) >= MAX_SLOTS:
-            raise ConfigValidationError([{"field": "slots", "message": f"tối đa {MAX_SLOTS} slot — xoá bớt slot không dùng"}])
-        self.store.save_slot(slot)
+        ext_type = slot.provider_type in EXT_PROVIDER_TYPES
+        if ext_type and cfg.ext.state == "unavailable":
+            # Uniqueness cannot be checked while the partition cannot be read, and a write would PATCH-overwrite an invisible slot.
+            raise ControlConflict("Không đọc được kho Alibaba lúc này — chưa thể tạo slot Alibaba (không kiểm được trùng id). "
+                                  "Thử lại sau.")
+        # More than MAX_SLOTS makes the whole config invalid on the next load (AI fail-closed), so refuse the slot that would
+        # cross the line. The Alibaba partition has its OWN cap and neither partition's slots count against the other's.
+        same_store = [s for s in cfg.slots.values() if (s.provider_type in EXT_PROVIDER_TYPES) == ext_type]
+        cap = MAX_EXT_SLOTS if ext_type else MAX_SLOTS
+        if len(same_store) >= cap:
+            raise ConfigValidationError([{"field": "slots", "message": f"tối đa {cap} slot — xoá bớt slot không dùng"}])
+        self._save_slot(slot)
         self._commit(self._diff(actor, f"slot:{slot.slot_id}", {}, slot_to_dict(slot)))
         return slot_to_dict(slot)
+
+    def _save_slot(self, slot: ProviderSlot, *, clear_meta: bool = False) -> None:
+        """Loại thuộc vùng tách biệt (`EXT_PROVIDER_TYPES`) đi vào collection RIÊNG của nó, không bao giờ vào `ai_provider_slots`
+        — bản cũ đọc collection đó và coi một dòng lạ là cấu hình hỏng (xem docstring `store.py`)."""
+        if slot.provider_type in EXT_PROVIDER_TYPES:
+            self.store.save_ext_slot(slot)
+        else:
+            self.store.save_slot(slot, clear_meta=clear_meta)
 
     @_serialized
     def update_slot(self, actor: str, slot_id: str, body: Mapping[str, Any]) -> Dict[str, Any]:
@@ -681,12 +1007,17 @@ class ControlPlane:
         old = cfg.slots.get(slot_id)
         if old is None:
             raise KeyError(slot_id)
-        merged = {**slot_to_dict(old), **{k: v for k, v in body.items() if k != "slot_id"}, "slot_id": slot_id}
+        merged = {**slot_to_dict(old),
+                  **{k: v for k, v in body.items() if k not in ("slot_id", "free_quota_updated_at")}, "slot_id": slot_id}
         if merged.get("provider_type") != old.provider_type:
             raise ConfigValidationError([{"field": "provider_type", "message": "không đổi được loại của slot đã tạo"}])
         slot = slot_from_dict(merged)
         validate_slot(slot)
-        self.store.save_slot(slot)
+        if slot.free_quota_remaining != old.free_quota_remaining:  # số dư đổi -> đóng dấu ảnh chụp mới (hoặc xoá dấu)
+            slot = replace(slot, free_quota_updated_at=now_iso() if slot.free_quota_remaining is not None else "")
+        # Xoá `meta_json` đã lưu (khi siêu dữ liệu mới rỗng, hoặc dòng cũ bị hỏng) phải ghi tường minh; thường thì KHÔNG gửi gì.
+        # (Slot ở vùng tách biệt mang toàn bộ trường trong một payload nên không có khái niệm này.)
+        self._save_slot(slot, clear_meta=bool((slot_meta(old) or old.meta_corrupt) and not slot_meta(slot)))
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), slot_to_dict(slot)))
         return slot_to_dict(slot)
 
@@ -699,8 +1030,33 @@ class ControlPlane:
         using = [p.name for p in cfg.profiles.values() if slot_id in p.steps]
         if using:
             raise ControlConflict("Slot đang được dùng trong hồ sơ: " + ", ".join(sorted(using)))
-        self.store.delete_slot(slot_id)
+        if old.provider_type in EXT_PROVIDER_TYPES:
+            self.store.delete_ext_slot(slot_id)
+        else:
+            self.store.delete_slot(slot_id)
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), {}))
+
+    @staticmethod
+    def _next_stamp(previous: str) -> str:
+        """Dấu của một lần ghi hồ sơ = `updated_at` của dòng hồ sơ cũ, tới giây, và LUÔN lớn hơn dấu trước (hai lần sửa trong cùng một
+        giây vẫn ra hai dấu khác nhau)."""
+        raw = now_iso()
+        now = normalize_timestamp(raw) or raw  # cùng định dạng UTC `+00:00` tới giây với `prev` nên so chuỗi là so thời gian
+        prev = normalize_timestamp(previous) if previous else None
+        if prev is not None and now <= prev:
+            now = (datetime.fromisoformat(prev) + timedelta(seconds=1)).isoformat(timespec="seconds")
+        return now
+
+    def _restore_route(self, name: str, old: Optional[RoutingProfile], cfg: ControlConfig) -> None:
+        """Ghi hồ sơ cũ thất bại SAU khi dòng Alibaba mới đã ghi: trả dòng Alibaba về như cũ (cùng dấu cũ nên hợp lệ lại) hoặc xoá nó.
+        Cố gắng hết sức — thất bại ở đây vẫn an toàn (dòng mới mang dấu chưa từng được ghi cho dòng hồ sơ cũ nên bị bỏ qua)."""
+        try:
+            if old is not None and split_steps(old.steps, cfg.slots)[1]:
+                self.store.save_ext_route(name, old.steps, stamp=old.updated_at)
+            else:
+                self.store.delete_ext_route(name)
+        except Exception:  # noqa: BLE001
+            log.warning("ai_control: could not restore the Alibaba route of %s after a failed profile write — it is ignored", name)
 
     @_serialized
     def update_profile(self, actor: str, name: str, steps: List[str], enabled: bool) -> Dict[str, Any]:
@@ -708,9 +1064,43 @@ class ControlPlane:
         if not isinstance(steps, list) or any(not isinstance(s, str) for s in steps) or not isinstance(enabled, bool):
             raise ConfigValidationError([{"field": "steps", "message": "danh sách bước không hợp lệ"}])
         p = RoutingProfile(name=name, steps=tuple(steps), enabled=enabled)
+        if cfg.ext.state in ("unavailable", "schema_missing") \
+                and any(s not in PROVIDER_TYPES and s not in cfg.slots for s in p.steps):
+            # A step we cannot place may be an Alibaba slot we cannot read right now: say so instead of "not a known slot".
+            raise ControlConflict("Không đọc được kho Alibaba (collection ai_alibaba_config) — chưa thể kiểm tra các bước trỏ "
+                                  "tới slot Alibaba. Sửa hồ sơ chỉ gồm Gemini/loại cũ vẫn được.")
         validate_profile(p, cfg.slots)
+        legacy, ext_steps = split_steps(p.steps, cfg.slots)
+        if ext_steps and not legacy:
+            # Alibaba is never the ONLY route of a profile: rolling it back (or the gate closing) must leave Gemini serving
+            # that mode instead of an empty profile.
+            raise ConfigValidationError([{
+                "field": "steps",
+                "message": "hồ sơ có bước Alibaba phải còn ít nhất một bước loại khác (vd. Gemini) — Alibaba không được là "
+                           "đường duy nhất"}])
         old = cfg.profiles.get(name)
-        self.store.save_profile(p)
+        # Hồ sơ lưu ở collection CŨ chỉ mang phần bản cũ đọc được (không `alibaba`, không id slot Alibaba) — nếu không bản cũ
+        # coi hồ sơ là hỏng và tắt AI. Phần Alibaba ghi TRƯỚC ở vùng tách biệt: kho chưa migrate/không với tới thì lỗi sạch,
+        # chưa đổi gì. Cả hai dòng mang CÙNG MỘT DẤU (`updated_at` của dòng hồ sơ cũ, luôn tăng nghiêm ngặt): dòng Alibaba chỉ
+        # có hiệu lực cho đúng lần ghi này. Nên nếu ghi hồ sơ thất bại sau đó, hay xoá dòng Alibaba thất bại (kho không với
+        # tới), hay bản cũ/bản mới sửa hồ sơ về sau — dòng Alibaba cũ mất dấu và mồ côi vĩnh viễn, kể cả khi các bước tình cờ
+        # trùng lại. Không bao giờ có trường hợp "lệnh gỡ bước Alibaba bị lờ đi".
+        stamp = self._next_stamp(old.updated_at if old else "")
+        wrote_route = False
+        try:
+            if ext_steps:
+                self.store.save_ext_route(name, p.steps, stamp=stamp)
+                wrote_route = True
+            elif cfg.ext.state in ("ok", "unavailable"):
+                try:
+                    self.store.delete_ext_route(name)
+                except ControlStoreUnavailable:
+                    log.warning("ai_control: Alibaba route for %s not deleted — the profile gets a new stamp, so it is ignored", name)
+            self.store.save_profile(replace(p, steps=legacy), stamp=stamp)
+        except Exception:
+            if wrote_route:
+                self._restore_route(name, old, cfg)
+            raise
         self._commit(self._diff(actor, f"profile:{name}",
                                 {"steps": list(old.steps), "enabled": old.enabled} if old else {},
                                 {"steps": list(p.steps), "enabled": p.enabled}))
@@ -723,8 +1113,14 @@ class ControlPlane:
             raise KeyError(slot_id)
         before = self.breaker.snapshot().get(slot_id, {}).get("open_for_s", 0.0)
         self.breaker.record_success(slot_id)
-        self._commit([AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="cooldown",
-                                 old_value=f"{round(before, 1)}s", new_value="0s (reset)")])
+        entries = [AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="cooldown",
+                              old_value=f"{round(before, 1)}s", new_value="0s (reset)")]
+        with self._lock:
+            parked = self._quota_out.pop(slot_id, None)
+        if parked:  # Owner đã cập nhật hạn mức bên nhà cung cấp: cho slot thử lại
+            entries.append(AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="provider_quota_exhausted",
+                                      old_value=f"nghỉ tới hết ngày {parked} UTC", new_value="đã gỡ (reset)"))
+        self._commit(entries)
 
     def _roll_probe_day(self) -> None:
         """Caller holds self._lock. Probe counters are per UTC day, like the usage ledger."""
@@ -776,6 +1172,25 @@ class ControlPlane:
                                  old_value=before, new_value=name)])
         return out
 
+    @staticmethod
+    def _probe_stream(provider: ChatProvider, req: GenerateRequest, t0: float) -> Tuple[Optional[int], int]:
+        """Probe through `stream()`: (time-to-first-token ms, tokens). Empty text is a failure (`provider_empty`) like in
+        `generate()`; the text itself is dropped here — a probe never returns provider text."""
+        first: Optional[int] = None
+        text_len = 0
+        tokens = 0
+        with contextlib.closing(provider.stream(req)) as events:
+            for ev in events:
+                if isinstance(ev, Delta):
+                    if first is None:
+                        first = int((time.monotonic() - t0) * 1000)
+                    text_len += len(ev.text.strip())
+                elif isinstance(ev, UsageEvent):
+                    tokens = int(ev.input_tokens or 0) + int(ev.output_tokens or 0)
+        if text_len == 0:
+            raise ProviderError("empty probe answer", transient=True, code="provider_empty", category="EMPTY_RESPONSE")
+        return first, tokens
+
     def probe(self, actor: str, slot_id: str) -> Dict[str, Any]:
         """Owner health check: ONE real minimal request through this slot's own key, endpoint
         and model — works while the slot is disabled and the global switch is off, so a new
@@ -794,6 +1209,13 @@ class ControlPlane:
         slot = cfg.slots.get(slot_id)
         if slot is None:
             raise KeyError(slot_id)
+        if not self.gate_open(slot.provider_type):
+            # Kiểm tra là một request thật tới nhà cung cấp: loại có cổng máy chủ đóng thì KHÔNG gửi gì (và không tính lượt kiểm).
+            raise ControlConflict(f"Loại {PROVIDER_LABELS.get(slot.provider_type, slot.provider_type)} chưa được bật ở máy "
+                                  f"chủ — đặt biến môi trường {GATED_PROVIDER_TYPES[slot.provider_type]}=1 rồi khởi động "
+                                  "lại dịch vụ. Chưa có request nào được gửi.")
+        if slot.meta_corrupt:
+            raise ControlConflict(f"Siêu dữ liệu của slot {slot_id} bị hỏng — lưu lại slot (sửa) để ghi đè trước khi kiểm.")
         now = self._clock()
         with self._lock:
             if now - self._probe_at.get(slot_id, -1e9) < PROBE_MIN_INTERVAL_S:
@@ -817,14 +1239,27 @@ class ControlPlane:
                                   timeout_s=30.0)
             t0 = time.monotonic()
             try:
-                res = self.provider_for(slot, key).generate(req)
+                provider = self.provider_for(slot, key)
+                if getattr(provider, "probe_via_stream", False):
+                    # Cùng đường với lượt thật (stream) để đo được TTFT; các loại khác giữ nguyên `generate()`.
+                    ttft, tokens = self._probe_stream(provider, req, t0)
+                    out["ttft_ms"] = ttft
+                else:
+                    res = provider.generate(req)
+                    tokens = int(res.input_tokens or 0) + int(res.output_tokens or 0)
                 out.update(ok=True, latency_ms=int((time.monotonic() - t0) * 1000))
                 self.breaker.record_success(slot_id)
-                out["tokens"] = int(res.input_tokens or 0) + int(res.output_tokens or 0)
+                out["tokens"] = tokens
+                self.note_latency(slot, ttft_ms=out.get("ttft_ms"), total_ms=out["latency_ms"], ok=True, probe=True)
             except ProviderError as exc:
                 cat = getattr(exc, "category", None)
                 out["latency_ms"] = int((time.monotonic() - t0) * 1000)
-                if exc.code == "provider_http_429" or exc.retry_after_s is not None:
+                self.note_latency(slot, ttft_ms=out.get("ttft_ms"), total_ms=out["latency_ms"], ok=False, probe=True)
+                if cat == "QUOTA_EXHAUSTED":
+                    # Hết hạn mức của nhà cung cấp: slot nghỉ tới 00:00 UTC; không phải lỗi sức khoẻ, không cooldown 30 s,
+                    # và (như mọi lần kiểm) không chạm sổ sử dụng.
+                    self._mark_quota_out(slot, exc.code, cat)
+                elif exc.code == "provider_http_429" or exc.retry_after_s is not None:
                     self.breaker.cool_down(slot_id, exc.retry_after_s if exc.retry_after_s is not None
                                            else DEFAULT_429_COOLDOWN_S)
                     with self._lock:
@@ -841,8 +1276,8 @@ class ControlPlane:
                 out.update(code="provider_unexpected_error")
         self._note_probe(slot_id, out)
         out.pop("tokens", None)
-        result = (f"ok {out['latency_ms']}ms" if out["ok"]
-                  else f"{out['code']}" + (f"/{out['category']}" if out["category"] else ""))
+        result = ((f"ok {out['latency_ms']}ms" + (f" ttft {out['ttft_ms']}ms" if out.get("ttft_ms") is not None else ""))
+                  if out["ok"] else f"{out['code']}" + (f"/{out['category']}" if out["category"] else ""))
         self._commit([AuditEntry(admin_id=actor, entity=f"slot:{slot_id}", field="probe",
                                  old_value=slot.model[:120], new_value=result[:200])])
         cur = self.snapshot()

@@ -95,7 +95,7 @@ class TestAccessMatrix(unittest.TestCase):
     def test_config_meta_drives_the_ui(self) -> None:
         """The UI reads provider rules from here, so the JS chunk carries no provider names."""
         meta = self.c.get("/api/admin/ai/config", headers=auth("admin")).json()["meta"]
-        self.assertEqual(sorted(meta["requires_endpoint"]), ["azure_openai", "workers_ai"])
+        self.assertEqual(sorted(meta["requires_endpoint"]), ["alibaba", "azure_openai", "workers_ai"])
         self.assertEqual(meta["uses_api_version"], ["azure_openai"])
         self.assertEqual(set(meta["endpoint_hints"]), set(meta["requires_endpoint"]))
 

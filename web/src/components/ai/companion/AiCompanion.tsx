@@ -286,8 +286,10 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
           if (cancelled || physicsRef.current || !Physics) return;
           const p = new Physics(rt, { surfaces: () => surfacesRef.current });
           physicsRef.current = p;
-          // `physics` tự đặt tabIndex=0 + aria-label lên host. Linh vật là TRANG TRÍ: không vào thứ tự Tab, không nhãn đọc màn hình.
-          rt.host.setAttribute("tabindex", "-1");
+          // `physics` tự đặt tabIndex=0 + aria-label lên host. Linh vật là TRANG TRÍ (`aria-hidden`): GỠ HẲN cả hai — không vào thứ tự Tab,
+          // không nhận focus kể cả khi bấm hay gọi `.focus()` (tabindex=-1 vẫn là "focus được bằng chương trình/chuột" trên một phần tử
+          // ẩn khỏi cây trợ năng — review Codex #3), không nhãn đọc màn hình.
+          rt.host.removeAttribute("tabindex");
           rt.host.removeAttribute("aria-label");
           setInteractive(true);
         };

@@ -85,13 +85,27 @@ interface InkScoutWindow {
 
 const scripts = new Map<string, Promise<void>>();
 
-/** Chèn MỘT `<script async=false>`; gọi lại cùng `file` thì dùng lại (kể cả khi thẻ đã có trong DOM). */
+/**
+ * Chèn MỘT `<script async=false>`; gọi lại cùng `file` thì dùng lại (kể cả khi thẻ đã có trong DOM).
+ *
+ * Trạng thái của thẻ ghi ở `data-state` (`loaded` | `error`): một thẻ ĐÃ tải xong (mô-đun được nạp lại khi HMR) hoặc ĐÃ hỏng sẽ không phát
+ * thêm sự kiện `load`/`error` nào — gắn listener vào nó là treo vĩnh viễn. Thẻ hỏng bị GỠ khỏi DOM ngay khi lỗi để lần thử lại tạo thẻ mới
+ * (review Codex #2: trước đây "cho phép thử lại" gắn listener vào đúng thẻ đã hỏng nên lần thử lại không bao giờ kết thúc cho tới khi tải lại trang).
+ */
 function loadScript(file: string): Promise<void> {
   const cached = scripts.get(file);
   if (cached) return cached;
   const p = new Promise<void>((resolve, reject) => {
     const id = `ink-scout-${file.replace(/\.js$/, "")}`;
     let el = document.getElementById(id) as HTMLScriptElement | null;
+    if (el && el.dataset.state === "error") {
+      el.remove();
+      el = null;
+    }
+    if (el && el.dataset.state === "loaded") {
+      resolve();
+      return;
+    }
     if (!el) {
       el = document.createElement("script");
       el.id = id;
@@ -99,8 +113,16 @@ function loadScript(file: string): Promise<void> {
       el.async = false; // tải song song, THỰC THI đúng thứ tự chèn (player → rig → physics → presence)
       document.head.appendChild(el);
     }
-    el.addEventListener("load", () => resolve(), { once: true });
-    el.addEventListener("error", () => reject(new Error(`Unable to load ${file}`)), { once: true });
+    const tag = el;
+    tag.addEventListener("load", () => {
+      tag.dataset.state = "loaded";
+      resolve();
+    }, { once: true });
+    tag.addEventListener("error", () => {
+      tag.dataset.state = "error";
+      tag.remove();
+      reject(new Error(`Unable to load ${file}`));
+    }, { once: true });
   });
   scripts.set(file, p);
   p.catch(() => scripts.delete(file)); // cho phép thử lại ở lần mở sau

@@ -317,8 +317,17 @@ scenario("kéo-thả-chuột", async (page, vp, ctx) => {
   await waitPhysics(page);
   const R0 = await settled(page);
   const g0 = await geom(page);
-  check("physics đã gắn nhưng linh vật KHÔNG vào thứ tự Tab (tabindex=-1, không aria-label trên host)", vp.name,
-    (await page.ev(`(() => { const h = document.querySelector('.ai-companion-host'); return h.getAttribute('tabindex') === '-1' && !h.hasAttribute('aria-label'); })()`)), "");
+  check("physics đã gắn nhưng linh vật KHÔNG focus được (gỡ hẳn tabindex + aria-label trên host)", vp.name,
+    (await page.ev(`(() => { const h = document.querySelector('.ai-companion-host'); return !h.hasAttribute('tabindex') && !h.hasAttribute('aria-label') && h.tabIndex === -1; })()`)), "");
+  // bấm chuột vào linh vật KHÔNG được chuyển focus vào nó (review Codex #3)
+  await page.ev(`document.querySelector('.ai-launcher').focus()`);
+  const hostBox = await hostRect(page);
+  await mouse(page, "mouseMoved", centerOf(hostBox).x, centerOf(hostBox).y);
+  await mouse(page, "mousePressed", centerOf(hostBox).x, centerOf(hostBox).y, { buttons: 1 });
+  await mouse(page, "mouseReleased", centerOf(hostBox).x, centerOf(hostBox).y);
+  await sleep(300);
+  check("bấm vào linh vật: focus KHÔNG rơi vào linh vật", vp.name, await page.ev(`!document.activeElement?.closest('.ai-companion')`), await page.ev(`document.activeElement?.tagName + '.' + document.activeElement?.className`));
+  await sleep(1500);
   check("host báo touch-action: none (chạm kéo không cuộn trang)", vp.name, (await page.ev(`getComputedStyle(document.querySelector('.ai-companion-host')).touchAction`)) === "none",
     await page.ev(`getComputedStyle(document.querySelector('.ai-companion-host')).touchAction`));
 
@@ -412,6 +421,69 @@ scenario("kéo-thả-chuột", async (page, vp, ctx) => {
   const R10 = await settled(page, { timeout: 12000 });
   check("sau đặt lại: linh vật về chỗ nhà mặc định (±2px)", vp.name, Math.abs(R10.l - R0.l) <= 2 && Math.abs(R10.t - R0.t) <= 2, `mặc định ${R0.l},${R0.t} sau ${R10.l},${R10.t}`);
   void g0;
+});
+
+// ---- 6b. Cầm linh vật GIỮA LÚC nó đang nhảy lên panel / đang áp trạng thái: không bị giật khỏi tay (review Codex #1)
+scenario("kéo-giữa-lúc-nhảy", async (page, vp) => {
+  await readyFloating(page);
+  await waitPhysics(page);
+  await settled(page);
+  // Mở panel rồi ĐÓNG: director ra lệnh stand-up + return-home (đường về nhà KHÔNG đi qua panel — panel có z-index cao hơn linh vật
+  // nên nếu cầm lúc nó bay sau panel thì con trỏ sẽ trúng panel chứ không phải linh vật).
+  await openPanel(page);
+  const R0 = await settled(page, { timeout: 12000 });
+  await closePanel(page);
+  // chờ tới khi linh vật ĐANG di chuyển (đã rời chỗ ngồi ≥ 25px) rồi cầm ngay giữa không trung
+  let cur = R0, moved = false;
+  for (let i = 0; i < 80 && !moved; i += 1) {
+    await sleep(25);
+    cur = await hostRect(page);
+    moved = Math.hypot(cur.l - R0.l, cur.t - R0.t) >= 25;
+  }
+  check("linh vật đang di chuyển về nhà khi cầm (đã rời chỗ ngồi ≥ 25px)", vp.name, moved, `${R0.l},${R0.t} → ${cur.l},${cur.t}`);
+  // Đo lại ngay trước khi bấm (linh vật đang bay ~0,5px/ms): bấm TRƯỚC khi ra khỏi ô 96px của nó.
+  cur = await hostRect(page);
+  const from = centerOf(cur);
+  await mouse(page, "mousePressed", from.x, from.y, { buttons: 1 });
+  await sleep(80); // React cập nhật lớp "đang cầm" sau sự kiện `pickup`
+  const grabbed = await page.ev(`!!document.querySelector('.ai-companion-giu')`);
+  check("bấm giữa lúc đang di chuyển: linh vật bị CẦM (physics nhận pointerdown, director dừng ra lệnh)", vp.name, grabbed, `host ${Math.round(cur.l)},${Math.round(cur.t)} bấm ${Math.round(from.x)},${Math.round(from.y)}`);
+  const samples = [];
+  const steps = 22;
+  const to = { x: from.x - 260, y: from.y + 40 };
+  for (let i = 1; i <= steps; i += 1) {
+    const px = from.x + ((to.x - from.x) * i) / steps, py = from.y + ((to.y - from.y) * i) / steps;
+    await mouse(page, "mouseMoved", px, py, { buttons: 1 });
+    await sleep(40);
+    const r = await hostRect(page);
+    const c = centerOf(r);
+    samples.push({ d: Math.hypot(c.x - px, c.y - py), i });
+  }
+  const tracked = samples.filter((s) => s.i >= 5 && s.d <= 60).length / samples.filter((s) => s.i >= 5).length;
+  check("đang cầm: linh vật bám theo con trỏ (≥ 85% mẫu trong 60px) — không bị lệnh nhảy/trạng thái cũ giật đi", vp.name, tracked >= 0.85, `${(tracked * 100).toFixed(0)}% — ${samples.filter((s) => s.i >= 5).map((s) => Math.round(s.d)).join(",")}`);
+  await mouse(page, "mouseReleased", to.x, to.y, { buttons: 0 });
+  const R1 = await settled(page, { timeout: 12000 });
+  const g = await geom(page);
+  check("thả: đứng yên hợp lệ, không đè điều khiển nào", vp.name, g.present && g.ctrl.length === 0 && g.covered.length === 0 && R1.l >= -1, JSON.stringify({ ctrl: g.ctrl, covered: g.covered, l: R1.l }));
+  info("kết cục sau khi thả giữa lúc bay", vp.name, `host (${Math.round(R1.l)},${Math.round(R1.t)}) thả ở (${Math.round(to.x)},${Math.round(to.y)}) · ${(await prefs(page))?.homeX ?? "không nhớ"}`);
+});
+
+// ---- 6c. Runtime/physics KHÔNG tải được lần đầu (mạng chập chờn) → thử lại khi mount lại, không treo vĩnh viễn (review Codex #2)
+scenario("tải-thất-bại-thử-lại", async (page, vp) => {
+  await page.s("Network.enable");
+  await page.s("Network.setBlockedURLs", { urls: ["*ink-scout.js*"] });
+  await login(page);
+  await page.wait("document.querySelector('.ai-launcher')", 8000, "nút nổi");
+  await sleep(6000);
+  check("runtime bị chặn: không linh vật, trợ lý vẫn chạy (nút mở hiện)", vp.name, !(await page.ev(`!!document.querySelector('.ai-companion-host canvas')`)) && (await page.ev(`!!document.querySelector('.ai-launcher')`)));
+  await page.s("Network.setBlockedURLs", { urls: [] });
+  const emit = (hidden) => page.ev(`window.dispatchEvent(new CustomEvent('fas:ai-companion-prefs', { detail: { hidden: ${hidden}, reducedMotion: false, homeX: null } }))`);
+  await emit(true);
+  await sleep(300);
+  await emit(false); // mount lại → nạp lại
+  await waitMascot(page, 15000);
+  check("bỏ chặn rồi mount lại: linh vật nạp được (không treo trên thẻ script đã hỏng)", vp.name, await page.ev(`!!document.querySelector('.ai-companion-host canvas')`));
+  check("chỉ còn MỘT thẻ <script> cho runtime (thẻ hỏng đã được gỡ)", vp.name, (await page.ev(`document.querySelectorAll('script[id="ink-scout-ink-scout"]').length`)) === 1);
 });
 
 // ---- 7. Kéo thả bằng CHẠM (máy tính bảng ngang, con trỏ thô)
@@ -759,8 +831,8 @@ scenario("trợ-năng-bàn-phím", async (page, vp) => {
   const uniq = new Set(names);
   check("Tab: đi qua các điều khiển chính của panel (chế độ, hội thoại mới, lịch sử, cài đặt, đóng, ô soạn)", vp.name, ["Chọn chế độ trợ lý", "Hội thoại mới", "Lịch sử hội thoại", "Cài đặt ký ức", "Đóng trợ lý AI"].every((n) => [...uniq].some((u) => u.includes(n))), [...uniq].join(" | "));
   // Linh vật trang trí: ẩn khỏi cây trợ năng
-  check("linh vật: aria-hidden=true, host tabindex=-1, không nhãn đọc màn hình trên host", vp.name,
-    await page.ev(`(() => { const w = document.querySelector('.ai-companion'); const h = document.querySelector('.ai-companion-host'); return w.getAttribute('aria-hidden') === 'true' && h.getAttribute('tabindex') === '-1' && !h.hasAttribute('aria-label'); })()`));
+  check("linh vật: aria-hidden=true, host không tabindex, không nhãn đọc màn hình trên host", vp.name,
+    await page.ev(`(() => { const w = document.querySelector('.ai-companion'); const h = document.querySelector('.ai-companion-host'); return w.getAttribute('aria-hidden') === 'true' && !h.hasAttribute('tabindex') && !h.hasAttribute('aria-label'); })()`));
   // Gửi bằng bàn phím + Escape đóng, focus về nút mở
   await page.focus("textarea.ai-o");
   await page.type("bàn phím thôi");

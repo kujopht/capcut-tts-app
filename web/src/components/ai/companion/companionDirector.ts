@@ -34,6 +34,7 @@ export interface RuntimeLike {
 export type Place = { kind: "home" } | { kind: "seat"; x: number; y: number } | { kind: "free" };
 
 const HOME: Place = { kind: "home" };
+const FREE: Place = { kind: "free" };
 
 function samePlace(a: Place, b: Place): boolean {
   if (a.kind === "free" || b.kind === "free") return false;
@@ -227,7 +228,9 @@ export class CompanionDirector {
       if (this.applied === "seated") await this.rt.transition("stand-up");
       await this.rt.transition("return-home");
     }
-    this.place = t;
+    // Người dùng cầm linh vật GIỮA lúc nó đang di chuyển (physics huỷ chuyển động đó): linh vật KHÔNG ở đích. Ghi nhận đích sẽ làm lần
+    // `goHome`/`goSeat` kế tiếp coi như "đã ở đó" và không đi đâu; để "không xác định" tới khi người dùng thả (`settle` chốt chỗ thật).
+    this.place = this.held ? FREE : t;
     this.applied = null; // runtime kết thúc di chuyển ở idle/tư thế — áp lại trạng thái mong muốn
   }
 }

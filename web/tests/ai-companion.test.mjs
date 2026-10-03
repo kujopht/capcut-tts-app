@@ -450,6 +450,11 @@ test("bo nap: phien ban ?v= khop manifest + SUBSET; thu tu player -> rig -> phys
   assert.match(loader, /\.catch\(\(\) => null\)/, "thieu physics/rig -> van chay bang player co ban");
   assert.ok(!/ink-scout-presence\.js/.test(loader.slice(0, loader.indexOf("export function loadInkScoutPresence"))), "presence KHONG nap cung player");
   assert.match(loader, /manifest\.json\?v=/);
+  // Review Codex #2: the hong KHONG duoc de lai trong DOM (listener gan vao the da hong khong bao gio nhan them su kien -> thu lai treo vinh vien);
+  // the da tai xong (HMR nap lai module) cung khong gan listener.
+  assert.match(loader, /dataset\.state === "error"[\s\S]{0,40}el\.remove\(\)/, "the hong bi go truoc khi thu lai");
+  assert.match(loader, /dataset\.state === "loaded"[\s\S]{0,40}resolve\(\)/, "the da tai xong -> resolve ngay");
+  assert.match(loader, /tag\.dataset\.state = "error";\s*tag\.remove\(\);\s*reject\(/, "loi -> danh dau + go the roi moi reject");
 });
 
 // ------------------------------------------------------------------ kéo thả, vị trí nhớ, phán xử nơi thả
@@ -544,6 +549,24 @@ test("director: relocate khi dang bi cam chi ghi nhan dich moi, ap khi tha; sett
   assert.equal(rt.calls.filter((c) => c[0] === "move").length, moves + 1);
 });
 
+test("director: nguoi dung CAM giua luc dang di chuyen -> khong lenh nao toi runtime nua, place = free (khong coi nhu da toi dich); tha ra moi di tiep", async () => {
+  // Review Codex #1: `hold(true)` khong huy chuyen dong dang chay (physics lam viec do) — phan cua director phai an toan sau khi no tra ve.
+  const rt = fakeRuntime();
+  const d = new CompanionDirector(rt);
+  d.setState("listening"); await tick(); await tick();
+  d.goSeat(-120, -300); await tick();              // dang nhay
+  d.setState("thinking");                           // trang thai moi den trong luc bay
+  d.hold(true);                                     // nguoi dung cam (physics huy chuyen dong)
+  const before = rt.calls.length;
+  rt.finishMove(); await tick(); await tick();      // chuyen dong tra ve "cancelled"
+  assert.equal(rt.calls.length, before, "dang cam: khong setState/transition/position nao sau khi chuyen dong ket thuc");
+  assert.deepEqual(d.currentPlace, { kind: "free" }, "chua toi cho ngoi — khong ghi nhan la da toi");
+  d.settle({ kind: "home" });                       // nguoi dung tha o san hop le
+  d.hold(false); await tick(); await tick();
+  assert.equal(rt.calls.filter((c) => c[0] === "state").at(-1)[1], "thinking", "tha ra -> ap trang thai MOI NHAT");
+  assert.equal(rt.calls.filter((c) => c[0] === "move").length, 1, "khong nhay lai toi cho ngoi cu");
+});
+
 test("director.rehome: nha doi khi dang BAN ap trang thai dau tien -> van doi (khong bo qua), ngay khi ranh; khong hoat anh", async () => {
   // Loi that do o QA trinh duyet: vi tri da nho khong duoc ap luc tai trang vi director dang ban `setState('idle')`.
   const rt = fakeRuntime();
@@ -595,7 +618,8 @@ test("AiCompanion: vi tri chi duoc nho khi THA hop le; physics gan luoi; presenc
   assert.match(src, /protectedRectsNow\(/);
   assert.match(src, /requestIdleCallback\(attachPhysics/, "physics gan khi trinh duyet ranh");
   assert.match(src, /\(pointer: coarse\)/, "man hinh cam ung gan ngay (khong co hover de bao truoc)");
-  assert.match(src, /setAttribute\("tabindex", "-1"\)/);
+  assert.match(src, /removeAttribute\("tabindex"\)/, "physics dat tabIndex=0 -> go han: linh vat trang tri khong nhan focus ke ca khi bam");
+  assert.ok(!/setAttribute\("tabindex"/.test(src), "tabindex=-1 van focus duoc bang chuot/chuong trinh tren phan tu aria-hidden");
   assert.match(src, /removeAttribute\("aria-label"\)/, "linh vat trang tri: khong nhan doc man hinh");
   assert.match(src, /loadInkScoutPresence\(\)/);
   assert.match(src, /addEventListener\("pointerenter", enter\)/, "presence nap khi con tro vao linh vat");

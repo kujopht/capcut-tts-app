@@ -539,7 +539,7 @@ def _opt_int(v: Any) -> Optional[int]:
     return v
 
 
-def _thinking(v: Any) -> str:
+def _thinking(v: Any) -> Any:
     """Thiếu/rỗng = `provider_default` (một dòng do bản cũ ghi chưa có trường này); chuỗi được chuẩn hoá chữ thường; kiểu khác giữ
     nguyên để `validate_slot` báo đúng trường."""
     if v is None or (isinstance(v, str) and not v.strip()):

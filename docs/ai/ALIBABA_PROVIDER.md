@@ -77,6 +77,8 @@ trần toàn cục → audit. Tên provider của adapter là **id của slot**,
   `max_tokens` nhỏ như probe (64), có thể không trả lời gì. Giá trị sai bị từ chối (adapter không chạy, dòng đọc từ kho bị **đỗ lại**), không bao giờ im lặng
   hiểu là "mặc định". Chế độ nằm trong payload của slot ở vùng tách biệt (bản cũ không đọc; dòng cũ chưa có trường = `provider_default`) và là một phần
   khoá cache client (đổi chế độ thì dựng lại client). `reasoning_content` vẫn không bao giờ tới người dùng hay admin, bất kể chế độ.
+  **Lưu ý khi rút mã về `3193eec`** (bản có Alibaba nhưng CHƯA có trường này): bản đó bỏ qua `thinking` nên model lai sẽ chạy với suy luận mặc định của nó.
+  Vì vậy trước khi rút mã về đó phải **tắt slot Alibaba (hoặc đóng cổng `FAS_AI_ALIBABA_ENABLED`)**; rút về bản cũ hơn `3193eec` thì không có đường nào gọi Alibaba.
 * **Model** luôn lấy từ slot; không có tên model nào trong mã.
 * **Hết hạn thời gian**: kết nối 10 s; chờ giữa hai gói tin 20 s; **chờ token chữ đầu (TTFT) 30 s**; tổng 120 s. Quá hạn →
   `provider_timeout` (trước token đầu: chuyển slot; sau token đầu: báo "bị gián đoạn", giữ phần đã nhận). Hạn TTFT chỉ tính token **chữ**:

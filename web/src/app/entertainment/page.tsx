@@ -22,14 +22,17 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import { IconSparkles } from "@/components/Icons";
 import { useAudioEngineOptional } from "@/components/AudioEngine";
-import { MUSIC_ENABLED } from "@/lib/features";
+import { GAME_INK_SCOUT_ENABLED, MUSIC_ENABLED } from "@/lib/features";
 
 /** Tải lười: nhạc tắt thì mã trình phát không nằm trong gói JS ban đầu của trang (đo bằng build). */
 const MusicSection = dynamic(
   () => import("@/components/entertainment/MusicSection").then((m) => m.MusicSection),
   { ssr: false },
 );
-import { GAMES, nhanCheDo, type GameInfo } from "@/lib/games";
+import { GAMES, INK_SCOUT_GAME, nhanCheDo, type GameInfo } from "@/lib/games";
+
+/** Danh sách hiển thị: thẻ Ink Scout chỉ có khi cờ build bật (mặc định tắt). */
+const DANH_SACH: readonly GameInfo[] = GAME_INK_SCOUT_ENABLED ? [...GAMES, INK_SCOUT_GAME] : GAMES;
 
 function TheGame({ g, onChoi, onRoiTrang }: { g: GameInfo; onChoi: (g: GameInfo) => void; onRoiTrang: () => void }) {
   return (
@@ -146,7 +149,7 @@ export default function EntertainmentPage() {
               Chơi ngay
             </h2>
             <div className="ent-games-grid gt-luoi">
-              {GAMES.map((g) => (
+              {DANH_SACH.map((g) => (
                 <TheGame key={g.id} g={g} onChoi={moGame} onRoiTrang={tamDungLoiDoc} />
               ))}
             </div>

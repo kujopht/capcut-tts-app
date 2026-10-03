@@ -72,6 +72,11 @@ CATEGORIES = frozenset({
     "CONTEXT_TOO_LONG", "BAD_REQUEST", "SERVER_ERROR", "UNAVAILABLE", "TIMEOUT", "NETWORK_ERROR", "BAD_RESPONSE",
     "EMPTY_RESPONSE",
 })
+#: Slot-level control of a hybrid-thinking model's reasoning phase. `provider_default` OMITS the field (the vendor/model decides);
+#: `off` sends `enable_thinking: false` and `on` sends `enable_thinking: true`, at the TOP LEVEL of the chat-completions body (the
+#: documented raw-HTTP shape; SDK users pass it through `extra_body`). Nothing here knows a model id: which model needs which mode
+#: is the owner's per-slot choice. Whatever the mode, `reasoning_content` is never shown or forwarded (see `_stream_inner`).
+THINKING_MODES = ("provider_default", "off", "on")
 #: Transient = the same request may succeed elsewhere / a moment later.
 _TRANSIENT = frozenset({"RATE_LIMITED", "SERVER_ERROR", "UNAVAILABLE", "TIMEOUT", "NETWORK_ERROR", "EMPTY_RESPONSE"})
 
@@ -234,11 +239,16 @@ class AlibabaModelStudioProvider(OpenAICompatChatProvider):
                  client: Optional[httpx.Client] = None,
                  clock: Callable[[], float] = time.monotonic,
                  connect_timeout_s: float = 10.0, read_timeout_s: float = 20.0,
-                 first_token_timeout_s: float = 30.0, total_timeout_s: float = 120.0) -> None:
+                 first_token_timeout_s: float = 30.0, total_timeout_s: float = 120.0,
+                 thinking: str = "provider_default") -> None:
         reason = alibaba_endpoint_error(base_url)
         if reason:
             raise ProviderError(f"Endpoint của '{name}' không hợp lệ cho Alibaba Model Studio.", transient=False,
                                 code="provider_not_configured", category="BAD_REQUEST")
+        if thinking not in THINKING_MODES:  # a typo must never silently mean "default" (= the model's own thinking, = quota burn)
+            raise ProviderError(f"Chế độ thinking của '{name}' không hợp lệ.", transient=False,
+                                code="provider_not_configured", category="BAD_REQUEST")
+        self._thinking = thinking
         self._clock = clock
         self._connect_timeout_s = connect_timeout_s
         self._read_timeout_s = read_timeout_s
@@ -260,6 +270,11 @@ class AlibabaModelStudioProvider(OpenAICompatChatProvider):
     def _payload(self, req: GenerateRequest, *, stream: bool) -> Dict[str, Any]:
         payload = super()._payload(req, stream=stream)
         payload.pop("user", None)  # data minimisation: no user reference leaves for this vendor
+        if self._thinking == "off":
+            payload["enable_thinking"] = False
+        elif self._thinking == "on":
+            payload["enable_thinking"] = True
+        # "provider_default": the field is OMITTED — the vendor/model applies its own default.
         return payload
 
     # ------------------------------------------------------------------ non-streaming = streaming internally

@@ -165,6 +165,105 @@ class TestHostAllowlist(unittest.TestCase):
         self.assertNotIn(KEY, str(p.usage()))
 
 
+# ====================================================================== thinking control (hybrid-thinking models)
+
+
+class TestThinkingControl(unittest.TestCase):
+    """A hybrid-thinking model reasons by default (burning tokens/latency and, with a tiny `max_tokens`, answering nothing).
+    The slot says what it wants; the adapter sends `enable_thinking` at the TOP LEVEL of the body — or nothing at all."""
+
+    def _sent(self, thinking: Optional[str], *, generate: bool = False) -> Dict[str, Any]:
+        seen = Seen()
+        body = sse(chunk("OK"), chunk(None, finish="stop"), USAGE)
+        kw = {} if thinking is None else {"thinking": thinking}
+        p = make(ok_handler(body), seen, **kw)
+        p.generate(req()) if generate else stream_events(p)
+        self.assertEqual(len(seen.requests), 1)
+        return seen.payloads[0]
+
+    def test_off_sends_enable_thinking_false_at_the_top_level(self) -> None:
+        for generate in (False, True):  # real traffic streams; generate() streams internally — both carry it
+            with self.subTest(generate=generate):
+                payload = self._sent("off", generate=generate)
+                self.assertIs(payload["enable_thinking"], False)
+                self.assertNotIn("enable_thinking", payload.get("extra_body", {}), "top level, not nested")
+                self.assertEqual(list(k for k in payload if "think" in k), ["enable_thinking"])
+
+    def test_on_sends_enable_thinking_true(self) -> None:
+        for generate in (False, True):
+            with self.subTest(generate=generate):
+                self.assertIs(self._sent("on", generate=generate)["enable_thinking"], True)
+
+    def test_provider_default_and_the_unset_default_omit_the_field_entirely(self) -> None:
+        self.assertNotIn("enable_thinking", self._sent("provider_default"))
+        self.assertNotIn("enable_thinking", self._sent(None), "an adapter built without the option behaves as before")
+
+    def test_only_that_one_field_differs_between_modes(self) -> None:
+        base = self._sent("provider_default")
+        for mode, value in (("off", False), ("on", True)):
+            payload = self._sent(mode)
+            self.assertEqual({k: v for k, v in payload.items() if k != "enable_thinking"}, base,
+                             "model, messages, max_tokens, stream_options… are identical across modes")
+            self.assertIs(payload["enable_thinking"], value)
+
+    def test_an_unknown_mode_is_refused_not_treated_as_default(self) -> None:
+        calls: List[int] = []
+        for bad in ("OFF", "disabled", "", "true", None, False, 0):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ProviderError) as ctx:
+                    AlibabaModelStudioProvider(name="a", base_url=BASE, api_key=KEY, thinking=bad,  # type: ignore[arg-type]
+                                               client=httpx.Client(transport=httpx.MockTransport(lambda r: calls.append(1))))
+                self.assertEqual(ctx.exception.code, "provider_not_configured")
+                self.assertNotIn(KEY, str(ctx.exception))
+        self.assertEqual(calls, [], "refused before any request")
+
+    def test_reasoning_content_never_reaches_the_user_in_any_mode(self) -> None:
+        for mode in ("off", "on", "provider_default"):
+            with self.subTest(mode=mode):
+                # a model may reason even when asked not to (or because it was asked to): the text stays out either way
+                p = make(ok_handler(sse(chunk(reasoning=LEAK), chunk(reasoning=LEAK), chunk("Đáp án"),
+                                        chunk(None, finish="stop"), USAGE)), thinking=mode)
+                events = stream_events(p)
+                self.assertEqual([e.text for e in events if isinstance(e, Delta)], ["Đáp án"])
+                self.assertNotIn(LEAK, repr(events))
+                q = make(ok_handler(sse(chunk(reasoning=LEAK), chunk("Đáp án"), chunk(None, finish="stop"), USAGE)),
+                         thinking=mode)
+                res = q.generate(req())
+                self.assertEqual(res.text, "Đáp án")
+                self.assertNotIn(LEAK, repr(res))
+                self.assertEqual((res.input_tokens, res.output_tokens), (11, 4), "usage still accounted (reasoning tokens included)")
+
+    def test_a_reasoning_only_answer_is_empty_not_the_reasoning(self) -> None:
+        """If the model spends everything on reasoning the user gets an error, never the hidden text."""
+        p = make(ok_handler(sse(chunk(reasoning=LEAK), chunk(None, finish="length"), USAGE)), thinking="on")
+        with self.assertRaises(ProviderError) as ctx:
+            p.generate(req())
+        self.assertEqual(ctx.exception.category, "EMPTY_RESPONSE")
+        self.assertNotIn(LEAK, repr(ctx.exception) + str(vars(ctx.exception)))
+
+    def test_other_openai_compatible_providers_never_send_the_field(self) -> None:
+        from server.llm_gateway.chat_providers import OpenAICompatChatProvider
+        seen = Seen()
+
+        def handler(r: httpx.Request) -> httpx.Response:
+            seen.requests.append(r)
+            if json.loads(r.content).get("stream"):
+                return httpx.Response(200, content=sse(chunk("OK"), chunk(None, finish="stop"), USAGE),
+                                      headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+                                             "usage": {"prompt_tokens": 11, "completion_tokens": 4, "total_tokens": 15}})
+
+        gemini_base = "https://generativelanguage.googleapis.com/v1beta/openai"
+        g = OpenAICompatChatProvider(name="gemini-01", base_url=gemini_base, api_key=KEY,
+                                     client=httpx.Client(base_url=gemini_base, transport=httpx.MockTransport(handler)))
+        list(g.stream(req()))
+        g.generate(req())
+        for payload in seen.payloads:
+            self.assertNotIn("enable_thinking", payload)
+            self.assertEqual(payload["user"], "hashed-user", "…and Gemini/OpenAI-compatible still send what they always sent")
+        self.assertFalse(hasattr(OpenAICompatChatProvider, "_thinking"), "the base class knows nothing about thinking")
+
+
 # ====================================================================== wire format + accounting
 
 

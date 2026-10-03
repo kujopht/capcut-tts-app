@@ -33,7 +33,8 @@ from server.ai_assistant.control.capability import (
 )
 from server.ai_assistant.control.model import (
     CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, EXT_PROVIDER_TYPES,
-    GATED_PROVIDER_TYPES, MAX_EXT_SLOTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS, WORKLOADS,
+    GATED_PROVIDER_TYPES, MAX_EXT_SLOTS, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS,
+    THINKING_TYPES, WORKLOADS,
     ConfigValidationError, ControlConfig, ExtStatus, GlobalControls, ProviderSlot, RoutingProfile, compose_profile,
     controls_to_dict, controls_with, preset_matching, normalize_timestamp, sanitize_core, slot_from_dict, slot_meta,
     slot_to_dict, split_steps, validate_config, validate_controls, validate_profile, validate_slot,
@@ -50,6 +51,7 @@ from server.ai_assistant.control.store import (
 )
 from server.ai_assistant.gateway import DEFAULT_429_COOLDOWN_S
 from server.ai_assistant.scopes import SCOPE_GLOBAL, SCOPE_QA, SCOPE_USER
+from server.llm_gateway.alibaba import THINKING_MODES
 from server.llm_gateway.chat_provider import ChatProvider, ChatTurn, Delta, GenerateRequest, ProviderError, UsageEvent
 from server.llm_gateway.usage_limits import CircuitBreaker
 
@@ -799,6 +801,8 @@ class ControlPlane:
                      "secret_env_prefix": "FAS_AI_SECRET_",
                      # Tầng năng lực + quy tắc an toàn của loại có cổng: giao diện vẽ từ đây, không viết cứng tên provider.
                      "capability_tiers": list(CAPABILITY_TIERS), "chat_tiers": list(CHAT_TIERS),
+                     # Chế độ thinking của slot và loại nào có nó (giao diện chỉ hiện ô chọn cho các loại này).
+                     "thinking_modes": list(THINKING_MODES), "thinking_types": list(THINKING_TYPES),
                      "gated_types": {t: {"env": env, "open": self.gate_open(t)} for t, env in GATED_PROVIDER_TYPES.items()},
                      "created_disabled_types": list(CREATED_DISABLED_TYPES),
                      "free_quota": {"expiring_soon_days": EXPIRING_SOON_DAYS,

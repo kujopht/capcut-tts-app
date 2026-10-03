@@ -77,7 +77,7 @@ class Rig:
     def __init__(self, fake: Optional[_FakeAppwrite] = None, *, gate: bool = True, qwen_gate: bool = False) -> None:
         self.store, self.fake = _appwrite_store(fake or _Writes())
         self.gem = [slot("gemini-01", priority=10), slot("gemini-02", priority=20)]
-        self.ali = a_slot("alibaba-01", priority=1)
+        self.ali = a_slot("alibaba-01", priority=1, thinking="off")  # the new field rides in the isolated payload: R0 must not care
         self.provs: Dict[str, Scripted] = {s.slot_id: Scripted(s.slot_id) for s in self.gem + [self.ali]}
         self.clk = Clock()
         self.plane = ControlPlane(

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
 
-from server.llm_gateway.alibaba import alibaba_endpoint_error
+from server.llm_gateway.alibaba import THINKING_MODES, alibaba_endpoint_error
 
 PROVIDER_TYPES: Tuple[str, ...] = ("gemini", "groq", "workers_ai", "qwen", "azure_openai", "openrouter", "alibaba")
 PROVIDER_LABELS: Dict[str, str] = {
@@ -53,6 +53,10 @@ CAPABILITY_TIERS: Tuple[str, ...] = ("FAST", "SMART", "ADVANCED", "TRANSLATION",
 #: nhận lượt chat.
 CHAT_TIERS: Tuple[str, ...] = ("FAST", "SMART", "ADVANCED", "TRANSLATION", "VISION")
 MAX_QUOTA = 10 ** 12
+#: Loại provider có chế độ `thinking` của slot (`THINKING_MODES`: provider_default | off | on). Loại khác CHỈ nhận `provider_default`
+#: (không có gì để điều khiển, và một giá trị khác sẽ im lặng không có tác dụng). Cấu hình theo LOẠI, không theo tên model:
+#: model nào cần chế độ nào là lựa chọn của Owner trên từng slot.
+THINKING_TYPES: Tuple[str, ...] = ("alibaba",)
 WORKLOADS: Tuple[str, ...] = ("general", "story", "support", "writer", "web_search")
 PROFILES: Tuple[str, ...] = ("FREE_FIRST", "QUALITY_FIRST", "WRITER", "STORY", "SUPPORT_SAFE", "WEB_SEARCH")
 MODES: Tuple[str, ...] = ("general", "story", "support", "writer")
@@ -161,6 +165,9 @@ class ProviderSlot:
     free_quota_only: bool = False
     #: Do MÁY CHỦ đóng dấu mỗi khi `free_quota_remaining` đổi (client không đặt được).
     free_quota_updated_at: str = ""
+    #: Chế độ suy luận (thinking) của model — `THINKING_MODES`. `provider_default` = KHÔNG gửi gì (model tự quyết). Chỉ loại trong
+    #: `THINKING_TYPES` mới nhận giá trị khác; với slot Alibaba nó nằm trong payload của dòng ở vùng tách biệt (bản cũ không đọc).
+    thinking: str = "provider_default"
     #: Chỉ khi chạy: dòng của kho KHÔNG dùng được — `meta_json` hỏng, hoặc (loại ở vùng tách biệt) cấu hình lưu của slot không qua
     #: được kiểm tra. Không lưu, không bao giờ làm cả cấu hình hỏng — chỉ slot này bị bỏ qua (đỗ lại), Gemini không đổi.
     meta_corrupt: bool = False
@@ -391,6 +398,10 @@ def validate_slot(slot: ProviderSlot) -> None:
     if not wl or any(w not in WORKLOADS for w in wl) or len(set(wl)) != len(wl):
         e.append({"field": "workloads", "message": "chọn ít nhất một, trong " + ", ".join(WORKLOADS)})
     e.extend(_meta_errors(slot))
+    if slot.thinking not in THINKING_MODES:
+        e.append({"field": "thinking", "message": "chọn một trong: " + ", ".join(THINKING_MODES)})
+    elif slot.thinking != "provider_default" and slot.provider_type not in THINKING_TYPES:
+        e.append({"field": "thinking", "message": "loại provider này không có chế độ thinking — để provider_default"})
     if e:
         raise ConfigValidationError(e)
 
@@ -513,6 +524,7 @@ def slot_from_dict(d: Mapping[str, Any]) -> ProviderSlot:
             free_quota_expires_at=_ts(d.get("free_quota_expires_at")),
             free_quota_only=_flag(d.get("free_quota_only", False), "free_quota_only"),
             free_quota_updated_at=_ts(d.get("free_quota_updated_at")),
+            thinking=_thinking(d.get("thinking")),
         )
     except (TypeError, ValueError) as exc:
         raise ConfigValidationError([{"field": "slot", "message": "dữ liệu không đúng kiểu"}]) from exc
@@ -525,6 +537,14 @@ def _opt_int(v: Any) -> Optional[int]:
     if isinstance(v, str) and re.fullmatch(r"-?\d{1,15}", v.strip()):
         return int(v.strip())
     return v
+
+
+def _thinking(v: Any) -> str:
+    """Thiếu/rỗng = `provider_default` (một dòng do bản cũ ghi chưa có trường này); chuỗi được chuẩn hoá chữ thường; kiểu khác giữ
+    nguyên để `validate_slot` báo đúng trường."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return "provider_default"
+    return v.strip().lower() if isinstance(v, str) else v
 
 
 def _ts(v: Any) -> str:
@@ -591,7 +611,7 @@ def slot_to_dict(s: ProviderSlot) -> Dict[str, Any]:
             "price_out_micro_per_mtok": s.price_out_micro_per_mtok,
             "tiers": list(s.tiers), "free_quota_remaining": s.free_quota_remaining,
             "free_quota_expires_at": s.free_quota_expires_at, "free_quota_only": s.free_quota_only,
-            "free_quota_updated_at": s.free_quota_updated_at}
+            "free_quota_updated_at": s.free_quota_updated_at, "thinking": s.thinking}
 
 
 def controls_to_dict(c: GlobalControls) -> Dict[str, Any]:

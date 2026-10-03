@@ -1024,6 +1024,155 @@ class TestNoMetadataLeaksToOrdinaryClients(unittest.TestCase):
         self.assertIn("QUOTA_EXHAUSTED", raw)
 
 
+# ================================================================== slot-level thinking control
+
+
+class TestSlotThinking(unittest.TestCase):
+    """`thinking` = provider_default | off | on, per slot, only for provider types that have it, stored with the Alibaba slot in the
+    isolated partition, and honoured by the REAL adapter on both the owner probe and normal chat traffic."""
+
+    def test_modes_validation_and_normalisation(self) -> None:
+        from server.llm_gateway.alibaba import THINKING_MODES
+        self.assertEqual(THINKING_MODES, ("provider_default", "off", "on"))
+        self.assertEqual(a_slot().thinking, "provider_default", "the default is 'send nothing'")
+        for mode in THINKING_MODES:
+            validate_slot(a_slot(thinking=mode))
+        d = _dict(a_slot())
+        self.assertEqual(slot_from_dict({**d, "thinking": " OFF "}).thinking, "off", "case/space tolerant on input")
+        self.assertEqual(slot_from_dict({k: v for k, v in d.items() if k != "thinking"}).thinking, "provider_default",
+                         "a row written before this field existed")
+        self.assertEqual(slot_from_dict({**d, "thinking": None}).thinking, "provider_default")
+        for bad in ("maybe", "disabled", "true", 1, True, ["off"]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ConfigValidationError) as ctx:
+                    validate_slot(slot_from_dict({**d, "thinking": bad}))
+                self.assertIn("thinking", {e["field"] for e in ctx.exception.errors})
+
+    def test_only_types_that_have_the_control_accept_a_non_default_value(self) -> None:
+        from server.ai_assistant.control.model import THINKING_TYPES
+        self.assertEqual(THINKING_TYPES, ("alibaba",))
+        for t in LEGACY_TYPES:
+            validate_slot(slot("x-" + t, t))  # the default is always fine
+            with self.assertRaises(ConfigValidationError) as ctx:
+                validate_slot(replace(slot("x-" + t, t), thinking="off"))
+            self.assertEqual([e["field"] for e in ctx.exception.errors], ["thinking"], t)
+
+    def test_admin_api_create_update_validate_audit_and_meta(self) -> None:
+        p = build_plane([slot("gemini-01")], profiles=only("gemini"))
+        c = _admin_client(p)
+        body = dict(slot_id="alibaba-sg-01", provider_type="alibaba", label="SG", secret_ref="ALIBABA_SG_01", model="m",
+                    endpoint=BASE, workloads=["general"], thinking="off")
+        r = c.post("/api/admin/ai/slots", json=body)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["slot"]["thinking"], "off")
+        r = c.put("/api/admin/ai/slots/alibaba-sg-01", json={"thinking": "on"})
+        self.assertEqual((r.status_code, r.json()["slot"]["thinking"]), (200, "on"))
+        r = c.put("/api/admin/ai/slots/alibaba-sg-01", json={"label": "renamed"})
+        self.assertEqual(r.json()["slot"]["thinking"], "on", "an unrelated edit does not reset it")
+        r = c.put("/api/admin/ai/slots/alibaba-sg-01", json={"thinking": "maybe"})
+        self.assertEqual((r.status_code, r.json()["detail"]["errors"][0]["field"]), (422, "thinking"))
+        r = c.put("/api/admin/ai/slots/gemini-01", json={"thinking": "off"})
+        self.assertEqual((r.status_code, r.json()["detail"]["errors"][0]["field"]), (422, "thinking"))
+        self.assertEqual(c.get("/api/admin/ai/config").json()["slots"][0]["thinking"] in ("provider_default", "on"), True)
+        meta = c.get("/api/admin/ai/config").json()["meta"]
+        self.assertEqual((meta["thinking_modes"], meta["thinking_types"]), (["provider_default", "off", "on"], ["alibaba"]))
+        changes = [(a["entity"], a["old_value"], a["new_value"]) for a in p.audit(50) if a["field"] == "thinking"]
+        self.assertIn(("slot:alibaba-sg-01", "off", "on"), changes, "a thinking change is audited")
+
+    def test_the_mode_round_trips_through_the_isolated_store_and_nothing_reaches_the_legacy_collection(self) -> None:
+        for label, make_store in (("memory", lambda: (InMemoryControlStore(), None)), ("appwrite", lambda: _appwrite_store())):
+            with self.subTest(label):
+                st, fake = make_store()
+                for mode in ("off", "on", "provider_default"):
+                    st.save_ext_slot(a_slot("alibaba-sg-01", thinking=mode))
+                    self.assertEqual(st.load_ext().slots["alibaba-sg-01"].thinking, mode)
+                row = (fake.cols["ai_alibaba_config"]["s-alibaba-sg-01"] if fake else st.ext_rows["s-alibaba-sg-01"])
+                self.assertEqual(json.loads(row["data_json"])["thinking"], "provider_default")
+                st.save_ext_slot(a_slot("alibaba-sg-01", thinking="off"))
+                row = (fake.cols["ai_alibaba_config"]["s-alibaba-sg-01"] if fake else st.ext_rows["s-alibaba-sg-01"])
+                self.assertEqual(json.loads(row["data_json"])["thinking"], "off")
+                if fake:
+                    self.assertNotIn("ai_provider_slots", fake.cols, "the legacy collection never sees it")
+
+    def test_a_row_written_before_the_field_existed_loads_as_provider_default_and_a_bad_value_parks_the_slot(self) -> None:
+        st = InMemoryControlStore()
+        legacy_payload = {k: v for k, v in _dict(a_slot("alibaba-sg-01")).items() if k != "thinking"}
+        st.ext_rows["s-alibaba-sg-01"] = {"$id": "s-alibaba-sg-01", "kind": "slot", "key": "alibaba-sg-01",
+                                          "data_json": json.dumps(legacy_payload)}
+        got = st.load_ext().slots["alibaba-sg-01"]
+        self.assertEqual((got.thinking, got.meta_corrupt), ("provider_default", False))
+        st.ext_rows["s-alibaba-sg-01"]["data_json"] = json.dumps({**legacy_payload, "thinking": "sometimes"})
+        parked = st.load_ext().slots["alibaba-sg-01"]
+        self.assertTrue(parked.meta_corrupt, "a typo is NOT silently read as 'default' (= the model's own thinking, = quota burn)")
+
+    def test_the_factory_builds_the_right_provider_and_rebuilds_when_the_mode_changes(self) -> None:
+        from server.llm_gateway.alibaba import AlibabaModelStudioProvider
+        from server.llm_gateway.chat_providers import OpenAICompatChatProvider
+        from server.ai_assistant.control.providers import default_builder
+        off = default_builder(a_slot(thinking="off"), FAKE_KEY)
+        self.assertIsInstance(off, AlibabaModelStudioProvider)
+        self.assertEqual(off._thinking, "off")  # noqa: SLF001
+        self.assertEqual(default_builder(a_slot(), FAKE_KEY)._thinking, "provider_default")  # noqa: SLF001
+        g = default_builder(slot("gemini-01"), FAKE_KEY)
+        self.assertIs(type(g), OpenAICompatChatProvider, "Gemini is still the plain OpenAI-compatible class")
+        self.assertFalse(hasattr(g, "_thinking"))
+        f = ProviderFactory()
+        a1 = f.get(a_slot(thinking="off"), FAKE_KEY)
+        self.assertIs(f.get(a_slot(thinking="off"), FAKE_KEY), a1, "same slot, same mode: cached")
+        a2 = f.get(a_slot(thinking="on"), FAKE_KEY)
+        self.assertIsNot(a2, a1, "a different mode must rebuild the client")
+        self.assertEqual(a2._thinking, "on")  # noqa: SLF001
+
+    def _plane_with_the_real_adapter(self, mode: str):
+        """Real `default_builder` + real adapter; the REAL network transport is replaced, so nothing can leave the machine."""
+        from server.llm_gateway.alibaba import AlibabaModelStudioProvider  # noqa: F401
+        a = a_slot("alibaba-sg-01", enabled=True, thinking=mode)
+        st = InMemoryControlStore()
+        st.controls = GlobalControls(ai_enabled=True, provider_types=dict(types_on()), version=1)
+        persist_slot(st, a)
+        persist_profile(st, RoutingProfile("FREE_FIRST", ("alibaba-sg-01",)), {a.slot_id: a})
+        return ControlPlane(st, secrets=SecretResolver(env_for(a)), factory=ProviderFactory(), alibaba_enabled=True,
+                            rng=random.Random(1)), a
+
+    def test_the_real_probe_and_real_chat_traffic_carry_the_slot_mode_and_no_request_leaves_the_machine(self) -> None:
+        sent: List[Dict[str, Any]] = []
+        hosts: List[str] = []
+
+        def fake_transport(self_: Any, request: httpx.Request) -> httpx.Response:
+            sent.append(json.loads(request.content))
+            hosts.append(request.url.host)
+            body = ("".join(f"data: {json.dumps(f)}\n\n" for f in (
+                {"choices": [{"index": 0, "delta": {"reasoning_content": LEAK}, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {"content": "OK"}, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                {"choices": [], "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}})) + "data: [DONE]\n\n")
+            return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
+
+        for mode, expect in (("off", False), ("on", True), ("provider_default", "absent")):
+            with self.subTest(mode=mode):
+                sent.clear()
+                p, a = self._plane_with_the_real_adapter(mode)
+                with mock.patch("httpx.HTTPTransport.handle_request", fake_transport):
+                    probe = p.probe("owner", "alibaba-sg-01")  # owner probe (works while the slot is enabled=True/False)
+                    events = list(ControlledGateway(p).stream(turns(), mode="general"))  # normal chat traffic
+                self.assertTrue(probe["ok"], probe)
+                self.assertEqual(served(events), ["alibaba-sg-01"])
+                self.assertEqual(len(sent), 2, "one probe + one chat turn, nothing else")
+                for payload in sent:
+                    if expect == "absent":
+                        self.assertNotIn("enable_thinking", payload)
+                    else:
+                        self.assertIs(payload["enable_thinking"], expect)
+                self.assertEqual(set(hosts), {"dashscope-intl.aliyuncs.com"}, "only the slot's own configured host")
+                hosts.clear()
+                text = repr(events) + repr(probe)
+                self.assertNotIn(LEAK, text, "reasoning_content reaches neither the user nor the admin")
+
+
+def types_on() -> Dict[str, bool]:
+    return {t: True for t in LEGACY_TYPES} | {"alibaba": True}
+
+
 # ================================================================== helpers
 
 

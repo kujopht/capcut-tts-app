@@ -70,6 +70,13 @@ trần toàn cục → audit. Tên provider của adapter là **id của slot**,
 * **Khoá** chỉ nằm trong header `Authorization` của client httpx; `repr`, lỗi, log không bao giờ chứa nó (có test).
 * **Streaming** theo định dạng OpenAI tương thích (`stream_options.include_usage`), không gửi trường `user` (không gửi mã người
   dùng, kể cả đã băm, ra nhà cung cấp mới). `reasoning_content` của model suy luận **không bao giờ** hiển thị hay chuyển tiếp.
+* **Thinking theo slot** (`slot.thinking`): `provider_default` | `off` | `on`, chỉ cho loại provider khai báo có điều khiển này (`THINKING_TYPES`; Gemini và loại
+  khác chỉ nhận `provider_default`, giá trị khác bị từ chối). Không viết cứng model nào: model nào cần chế độ nào là lựa chọn của Owner trên từng slot.
+  Với Alibaba, `off` gửi `"enable_thinking": false` và `on` gửi `true` ở **cấp trên cùng** của thân yêu cầu (dạng HTTP thô theo tài liệu; SDK đặt nó
+  trong `extra_body`); `provider_default` **bỏ hẳn** trường. Cần thiết vì model lai (hybrid) như `qwen3.7-plus` mặc định bật suy luận — tốn token/độ trễ và, với
+  `max_tokens` nhỏ như probe (64), có thể không trả lời gì. Giá trị sai bị từ chối (adapter không chạy, dòng đọc từ kho bị **đỗ lại**), không bao giờ im lặng
+  hiểu là "mặc định". Chế độ nằm trong payload của slot ở vùng tách biệt (bản cũ không đọc; dòng cũ chưa có trường = `provider_default`) và là một phần
+  khoá cache client (đổi chế độ thì dựng lại client). `reasoning_content` vẫn không bao giờ tới người dùng hay admin, bất kể chế độ.
 * **Model** luôn lấy từ slot; không có tên model nào trong mã.
 * **Hết hạn thời gian**: kết nối 10 s; chờ giữa hai gói tin 20 s; **chờ token chữ đầu (TTFT) 30 s**; tổng 120 s. Quá hạn →
   `provider_timeout` (trước token đầu: chuyển slot; sau token đầu: báo "bị gián đoạn", giữ phần đã nhận). Hạn TTFT chỉ tính token **chữ**:
@@ -277,7 +284,7 @@ Mốc dừng: `ALIBABA_SG_01_CANARY_PROBE_VERIFIED` (slot vẫn TẮT, chưa có
 | 4 | Đặt khoá: Render → `fas-prod-api` → Environment → **`FAS_AI_SECRET_ALIBABA_SG_01`** = giá trị khoá (dán thủ công từ file CSV của console; không gửi qua chat, không ghi vào kho, không `.env`) → lưu | Owner | `/admin/ai` sau khi tạo slot: `secret.present = true` (chỉ hiện tên biến + vân tay, không bao giờ giá trị). Xoá/chuyển file CSV vào `C:\FanficSecrets\` **sau khi** thấy `present` |
 | 5 | Console Alibaba → trang model usage → tab Free Quota → bật **Free Quota Only** cho model canary (có hiệu lực **không tức thì**: đợi một lúc trước khi gọi) — đây mới là rào chặn phí thật; trường `free_quota_only` của ứng dụng chỉ là phép ước tính | Owner | ảnh chụp màn hình công tắc đã bật cho đúng model |
 | 6 | Cung cấp: endpoint đúng của workspace, model ID, số dư hạn mức + hạn dùng, RPM/TPM, có phải model suy luận không | Owner | (mục 12) |
-| 7 | `/admin/ai` → tạo **một** slot `alibaba-sg-01` (`provider_type=alibaba`, `secret_ref=ALIBABA_SG_01`, **TẮT**, endpoint/model thật, tầng, hạn mức + hạn dùng, trần ngày thấp, workload hẹp; `free_quota_only` chỉ bật khi bước 5 đã xong). **Không** thêm vào hồ sơ định tuyến nào | Owner/agent | slot hiện `GATE_CLOSED` |
+| 7 | `/admin/ai` → tạo **một** slot `alibaba-sg-01` (`provider_type=alibaba`, `secret_ref=ALIBABA_SG_01`, **TẮT**, endpoint/model thật, tầng, hạn mức + hạn dùng, trần ngày thấp, workload hẹp, **`thinking`** theo model — model lai như `qwen3.7-plus` cần `off` cho lần probe đầu; `free_quota_only` chỉ bật khi bước 5 đã xong). **Chỉ tạo SAU khi bản có trường `thinking` đã deploy**: bản chưa có trường này sẽ BỎ QUA `thinking` khi lưu và probe sẽ chạy với suy luận mặc định của model. **Không** thêm vào hồ sơ định tuyến nào | Owner/agent | slot hiện `GATE_CLOSED`; `thinking` hiện đúng trong `/admin/ai` |
 | 8 | Đặt `FAS_AI_ALIBABA_ENABLED=1` (giữ `FAS_AI_QWEN_LEGACY_ENABLED` chưa đặt) → khởi động lại | Owner | slot hết `GATE_CLOSED`; nút Kiểm tra mở |
 | 9 | Bấm **Kiểm tra** (probe) vài lần, tối đa | Owner/agent | xác thực OK, model được nhận, TTFT + tổng độ trễ ghi nhận, `usage` có (nếu Alibaba trả), lỗi đã làm sạch, không lộ khoá/endpoint/phản hồi thô |
 

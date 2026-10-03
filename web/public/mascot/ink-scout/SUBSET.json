@@ -48,6 +48,101 @@
    "sha256": "a7bc979a9346e8b3c5d7056cd9f30336851267f884f328e8cf3551fc07801f2e"
   },
   {
+   "path": "animations/walk-left/rig/body.png",
+   "bytes": 60679,
+   "sha256": "fb8a9b8aaaf2014c3605a5f6d60414553b39729a01597e222eb880cc89213570"
+  },
+  {
+   "path": "animations/walk-left/rig/far-arm.png",
+   "bytes": 3714,
+   "sha256": "140385addd619c14577b327850e10eeb1bfb88707875a18de1e65d932f62db0a"
+  },
+  {
+   "path": "animations/walk-left/rig/far-boot.png",
+   "bytes": 2324,
+   "sha256": "f6ca2a2b17031db8d147aaeaa146f7391dc0fde274376234c87d4bece2645c5d"
+  },
+  {
+   "path": "animations/walk-left/rig/far-shin.png",
+   "bytes": 2723,
+   "sha256": "96f661711c68b005fb6c5c9fa1f2e3a9769b4b2cf16238b7ee49c4adde339d68"
+  },
+  {
+   "path": "animations/walk-left/rig/far-thigh.png",
+   "bytes": 2056,
+   "sha256": "af4a30aba5a93a16f0b20d215e769142f65100f6e59f0d2ae73d3d6fb750d4a8"
+  },
+  {
+   "path": "animations/walk-left/rig/near-arm.png",
+   "bytes": 3732,
+   "sha256": "d50b4ddbcf1b2dd4bd154f8fe8a10584393c3552306e3030be5d04834df98f14"
+  },
+  {
+   "path": "animations/walk-left/rig/near-shin.png",
+   "bytes": 2864,
+   "sha256": "0be5e1da468e8626bd14afb1cd2885980b0aca6b096ee0f63b49957fd8f00e7a"
+  },
+  {
+   "path": "animations/walk-left/rig/near-thigh.png",
+   "bytes": 2105,
+   "sha256": "198367a0d0c88ee34e7f27b7ea2650bd9628fce0fcb3958c1866c7c3e298d9b2"
+  },
+  {
+   "path": "animations/walk-left/sprite.webp",
+   "bytes": 609252,
+   "sha256": "44580ea18f6b7e4add9d78c059b80124340022847a868f3b04742cfd6dab95de"
+  },
+  {
+   "path": "animations/walk-right/rig/body.png",
+   "bytes": 58128,
+   "sha256": "33494862c183614318e09f5b4a4e83879ef784e8032ceef8c9f420a9634e6406"
+  },
+  {
+   "path": "animations/walk-right/rig/far-arm.png",
+   "bytes": 3718,
+   "sha256": "5e9f8b95e0e8bc4d4c07e2bd2427d60c4fe206bbc49024e2f5e2c3f96a1d0c4c"
+  },
+  {
+   "path": "animations/walk-right/rig/far-boot.png",
+   "bytes": 2598,
+   "sha256": "cef87a800e22009caa8369c55b37767277b87c4d10174a2555077fd34c29ad7b"
+  },
+  {
+   "path": "animations/walk-right/rig/far-shin.png",
+   "bytes": 3419,
+   "sha256": "6b1df4bc73177456ba4008060bfb2c4b691311a0e41c866baa303af49ebb7f99"
+  },
+  {
+   "path": "animations/walk-right/rig/far-thigh.png",
+   "bytes": 2271,
+   "sha256": "e65ab61c6d84c471956b262c902ac34afd7b505000c22fb49147b05d97878496"
+  },
+  {
+   "path": "animations/walk-right/rig/near-arm.png",
+   "bytes": 4379,
+   "sha256": "76c53faef0aed6492459fc83884ed1b2f6ec2c666ea47679ae84d5fcb4346f98"
+  },
+  {
+   "path": "animations/walk-right/rig/near-boot.png",
+   "bytes": 2641,
+   "sha256": "331f33da68689d37024e65c0f27bd07425f5c8ec1c50fc610e91af01560bb1dc"
+  },
+  {
+   "path": "animations/walk-right/rig/near-shin.png",
+   "bytes": 3313,
+   "sha256": "34caa62a70b3d4120a4263e8e42c3526655b3f127fa125d1e72c24b6c5e42da5"
+  },
+  {
+   "path": "animations/walk-right/rig/near-thigh.png",
+   "bytes": 2005,
+   "sha256": "70df88b09f503258e4ab24abda21ca415a2ab59effb9d21e5f56d67853bad693"
+  },
+  {
+   "path": "animations/walk-right/sprite.webp",
+   "bytes": 577006,
+   "sha256": "3eeca4e5debce4e68777dc21b3f95e4273d325c67b0418407621d3fe81b5fe73"
+  },
+  {
    "path": "animations/walk/sprite.webp",
    "bytes": 122558,
    "sha256": "28a9cdb1b2da0a008cd3d74f354305fce1fd7386d634c11243065b6e30c65c16"
@@ -103,6 +198,26 @@
    "sha256": "ba192aae8c3eae775d72515434f48fc653f68834051aad805fd096e173a9e13d"
   },
   {
+   "path": "poses/motion/jump-airborne.webp",
+   "bytes": 25106,
+   "sha256": "79239b17c3a63b07cfe2e91690d315609c5c7e7782ca14ab6852cbd794baf4bd"
+  },
+  {
+   "path": "poses/motion/jump-anticipation.webp",
+   "bytes": 23596,
+   "sha256": "b7019c6d6074fecf615eff86bad197b48e31b0478a19c655ff1b607b16e92c71"
+  },
+  {
+   "path": "poses/motion/jump-landing.webp",
+   "bytes": 24500,
+   "sha256": "8d0c3cbe8ac0f63f2fd53956413540b68f40696e3ec07316cf96960cb9ab63e6"
+  },
+  {
+   "path": "poses/motion/picked-up.webp",
+   "bytes": 22712,
+   "sha256": "168c7db700e70d4c0aba7c9838e6e540d1330910a0b471b79bca202244d44f1b"
+  },
+  {
    "path": "poses/peeking.webp",
    "bytes": 40588,
    "sha256": "a82f49c67fd6d6c04eef8536c40c96cf3bcf05d24a9856f95298a608dcf3f929"
@@ -113,9 +228,24 @@
    "sha256": "4a1d2428c75e068bb6479ab87af9d3099cd64da303e606bd0f23d98cf695e18e"
   },
   {
+   "path": "runtime/ink-scout-physics.js",
+   "bytes": 14981,
+   "sha256": "ee95b9f092a599ab2ea13039d2b1fc45d2122b4f8d327d6cc2b2e075b52dc846"
+  },
+  {
+   "path": "runtime/ink-scout-presence.js",
+   "bytes": 5316,
+   "sha256": "cf0bfe1bd440edb0308019a0b3246cbc1f2a4ff260fa5013f6e129b67c2a4ae9"
+  },
+  {
+   "path": "runtime/ink-scout-walk-rig.js",
+   "bytes": 3862,
+   "sha256": "d1d17f06ca4085e5b4bf6f9a04c085bfec8297b4dfcf010615251869e1339de8"
+  },
+  {
    "path": "runtime/ink-scout.js",
-   "bytes": 13466,
-   "sha256": "6d490dd24c343c4fa4cdf5a003d2d21ac411d17d7bd3454a6c7d8ec68057b1c2"
+   "bytes": 13830,
+   "sha256": "bc8afeac948b943988a1517d609151b563f59378b4e52fd1cee8f7bf7d088340"
   },
   {
    "path": "transitions/hop-left/sprite.webp",
@@ -143,26 +273,29 @@
    "sha256": "cefc8ae322c0b9acd75a55e3095576281a4a2a8edf1a2c8ff023a47e8a643ac2"
   }
  ],
- "manifestBytes": 17854,
- "totalBytes": 2222532,
- "budgetBytes": 2700000,
- "packBytes": 74314576,
+ "manifestBytes": 23779,
+ "totalBytes": 3697821,
+ "budgetBytes": 4100000,
+ "packBytes": 94748902,
  "byKind": {
   "state-sprite": 750010,
+  "walk-rig-part": 162669,
+  "walk-sprite": 1186258,
   "transition-sprite": 869656,
   "static-poster": 492628,
-  "pose": 78918,
-  "runtime": 13466
+  "pose": 174832,
+  "runtime": 37989
  },
  "excluded": [
   "sources/ (generation sheets)",
-  "*.png sprite atlases / posters / master PNGs",
+  "*.png sprite atlases / posters / master PNGs (except the walk rig parts, PNG-only in the pack)",
   "Lottie animation.json (embedded PNG frames)",
   "animated.webp",
   "sprite.json (coords are in manifest)",
+  "rig.json (the rig description is inlined in the web manifest)",
   "expressions/",
-  "poses/ except sitting-edge + peeking",
-  "stickers/ (not integrated in this PR)",
+  "poses/ except sitting-edge, peeking and the four motion poses",
+  "stickers/ (not integrated)",
   "master front/side/back/three-quarter references",
   "qa/, tools/, vendor/, node_modules/, the ZIP"
  ]

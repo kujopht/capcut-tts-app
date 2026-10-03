@@ -60,7 +60,11 @@
     get reducedMotion() { return this.reducedOverride ?? this.media.matches; }
     report(error) { this.host.dispatchEvent(new CustomEvent('mascoterror', { detail: error })); }
     event(name, detail) { this.host.dispatchEvent(new CustomEvent(name, { detail })); }
-    url(path) { return new URL(path, this.base).href; }
+    url(path) {
+      const url = new URL(path, this.base);
+      if (this.manifest.version) url.searchParams.set('v', this.manifest.version);
+      return url.href;
+    }
 
     async image(path, fallback) {
       if (this.cache.has(path)) {
@@ -137,7 +141,7 @@
       if (this.anim) this.anim.complete = true;
       const image = await this.image(this.reducedMotion ? spec.poster : spec.image, this.reducedMotion ? null : spec.png);
       if (this.destroyed || token !== this.token) return false;
-      this.anim = { ...spec, image, static: this.reducedMotion, playback: hold ? 'hold' : loop ? 'loop' : 'once', after: null, complete: false };
+      this.anim = { ...spec, animation: name, image, static: this.reducedMotion, playback: hold ? 'hold' : loop ? 'loop' : 'once', after: null, complete: false };
       this.elapsed = 0; this.lastTime = null; this.lastFrame = -1;
       this.draw(0); this.startClock(); return true;
     }
@@ -224,9 +228,12 @@
       }
       const from = { ...this.position };
       let to = { ...from }, arc = 0, duration = 650, animation = name;
-      if (name === 'walk') {
+      const walking = name === 'walk' || name === 'walk-left' || name === 'walk-right';
+      if (walking) {
         const distance = clamp(Math.abs(Number(options.distance) || 180), 100, 300);
-        to.x += (options.direction === 'left' ? -1 : 1) * distance;
+        const direction = name === 'walk-left' || options.direction === 'left' ? 'left' : 'right';
+        to.x += (direction === 'left' ? -1 : 1) * distance;
+        animation = this.manifest.physics?.walkCycles?.[direction] || name;
         duration = distance / 95 * 1000;
       } else if (name === 'hop-left' || name === 'hop-right') {
         to.x += (name === 'hop-left' ? -1 : 1) * clamp(Number(options.distance) || 64, 16, 100);
@@ -246,7 +253,7 @@
       to = this.constrain(to);
       // Keep the whole canvas within the host's explicitly supplied bounds.
       arc = Math.min(arc, Math.max(0, Math.min(from.y, to.y) - this.bounds.top));
-      const started = await this.play(animation, { loop: name === 'walk' || name === 'return-home' });
+      const started = await this.play(animation, { loop: walking || name === 'return-home' });
       if (!started) return { cancelled: true };
       const token = this.token;
       if (this.reducedMotion) {
@@ -259,7 +266,7 @@
         return { cancelled: false, position: to };
       }
       const outcome = await new Promise(resolve => {
-        this.motion = { name, from, to, arc, duration, elapsed: 0, resolve, linear: name === 'walk' || name === 'return-home' };
+        this.motion = { name, from, to, arc, duration, elapsed: 0, resolve, linear: walking || name === 'return-home' };
         this.startClock();
       });
       if (!outcome.cancelled && token === this.token) {

@@ -25,14 +25,18 @@ export interface RuntimeLike {
   destroy(): void;
   applyPosition(): void;
   position: { x: number; y: number };
+  /** "Nhà" của runtime (`return-home` đi tới đây). Mặc định `{0,0}`; người dùng có thể dời nó bằng kéo thả. */
+  home: { x: number; y: number };
   readonly reducedMotion: boolean;
 }
 
-export type Place = { kind: "home" } | { kind: "seat"; x: number; y: number };
+/** `free` = một chỗ KHÔNG xác định (người dùng vừa thả linh vật vào vùng cấm): không đích nào "đã ở đó", nên mọi đích đều di chuyển thật. */
+export type Place = { kind: "home" } | { kind: "seat"; x: number; y: number } | { kind: "free" };
 
 const HOME: Place = { kind: "home" };
 
 function samePlace(a: Place, b: Place): boolean {
+  if (a.kind === "free" || b.kind === "free") return false;
   if (a.kind !== b.kind) return false;
   if (a.kind === "home" || b.kind === "home") return true;
   return Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
@@ -48,6 +52,13 @@ export class CompanionDirector {
   private target: Place | null = null;
   private running = false;
   private destroyed = false;
+  /**
+   * NGƯỜI DÙNG đang cầm / thả linh vật (kéo thả). Trong lúc đó director KHÔNG ra lệnh gì cho runtime: `setState`/`transition` huỷ
+   * chuyển động đang chạy, tức là giật linh vật khỏi tay người dùng. Thả xong (`hold(false)`) thì áp lại trạng thái/chỗ đứng MỚI NHẤT.
+   */
+  private held = false;
+  /** `rehome()` được gọi lúc vòng lặp đang bận: dời nhà ngay khi nó rảnh. */
+  private rehomePending = false;
   private readonly rt: RuntimeLike;
   private readonly onError: (e: unknown) => void;
 
@@ -64,6 +75,49 @@ export class CompanionDirector {
 
   get busy(): boolean {
     return this.running;
+  }
+
+  get isHeld(): boolean {
+    return this.held;
+  }
+
+  /** Người dùng bắt đầu (`true`) / kết thúc (`false`) cầm linh vật. Kết thúc → chạy lại vòng lặp với yêu cầu mới nhất. */
+  hold(value: boolean): void {
+    if (this.held === value) return;
+    this.held = value;
+    if (!value) void this.pump();
+  }
+
+  /**
+   * Chốt chỗ đứng sau khi người dùng THẢ: linh vật đã đứng yên ở đó (runtime tự kết thúc ở idle), nên director chỉ ghi nhận nơi ở
+   * mới và áp lại trạng thái mong muốn. Không gọi `transition` (không có gì để di chuyển).
+   */
+  settle(place: Place): void {
+    this.place = place;
+    this.target = null;
+    this.applied = null;
+  }
+
+  /**
+   * "Nhà" (`rt.home`) vừa dời — vị trí người dùng đã nhớ được khôi phục lúc tải trang, cửa sổ thu nhỏ, "Đặt lại vị trí". Đang đứng nhà
+   * thì dời NGAY (không hoạt ảnh), kể cả khi vòng lặp đang bận áp trạng thái: khi đó dời ngay lúc nó rảnh. (Trước đây nhánh "đang
+   * bận" bỏ qua hẳn nên linh vật vẫn đứng ở nhà mặc định dù đã nhớ chỗ khác — lỗi chạy đua phụ thuộc nhịp tải, đo ở QA trình duyệt.)
+   * Đang ở chỗ ngồi / bị cầm: lần về nhà kế tiếp (`return-home`) tự tới nhà mới, `settle()` chốt chỗ sau khi thả.
+   */
+  rehome(): void {
+    if (this.destroyed) return;
+    if (this.running) {
+      this.rehomePending = true;
+      return;
+    }
+    if (this.place.kind === "home" && !this.held) this.applyHome();
+  }
+
+  private applyHome(): void {
+    const h = this.rt.home;
+    if (this.rt.position.x === h.x && this.rt.position.y === h.y) return;
+    this.rt.position = { x: h.x, y: h.y };
+    this.rt.applyPosition();
   }
 
   /** Trạng thái mong muốn MỚI NHẤT (ghi đè; không xếp hàng). */
@@ -88,6 +142,11 @@ export class CompanionDirector {
    * không phát hoạt ảnh; đang bận → coi như đích mới.
    */
   relocate(x: number, y: number): void {
+    if (this.held) {
+      // Người dùng đang cầm: không dời trực tiếp; ghi nhận đích mới, áp khi họ thả.
+      if (this.place.kind === "seat" || this.target?.kind === "seat") this.target = { kind: "seat", x, y };
+      return;
+    }
     if (this.place.kind === "seat" && !this.running) {
       const dx = x - this.place.x, dy = y - this.place.y;
       this.rt.position = { x: this.rt.position.x + dx, y: this.rt.position.y + dy };
@@ -118,6 +177,7 @@ export class CompanionDirector {
     this.running = true;
     try {
       while (!this.destroyed) {
+        if (this.held) break; // người dùng đang cầm: không giật linh vật khỏi tay họ
         const t = this.target;
         this.target = null;
         if (t && !samePlace(t, this.place)) {
@@ -148,6 +208,10 @@ export class CompanionDirector {
       this.onError(e);
     } finally {
       this.running = false;
+      if (this.rehomePending) {
+        this.rehomePending = false;
+        if (!this.destroyed && !this.held && this.place.kind === "home") this.applyHome();
+      }
     }
   }
 
@@ -155,7 +219,7 @@ export class CompanionDirector {
     const reduced = this.rt.reducedMotion;
     if (reduced) {
       // Giảm chuyển động: dời tức thì, không hoạt ảnh di chuyển (và không tải poster PNG).
-      this.rt.position = t.kind === "seat" ? { x: t.x, y: t.y } : { x: 0, y: 0 };
+      this.rt.position = t.kind === "seat" ? { x: t.x, y: t.y } : { ...this.rt.home };
       this.rt.applyPosition();
     } else if (t.kind === "seat") {
       await this.rt.transition("jump-onto-panel", { x: t.x, y: t.y });

@@ -5,7 +5,7 @@
 Source of truth: the UNPACKED canonical project (never the 73 MB ZIP). Output:
 ``web/public/mascot/ink-scout/`` with
 
-* ``runtime/ink-scout.js`` — the supplied player, BYTE-IDENTICAL (sha256 recorded);
+* ``runtime/ink-scout*.js`` — the supplied player + walk rig + physics + presence (v1.3.0), each BYTE-IDENTICAL (sha256 recorded);
 * the supplied optimized WebP sprite atlases for the 10 AI states and the 8
   movement transitions, the 9 static state posters (reduced motion) and the two
   poses the runtime shows after a movement — copied byte-for-byte, same
@@ -33,11 +33,20 @@ DEFAULT_PACK = Path("C:/Users/nguye/Projects/Fanfic-World-Mascot")
 
 STATES = ("idle", "hover", "listening", "thinking", "searching", "writing", "answering", "success", "error", "offline")
 TRANSITIONS = ("hop-left", "hop-right", "walk", "jump-onto-panel", "sit-down", "stand-up", "peek-out", "return-home")
+#: v1.3.0 directional walk: the physics runtime plays `walk-left` / `walk-right` (independent artwork, never mirrored).
+WALK_TRANSITIONS = ("walk-left", "walk-right")
 POSES = ("sitting-edge", "peeking")  # shown by the runtime at the end of sit-down / peek-out
+#: Runtime scripts, in the ORDER the pack requires (classic IIFEs): player -> walk rig -> physics -> presence. Every one is copied
+#: BYTE-IDENTICAL (sha256 in SUBSET.json); the web never edits the approved runtime.
+RUNTIME = ("ink-scout.js", "ink-scout-walk-rig.js", "ink-scout-physics.js", "ink-scout-presence.js")
 STATE_KEYS = ("animation", "playback", "after", "static", "image", "loop", "durationMs", "fps", "frames")
 ANIM_KEYS = ("image", "loop", "durationMs", "fps", "frames")
-#: Budget for the whole web subset (bytes on disk). The pack is ~72.6 MB.
-SUBSET_BUDGET = 2_700_000
+#: Extra keys the physics runtime reads from the directional walk animations (stride, frame count, rig description).
+WALK_ANIM_KEYS = ANIM_KEYS + ("direction", "cycleFrames", "strideAt128Px", "rig")
+#: Budget for the whole web subset (bytes on disk). The v1.3.0 pack is ~94.7 MB; the subset must stay under 5% of it.
+#: v1.0 subset was 2.22 MB; v1.3.0 adds the directional walk sprites (~1.2 MB, fetched lazily and only when the mascot walks),
+#: the walk rig parts (PNG only in the pack, ~165 KB), four motion poses and three small runtime scripts.
+SUBSET_BUDGET = 4_100_000
 
 
 def sha(p: Path) -> str:
@@ -47,7 +56,9 @@ def sha(p: Path) -> str:
 def build(pack: Path) -> tuple[dict, dict[str, Path]]:
     m = pack / "mascot"
     man = json.loads((m / "manifest.json").read_text(encoding="utf-8"))
-    files: dict[str, Path] = {"runtime/ink-scout.js": m / "runtime" / "ink-scout.js"}
+    if man["version"] != "1.3.0":
+        raise SystemExit(f"expected the Ink Scout 1.3.0 pack, found {man['version']}")
+    files: dict[str, Path] = {f"runtime/{name}": m / "runtime" / name for name in RUNTIME}
 
     states = {}
     for s in STATES:
@@ -68,6 +79,23 @@ def build(pack: Path) -> tuple[dict, dict[str, Path]]:
         anims[name] = a
         trans[t] = {"animation": name, "durationMs": tr["durationMs"]}
         files[spec["image"]] = m / spec["image"]
+
+    for t in WALK_TRANSITIONS:
+        tr = man["transitions"][t]
+        name = tr["animation"]
+        spec = man["animations"][name]
+        a = {k: spec[k] for k in WALK_ANIM_KEYS}
+        a["poster"] = man["states"]["idle"]["static"]  # reduced motion never walks: the host repositions instantly
+        anims[name] = a
+        trans[t] = {"animation": name, "durationMs": tr["durationMs"]}
+        files[spec["image"]] = m / spec["image"]
+        for part in spec["rig"]["parts"].values():  # PNG only in the pack (no WebP export): copied untouched
+            files[part["image"]] = m / part["image"]
+
+    # Physics: four procedural motion poses (pickup / anticipation / airborne / landing) and the directional walk cycles.
+    physics = {"poses": dict(man["physics"]["poses"]), "walkCycles": dict(man["physics"]["walkCycles"])}
+    for rel in physics["poses"].values():
+        files[rel] = m / rel
 
     poses = {}
     for p in POSES:
@@ -92,6 +120,16 @@ def build(pack: Path) -> tuple[dict, dict[str, Path]]:
             for k in ("image", "static", "poster"):
                 if spec.get(k) in alias:
                     spec[k] = alias[spec[k]]
+    # Rig parts live one level deeper (animations[*].rig.parts[*].image). The pack reuses ONE left-facing boot cutout for both boots
+    # of the left rig (see runtime/README.txt), so near-boot.png == far-boot.png byte for byte: point both at the single copy.
+    for spec in anims.values():
+        for part in (spec.get("rig") or {}).get("parts", {}).values():
+            if part["image"] in alias:
+                part["image"] = alias[part["image"]]
+    for spec in physics["poses"], physics["walkCycles"]:
+        for k, v in list(spec.items()):
+            if v in alias:
+                spec[k] = alias[v]
 
     web_manifest = {
         "schemaVersion": man["schemaVersion"], "id": man["id"], "name": man["name"], "version": man["version"],
@@ -100,7 +138,7 @@ def build(pack: Path) -> tuple[dict, dict[str, Path]]:
         # identity rules only (mirrorAllowed=false, streak side); the PNG reference
         # path stays in the pack — the web never downloads it.
         "identity": {k: v for k, v in (man.get("identity") or {}).items() if k != "reference"},
-        "states": states, "animations": anims, "transitions": trans, "poses": poses,
+        "states": states, "animations": anims, "transitions": trans, "poses": poses, "physics": physics,
     }
     web_manifest["dedupedAliases"] = alias
     return web_manifest, files
@@ -115,18 +153,21 @@ def inventory(web_manifest: dict, files: dict[str, Path], pack: Path) -> dict:
     total = sum(i["bytes"] for i in items) + manifest_bytes
     by_kind: dict[str, int] = {}
     for i in items:
-        kind = ("runtime" if i["path"].startswith("runtime/") else "static-poster" if "/states/" in i["path"]
-                else "pose" if i["path"].startswith("poses/") else "transition-sprite"
-                if i["path"].startswith("transitions/") or "/walk/" in i["path"] else "state-sprite")
+        p = i["path"]
+        kind = ("runtime" if p.startswith("runtime/") else "static-poster" if "/states/" in p
+                else "walk-rig-part" if "/rig/" in p else "walk-sprite" if "/walk-left/" in p or "/walk-right/" in p
+                else "pose" if p.startswith("poses/") else "transition-sprite"
+                if p.startswith("transitions/") or "/walk/" in p else "state-sprite")
         by_kind[kind] = by_kind.get(kind, 0) + i["bytes"]
     return {
         "source": "unpacked canonical project (mascot/), NOT the ZIP",
         "runtimeUnchanged": True,
         "files": items, "manifestBytes": manifest_bytes, "totalBytes": total, "budgetBytes": SUBSET_BUDGET,
         "packBytes": pack_bytes, "byKind": by_kind,
-        "excluded": ["sources/ (generation sheets)", "*.png sprite atlases / posters / master PNGs",
+        "excluded": ["sources/ (generation sheets)", "*.png sprite atlases / posters / master PNGs (except the walk rig parts, PNG-only in the pack)",
                      "Lottie animation.json (embedded PNG frames)", "animated.webp", "sprite.json (coords are in manifest)",
-                     "expressions/", "poses/ except sitting-edge + peeking", "stickers/ (not integrated in this PR)",
+                     "rig.json (the rig description is inlined in the web manifest)",
+                     "expressions/", "poses/ except sitting-edge, peeking and the four motion poses", "stickers/ (not integrated)",
                      "master front/side/back/three-quarter references", "qa/, tools/, vendor/, node_modules/, the ZIP"],
     }
 

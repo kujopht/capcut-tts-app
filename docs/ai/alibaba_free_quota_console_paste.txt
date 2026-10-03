@@ -1,0 +1,196 @@
+qwen3.8-livetranslate-flash-realtime    语音模型
+剩 1M / 共 1M
+2026/12/15剩余 74 天
+未开启
+qwen3-tts-vc-realtime-2025-11-27    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+qwen3-tts-instruct-flash-realtime-2026-01-22    语音模型
+剩 10K / 共 10K
+2026/12/01剩余 60 天
+未开启
+qwen3-tts-instruct-flash    语音模型
+剩 10K / 共 10K
+2026/12/01剩余 60 天
+未开启
+qwen3-tts-instruct-flash-realtime    语音模型
+剩 10K / 共 10K
+2026/12/01剩余 60 天
+未开启
+qwen-audio-3.0-tts-plus    语音模型
+剩 10K / 共 10K
+2026/12/01剩余 60 天
+未开启
+qwen3-tts-vd-realtime-2026-01-15    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+qwen-audio-3.0-asr-flash    语音模型
+剩 36K / 共 36K
+2026/12/01剩余 60 天
+未开启
+qwen3-asr-flash-filetrans-2025-11-17    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3-livetranslate-flash-realtime    语音模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启
+qwen3.5-livetranslate-flash-realtime-2026-05-19    语音模型
+剩 1M / 共 1M
+2026/12/01剩余 60 天
+未开启
+fun-asr    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3.5-livetranslate-flash-realtime    语音模型
+剩 1M / 共 1M
+2026/12/01剩余 60 天
+未开启
+qwen3-livetranslate-flash-2025-12-01    语音模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启
+qwen-audio-3.1-asr-flash-filetrans    语音模型
+剩 1M / 共 1M
+2026/12/20剩余 79 天
+未开启
+qwen3-asr-flash    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3-asr-flash-2025-09-08    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3-omni-30b-a3b-captioner    语音模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启
+qwen3-tts-vc-realtime-2026-01-15    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+cosyvoice-v3-flash    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+fun-asr-2025-08-25    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+fun-asr-realtime-2025-11-07    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3-tts-flash    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+qwen3-tts-flash-realtime-2025-09-18    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+qwen3-asr-flash-realtime-2026-02-10    语音模型
+剩 36K / 共 36K
+2026/12/01剩余 60 天
+未开启
+qwen3-tts-vc-2026-01-22    语音模型
+剩 10K / 共 10K
+2026/12/01剩余 60 天
+未开启
+qwen-audio-3.1-asr-flash-message    语音模型
+剩 1M / 共 1M
+2026/12/20剩余 79 天
+未开启
+qwen-audio-3.0-tts-flash    语音模型
+剩 10K / 共 10K
+2026/12/01剩余 60 天
+未开启
+qwen3-tts-flash-2025-11-27    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+qwen-audio-3.0-asr-flash-filetrans    语音模型
+剩 36K / 共 36K
+2026/12/01剩余 60 天
+未开启
+qwen3-asr-flash-realtime-2025-10-27    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3-asr-flash-realtime    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3-tts-vd-realtime-2025-12-16    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+cosyvoice-v3-plus    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+qwen3-asr-flash-2026-02-10    语音模型
+剩 36K / 共 36K
+2026/12/01剩余 60 天
+未开启
+fun-asr-mtl-2025-08-25    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+fun-asr-realtime    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3-livetranslate-flash    语音模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启
+qwen3-asr-flash-filetrans    语音模型
+剩 36K / 共 36K
+2026/12/02剩余 61 天
+未开启
+qwen3-tts-flash-realtime-2025-11-27    语音模型
+剩 10K / 共 10K
+2026/12/02剩余 61 天
+未开启
+qwen-audio-3.1-asr-flash    语音模型
+剩 1M / 共 1M
+2026/12/20剩余 79 天
+未开启
+fun-asr-flash-2026-06-15    语音模型
+剩 36K / 共 36K
+2026/12/01剩余 60 天
+未开启
+qwen-voice-design    语音模型
+剩 10 / 共 10
+2026/12/02剩余 61 天
+未开启
+tongyi-embedding-vision-flash    向量模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启
+qwen3-rerank    向量模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启
+text-embedding-v3    向量模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启
+tongyi-embedding-vision-plus    向量模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启
+qwen3.7-text-embedding    向量模型
+剩 1M / 共 1M
+2026/12/01剩余 60 天
+未开启
+text-embedding-v4    向量模型
+剩 1M / 共 1M
+2026/12/02剩余 61 天
+未开启

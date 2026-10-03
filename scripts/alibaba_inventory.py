@@ -3,6 +3,7 @@ Công cụ dòng lệnh cho kiểm kê model Alibaba (NGOẠI TUYẾN: chỉ đ�
 
     python scripts/alibaba_inventory.py validate docs/ai/alibaba_model_inventory.json
     python scripts/alibaba_inventory.py report   docs/ai/alibaba_model_inventory.json
+    python scripts/alibaba_inventory.py parse-console docs/ai/alibaba_free_quota_console_paste.txt --into docs/ai/alibaba_model_inventory.json --out moi.json
     python scripts/alibaba_inventory.py from-csv bang.csv --captured-at 2026-10-04T03:00:00+00:00 > kiem_ke.json
     python scripts/alibaba_inventory.py slot docs/ai/alibaba_model_inventory.json <model_id> --slot-id alibaba-sg-02 \
         --secret-ref ALIBABA_SG_02 --endpoint <endpoint của workspace>
@@ -30,6 +31,7 @@ from server.ai_assistant.control.model import CAPABILITY_TIERS, ConfigValidation
 #: Với mỗi trường còn thiếu: Owner cần lấy nó ở ĐÂU trên console (để câu trả lời "cần ảnh chụp gì" luôn khớp với mã).
 WHERE = {
     "tiers": "Owner/Claude phân loại tầng (FAST/SMART/ADVANCED/TRANSLATION/VISION/EMBEDDING) dựa trên trang chi tiết model",
+    "quota_unit": "Model usage > tab Free Quota: ĐƠN VỊ của hạn mức (token / ký tự / giây / ảnh / lần) — bản dán chỉ có con số, không có đơn vị",
     "free_quota_remaining": "Model usage > tab Free Quota: cột số dư còn lại (cả bảng, mọi trang)",
     "free_quota_snapshot_at": "thời điểm chụp ảnh Free Quota (ngày giờ + múi giờ)",
     "free_quota_expires_at": "Model usage > tab Free Quota: cột hạn dùng",
@@ -74,15 +76,22 @@ def cmd_report(args: argparse.Namespace) -> int:
         return 1
     now = datetime.fromisoformat(args.now) if args.now else datetime.now(timezone.utc)
     needed: dict = {}
+    counts = {inv.READY: 0, inv.INCOMPLETE: 0, inv.BLOCKED: 0}
+    by_category: dict = {}
     for m in data.models:
         state, why = inv.readiness(m, now)
-        _out(f"{m.model_id}  [{m.status}]  tầng={','.join(m.tiers) or '(chưa phân loại)'}  thinking(slot)={m.slot_thinking}  => {state}")
-        for w in why:
-            _out(f"    - {w}")
-        for w in inv.warnings(m):
-            _out(f"    ! {w}")
+        counts[state] += 1
+        by_category[m.console_category or "(không ghi)"] = by_category.get(m.console_category or "(không ghi)", 0) + 1
+        if not args.brief:
+            _out(f"{m.model_id}  [{m.status}]  tầng={','.join(m.tiers) or '(chưa phân loại)'}  thinking(slot)={m.slot_thinking}  => {state}")
+            for w in why:
+                _out(f"    - {w}")
+            for w in inv.warnings(m):
+                _out(f"    ! {w}")
         for g in inv.missing(m):
             needed.setdefault(g, []).append(m.model_id)
+    _out(f"Tổng {len(data.models)} model: READY {counts[inv.READY]} · INCOMPLETE {counts[inv.INCOMPLETE]} · BLOCKED {counts[inv.BLOCKED]}")
+    _out("Theo danh mục console: " + ", ".join(f"{k} {v}" for k, v in sorted(by_category.items())))
     _out()
     _out("Phủ theo tầng (model READY, hạn dùng sớm nhất trước):")
     cov = inv.tier_coverage(data, now)
@@ -92,7 +101,8 @@ def cmd_report(args: argparse.Namespace) -> int:
         _out()
         _out("Dữ liệu còn thiếu (trường -> model -> lấy ở đâu):")
         for k, models in needed.items():
-            _out(f"  {k}: {', '.join(models)}  <- {WHERE.get(k, '')}")
+            shown = ", ".join(models[:4]) + (f" … (+{len(models) - 4})" if len(models) > 4 else "")
+            _out(f"  {k} [{len(models)} model]: {shown}  <- {WHERE.get(k, '')}")
     return 0
 
 
@@ -113,6 +123,39 @@ def cmd_from_csv(args: argparse.Namespace) -> int:
             sys.stderr.write(f"CSV lỗi: {exc}\n")
         return 1
     _out(json.dumps(raw, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_parse_console(args: argparse.Namespace) -> int:
+    """Đọc văn bản dán từ bảng Free Quota (tiếng Trung) và gộp vào kiểm kê. In JSON mới ra stdout, hoặc ghi vào --out; tóm tắt ra stderr."""
+    try:
+        text = Path(args.paste).read_text(encoding="utf-8-sig")
+        entries, snap = inv.parse_console_free_quota(text, captured_at=args.captured_at)
+        base = (json.loads(Path(args.into).read_text(encoding="utf-8")) if args.into else
+                {"version": inv.INVENTORY_VERSION, "provider": inv.PROVIDER, "region": args.region, "captured_at": snap, "models": []})
+        merged, rep = inv.merge_console(base, entries, snap)
+        inv.parse_inventory(merged)
+    except FileNotFoundError as exc:
+        sys.stderr.write(f"KHÔNG TÌM THẤY: {exc.filename}\n")
+        return 1
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(f"JSON hỏng: {exc}\n")
+        return 1
+    except ValueError as exc:
+        if isinstance(exc, ConfigValidationError):
+            sys.stderr.write(f"KHÔNG HỢP LỆ ({len(exc.errors)} lỗi):\n")
+            for e in exc.errors:
+                sys.stderr.write(f"  - {e['field'] or '(gốc)'}: {e['message']}\n")
+        else:
+            sys.stderr.write(f"Văn bản dán lỗi: {exc}\n")
+        return 1
+    body = json.dumps(merged, ensure_ascii=False, indent=2) + "\n"
+    if args.out:
+        Path(args.out).write_text(body, encoding="utf-8")
+    else:
+        sys.stdout.write(body)
+    sys.stderr.write(f"Đọc {len(entries)} model (chụp {snap}): thêm {len(rep['added'])}, làm mới {len(rep['refreshed'])}, "
+                     f"không đổi {len(rep['unchanged'])}.\n")
     return 0
 
 
@@ -148,7 +191,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("validate"); s.add_argument("file"); s.set_defaults(fn=cmd_validate)
-    s = sub.add_parser("report"); s.add_argument("file"); s.add_argument("--now", default=""); s.set_defaults(fn=cmd_report)
+    s = sub.add_parser("report"); s.add_argument("file"); s.add_argument("--now", default=""); s.add_argument("--brief", action="store_true")
+    s.set_defaults(fn=cmd_report)
+    s = sub.add_parser("parse-console"); s.add_argument("paste"); s.add_argument("--into", default=""); s.add_argument("--out", default="")
+    s.add_argument("--captured-at", default=""); s.add_argument("--region", default="ap-southeast-1"); s.set_defaults(fn=cmd_parse_console)
     s = sub.add_parser("from-csv"); s.add_argument("csv"); s.add_argument("--captured-at", default=""); s.add_argument("--region", default="")
     s.set_defaults(fn=cmd_from_csv)
     s = sub.add_parser("slot"); s.add_argument("file"); s.add_argument("model_id"); s.add_argument("--slot-id", required=True)

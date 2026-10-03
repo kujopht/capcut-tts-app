@@ -3,6 +3,7 @@
 /** Tổng quan hôm nay: số liệu chính + trạng thái cấu hình + hạn mức toàn cục. */
 
 import type { AiConfig, AiOverview } from "@/lib/admin/aiControl";
+import { moTaKhoTachBiet } from "@/lib/admin/aiSlotView";
 import { OSo } from "@/components/AdminShell";
 import { AiQuotaBar } from "./AiQuotaBar";
 
@@ -47,6 +48,8 @@ function dinhDangUsd(microUsd: number): string {
 
 export function AiOverviewCards({ overview, config }: { overview: AiOverview; config: AiConfig }) {
   const canhBao = overview.state !== "ok" && overview.state !== "empty";
+  const khoTachBiet = overview.isolated_store ?? config.isolated_store;
+  const canhBaoKho = moTaKhoTachBiet(khoTachBiet);
 
   return (
     <div className="stack-3">
@@ -93,6 +96,17 @@ export function AiOverviewCards({ overview, config }: { overview: AiOverview; co
             />
             <OSo nhan="Giới hạn tốc độ mỗi người" so={overview.runtime.rpm_per_user} ghi_chu="lượt gửi / phút" />
           </div>
+        </div>
+      ) : null}
+
+      {canhBaoKho.length > 0 ? (
+        <div className="card stack-2" role="status">
+          <h3 className="section-title-sm">{khoTachBiet?.title || "Vùng lưu trữ tách biệt"}</h3>
+          {canhBaoKho.map((dong) => (
+            <p key={dong} className="hint">
+              {dong}
+            </p>
+          ))}
         </div>
       ) : null}
 

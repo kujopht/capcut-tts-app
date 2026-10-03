@@ -32,11 +32,11 @@ from server.ai_assistant.control.capability import (
     EXPIRING_SOON_DAYS, free_quota_block_reason, free_quota_state, order_by_expiring_free_quota, serves_tier, tier_map,
 )
 from server.ai_assistant.control.model import (
-    CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, GATED_PROVIDER_TYPES,
-    MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS, WORKLOADS, ConfigValidationError,
-    ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, controls_to_dict, controls_with, preset_matching,
-    normalize_timestamp, slot_from_dict, slot_meta, slot_to_dict, validate_config, validate_controls, validate_profile,
-    validate_slot,
+    CAPABILITY_TIERS, CHAT_TIERS, CREATED_DISABLED_TYPES, DEFAULT_ENDPOINTS, ENDPOINT_HOSTS, EXT_PROVIDER_TYPES,
+    GATED_PROVIDER_TYPES, MAX_SLOTS, MODES, PROFILES, PROVIDER_LABELS, PROVIDER_TYPES, ROLLOUT_PRESETS, WORKLOADS,
+    ConfigValidationError, ControlConfig, ExtStatus, GlobalControls, ProviderSlot, RoutingProfile, compose_profile,
+    controls_to_dict, controls_with, preset_matching, normalize_timestamp, sanitize_core, slot_from_dict, slot_meta,
+    slot_to_dict, split_steps, validate_config, validate_controls, validate_profile, validate_slot,
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import (
@@ -46,7 +46,7 @@ from server.ai_assistant.control.router import (
 )
 from server.ai_assistant.control.secrets import SecretResolver
 from server.ai_assistant.control.store import (
-    AuditEntry, ControlConfigCorrupt, ControlStore, ControlStoreUnavailable, UsageCounters, now_iso,
+    AuditEntry, ControlConfigCorrupt, ControlStore, ControlStoreUnavailable, ExtPartition, UsageCounters, now_iso,
 )
 from server.ai_assistant.gateway import DEFAULT_429_COOLDOWN_S
 from server.ai_assistant.scopes import SCOPE_GLOBAL, SCOPE_QA, SCOPE_USER
@@ -148,13 +148,15 @@ class ControlPlane:
                  user_usage_fn: Optional[Callable[[str, str], Tuple[int, int]]] = None,
                  alibaba_enabled: bool = False, prefer_free_quota: bool = False,
                  wall_now: Optional[Callable[[], datetime]] = None,
-                 background: Optional[Callable[[Callable[[], None]], None]] = None) -> None:
+                 background: Optional[Callable[[Callable[[], None]], None]] = None,
+                 qwen_legacy_enabled: bool = False) -> None:
         self.store = store
         #: Runs a no-argument job OFF the request path (cache warm-up for the free-quota lock). Tests inject an inline runner.
         self._background = background or _spawn_daemon
         #: Cổng cấp MÁY CHỦ của các loại provider trong `GATED_PROVIDER_TYPES` (biến môi trường, mặc định ĐÓNG): đóng thì
-        #: không slot nào của loại đó được chọn, dựng provider, hay Kiểm tra — bất kể cấu hình trong `/admin/ai`.
-        self._gates: Dict[str, bool] = {t: bool(alibaba_enabled) for t in GATED_PROVIDER_TYPES}
+        #: không slot nào của loại đó được chọn, dựng provider, hay Kiểm tra — bất kể cấu hình trong `/admin/ai`. Mỗi loại
+        #: một cổng RIÊNG: `alibaba_enabled` (Model Studio) KHÔNG mở `qwen`, và `qwen_legacy_enabled` KHÔNG mở `alibaba`.
+        self._gates: Dict[str, bool] = {"alibaba": bool(alibaba_enabled), "qwen": bool(qwen_legacy_enabled)}
         #: "Ưu tiên hạn mức miễn phí sắp hết hạn" (`FAS_AI_PREFER_FREE_QUOTA`): đã cài sẵn nhưng NGỦ ĐÔNG, mặc định TẮT.
         self._prefer_free_quota = bool(prefer_free_quota)
         self._wall_now = wall_now or (lambda: datetime.now(timezone.utc))
@@ -229,8 +231,7 @@ class ControlPlane:
             if self._cfg is not None and now - self._cfg_at < CACHE_TTL_S:
                 return self._cfg
         try:
-            cfg = self.store.load()
-            validate_config(cfg)
+            cfg = self._load_composed(validate=True)
             state = "ok" if (cfg.controls.version or cfg.slots) else "empty"
             with self._lock:
                 self._cfg, self._cfg_at, self._good_at, self.state = cfg, now, now, state
@@ -255,6 +256,45 @@ class ControlPlane:
     def _closed() -> ControlConfig:
         from server.ai_assistant.control.model import empty_config
         return empty_config()
+
+    def _load_composed(self, *, validate: bool) -> ControlConfig:
+        """The stored config as the routing/admin code sees it: the LEGACY collections (strictly validated, exactly as before
+        Alibaba existed — `validate=True`; a bad row there still fails closed) plus the isolated Alibaba partition layered on
+        top. The partition can only ADD slots/routes; whatever is wrong with it is a status, never a reason the legacy
+        configuration is rejected."""
+        core = sanitize_core(self.store.load())
+        if validate:
+            validate_config(core)
+        return self._compose(core, self._load_ext())
+
+    def _load_ext(self) -> ExtPartition:
+        try:
+            return self.store.load_ext()
+        except ControlStoreUnavailable:
+            return ExtPartition(state="unavailable")
+        except Exception:  # noqa: BLE001 — nothing about the Alibaba partition may take Gemini's configuration down with it
+            log.error("ai_control: isolated partition unreadable — Alibaba slots are off, the rest is unaffected")
+            return ExtPartition(state="unavailable")
+
+    @staticmethod
+    def _compose(core: ControlConfig, ext: ExtPartition) -> ControlConfig:
+        slots = dict(core.slots)
+        unreadable = core.ext.unreadable + ext.unreadable
+        for sid, s in ext.slots.items():
+            if sid in slots:  # same id in both collections: the legacy slot wins, the Alibaba row is ignored
+                unreadable += 1
+                continue
+            slots[sid] = s
+        profiles = dict(core.profiles)
+        stale: List[str] = []
+        for name, route in ext.routes.items():
+            base = profiles.get(name)
+            effective, applied = compose_profile(base, route, slots) if base is not None else (None, False)
+            if applied and effective is not None:
+                profiles[name] = effective
+            else:  # no longer matches the legacy-visible profile (or invalid): dropped, so it can never override a Gemini edit
+                stale.append(name)
+        return ControlConfig(core.controls, slots, profiles, ExtStatus(ext.state, unreadable, tuple(sorted(stale))))
 
     # ------------------------------------------------------------ usage (today)
     def usage_today(self) -> Dict[str, UsageCounters]:
@@ -690,6 +730,25 @@ class ControlPlane:
         return {"last_error_code": e.get("code"), "last_error_category": e.get("category"),
                 "last_error_at": e.get("at")}
 
+    @staticmethod
+    def _ext_view(cfg: ControlConfig) -> Dict[str, Any]:
+        """`notices` = những câu Owner cần đọc (rỗng khi bình thường). Luôn nói rõ Gemini KHÔNG bị ảnh hưởng."""
+        e = cfg.ext
+        notes: List[str] = []
+        if e.state == "schema_missing":
+            notes.append("Chưa chạy migration collection ai_alibaba_config (xem docs/ai/ALIBABA_PROVIDER.md) — chưa tạo được "
+                         "slot Alibaba. Gemini không bị ảnh hưởng.")
+        elif e.state == "unavailable":
+            notes.append("Không đọc được kho Alibaba lúc này — slot Alibaba tạm không dùng được. Gemini không bị ảnh hưởng.")
+        if e.unreadable:
+            notes.append(f"{e.unreadable} dòng trong kho Alibaba/cấu hình không đọc được (đã bỏ qua, không bao giờ được dùng). "
+                         "Gemini không bị ảnh hưởng.")
+        if e.stale_routes:
+            notes.append("Hồ sơ " + ", ".join(e.stale_routes) + " có bước Alibaba bị bỏ vì hồ sơ đã được sửa ở nơi khác "
+                         "(vd. sau khi rút mã về bản cũ). Đặt lại bước Alibaba nếu vẫn cần.")
+        return {"state": e.state, "unreadable": e.unreadable, "stale_routes": list(e.stale_routes), "notices": notes,
+                "title": "Kho Alibaba (vùng lưu riêng)"}
+
     def config_view(self) -> Dict[str, Any]:
         cfg = self.snapshot()
         usage = self.usage_today()
@@ -699,6 +758,9 @@ class ControlPlane:
                           "health": self.slot_health(s, cfg, usage)})
         return {
             "state": self.state,
+            #: Vùng lưu trữ tách biệt của Alibaba (state | unreadable | stale_routes | notices): lỗi ở đây KHÔNG bao giờ làm
+            #: `state` đổi. Tên trường trung tính + câu chữ do MÁY CHỦ cấp: JS công khai không viết cứng tên provider nào.
+            "isolated_store": self._ext_view(cfg),
             "controls": controls_to_dict(cfg.controls),
             "rollout": {"active_preset": preset_matching(cfg.controls),
                         "presets": {n: dict(v) for n, v in ROLLOUT_PRESETS.items()},
@@ -775,6 +837,7 @@ class ControlPlane:
                 runtime = None
         return {
             "state": self.state, "day": today_utc(), "ai_enabled": c.ai_enabled,
+            "isolated_store": self._ext_view(cfg),
             #: Thông tin runtime không nằm trong kho cấu hình: khán giả (`FAS_AI_AUDIENCE`), RPM/người, số luồng đang chạy.
             "runtime": runtime,
             #: Cổng cấp máy chủ của các loại provider có cổng (đóng = không có request nào tới nhà cung cấp đó) và việc
@@ -817,18 +880,18 @@ class ControlPlane:
         itself is still validated and AI stays fail-closed until the whole
         config is valid again."""
         try:
-            cfg = self.store.load()
+            core = sanitize_core(self.store.load())
         except ControlConfigCorrupt as exc:
             raise ControlConflict("Cấu hình AI đang hỏng — cần sửa trực tiếp ở kho trước khi chỉnh qua giao diện.") from exc
         except ControlStoreUnavailable as exc:
             raise ControlConflict("Không đọc được kho cấu hình AI — thử lại sau.") from exc
         try:
-            validate_config(cfg)
+            validate_config(core)
         except (ConfigValidationError, ValueError, TypeError) as exc:
             if not repair:
                 raise ControlConflict("Cấu hình AI đang không hợp lệ — chỉ xoá slot hoặc sửa hồ sơ định tuyến được "
                                       "cho tới khi hợp lệ trở lại.") from exc
-        return cfg
+        return self._compose(core, self._load_ext())
 
     @staticmethod
     def _val(v: Any) -> str:
@@ -910,9 +973,17 @@ class ControlPlane:
         # (AI fail-closed), so refuse the slot that would cross the line.
         if len(cfg.slots) >= MAX_SLOTS:
             raise ConfigValidationError([{"field": "slots", "message": f"tối đa {MAX_SLOTS} slot — xoá bớt slot không dùng"}])
-        self.store.save_slot(slot)
+        self._save_slot(slot)
         self._commit(self._diff(actor, f"slot:{slot.slot_id}", {}, slot_to_dict(slot)))
         return slot_to_dict(slot)
+
+    def _save_slot(self, slot: ProviderSlot, *, clear_meta: bool = False) -> None:
+        """Loại thuộc vùng tách biệt (`EXT_PROVIDER_TYPES`) đi vào collection RIÊNG của nó, không bao giờ vào `ai_provider_slots`
+        — bản cũ đọc collection đó và coi một dòng lạ là cấu hình hỏng (xem docstring `store.py`)."""
+        if slot.provider_type in EXT_PROVIDER_TYPES:
+            self.store.save_ext_slot(slot)
+        else:
+            self.store.save_slot(slot, clear_meta=clear_meta)
 
     @_serialized
     def update_slot(self, actor: str, slot_id: str, body: Mapping[str, Any]) -> Dict[str, Any]:
@@ -929,10 +1000,8 @@ class ControlPlane:
         if slot.free_quota_remaining != old.free_quota_remaining:  # số dư đổi -> đóng dấu ảnh chụp mới (hoặc xoá dấu)
             slot = replace(slot, free_quota_updated_at=now_iso() if slot.free_quota_remaining is not None else "")
         # Xoá `meta_json` đã lưu (khi siêu dữ liệu mới rỗng, hoặc dòng cũ bị hỏng) phải ghi tường minh; thường thì KHÔNG gửi gì.
-        if (slot_meta(old) or old.meta_corrupt) and not slot_meta(slot):
-            self.store.save_slot(slot, clear_meta=True)
-        else:
-            self.store.save_slot(slot)
+        # (Slot ở vùng tách biệt mang toàn bộ trường trong một payload nên không có khái niệm này.)
+        self._save_slot(slot, clear_meta=bool((slot_meta(old) or old.meta_corrupt) and not slot_meta(slot)))
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), slot_to_dict(slot)))
         return slot_to_dict(slot)
 
@@ -945,7 +1014,10 @@ class ControlPlane:
         using = [p.name for p in cfg.profiles.values() if slot_id in p.steps]
         if using:
             raise ControlConflict("Slot đang được dùng trong hồ sơ: " + ", ".join(sorted(using)))
-        self.store.delete_slot(slot_id)
+        if old.provider_type in EXT_PROVIDER_TYPES:
+            self.store.delete_ext_slot(slot_id)
+        else:
+            self.store.delete_slot(slot_id)
         self._commit(self._diff(actor, f"slot:{slot_id}", slot_to_dict(old), {}))
 
     @_serialized
@@ -954,9 +1026,33 @@ class ControlPlane:
         if not isinstance(steps, list) or any(not isinstance(s, str) for s in steps) or not isinstance(enabled, bool):
             raise ConfigValidationError([{"field": "steps", "message": "danh sách bước không hợp lệ"}])
         p = RoutingProfile(name=name, steps=tuple(steps), enabled=enabled)
+        if cfg.ext.state in ("unavailable", "schema_missing") \
+                and any(s not in PROVIDER_TYPES and s not in cfg.slots for s in p.steps):
+            # A step we cannot place may be an Alibaba slot we cannot read right now: say so instead of "not a known slot".
+            raise ControlConflict("Không đọc được kho Alibaba (collection ai_alibaba_config) — chưa thể kiểm tra các bước trỏ "
+                                  "tới slot Alibaba. Sửa hồ sơ chỉ gồm Gemini/loại cũ vẫn được.")
         validate_profile(p, cfg.slots)
+        legacy, ext_steps = split_steps(p.steps, cfg.slots)
+        if ext_steps and not legacy:
+            # Alibaba is never the ONLY route of a profile: rolling it back (or the gate closing) must leave Gemini serving
+            # that mode instead of an empty profile.
+            raise ConfigValidationError([{
+                "field": "steps",
+                "message": "hồ sơ có bước Alibaba phải còn ít nhất một bước loại khác (vd. Gemini) — Alibaba không được là "
+                           "đường duy nhất"}])
         old = cfg.profiles.get(name)
-        self.store.save_profile(p)
+        # Hồ sơ lưu ở collection CŨ chỉ mang phần bản cũ đọc được (không `alibaba`, không id slot Alibaba) — nếu không bản cũ
+        # coi hồ sơ là hỏng và tắt AI. Phần Alibaba ghi TRƯỚC ở vùng tách biệt: kho chưa migrate/không với tới thì lỗi sạch,
+        # chưa đổi gì; còn nếu ghi hồ sơ thất bại sau đó, dòng Alibaba không còn khớp hồ sơ cũ nên bị bỏ qua (không áp).
+        if ext_steps:
+            self.store.save_ext_route(name, p.steps)
+        elif cfg.ext.state in ("ok", "unavailable"):
+            try:
+                self.store.delete_ext_route(name)
+            except ControlStoreUnavailable:
+                log.warning("ai_control: stale Alibaba route for %s not removed — it no longer matches the profile, so it is ignored",
+                            name)
+        self.store.save_profile(replace(p, steps=legacy))
         self._commit(self._diff(actor, f"profile:{name}",
                                 {"steps": list(old.steps), "enabled": old.enabled} if old else {},
                                 {"steps": list(p.steps), "enabled": p.enabled}))

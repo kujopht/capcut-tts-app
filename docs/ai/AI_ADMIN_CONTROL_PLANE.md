@@ -66,12 +66,16 @@ Với beta, 8 slot × 30 = 240 request/ngày và 8 × 60.000 token. Cả hai đ�
 
 | Hồ sơ | Thứ tự mặc định |
 |---|---|
-| `FREE_FIRST` | gemini → groq → workers_ai → qwen → openrouter |
-| `QUALITY_FIRST` | qwen → azure_openai → gemini → openrouter |
-| `WRITER` | qwen → azure_openai → gemini |
-| `STORY` | gemini → groq → qwen |
-| `SUPPORT_SAFE` | azure_openai → qwen → **gemini** (chỉ slot có workload `support`). Gemini ở cuối: khi chỉ có pool Gemini, chế độ Hỗ trợ không rơi vào `ai_no_provider` |
-| `WEB_SEARCH` | gemini → qwen (LLM cho lượt có tìm web). Công cụ tìm web THẬT vẫn do cấu hình `web_search_provider` hiện có quyết định; `web_search_tool` trong control plane hiện chỉ nhận `off` và để dành cho bước sau |
+| `FREE_FIRST` | gemini → groq → workers_ai → openrouter |
+| `QUALITY_FIRST` | azure_openai → gemini → openrouter |
+| `WRITER` | azure_openai → gemini |
+| `STORY` | gemini → groq |
+| `SUPPORT_SAFE` | azure_openai → **gemini** (chỉ slot có workload `support`). Gemini ở cuối: khi chỉ có pool Gemini, chế độ Hỗ trợ không rơi vào `ai_no_provider` |
+| `WEB_SEARCH` | gemini (LLM cho lượt có tìm web). Công cụ tìm web THẬT vẫn do cấu hình `web_search_provider` hiện có quyết định; `web_search_tool` trong control plane hiện chỉ nhận `off` và để dành cho bước sau |
+
+Loại `qwen` (DashScope cũ) **đã nghỉ hưu khỏi các hồ sơ mặc định** (trước đây có ở cả sáu) và có cổng riêng `FAS_AI_QWEN_LEGACY_ENABLED`; thứ tự cũ
+giữ ở `model.LEGACY_QWEN_PROFILE_STEPS` làm đường quay về tường minh (`ALIBABA_PROVIDER.md` mục 2b). Hồ sơ đã lưu có bước `qwen` vẫn hợp lệ.
+Bước `alibaba`/slot Alibaba của một hồ sơ **không** nằm trong `ai_routing_profiles` mà ở `ai_alibaba_config` (mục 4).
 
 Chế độ → hồ sơ: `general→FREE_FIRST`, `story→STORY`, `writer→WRITER`, `support→SUPPORT_SAFE`; lượt tìm web → `web_search_profile`. Owner đổi được thứ tự, thêm/bớt bước, tắt hồ sơ.
 
@@ -149,6 +153,7 @@ Hết công suất chung là chuyện khác: 429 `scope:"global"`, giao diện n
 | `ai_routing_profiles` | tên hồ sơ | `steps_json`, `enabled` |
 | `ai_provider_usage_daily` | `{slot_id}_{yyyymmdd}` | requests, tokens, errors, 429, chi phí micro-USD, lần thành công cuối |
 | `ai_admin_audit` | ngẫu nhiên | admin_id, at, entity, field, old_value, new_value |
+| `ai_alibaba_config` | `s-<slot_id>` / `r-<hồ sơ>` | **Vùng tách biệt** của Alibaba Model Studio: `kind` (`slot`\|`route`), `key`, `data_json` (slot hoặc danh sách bước đầy đủ), `updated_at`. Bản cũ không đọc collection này — nên một slot/bước Alibaba đã lưu không thể làm hỏng cấu hình Gemini khi rút mã. Chỉ cần khi dùng Alibaba |
 
 Tất cả `permissions=[]`, `documentSecurity=true` (chỉ backend đọc/ghi). Kế hoạch offline: `python scripts/setup_appwrite.py --dry-run --only=<collection>`. PLAN chỉ đọc trên production: Owner chạy script plan có rào chặn mọi phương thức khác GET, rồi mới apply khi đã duyệt.
 

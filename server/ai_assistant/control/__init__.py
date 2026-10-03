@@ -38,6 +38,7 @@ def build_control_plane(settings: Any, *,
         store = InMemoryControlStore()
     return ControlPlane(store, active_users_fn=active_users_fn, user_usage_fn=user_usage_fn,
                         alibaba_enabled=bool(getattr(ai, "alibaba_enabled", False)),
+                        qwen_legacy_enabled=bool(getattr(ai, "qwen_legacy_enabled", False)),
                         prefer_free_quota=bool(getattr(ai, "prefer_free_quota", False)))
 
 

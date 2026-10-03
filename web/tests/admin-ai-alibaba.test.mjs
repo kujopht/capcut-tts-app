@@ -147,7 +147,38 @@ test("loại provider + tổng quan: cổng cấp máy chủ hiện rõ và khô
   assert.match(page, /probe\.ttft_ms != null/);
 });
 
+// ------------------------------------------------------------------ kho Alibaba tách biệt (rút lui an toàn)
+
+test("moTaKhoTachBiet: chỉ chuyển tiếp câu chữ của máy chủ; rỗng/sai hình dạng thì im lặng", () => {
+  assert.deepEqual(v.moTaKhoTachBiet(undefined), []);
+  assert.deepEqual(v.moTaKhoTachBiet({ state: "ok", unreadable: 0, stale_routes: [], notices: [], title: "t" }), []);
+  assert.deepEqual(v.moTaKhoTachBiet({ state: "ok", unreadable: 0, stale_routes: [] }), [], "thiếu notices (máy chủ cũ) không làm vỡ trang");
+  assert.deepEqual(
+    v.moTaKhoTachBiet({ state: "unavailable", unreadable: 0, stale_routes: [], title: "t", notices: ["Một", "  ", 5, "Hai"] }),
+    ["Một", "Hai"],
+    "bỏ phần tử không phải chuỗi / rỗng",
+  );
+});
+
+test("tổng quan: thẻ kho tách biệt chỉ hiện khi có gì để nói, đọc từ overview rồi config, tiêu đề do máy chủ cấp", () => {
+  const ov = codeOnly(read("components/admin/ai/AiOverviewCards.tsx"));
+  assert.match(ov, /overview\.isolated_store \?\? config\.isolated_store/);
+  assert.match(ov, /canhBaoKho\.length > 0/);
+  assert.match(ov, /khoTachBiet\?\.title/);
+  const types = codeOnly(read("lib/admin/aiControl.ts"));
+  assert.match(types, /isolated_store\?: AiIsolatedStore/);
+});
+
 // ------------------------------------------------------------------ chống trôi giữa TS và backend
+
+test("AiIsolatedStoreState (TS) liệt kê đúng EXT_STATES của backend", () => {
+  const py = readPy("ai_assistant/control/model.py");
+  const tuple = py.match(/EXT_STATES: Tuple\[str, \.\.\.\] = \(([^)]*)\)/)[1];
+  const backend = [...tuple.matchAll(/"(\w+)"/g)].map((m) => m[1]).sort();
+  const ts = read("lib/admin/aiControl.ts").match(/export type AiIsolatedStoreState =([\s\S]*?);/)[1];
+  const front = [...ts.matchAll(/"(\w+)"/g)].map((m) => m[1]).sort();
+  assert.deepEqual(front, backend);
+});
 
 test("AiProviderType (TS) liệt kê đúng PROVIDER_TYPES của backend", () => {
   const py = readPy("ai_assistant/control/model.py");

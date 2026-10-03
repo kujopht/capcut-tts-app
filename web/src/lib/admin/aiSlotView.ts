@@ -3,7 +3,16 @@
  * test thẳng bằng `node --test` (xem `web/tests/admin-ai-alibaba.test.mjs`). Không tên provider nào viết cứng ở đây — nhãn,
  * tên biến môi trường và quy tắc đều đến từ `meta`/`health` của server.
  */
-import type { AiFreeQuotaState, AiLatencyStat, AiSlotLatency, AiSlotQuota } from "./aiControl";
+import type { AiFreeQuotaState, AiIsolatedStore, AiLatencyStat, AiSlotLatency, AiSlotQuota } from "./aiControl";
+
+/**
+ * Những câu cảnh báo về kho lưu tách biệt mà Owner cần đọc — rỗng khi không có gì đáng nói. Câu chữ do MÁY CHỦ viết (nó nói
+ * rõ provider nào không bị ảnh hưởng); ở đây chỉ lọc dữ liệu sai hình dạng để một phản hồi lạ không làm vỡ trang.
+ */
+export function moTaKhoTachBiet(s: AiIsolatedStore | undefined): string[] {
+  if (!s || !Array.isArray(s.notices)) return [];
+  return s.notices.filter((n): n is string => typeof n === "string" && n.trim().length > 0);
+}
 
 export function dinhDangMs(n: number | null | undefined): string {
   return typeof n === "number" && Number.isFinite(n) ? `${n.toLocaleString("vi-VN")} ms` : "—";

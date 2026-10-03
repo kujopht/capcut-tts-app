@@ -29,9 +29,9 @@ from server.ai_assistant.control.capability import (
     free_quota_block_reason, free_quota_state, order_by_expiring_free_quota, serves_tier, tier_map,
 )
 from server.ai_assistant.control.model import (
-    CAPABILITY_TIERS, CHAT_TIERS, DEFAULT_PROFILE_STEPS, PROVIDER_TYPES, ConfigValidationError, ControlConfig,
-    GlobalControls, ProviderSlot, RoutingProfile, default_profiles, slot_from_dict, slot_meta, validate_config,
-    validate_controls, validate_slot,
+    CAPABILITY_TIERS, CHAT_TIERS, DEFAULT_PROFILE_STEPS, EXT_PROVIDER_TYPES, PROVIDER_TYPES, ConfigValidationError,
+    ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, default_profiles, slot_from_dict, slot_meta, split_steps,
+    validate_config, validate_controls, validate_slot,
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import (
@@ -98,6 +98,23 @@ class StreamProbeProvider(Scripted):
         yield Done()
 
 
+def persist_slot(st: InMemoryControlStore, s: ProviderSlot) -> None:
+    """Store a slot where the release stores it: Alibaba slots in the ISOLATED partition, the rest in the legacy collection."""
+    if s.provider_type in EXT_PROVIDER_TYPES:
+        st.save_ext_slot(s)
+    else:
+        st.slots[s.slot_id] = s
+
+
+def persist_profile(st: InMemoryControlStore, p: RoutingProfile, slots: Dict[str, ProviderSlot]) -> None:
+    """Store a profile the way `ControlPlane.update_profile` does: legacy-visible steps in the legacy row, the full list as an
+    Alibaba route when it has Alibaba steps."""
+    legacy, ext_steps = split_steps(p.steps, slots)
+    st.profiles[p.name] = replace(p, steps=legacy)
+    if ext_steps:
+        st.save_ext_route(p.name, p.steps)
+
+
 def build_plane(slots: List[ProviderSlot], *, gate: bool = True, alibaba_type: Optional[bool] = True,
                 profiles: Optional[Dict[str, RoutingProfile]] = None, providers: Optional[Dict[str, ChatProvider]] = None,
                 prefer: bool = False, clock: Optional[Clock] = None, ai_enabled: bool = True,
@@ -109,9 +126,10 @@ def build_plane(slots: List[ProviderSlot], *, gate: bool = True, alibaba_type: O
         types["alibaba"] = alibaba_type  # …plus (optionally) the new one
     st.controls = GlobalControls(ai_enabled=ai_enabled, provider_types=types, version=1)
     for s in slots:
-        st.slots[s.slot_id] = s
+        persist_slot(st, s)
+    by_id = {s.slot_id: s for s in slots}
     for p in (profiles or {}).values():
-        st.profiles[p.name] = p
+        persist_profile(st, p, by_id)
     provs = providers if providers is not None else {s.slot_id: Scripted(s.slot_id) for s in slots}
     clk = clock or Clock()
     return ControlPlane(st, secrets=SecretResolver(env_for(*slots)), factory=ProviderFactory(builder=lambda s, k: provs[s.slot_id]),
@@ -143,10 +161,12 @@ class TestProductionCompatibility(unittest.TestCase):
         with self.assertRaises(ConfigValidationError):
             validate_controls(GlobalControls(provider_types={**six, "gemini": "yes"}))  # type: ignore[dict-item]
 
-    def test_default_profiles_never_route_to_alibaba(self) -> None:
+    def test_default_profiles_never_route_to_either_alibaba_path(self) -> None:
+        """No DEFAULT route reaches Alibaba: neither Model Studio (`alibaba`) nor the retired legacy `qwen` (DashScope)."""
         for name, steps in DEFAULT_PROFILE_STEPS.items():
             self.assertNotIn("alibaba", steps, name)
-        self.assertNotIn("alibaba", {s for p in default_profiles().values() for s in p.steps})
+            self.assertNotIn("qwen", steps, name)
+        self.assertFalse({"alibaba", "qwen"} & {s for p in default_profiles().values() for s in p.steps})
 
     def test_new_type_exists_and_is_off_by_default(self) -> None:
         self.assertIn("alibaba", PROVIDER_TYPES)
@@ -202,12 +222,27 @@ class TestProductionCompatibility(unittest.TestCase):
         attrs = {a[0]: a for a in mod.SCHEMA["ai_provider_slots"]["attributes"]}
         rec = _Recorder()
         st = _appwrite_store(rec)[0]
-        st.save_slot(a_slot(tiers=("FAST", "SMART"), free_quota_remaining=5, free_quota_expires_at="2026-12-31T00:00:00+00:00",
-                            free_quota_only=True, free_quota_updated_at="2026-10-02T00:00:00+00:00"))
+        # A LEGACY-type slot carrying metadata: only `meta_json` is new, and the legacy enum is untouched (no `alibaba`).
+        st.save_slot(replace(slot("gemini-01"), tiers=("FAST", "SMART"), free_quota_remaining=5,
+                             free_quota_expires_at="2026-12-31T00:00:00+00:00", free_quota_only=True,
+                             free_quota_updated_at="2026-10-02T00:00:00+00:00"))
         written = set(rec.writes[-1]["data"])
         self.assertLessEqual(written, set(attrs), f"missing from schema: {written - set(attrs)}")
-        self.assertLessEqual(set(PROVIDER_TYPES), set(attrs["provider_type"][3]), "the enum must know every provider type")
+        self.assertEqual(list(attrs["provider_type"][3]), list(LEGACY_TYPES), "the legacy enum must NOT learn `alibaba`")
         self.assertLess(len(rec.writes[-1]["data"]["meta_json"]), attrs["meta_json"][3], "meta_json fits its attribute size")
+        # The Alibaba slot goes to the ISOLATED collection, whose spec must cover every attribute written there.
+        ext = {a[0]: a for a in mod.SCHEMA["ai_alibaba_config"]["attributes"]}
+        fake = _FakeAppwrite()
+        st2 = _appwrite_store(fake)[0]
+        st2.save_ext_slot(a_slot(tiers=("FAST", "SMART", "ADVANCED", "TRANSLATION", "VISION", "EMBEDDING"),
+                                 free_quota_remaining=5, free_quota_expires_at="2026-12-31T00:00:00+00:00",
+                                 free_quota_only=True, free_quota_updated_at="2026-10-02T00:00:00+00:00",
+                                 label="L" * 60, model="m" * 120, endpoint=BASE + "/" + "p" * 200))
+        st2.save_ext_route("FREE_FIRST", ("gemini", "alibaba", "groq", "workers_ai", "openrouter", "azure_openai", "qwen"))
+        for row in fake.cols["ai_alibaba_config"].values():
+            self.assertLessEqual(set(row) - {"$id"}, set(ext), f"missing from the ext schema: {set(row) - set(ext)}")
+            self.assertLess(len(row["data_json"]), ext["data_json"][3], "the payload fits its attribute")
+        self.assertNotIn("ai_provider_slots", fake.cols, "an Alibaba slot never touches the legacy collection")
 
     def test_a_corrupt_meta_row_parks_only_that_slot_and_never_breaks_the_config(self) -> None:
         for bad in ("{not json", "[1,2]", json.dumps({"tiers": "FAST"}), json.dumps({"tiers": ["NOPE"]}),
@@ -217,27 +252,33 @@ class TestProductionCompatibility(unittest.TestCase):
             with self.subTest(meta=bad):
                 st, fake = _appwrite_store()
                 st.save_slot(slot("gemini-01"))
-                st.save_slot(a_slot())
-                fake.cols["ai_provider_slots"]["alibaba-01"]["meta_json"] = bad
+                st.save_slot(slot("gemini-02"))
+                fake.cols["ai_provider_slots"]["gemini-02"]["meta_json"] = bad
                 cfg = st.load()
-                validate_config(cfg)  # the WHOLE config is still valid: Gemini keeps serving
-                self.assertTrue(cfg.slots["alibaba-01"].meta_corrupt)
+                validate_config(cfg)  # the WHOLE config is still valid: the other slot keeps serving
+                self.assertTrue(cfg.slots["gemini-02"].meta_corrupt)
                 self.assertFalse(cfg.slots["gemini-01"].meta_corrupt)
                 p = build_plane([], store=_with(cfg))
                 p.secrets = SecretResolver(env_for(*cfg.slots.values()))
-                live = p.snapshot()  # the plane's own (validated) view: types on, gate open
-                self.assertEqual(p.skip_reason(live.slots["alibaba-01"], "general", 10, cfg=live), SKIP_META_CORRUPT)
+                live = p.snapshot()  # the plane's own (validated) view: types on
+                self.assertEqual(p.skip_reason(live.slots["gemini-02"], "general", 10, cfg=live), SKIP_META_CORRUPT)
                 self.assertIsNone(p.skip_reason(live.slots["gemini-01"], "general", 10, cfg=live))
 
     def test_a_store_that_refuses_the_new_schema_says_so_and_only_for_new_things(self) -> None:
         st, _ = _appwrite_store(_Rejecting())
-        for s in (a_slot(), replace(slot("gemini-01"), tiers=("FAST",))):
-            with self.assertRaises(ControlSchemaOutdated) as ctx:
-                st.save_slot(s)
-            self.assertIn("migration", str(ctx.exception))
+        with self.assertRaises(ControlSchemaOutdated) as ctx:  # `meta_json` is the only new attribute of a legacy slot
+            st.save_slot(replace(slot("gemini-01"), tiers=("FAST",)))
+        self.assertIn("migration", str(ctx.exception))
         with self.assertRaises(ControlStoreUnavailable) as ctx2:  # a plain Gemini slot refused with 400 is NOT "outdated schema"
             _appwrite_store(_Rejecting(always=True))[0].save_slot(slot("gemini-01"))
         self.assertNotIsInstance(ctx2.exception, ControlSchemaOutdated)
+        # …and the Alibaba partition: a missing collection (404 on PATCH *and* POST) must be an error, not a silent no-op write.
+        st3, _ = _appwrite_store(_NoExtCollection())
+        with self.assertRaises(ControlSchemaOutdated) as ctx3:
+            st3.save_ext_slot(a_slot())
+        self.assertIn("ai_alibaba_config", str(ctx3.exception))
+        with self.assertRaises(ValueError):  # an Alibaba slot can never be written to the legacy collection
+            _appwrite_store()[0].save_slot(a_slot())
 
     def test_gemini_routing_is_identical_with_the_new_type_present(self) -> None:
         g1, g2 = slot("gemini-01", priority=10), slot("gemini-02", priority=20)
@@ -280,36 +321,8 @@ class TestExplicitEnablement(unittest.TestCase):
         self.assertEqual(provs["alibaba-01"].calls, 0)
         self.assertEqual([e.code for e in events if isinstance(e, ErrorEvent)], ["ai_provider_unavailable"])
 
-    def test_the_legacy_qwen_type_is_also_alibaba_and_shares_the_gate(self) -> None:
-        """`qwen` (DashScope) predates this work and sits in the DEFAULT profiles (SUPPORT_SAFE = azure > qwen > gemini …).
-        Without the shared gate, enabling one qwen slot would put Alibaba ahead of / behind Gemini in live traffic."""
-        q, g = slot("qwen-01", "qwen", priority=1), slot("gemini-01", priority=50)
-        for gate_open in (False, True):
-            provs = {"qwen-01": Scripted("qwen-01"), "gemini-01": Scripted("gemini-01")}
-            p = build_plane([q, g], gate=gate_open, providers=provs)  # DEFAULT profiles, qwen type flag ON
-            events = list(ControlledGateway(p).stream(turns(), mode="support"))
-            if gate_open:  # documents WHY the gate exists: the shipped default profile prefers qwen once it is reachable
-                self.assertEqual(served(events), ["qwen-01"])
-            else:
-                self.assertEqual(p.skip_reason(q, "support", 10), SKIP_GATE_CLOSED)
-                self.assertEqual(served(events), ["gemini-01"])
-                self.assertEqual(provs["qwen-01"].calls, 0)
-                with self.assertRaises(ProviderError):
-                    p.provider_for(q, FAKE_KEY)
-        self.assertEqual({t for t in PROVIDER_TYPES if not build_plane([], gate=False).gate_open(t)}, {"alibaba", "qwen"},
-                         "exactly the two Alibaba types are gated; Gemini and the rest are never affected")
-
-    def test_the_legacy_env_chain_for_qwen_goes_through_the_same_gate(self) -> None:
-        """With `FAS_AI_ADMIN_V1` off the chat uses `FAS_AI_PROVIDERS=qwen,…` + `AI_QWEN_API_KEY`: DashScope again."""
-        from server.ai_assistant.runtime import build_ai_runtime
-        from server.config import AiAssistantSettings, Settings
-        for gate_open in (False, True):
-            ai = AiAssistantSettings(enabled=True, providers=("qwen",), qwen_api_key=FAKE_KEY, audience="all",
-                                     alibaba_enabled=gate_open)
-            rt = build_ai_runtime(replace(Settings(), ai_assistant=ai))
-            self.assertEqual(rt.enabled, gate_open, f"gate_open={gate_open}")
-            if not gate_open:
-                self.assertEqual(rt.reason, "no_provider")
+    # (The legacy `qwen` path — its OWN gate, its retirement from the default profiles and its rollback — is covered in
+    #  test_ai_alibaba_isolation.py::TestLegacyQwenRetired.)
 
     def test_every_other_switch_also_blocks(self) -> None:
         a = a_slot()
@@ -639,18 +652,26 @@ class TestFreeQuotaMetadata(unittest.TestCase):
         self.assertIn("free_quota_remaining", {a["field"] for a in p.audit(50)}, "metadata changes are audited")
 
     def test_clearing_all_metadata_asks_the_store_to_clear_it(self) -> None:
+        """Applies to slots of the LEGACY collection (`meta_json` is its only optional attribute); an Alibaba slot carries every
+        field in its own payload, so there is nothing to "clear"."""
         calls: List[bool] = []
+        ext_saves: List[str] = []
 
         class Spy(InMemoryControlStore):
             def save_slot(self, s: ProviderSlot, *, clear_meta: bool = False) -> None:
                 calls.append(clear_meta)
                 super().save_slot(s, clear_meta=clear_meta)
 
-        p = build_plane([fq(tiers=("FAST",))], profiles=only("alibaba"), store=Spy())
-        p.update_slot("owner", "alibaba-01", {"label": "renamed"})
-        p.update_slot("owner", "alibaba-01", {"tiers": []})
-        p.update_slot("owner", "alibaba-01", {"label": "again"})
+            def save_ext_slot(self, s: ProviderSlot) -> None:
+                ext_saves.append(s.slot_id)
+                super().save_ext_slot(s)
+
+        p = build_plane([replace(slot("gemini-01"), tiers=("FAST",))], profiles=only("gemini"), store=Spy())
+        p.update_slot("owner", "gemini-01", {"label": "renamed"})
+        p.update_slot("owner", "gemini-01", {"tiers": []})
+        p.update_slot("owner", "gemini-01", {"label": "again"})
         self.assertEqual(calls, [False, True, False])
+        self.assertEqual(ext_saves, [], "a Gemini slot never touches the isolated partition")
 
     def test_preferring_expiring_free_quota_is_implemented_but_dormant(self) -> None:
         soon = a_slot("a-soon", free_quota_remaining=900, free_quota_expires_at="2026-10-06T00:00:00+00:00")
@@ -894,8 +915,10 @@ class TestAdminSurface(unittest.TestCase):
         self.assertIn("alibaba", body["meta"]["endpoint_hints"])
         ov = _admin_client(p).get("/api/admin/ai/overview").json()
         self.assertEqual(ov["gates"], {"alibaba": {"env": "FAS_AI_ALIBABA_ENABLED", "open": False},
-                                       "qwen": {"env": "FAS_AI_ALIBABA_ENABLED", "open": False}},
-                         "the legacy DashScope type shares the gate: no path to Alibaba without the explicit switch")
+                                       "qwen": {"env": "FAS_AI_QWEN_LEGACY_ENABLED", "open": False}},
+                         "two INDEPENDENT gates: the retired legacy DashScope type has its own switch")
+        self.assertEqual({k: ov["isolated_store"][k] for k in ("state", "unreadable", "stale_routes", "notices")},
+                         {"state": "ok", "unreadable": 0, "stale_routes": [], "notices": []})
         self.assertIs(ov["free_quota_preference"], False)
         self.assertIn("alibaba", {x["type"] for x in ov["providers"]})
 
@@ -934,8 +957,9 @@ class TestAdminSurface(unittest.TestCase):
 
     def test_a_schema_the_store_refuses_is_a_409_with_the_migration_hint(self) -> None:
         class Refusing(InMemoryControlStore):
-            def save_slot(self, s: ProviderSlot, *, clear_meta: bool = False) -> None:
-                raise ControlSchemaOutdated("Schema Appwrite chưa có thuộc tính mới — chạy migration trước.", status=400)
+            def save_ext_slot(self, s: ProviderSlot) -> None:
+                raise ControlSchemaOutdated("Schema Appwrite chưa có collection ai_alibaba_config — chạy migration trước.",
+                                            status=404)
 
         p = build_plane([], store=Refusing(), profiles=only("gemini"))
         r = _admin_client(p).post("/api/admin/ai/slots", json=dict(
@@ -952,9 +976,9 @@ class TestNoMetadataLeaksToOrdinaryClients(unittest.TestCase):
     def _world(self, script: Optional[List[Any]] = None) -> World:
         w = World(slots=1, global_cap=500)
         a = a_slot(model="model-from-owner")
-        w.store.slots[a.slot_id] = a
+        persist_slot(w.store, a)
         w.store.controls = replace(w.store.controls, provider_types={**w.store.controls.provider_types, "alibaba": True})
-        w.store.profiles["FREE_FIRST"] = RoutingProfile("FREE_FIRST", ("alibaba",))
+        persist_profile(w.store, RoutingProfile("FREE_FIRST", ("alibaba",)), {a.slot_id: a})
         w.provs["alibaba-01"] = Prov("alibaba-01", script=script or ())
         w.plane._gates["alibaba"] = True  # noqa: SLF001
         w.plane.secrets = SecretResolver({**env_for(*w.slots), **env_for(a)})
@@ -1008,7 +1032,9 @@ def _dict(s: ProviderSlot) -> Dict[str, Any]:
 
 def _with(cfg: ControlConfig) -> InMemoryControlStore:
     st = InMemoryControlStore()
-    st.controls, st.slots = cfg.controls, dict(cfg.slots)
+    st.controls = cfg.controls
+    for s in cfg.slots.values():
+        persist_slot(st, s)
     return st
 
 
@@ -1035,8 +1061,17 @@ class _Rejecting(_FakeAppwrite):
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.method in ("PATCH", "POST") and "/ai_provider_slots/" in request.url.path:
             data = json.loads(request.content).get("data", {})
-            if self.always or "meta_json" in data or data.get("provider_type") == "alibaba":
+            if self.always or "meta_json" in data:
                 return httpx.Response(400, json={"message": "Invalid document structure"})
+        return super().__call__(request)
+
+
+class _NoExtCollection(_FakeAppwrite):
+    """Production BEFORE the migration: the `ai_alibaba_config` collection does not exist (Appwrite answers 404 to everything)."""
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if "/collections/ai_alibaba_config/" in request.url.path:
+            return httpx.Response(404, json={"message": "Collection with the requested ID could not be found."})
         return super().__call__(request)
 
 

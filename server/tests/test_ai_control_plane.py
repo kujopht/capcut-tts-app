@@ -14,8 +14,8 @@ from typing import Dict, Iterator, List, Optional
 import httpx
 
 from server.ai_assistant.control.model import (
-    ConfigValidationError, ControlConfig, GlobalControls, ProviderSlot, RoutingProfile, default_profiles,
-    slot_from_dict, validate_profile, validate_slot,
+    LEGACY_QWEN_PROFILE_STEPS, ConfigValidationError, ControlConfig, GlobalControls, ProviderSlot, RoutingProfile,
+    default_profiles, slot_from_dict, validate_profile, validate_slot,
 )
 from server.ai_assistant.control.providers import ProviderFactory
 from server.ai_assistant.control.router import (
@@ -110,9 +110,10 @@ def plane_with(slots: List[ProviderSlot], *, controls: Optional[GlobalControls] 
                         factory=ProviderFactory(builder=lambda s, k: providers[s.slot_id]),
                         breaker=CircuitBreaker(clock_fn=clk), clock=clk, rng=random.Random(seed),
                         user_usage_fn=user_usage,
-                        # Some routing tests use the legacy `qwen` (DashScope) type; its server gate is OPEN here on purpose —
-                        # the gate-closed behaviour is covered in test_ai_alibaba_control_plane.py.
-                        alibaba_enabled=True)
+                        # Some routing tests use the retired legacy `qwen` (DashScope) type; ITS server gate is open here on
+                        # purpose (it is independent of the Alibaba Model Studio gate, which stays closed) — the gate-closed
+                        # behaviour is covered in test_ai_alibaba_control_plane.py / test_ai_alibaba_isolation.py.
+                        qwen_legacy_enabled=True)
 
 
 def turns() -> List[ChatTurn]:
@@ -334,10 +335,18 @@ class TestRouting(unittest.TestCase):
     def test_workload_routes_to_its_profile_and_model(self) -> None:
         g, q = slot("gemini-01", model="gemini-2.0-flash"), slot("qwen-01", "qwen", model="qwen-max")
         prov = {"gemini-01": Scripted("gemini-01"), "qwen-01": Scripted("qwen-01")}
-        p = plane_with([g, q], providers=prov)
+        # `qwen` is retired from the DEFAULT profiles: a mode routes to it only when the owner sets the step (the documented
+        # rollback path, `LEGACY_QWEN_PROFILE_STEPS`), and then the slot's own model is the one sent.
+        legacy_writer = {"WRITER": RoutingProfile("WRITER", LEGACY_QWEN_PROFILE_STEPS["WRITER"])}
+        p = plane_with([g, q], providers=prov, profiles=legacy_writer)
         served = [e for e in run(p, mode="writer") if isinstance(e, ProviderServed)]
-        self.assertEqual(served[0].provider_name, "qwen-01", "WRITER starts with qwen")
+        self.assertEqual(served[0].provider_name, "qwen-01", "the explicit legacy WRITER profile starts with qwen")
         self.assertEqual(prov["qwen-01"].models, ["qwen-max"])
+        # …and with the DEFAULT profile the same slots never reach qwen.
+        prov2 = {"gemini-01": Scripted("gemini-01"), "qwen-01": Scripted("qwen-01")}
+        served = [e for e in run(plane_with([g, q], providers=prov2), mode="writer") if isinstance(e, ProviderServed)]
+        self.assertEqual(served[0].provider_name, "gemini-01", "default WRITER = azure_openai > gemini, no qwen")
+        self.assertEqual(prov2["qwen-01"].calls, 0)
         served = [e for e in run(p, workload="web_search") if isinstance(e, ProviderServed)]
         self.assertEqual(served[0].provider_name, "gemini-01", "WEB_SEARCH starts with gemini")
 

@@ -342,6 +342,10 @@ class AiAssistantSettings:
     #: truong + khoi dong lai (mot phien Owner bi chiem khong tu bat duoc). Doc LONG kieu fail-closed: chi 1/true/yes/on moi
     #: bat; go sai = tat, khong bao gio lam sap khoi dong (khac `_env_bool`).
     alibaba_enabled: bool = False
+    #: Cong DOC LAP cua loai `qwen` CU (DashScope, da nghi huu khoi ho so mac dinh): `FAS_AI_QWEN_LEGACY_ENABLED`, MAC DINH
+    #: DONG, doc long nhu tren. Bat `FAS_AI_ALIBABA_ENABLED` KHONG mo cong nay (va nguoc lai): mot lan canary Model Studio khong
+    #: duoc danh thuc duong cu. Cong nay ap cho ca slot `qwen` cua control plane lan chuoi env cu (`FAS_AI_PROVIDERS=qwen`).
+    qwen_legacy_enabled: bool = False
     #: "Uu tien han muc mien phi sap het han" (`FAS_AI_PREFER_FREE_QUOTA`): da cai san nhung NGU DONG, mac dinh TAT.
     prefer_free_quota: bool = False
 
@@ -1154,6 +1158,7 @@ def _ai_assistant_settings() -> AiAssistantSettings:
         beta_users=tuple(dict.fromkeys(x for x in _env_list("FAS_AI_BETA_USERS", "") if _AI_USER_ID.match(x))),
         owner_qa_daily_requests=_qa_cap(),
         alibaba_enabled=_gate("FAS_AI_ALIBABA_ENABLED"),
+        qwen_legacy_enabled=_gate("FAS_AI_QWEN_LEGACY_ENABLED"),
         prefer_free_quota=_gate("FAS_AI_PREFER_FREE_QUOTA"),
     )
 

@@ -1958,9 +1958,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "name": "AI Provider Slots",
         "attributes": [
             ("slot_id", "string", True, 40),
-            # `alibaba` (Alibaba Model Studio) THÊM SAU: `_ensure_enum` chỉ MỞ RỘNG enum đã có. Production đang thiếu giá trị này
-            # nên một slot Alibaba bị Appwrite từ chối cho tới khi chạy migration (docs/ai/ALIBABA_PROVIDER.md).
-            ("provider_type", "enum", True, ["gemini", "groq", "workers_ai", "qwen", "azure_openai", "openrouter", "alibaba"]),
+            # KHÔNG thêm `alibaba` vào enum này — và không bao giờ: collection này là thứ BẢN CŨ đọc và kiểm tra từng dòng, một
+            # dòng loại lạ làm nó coi cả cấu hình là hỏng (AI tắt cho mọi người). Slot Alibaba nằm ở `ai_alibaba_config` bên dưới.
+            ("provider_type", "enum", True, ["gemini", "groq", "workers_ai", "qwen", "azure_openai", "openrouter"]),
             ("label", "string", False, 60),
             ("secret_ref", "string", True, 64),
             ("model", "string", True, 120),
@@ -1976,8 +1976,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("workloads_json", "string", False, 200),
             ("price_in_micro_per_mtok", "integer", False, None),
             ("price_out_micro_per_mtok", "integer", False, None),
-            # Siêu dữ liệu TUỲ CHỌN (tầng năng lực, hạn mức miễn phí): chỉ được ghi khi có giá trị, nên thiếu thuộc tính này
-            # không làm hỏng việc ghi các slot thường. Xem `server/ai_assistant/control/model.py::slot_meta`.
+            # Siêu dữ liệu TUỲ CHỌN của slot loại CŨ (tầng năng lực, hạn mức miễn phí): chỉ được ghi khi có giá trị, nên thiếu
+            # thuộc tính này không làm hỏng việc ghi các slot thường — và bản cũ bỏ qua thuộc tính nó không biết. Slot Alibaba
+            # không dùng thuộc tính này (mang cả trường trong payload của `ai_alibaba_config`). Cần migration CHỈ khi Owner gán
+            # tầng/hạn mức cho một slot Gemini. Xem `server/ai_assistant/control/model.py::slot_meta`.
             ("meta_json", "string", False, 600),
             ("updated_at", "datetime", True, None),
         ],
@@ -1995,6 +1997,22 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("updated_at", "datetime", True, None),
         ],
         "indexes": [],
+    },
+    "ai_alibaba_config": {
+        # VUNG TACH BIET cua Alibaba Model Studio (docs/ai/ALIBABA_PROVIDER.md, muc "Rut lui"): slot + buoc dinh tuyen cua
+        # loai `alibaba`. Ban CU khong bao gio doc collection nay, nen mot dong o day (hay ca viec rut ma ve ban cu) khong the
+        # lam hong cau hinh Gemini. Bo sung THUAN: khong doi collection nao co san. id = `s-<slot_id>` | `r-<ho so>`.
+        # `data_json` la payload da kiem tra (KHONG co khoa — `secret_ref` chi la TEN).
+        "name": "AI Alibaba Config",
+        "attributes": [
+            ("kind", "string", True, 12),
+            ("key", "string", True, 40),
+            ("data_json", "string", True, 4000),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("kind_idx", "key", ["kind"]),
+        ],
     },
     "ai_provider_usage_daily": {
         # id = `{slot_id}_{yyyymmdd}` — CHI bo dem, khong noi dung hoi thoai.

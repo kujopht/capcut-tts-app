@@ -1,7 +1,8 @@
 # Alibaba Model Studio trong control plane AI
 
 > Trạng thái: **đã tích hợp, NGỦ ĐÔNG**. Không có request nào tới Alibaba cho tới khi Owner bật tường minh (mục 2). Gemini,
-> hạn mức công khai, hồ sơ định tuyến mặc định: **không đổi**. Mốc hiện tại: `ALIBABA_PROVIDER_INTEGRATION_READY_FOR_CANARY`
+> hạn mức công khai: **không đổi**; hồ sơ định tuyến mặc định chỉ đổi ở chỗ loại `qwen` cũ nghỉ hưu (mục 2b, không đổi gì với Gemini). Cổng Alibaba
+> và cổng `qwen` cũ độc lập nhau. Dữ liệu Alibaba ở collection riêng nên rút mã về bản cũ không làm hỏng Gemini (mục 11). Mốc hiện tại: `ALIBABA_PROVIDER_INTEGRATION_READY_FOR_CANARY`
 > (mục 12 liệt kê thông tin Owner cần cung cấp để canary). Adapter mới chỉ được chạy qua `httpx.MockTransport` — chưa từng gọi
 > Alibaba thật; những gì cần xác nhận ở canary nằm ở mục 11.
 
@@ -12,7 +13,7 @@
 | Adapter HTTP (streaming, timeout, phân loại lỗi) | `server/llm_gateway/alibaba.py` — lớp con của `OpenAICompatChatProvider`; lớp gốc mà Gemini dùng **không bị sửa** |
 | Loại provider `alibaba`, slot, kiểm hợp lệ, tầng năng lực, trường hạn mức | `server/ai_assistant/control/model.py` |
 | Hàm thuần: tầng, trạng thái hạn mức miễn phí, thứ tự "ưu tiên sắp hết hạn" | `server/ai_assistant/control/capability.py` |
-| Lưu trữ (`meta_json` tuỳ chọn, lỗi schema rõ ràng) | `server/ai_assistant/control/store.py` |
+| Lưu trữ: slot + bước định tuyến Alibaba ở **collection riêng** `ai_alibaba_config` (vùng tách biệt, mục 11); `meta_json` tuỳ chọn cho slot loại cũ | `server/ai_assistant/control/store.py` |
 | Cổng, bỏ qua slot, probe qua stream, độ trễ, hạn mức nhà cung cấp, audit | `server/ai_assistant/control/service.py` |
 | Định tuyến, TTFT, đường "hết hạn mức" | `server/ai_assistant/control/router.py` |
 | Dựng provider theo slot | `server/ai_assistant/control/providers.py` |
@@ -34,15 +35,28 @@ trần toàn cục → audit. Tên provider của adapter là **id của slot**,
 
 * Cổng 1 được kiểm ở **ba chỗ**: `skip_reason` (slot không được chọn), `provider_for` (không dựng được provider) và `probe` (nút
   Kiểm tra trả 409, không gửi gì, không tính lượt kiểm). Có test cho từng chỗ.
-* Loại `qwen` **cũ** (cũng là DashScope của Alibaba) dùng **chung cổng** — kể cả chuỗi provider đọc từ env cũ (`FAS_AI_PROVIDERS=qwen,…` +
-  `AI_QWEN_API_KEY`, chỉ dùng khi control plane tắt): `runtime._build_provider("qwen")` bỏ qua provider khi cổng đóng. Lý do: `qwen` nằm trong các hồ sơ mặc định
-  (`SUPPORT_SAFE = azure > qwen > gemini`, `FREE_FIRST` có `qwen` sau `gemini`, `WRITER`/`QUALITY_FIRST` có `qwen` đứng đầu) — bật
-  một slot `qwen` sẽ lập tức đưa Alibaba vào lưu lượng thật, kể cả làm Alibaba đứng TRƯỚC Gemini ở chế độ Hỗ trợ. Cổng chung chặn
-  đường đó. Production không có slot `qwen` nào nên việc này không đổi hành vi hiện tại. **Khuyến nghị tách riêng:** bỏ `qwen` khỏi
-  `DEFAULT_PROFILE_STEPS` là một quyết định định tuyến — không làm trong đợt này.
+* **`FAS_AI_ALIBABA_ENABLED=1` KHÔNG đánh thức loại `qwen` cũ.** Hai đường tới Alibaba là hai cổng độc lập (mục 2b): bật cái này không
+  mở cái kia, và ngược lại. Một lần canary Model Studio không được vô tình đưa đường DashScope cũ vào lưu lượng thật.
 * Không có đường fallback Gemini → Alibaba: `alibaba` không nằm trong bất kỳ hồ sơ mặc định nào; test khẳng định cả bốn chế độ
   chat không bao giờ gọi slot Alibaba khi hồ sơ là mặc định, và khi cổng đóng thì Alibaba không được gọi dù Gemini lỗi.
 * Kill switch vẫn áp dụng: công tắc tổng tắt → `plan()` rỗng → không provider nào được gọi.
+
+### 2b. Loại `qwen` cũ — đã nghỉ hưu, có cổng riêng và đường quay về
+
+`qwen` (DashScope, có từ trước Model Studio) từng nằm trong các hồ sơ mặc định (`SUPPORT_SAFE = azure > qwen > gemini`, `FREE_FIRST` có
+`qwen` sau `gemini`, `WRITER`/`QUALITY_FIRST` có `qwen` đứng đầu). Đợt này tách nó ra:
+
+| Hạng mục | Trước | Sau |
+|---|---|---|
+| Cổng máy chủ của `qwen` | không có (ở bản #270 chưa deploy: dùng chung `FAS_AI_ALIBABA_ENABLED`) | **`FAS_AI_QWEN_LEGACY_ENABLED`**, mặc định ĐÓNG, độc lập với cổng Alibaba |
+| Hồ sơ mặc định | có `qwen` ở cả 6 hồ sơ | **không còn `qwen`** (bảng cũ giữ ở `LEGACY_QWEN_PROFILE_STEPS`) |
+| Chuỗi env cũ `FAS_AI_PROVIDERS=qwen` (khi control plane tắt) | không cổng | cùng cổng riêng `FAS_AI_QWEN_LEGACY_ENABLED` |
+| Slot/hồ sơ `qwen` đã lưu từ trước | hợp lệ | **vẫn hợp lệ** (loại còn trong `PROVIDER_TYPES`) — chỉ không nhận request khi cổng đóng |
+| Định tuyến Gemini | — | không đổi (test so từng chế độ; production không có slot `qwen`) |
+
+**Đường quay về (an toàn, tường minh, không bao giờ tự động):** (1) đặt `FAS_AI_QWEN_LEGACY_ENABLED=1` + khởi động lại; (2) Owner đặt lại bước
+`qwen` cho từng hồ sơ qua `/admin/ai` (hợp lệ vì `qwen` vẫn là loại hợp lệ) — thứ tự cũ chính xác nằm ở `LEGACY_QWEN_PROFILE_STEPS` và được test
+đối chiếu từng bước với bản production trước đợt này. Thiếu một trong hai thì `qwen` không nhận request nào.
 
 ## 3. Adapter (`AlibabaModelStudioProvider`)
 
@@ -115,7 +129,7 @@ Gói đăng ký/tính năng về sau **ánh xạ tới tầng**, rồi tầng �
 
 ## 7. Hạn mức miễn phí & hạn dùng
 
-Trường tuỳ chọn của slot (lưu trong `meta_json`): `free_quota_remaining` (token), `free_quota_expires_at` (ISO-8601 có múi giờ,
+Trường tuỳ chọn của slot (slot Alibaba: nằm trong payload của dòng `ai_alibaba_config`; slot loại cũ: `meta_json`): `free_quota_remaining` (token), `free_quota_expires_at` (ISO-8601 có múi giờ,
 chuẩn hoá UTC), `free_quota_only`, và `free_quota_updated_at` (do **máy chủ** đóng dấu khi số dư đổi).
 
 * Đây là **ảnh chụp do Owner nhập** từ trang Model Studio, không tự cập nhật (Alibaba không đưa số dư vào API chat). Giao diện luôn
@@ -158,23 +172,55 @@ chứa bí mật (chỉ tên tham chiếu). Chỉ Owner ghi; Admin chỉ đọc.
 cấp (test E2E với một lượt thật do slot Alibaba phục vụ, và 3 kiểu lỗi nhà cung cấp mang chuỗi dò). Lỗi nhà cung cấp trước token đầu là
 miễn phí cho người dùng.
 
-## 11. Migration schema Appwrite (CHƯA chạy; Owner/phiên có duyệt chạy ở giai đoạn canary)
+## 11. Lưu trữ tách biệt + migration Appwrite (CHƯA chạy; Owner/phiên có duyệt chạy ở giai đoạn canary)
 
-Schema production hiện có `provider_type` là **enum 6 giá trị** và không có `meta_json`. Mã mới **tương thích ngược**: ghi một slot Gemini
-gửi đúng bộ thuộc tính cũ (test khoá từng byte), nên deploy mã này **không cần** migration. Chỉ khi tạo slot Alibaba (giá trị enum mới) hoặc đặt
-tầng/hạn mức cho một slot (thuộc tính `meta_json`) mới cần:
+### Vì sao slot Alibaba nằm ở collection RIÊNG
+
+Mã **cũ** (production hiện tại và mọi bản trước) đọc `ai_provider_slots` và `ai_routing_profiles`, kiểm từng dòng, và coi **bất kỳ dòng nào nó
+không hiểu** là "cấu hình hỏng" → AI tắt cho mọi người (fail-closed, kể cả Gemini). Một dòng `provider_type = alibaba`, hoặc một bước `alibaba` trong
+`steps_json`, sẽ biến việc **rút mã về bản cũ** thành sự cố toàn cục — và không bản vá nào ở mã mới cứu được, vì mã cũ là thứ chạy. Cách duy nhất
+là **không để mã cũ thấy chúng**:
+
+| Dữ liệu | Nơi lưu | Mã cũ thấy gì |
+|---|---|---|
+| Slot Alibaba (kể cả tầng, hạn mức miễn phí) | `ai_alibaba_config`, dòng `s-<slot_id>` | không đọc collection này |
+| Bước Alibaba của hồ sơ định tuyến | `ai_alibaba_config`, dòng `r-<hồ sơ>` = danh sách bước ĐẦY ĐỦ | `ai_routing_profiles.steps_json` chỉ mang **phần bản cũ đọc được** (bỏ `alibaba` và id slot Alibaba) |
+| Cờ loại `alibaba` | khoá thêm trong `provider_types_json` | bỏ qua khoá lạ (mã cũ chỉ đọc 6 khoá của nó) |
+| Sử dụng/audit | collection chung (chỉ số đếm / chuỗi) | không kiểm tra |
+
+* **Hồ sơ hiệu lực** = phần bản cũ đọc được + dòng `r-…`, và dòng `r-…` **chỉ được áp khi khớp đúng** phần bản cũ (bỏ bước Alibaba phải ra đúng
+  `steps_json`). Nếu bản cũ chạy một thời gian rồi Owner sửa hồ sơ ở đó, dòng Alibaba cũ không khớp → **bị bỏ** (không bao giờ ghi đè thay đổi
+  về Gemini) và `/admin/ai` báo "hồ sơ … có bước Alibaba bị bỏ".
+* Lúc ghi hồ sơ có bước Alibaba, phần Alibaba ghi **trước**: nếu collection chưa có/không với tới thì lỗi sạch (409), chưa đổi gì. Hồ sơ có bước
+  Alibaba **phải còn ít nhất một bước loại khác** — Alibaba không bao giờ là đường duy nhất của một chế độ.
+* `AppwriteControlStore.save_slot` **từ chối** slot loại Alibaba, `save_profile` từ chối bước `alibaba` (lỗi lập trình, không ghi gì): không đường nào
+  đưa chúng vào collection cũ. Nếu có (sửa tay) thì mã mới **bỏ qua + đếm** chứ không định tuyến, và không làm cấu hình hỏng.
+* **Đọc vùng này không bao giờ làm hỏng cấu hình Gemini:** collection thiếu / kho không với tới / dòng hỏng / lỗi trình phân tích chỉ cho ra một
+  *trạng thái* (`schema_missing`, `unavailable`, số dòng `unreadable`) hiện ở `/admin/ai`; Gemini vẫn được đọc và kiểm tra nghiêm ngặt như trước (một dòng
+  Gemini hỏng vẫn fail-closed — không nới lỏng). Slot Alibaba đọc được nhưng không hợp lệ (vd. endpoint ngoài danh sách cho phép) bị **đỗ lại**: không
+  định tuyến, không Kiểm tra, sửa hợp lệ ở `/admin/ai` là mở lại.
+
+### Migration
+
+Deploy mã này **không cần** migration (ghi slot Gemini gửi đúng bộ thuộc tính cũ — test khoá từng byte — và collection mới chỉ được chạm khi có slot/bước
+Alibaba). Tạo slot Alibaba cần **một collection mới, thuần cộng thêm** (không đổi collection nào có sẵn, không đụng enum):
 
 ```
-.venv\Scripts\python.exe -m scripts.setup_appwrite --plan --only ai_provider_slots     # CHỈ ĐỌC: cho biết thiếu gì
-.venv\Scripts\python.exe -m scripts.setup_appwrite --only ai_provider_slots            # mở rộng enum (+alibaba) và thêm meta_json; idempotent
+.venv\Scripts\python.exe -m scripts.setup_appwrite --plan --only ai_alibaba_config     # CHỈ ĐỌC: cho biết sẽ tạo gì
+.venv\Scripts\python.exe -m scripts.setup_appwrite --only ai_alibaba_config            # tạo collection (4 thuộc tính + 1 index); idempotent
 ```
 
-(dùng khoá schema `APPWRITE_SCHEMA_API_KEY` của Owner; xem chú thích trong script). Trước migration, thử tạo slot Alibaba sẽ nhận 409
-`ai_admin_schema_outdated` với hướng dẫn, và **không ảnh hưởng** việc ghi/tắt các slot khác.
+(dùng khoá schema `APPWRITE_SCHEMA_API_KEY` của Owner; xem chú thích trong script). Trước migration, thử tạo slot Alibaba nhận 409
+`ai_admin_schema_outdated` kèm hướng dẫn, `/admin/ai` hiện "chưa chạy migration collection ai_alibaba_config", và **không ảnh hưởng** gì khác.
+Thuộc tính tuỳ chọn `meta_json` của `ai_provider_slots` (`--only ai_provider_slots`) **chỉ cần** nếu Owner gán tầng/hạn mức cho một slot **Gemini**; slot
+Alibaba không dùng nó. **Enum `provider_type` của collection cũ KHÔNG được mở rộng** (spec đã bỏ giá trị `alibaba`).
 
-**Ràng buộc rút lui (quan trọng):** `meta_json` thì mã cũ bỏ qua an toàn; nhưng mã cũ **không biết loại `alibaba`** — gặp một dòng slot
-`alibaba` trong kho nó coi CẢ cấu hình là hỏng và AI tắt cho mọi người (fail-closed, kể cả Gemini). Vì vậy **trước khi rút mã về bản cũ phải
-xoá mọi slot `alibaba`** (và khoá cờ loại). Khoá `provider_types_json` có thêm `alibaba` thì mã cũ bỏ qua an toàn.
+### Kiểm chứng rút lui bằng mã cũ thật
+
+`server/tests/fixtures/legacy_release_3f86706/` giữ **nguyên văn** `model.py` + `store.py` của production hiện tại (commit 3f86706, chỉ đổi một dòng
+import). `test_ai_alibaba_isolation.py` ghi cấu hình bằng mã mới — Gemini + slot Alibaba đã bật + hồ sơ có bước Alibaba — rồi nạp **chính các dòng đó**
+bằng mã cũ và kiểm tra bằng validation cũ: hợp lệ, AI vẫn bật, đúng slot/hồ sơ Gemini. Có bài đối chứng cho thấy mã cũ **thật sự** từ chối một
+dòng `alibaba` trong collection cũ (nên bảo đảm không rỗng). Các đột biến "ghi slot vào collection cũ" và "không tách bước hồ sơ" làm bài đó đỏ.
 
 ## 12. Điều kiện canary — thông tin Owner phải cung cấp (không đoán)
 
@@ -184,7 +230,8 @@ xoá mọi slot `alibaba`** (và khoá cờ loại). Khoá `provider_types_json`
 3. **Danh mục model và hạn mức thật**: id model chính xác Owner muốn dùng (mỗi model một slot), tầng nào (FAST/SMART/…), số dư hạn mức miễn phí và ngày
    hết hạn của từng model, giới hạn tốc độ (RPM/TPM) trên trang Alibaba, và có model nào là model "suy luận" (có `reasoning_content`) không.
 4. Xác nhận đã bật chế độ **"chỉ dùng hạn mức miễn phí"** ở console Alibaba cho từng model sẽ dùng (rào chặn phí thật, mục 7).
-5. Duyệt chạy migration (mục 11) và đặt `FAS_AI_ALIBABA_ENABLED=1`.
+5. Duyệt chạy migration **`--only ai_alibaba_config`** (mục 11) và đặt `FAS_AI_ALIBABA_ENABLED=1`. (Không cần đặt `FAS_AI_QWEN_LEGACY_ENABLED` — cổng đó là của
+   đường `qwen` cũ và phải để ĐÓNG.)
 
 **Việc canary phải xác nhận trên tài khoản thật** (adapter chưa từng gọi Alibaba thật): (a) đường dẫn và `stream_options.include_usage` cho ra khung
 `usage`; (b) chuỗi mã lỗi thật cho lỗi khoá, hết hạn mức miễn phí, giới hạn tốc độ (đối chiếu phân loại ở mục 4 bằng `last_error_category`);
@@ -193,4 +240,9 @@ xoá mọi slot `alibaba`** (và khoá cờ loại). Khoá `provider_types_json`
 ## 13. Rút lui
 
 Nhanh nhất: `FAS_AI_ALIBABA_ENABLED` về 0 + khởi động lại (hoặc công tắc tổng ở `/admin/ai`); tắt cờ loại `alibaba`; tắt/xoá slot. Không thay đổi hạn
-mức công khai, hồ sơ mặc định hay slot Gemini ở bất kỳ bước nào. Rút **mã** về bản trước khi có Alibaba: xoá slot `alibaba` trước (mục 11).
+mức công khai, hồ sơ mặc định hay slot Gemini ở bất kỳ bước nào.
+
+Rút **mã** về bản trước khi có Alibaba (kể cả khi slot/hồ sơ Alibaba đã được lưu): **không cần dọn gì trước**. Dữ liệu Alibaba nằm ở collection mà
+mã cũ không đọc, nên cấu hình Gemini vẫn hợp lệ và AI vẫn bật (có test với chính mã cũ, mục 11). Dữ liệu Alibaba còn nguyên để triển khai lại; hồ sơ
+mà bản cũ đã sửa trong lúc đó thắng bước Alibaba cũ (bị bỏ, `/admin/ai` báo). Chỉ cần nhớ: bản cũ **không có** nút tắt Alibaba — nhưng cũng không có
+đường nào gọi Alibaba (không biết loại này).

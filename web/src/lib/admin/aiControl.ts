@@ -123,6 +123,8 @@ export interface AiOverview {
   runtime?: { audience: string; rpm_per_user: number; streams_active: number; streams_max: number } | null;
   /** Cổng cấp máy chủ của các loại provider có cổng: đóng = KHÔNG request nào tới nhà cung cấp đó. */
   gates?: Record<string, AiGateInfo>;
+  /** Vùng lưu trữ TÁCH BIỆT của một nhà cung cấp mới: lỗi ở đây không bao giờ làm đổi `state` hay ảnh hưởng provider khác. */
+  isolated_store?: AiIsolatedStore;
   /** "Ưu tiên hạn mức miễn phí sắp hết hạn" có đang bật không (mặc định TẮT). */
   free_quota_preference?: boolean;
   slots_by_status: Record<string, number>;
@@ -270,8 +272,26 @@ export interface AiConfigMeta {
   free_quota?: { expiring_soon_days: number; prefer_expiring_active: boolean };
 }
 
+/**
+ * Tình trạng collection lưu RIÊNG slot + bước định tuyến của loại provider tách biệt. `schema_missing` = chưa chạy
+ * migration; `unavailable` = không đọc được lúc này (các slot đó tạm không dùng được, provider khác không đổi);
+ * `unreadable` = số dòng hỏng (chỉ đếm); `stale_routes` = hồ sơ có bước bị bỏ vì không còn khớp phần hồ sơ mà bản cũ đọc.
+ * `notices` + `title` do MÁY CHỦ viết (JS công khai không viết cứng tên provider); `notices` rỗng = không có gì cần nói.
+ */
+export type AiIsolatedStoreState = "none" | "empty" | "ok" | "schema_missing" | "unavailable";
+
+export interface AiIsolatedStore {
+  state: AiIsolatedStoreState;
+  unreadable: number;
+  stale_routes: string[];
+  notices: string[];
+  title: string;
+}
+
 export interface AiConfig {
   state: AiConfigState;
+  /** Xem `AiOverview.isolated_store`. */
+  isolated_store?: AiIsolatedStore;
   controls: AiControls;
   rollout?: AiRollout;
   /** Tầng năng lực → id các slot khai báo phục vụ tầng đó. */

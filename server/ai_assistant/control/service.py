@@ -792,8 +792,9 @@ class ControlPlane:
                      "endpoint_hints": {
                          "workers_ai": "https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1",
                          "azure_openai": "https://<resource>.openai.azure.com hoặc https://<resource>.cognitiveservices.azure.com",
-                         "alibaba": "https://<máy chủ DashScope của tài khoản>/compatible-mode/v1 — máy chủ dạng "
-                                    "dashscope[-vùng].aliyuncs.com, đúng endpoint/vùng trong trang Model Studio của bạn",
+                         "alibaba": "https://<máy chủ của tài khoản>/compatible-mode/v1 — máy chủ theo workspace "
+                                    "<WorkspaceId>.<vùng>.maas.aliyuncs.com (vd. vùng Singapore: ap-southeast-1) hoặc dạng cũ "
+                                    "dashscope[-vùng].aliyuncs.com; đúng endpoint/vùng trong trang Model Studio của bạn",
                      },
                      "secret_env_prefix": "FAS_AI_SECRET_",
                      # Tầng năng lực + quy tắc an toàn của loại có cổng: giao diện vẽ từ đây, không viết cứng tên provider.

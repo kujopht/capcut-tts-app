@@ -50,10 +50,20 @@ from server.llm_gateway.chat_providers import (
     _retry_after_s,
 )
 
-#: `dashscope.aliyuncs.com`, `dashscope-intl.aliyuncs.com`, `dashscope-us.aliyuncs.com` and one optional region label in front
-#: (`cn-hongkong.dashscope.aliyuncs.com`). Anchored, one label at most: no other `aliyuncs.com` service (object storage,
-#: function compute …) — whose names customers can choose — can ever receive the key.
-ALIBABA_HOST_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\.)?dashscope(?:-[a-z0-9]{1,16})?\.aliyuncs\.com$")
+#: The two documented Model Studio host shapes (official "OpenAI compatible - Chat" page, checked 2026-10-03):
+#:   * per-WORKSPACE endpoint — `https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1`
+#:     (Singapore: `{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com`) — exactly ONE workspace label + ONE region label;
+#:   * the older DashScope hosts, documented as "still functional" — `dashscope.aliyuncs.com`, `dashscope-intl.aliyuncs.com`,
+#:     `dashscope-us.aliyuncs.com`, with one optional region label in front (`cn-hongkong.dashscope.aliyuncs.com`).
+#: Anchored, fixed suffix, no extra labels: no other `aliyuncs.com` service (object storage, function compute …) — whose names
+#: customers can choose — can ever receive the key. Which of these the account really uses is the OWNER's to state; nothing here
+#: picks an endpoint for them.
+_REGION_LABEL = r"[a-z]{2}-[a-z]+(?:-[a-z]+)?(?:-[0-9]{1,2})?"  # ap-southeast-1, us-east-1, eu-central-1, cn-beijing, cn-hongkong
+ALIBABA_HOST_RE = re.compile(
+    r"^(?:"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\.)?dashscope(?:-[a-z0-9]{1,16})?\.aliyuncs\.com"
+    r"|[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\." + _REGION_LABEL + r"\.maas\.aliyuncs\.com"
+    r")$")
 _PATH_RE = re.compile(r"^/[A-Za-z0-9._~/-]{0,100}$")
 
 #: The ONLY error categories this adapter reports — letters/underscore (they must pass the control plane's sanitiser).
@@ -97,7 +107,8 @@ def alibaba_endpoint_error(endpoint: str) -> Optional[str]:
     if port not in (None, 443):
         return "chỉ cổng 443"
     if not alibaba_host_allowed(u.hostname):
-        return "máy chủ phải là dạng dashscope[-vùng].aliyuncs.com của Alibaba Model Studio"
+        return ("máy chủ phải là dạng <workspace>.<vùng>.maas.aliyuncs.com hoặc dashscope[-vùng].aliyuncs.com "
+                "của Alibaba Model Studio")
     if len(u.path) < 2 or not _PATH_RE.match(u.path) or ".." in u.path or "//" in u.path:
         return "đường dẫn phải bắt đầu bằng / (ví dụ /compatible-mode/v1)"
     return None

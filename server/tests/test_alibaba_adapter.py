@@ -106,10 +106,21 @@ class Tick:
 class TestHostAllowlist(unittest.TestCase):
     def test_documented_dashscope_hosts_pass_and_everything_else_fails(self) -> None:
         good = ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com",
-                "cn-hongkong.dashscope.aliyuncs.com", "DashScope-Intl.AliYunCS.com"]
+                "cn-hongkong.dashscope.aliyuncs.com", "DashScope-Intl.AliYunCS.com",
+                # the documented per-workspace form, Singapore and the other documented regions
+                "ws-abc123.ap-southeast-1.maas.aliyuncs.com", "mywork.us-east-1.maas.aliyuncs.com",
+                "w1.eu-central-1.maas.aliyuncs.com", "w1.ap-northeast-1.maas.aliyuncs.com", "w1.cn-beijing.maas.aliyuncs.com",
+                "w1.cn-hongkong.maas.aliyuncs.com", "WS-ABC123.AP-Southeast-1.MaaS.AliYunCS.com"]
         bad = ["evil.aliyuncs.com", "dashscope.aliyuncs.com.evil.com", "xdashscope.aliyuncs.com", "dashscope-.aliyuncs.com",
                "a.b.dashscope.aliyuncs.com", "my-bucket.oss-cn-hangzhou.aliyuncs.com", "dashscope.example.com",
-               "dashscope.aliyuncs.com:8443", "127.0.0.1", "169.254.169.254", "localhost", "", "dashscope-intl.aliyuncs.com."]
+               "dashscope.aliyuncs.com:8443", "127.0.0.1", "169.254.169.254", "localhost", "", "dashscope-intl.aliyuncs.com.",
+               # workspace form: exactly one workspace label + one region label, fixed suffix, nothing else
+               "ap-southeast-1.maas.aliyuncs.com", "maas.aliyuncs.com", "a.b.ap-southeast-1.maas.aliyuncs.com",
+               "ws.ap-southeast-1.maas.aliyuncs.com.evil.com", "ws.ap-southeast-1.maas.aliyuncs.com.", "ws.maas.aliyuncs.com",
+               "ws.ap-southeast-1.maas.example.com", "ws.ap-southeast-1.aliyuncs.com", "ws.ap-southeast-1.mass.aliyuncs.com",
+               "-ws.ap-southeast-1.maas.aliyuncs.com", "ws-.ap-southeast-1.maas.aliyuncs.com", "ws.AP.maas.aliyuncs.com",
+               "ws.ap-southeast-1.maas.aliyuncs.com:8443", "ws_1.ap-southeast-1.maas.aliyuncs.com",
+               "ws.ap-southeast-1.oss-cn-hangzhou.aliyuncs.com"]
         for h in good:
             with self.subTest(good=h):
                 self.assertTrue(alibaba_host_allowed(h))
@@ -120,6 +131,12 @@ class TestHostAllowlist(unittest.TestCase):
     def test_endpoint_rules(self) -> None:
         self.assertIsNone(alibaba_endpoint_error(BASE))
         self.assertIsNone(alibaba_endpoint_error("https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1"))
+        self.assertIsNone(alibaba_endpoint_error("https://ws-abc123.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"),
+                          "the official per-workspace Singapore endpoint shape")
+        for url in ("https://ws-abc123.ap-southeast-1.maas.aliyuncs.com", "http://ws-abc123.ap-southeast-1.maas.aliyuncs.com/v1",
+                    "https://ws-abc123.ap-southeast-1.maas.aliyuncs.com/v1?x=1", "https://evil.maas.aliyuncs.com/compatible-mode/v1"):
+            with self.subTest(workspace_url=url):
+                self.assertIsNotNone(alibaba_endpoint_error(url))
         for url in ("http://dashscope.aliyuncs.com/compatible-mode/v1", "https://dashscope.aliyuncs.com",
                     "https://dashscope.aliyuncs.com/", "https://user:pw@dashscope.aliyuncs.com/v1",
                     "https://dashscope.aliyuncs.com:8443/v1", "https://dashscope.aliyuncs.com/v1?key=x",
@@ -328,8 +345,12 @@ def err_response(status: int, body: Any, headers: Optional[Dict[str, str]] = Non
 
 
 class TestErrorClassification(unittest.TestCase):
-    #: (status, body, expected category) — status first, vendor code/type/message second, tolerant keywords.
+    #: (status, body, expected category) — status first, vendor code/type/message second, tolerant keywords. Every code of the
+    #: official "Error codes" table (checked 2026-10-03: top-level `code`/`message`; `AllocationQuota.FreeTierOnly` 403 = the
+    #: "Free Quota Only" console wall; `Throttling*` 429; `Arrearage` 400) is a row here, in the shape the table documents.
     MATRIX = [
+        (429, {"code": "Throttling", "message": "Requests throttled"}, "RATE_LIMITED"),
+        (400, {"code": "data_inspection_failed", "message": "flagged"}, "CONTENT_FILTERED"),
         (401, {"error": {"code": "invalid_api_key", "message": "Incorrect API key"}}, "AUTH_FAILED"),
         (401, {"code": "InvalidApiKey", "message": "Invalid API-key provided."}, "AUTH_FAILED"),
         (403, {"code": "AccessDenied", "message": "no access"}, "PERMISSION_DENIED"),

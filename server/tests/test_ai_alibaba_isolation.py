@@ -988,6 +988,25 @@ class TestSecondRoundReviewFindings(unittest.TestCase):
         self.assertEqual(served(rig.turn("general")), ["gemini-01"])
         del bad_slot
 
+    def test_rows_written_by_a_newer_release_are_read_forward_compatibly(self) -> None:
+        """Unknown FIELDS inside a slot/route payload are ignored, an unknown `kind` is a counted unreadable row, an unknown
+        extra collection is never read — none of it can reach Gemini."""
+        rig = Rig().configure()
+        genuine = _ext_rows(rig)["s-alibaba-01"]
+        future_slot = {**json.loads(genuine["data_json"]), "future_field": {"nested": [1, 2]}, "sampling": {"top_p": 0.5}}
+        genuine["data_json"] = json.dumps(future_slot)
+        route = _ext_rows(rig)["r-FREE_FIRST"]
+        route["data_json"] = json.dumps({**json.loads(route["data_json"]), "future_hint": "x"})
+        _ext_rows(rig)["x-new"] = {"$id": "x-new", "kind": "mcp-server", "key": "k", "data_json": "{}"}  # a kind from the future
+        rig.fake.cols["ai_future_partition"] = {"a": {"$id": "a", "whatever": 1}}  # a collection this release never reads
+        rig.plane.invalidate()
+        cfg = rig.plane.snapshot()
+        self.assertEqual(rig.plane.state, "ok")
+        self.assertIn("alibaba-01", cfg.slots, "the slot with unknown fields still loads")
+        self.assertEqual(cfg.profiles["FREE_FIRST"].steps, ("alibaba-01", "gemini-01", "gemini-02"), "…and its route still applies")
+        self.assertEqual(cfg.ext.unreadable, 1, "only the unknown kind is counted")
+        self.assertEqual(served(rig.turn("general")), ["alibaba-01"])
+
     def test_a_route_that_blows_up_inside_compose_drops_only_itself(self) -> None:
         rig = Rig().configure()
         with mock.patch("server.ai_assistant.control.service.compose_profile", side_effect=OverflowError("boom")):

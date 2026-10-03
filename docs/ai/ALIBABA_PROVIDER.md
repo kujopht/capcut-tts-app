@@ -61,8 +61,11 @@ trần toàn cục → audit. Tên provider của adapter là **id của slot**,
 ## 3. Adapter (`AlibabaModelStudioProvider`)
 
 * **Điểm cuối**: không có mặc định (vùng/endpoint là của tài khoản Owner). `endpoint` bắt buộc, `https`, cổng 443, không
-  user/query/fragment, **máy chủ chỉ dạng `[nhãn.]dashscope[-x].aliyuncs.com`** (không phải mọi dịch vụ `*.aliyuncs.com` — tên
-  nhiều dịch vụ khác do khách hàng tự chọn nên không thể nhận khoá). Kiểm ở API (`validate_slot`) **và** trong constructor của
+  user/query/fragment, **máy chủ chỉ thuộc một trong hai dạng tài liệu chính thức mô tả** (trang "OpenAI compatible - Chat", kiểm 2026-10-03):
+  (a) **theo workspace** `<WorkspaceId>.<vùng>.maas.aliyuncs.com` — vùng Singapore là `ap-southeast-1`, đường dẫn
+  `/compatible-mode/v1` — đúng MỘT nhãn workspace + MỘT nhãn vùng + đuôi cố định; (b) dạng cũ (tài liệu ghi "vẫn dùng được")
+  `[nhãn.]dashscope[-x].aliyuncs.com`. Không phải mọi dịch vụ `*.aliyuncs.com` — tên nhiều dịch vụ khác do khách hàng tự chọn nên không thể nhận khoá.
+  Tài khoản Owner dùng dạng nào là việc của Owner nêu — mã không chọn thay. Kiểm ở API (`validate_slot`) **và** trong constructor của
   adapter (phòng thủ chiều sâu). Không theo chuyển hướng (`follow_redirects=False`).
 * **Khoá** chỉ nằm trong header `Authorization` của client httpx; `repr`, lỗi, log không bao giờ chứa nó (có test).
 * **Streaming** theo định dạng OpenAI tương thích (`stream_options.include_usage`), không gửi trường `user` (không gửi mã người
@@ -229,6 +232,14 @@ Alibaba). Tạo slot Alibaba cần **một collection mới, thuần cộng thê
 Thuộc tính tuỳ chọn `meta_json` của `ai_provider_slots` (`--only ai_provider_slots`) **chỉ cần** nếu Owner gán tầng/hạn mức cho một slot **Gemini**; slot
 Alibaba không dùng nó. **Enum `provider_type` của collection cũ KHÔNG được mở rộng** (spec đã bỏ giá trị `alibaba`).
 
+### Sàn tương thích (bản thấp nhất rút mã về mà vẫn an toàn)
+
+**Sàn = commit `3f86706`** (production trước đợt này, merge của #269): đó là bản **đã kiểm chứng bằng chính mã của nó** (fixture mục dưới) khi đọc một
+cấu hình có slot/route Alibaba — hợp lệ, AI vẫn bật. Mọi bản từ `3f86706` trở lên tới trước đợt này đều đọc đúng hai collection cũ nên an toàn. Bản **cũ hơn
+`3f86706` chưa được kiểm chứng** — không khẳng định gì về chúng (đừng rút mã xuống dưới sàn mà chưa chạy lại bài kiểm chứng với bản đó).
+Tương thích **tiến** cũng được khoá: một dòng của vùng Alibaba có trường/`kind` lạ do bản MỚI HƠN ghi thì trường lạ bị bỏ qua, `kind` lạ bị đếm là không đọc
+được — không bao giờ ném lỗi hay đụng cấu hình Gemini; một collection lạ do bản sau thêm thì bản này không bao giờ đọc.
+
 ### Kiểm chứng rút lui bằng mã cũ thật
 
 `server/tests/fixtures/legacy_release_3f86706/` giữ **nguyên văn** `model.py` + `store.py` của production hiện tại (commit 3f86706, chỉ đổi một dòng
@@ -238,7 +249,9 @@ dòng `alibaba` trong collection cũ (nên bảo đảm không rỗng). Các đ�
 
 ## 12. Điều kiện canary — thông tin Owner phải cung cấp (không đoán)
 
-1. **Endpoint/vùng** của tài khoản Model Studio (máy chủ DashScope và đường dẫn tương thích OpenAI mà tài khoản dùng). Không có mặc định.
+1. **Endpoint/vùng** của tài khoản Model Studio — đúng máy chủ (dạng workspace `<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com` hoặc dạng cũ
+   `dashscope-intl.aliyuncs.com`) và đường dẫn tương thích OpenAI mà tài khoản dùng. Không có mặc định; **WorkspaceId** là giá trị riêng của tài khoản (xem trang
+   "API key"/"Workspace" trong console).
 2. **Khoá API**: đặt vào môi trường Render dưới tên `FAS_AI_SECRET_ALIBABA_<TÊN>` (slot chỉ lưu `ALIBABA_<TÊN>`); Owner đặt, không gửi cho tôi.
    Phải nêu khoá thuộc tài khoản/vùng nào và có bật chế độ "chỉ dùng hạn mức miễn phí" của Alibaba hay không.
 3. **Danh mục model và hạn mức thật**: id model chính xác Owner muốn dùng (mỗi model một slot), tầng nào (FAST/SMART/…), số dư hạn mức miễn phí và ngày
@@ -250,6 +263,26 @@ dòng `alibaba` trong collection cũ (nên bảo đảm không rỗng). Các đ�
 **Việc canary phải xác nhận trên tài khoản thật** (adapter chưa từng gọi Alibaba thật): (a) đường dẫn và `stream_options.include_usage` cho ra khung
 `usage`; (b) chuỗi mã lỗi thật cho lỗi khoá, hết hạn mức miễn phí, giới hạn tốc độ (đối chiếu phân loại ở mục 4 bằng `last_error_category`);
 (c) TTFT/độ trễ thật; (d) hành vi model suy luận; (e) `Retry-After` có được gửi không. Các lần probe không tốn lượt người dùng và không vào trần 150.
+
+## 12b. Quy trình canary đầu tiên — thứ tự BẮT BUỘC (mỗi bước chỉ làm khi bước trước đã xong)
+
+Mốc dừng: `ALIBABA_SG_01_CANARY_PROBE_VERIFIED` (slot vẫn TẮT, chưa có lưu lượng công khai). Biến `FAS_AI_ALIBABA_ENABLED`/`FAS_AI_QWEN_LEGACY_ENABLED` **chưa đặt =
+đóng**, nên bước triển khai không cần đổi biến nào.
+
+| # | Việc | Ai | Kiểm chứng |
+|---|---|---|---|
+| 1 | Merge #270 (CI bắt buộc xanh: Backend, Web, gitleaks) | Owner | job Router không bắt buộc đỏ **y hệt** baseline (51 test, chủ yếu thiếu `httpx` trong venv của job đó — đã so với run của #269) |
+| 2 | Deploy SHA mới của `main` qua `production-deploy.yml` (Owner duyệt môi trường `production`), **không** deploy SHA nhánh | Owner duyệt | `GET /api/health` báo đúng SHA; smoke Owner QA: general + support, có stream, không lộ metadata; hạn mức công khai/audience/slot Gemini không đổi |
+| 3 | Migration: `python -m scripts.setup_appwrite --plan --only ai_alibaba_config` (CHỈ ĐỌC) → xem kế hoạch: chỉ **1 collection mới, 4 thuộc tính, 1 index** (`kind`, `key`, `data_json`, `updated_at`; `kind_idx`), không dòng nào đụng collection cũ → rồi `python -m scripts.setup_appwrite --only ai_alibaba_config` | Owner (agent không được đọc production) | `/admin/ai` hết thông báo "chưa chạy migration"; slot/hạn mức Gemini không đổi; chưa có slot Alibaba nào |
+| 4 | Đặt khoá: Render → `fas-prod-api` → Environment → **`FAS_AI_SECRET_ALIBABA_SG_01`** = giá trị khoá (dán thủ công từ file CSV của console; không gửi qua chat, không ghi vào kho, không `.env`) → lưu | Owner | `/admin/ai` sau khi tạo slot: `secret.present = true` (chỉ hiện tên biến + vân tay, không bao giờ giá trị). Xoá/chuyển file CSV vào `C:\FanficSecrets\` **sau khi** thấy `present` |
+| 5 | Console Alibaba → trang model usage → tab Free Quota → bật **Free Quota Only** cho model canary (có hiệu lực **không tức thì**: đợi một lúc trước khi gọi) — đây mới là rào chặn phí thật; trường `free_quota_only` của ứng dụng chỉ là phép ước tính | Owner | ảnh chụp màn hình công tắc đã bật cho đúng model |
+| 6 | Cung cấp: endpoint đúng của workspace, model ID, số dư hạn mức + hạn dùng, RPM/TPM, có phải model suy luận không | Owner | (mục 12) |
+| 7 | `/admin/ai` → tạo **một** slot `alibaba-sg-01` (`provider_type=alibaba`, `secret_ref=ALIBABA_SG_01`, **TẮT**, endpoint/model thật, tầng, hạn mức + hạn dùng, trần ngày thấp, workload hẹp; `free_quota_only` chỉ bật khi bước 5 đã xong). **Không** thêm vào hồ sơ định tuyến nào | Owner/agent | slot hiện `GATE_CLOSED` |
+| 8 | Đặt `FAS_AI_ALIBABA_ENABLED=1` (giữ `FAS_AI_QWEN_LEGACY_ENABLED` chưa đặt) → khởi động lại | Owner | slot hết `GATE_CLOSED`; nút Kiểm tra mở |
+| 9 | Bấm **Kiểm tra** (probe) vài lần, tối đa | Owner/agent | xác thực OK, model được nhận, TTFT + tổng độ trễ ghi nhận, `usage` có (nếu Alibaba trả), lỗi đã làm sạch, không lộ khoá/endpoint/phản hồi thô |
+
+Nếu probe lỗi: để slot TẮT, không đổi định tuyến, đọc `last_error_category` (đã làm sạch) và đối chiếu bảng mục 4; Gemini không bị ảnh hưởng. Không cố ý làm cạn hạn
+mức hay tạo tải lớn để thử giới hạn tốc độ.
 
 ## 13. Rút lui
 

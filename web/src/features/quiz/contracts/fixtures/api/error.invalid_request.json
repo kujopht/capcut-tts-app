@@ -1,0 +1,32 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": {
+      "owner_user_id": "x",
+      "questions": [],
+      "theme_id": "neon-tactics",
+      "title": "Quiz"
+    },
+    "method": "POST",
+    "path": "/api/quiz/drafts"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "invalid_request",
+        "field_errors": [
+          {
+            "loc": [
+              "owner_user_id"
+            ],
+            "msg": "Extra inputs are not permitted",
+            "type": "extra_forbidden"
+          }
+        ],
+        "message": "Request body failed validation."
+      }
+    },
+    "status": 422
+  },
+  "response_model": "ErrorEnvelope"
+}

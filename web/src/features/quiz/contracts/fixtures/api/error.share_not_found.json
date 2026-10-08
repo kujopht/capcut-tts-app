@@ -1,0 +1,18 @@
+{
+  "request": {
+    "auth": null,
+    "body": null,
+    "method": "GET",
+    "path": "/api/quiz/shares/NoSuchShare00000"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "share_not_found",
+        "message": "Share not found."
+      }
+    },
+    "status": 404
+  },
+  "response_model": "ErrorEnvelope"
+}

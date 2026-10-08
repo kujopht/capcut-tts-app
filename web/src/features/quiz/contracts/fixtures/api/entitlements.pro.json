@@ -1,0 +1,22 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": null,
+    "method": "GET",
+    "path": "/api/quiz/me/entitlements"
+  },
+  "response": {
+    "body": {
+      "plan": "pro",
+      "pro_expires_at": null,
+      "published_limit": 50,
+      "published_used": 5,
+      "themes": [
+        "neon-tactics",
+        "arcane-academy"
+      ]
+    },
+    "status": 200
+  },
+  "response_model": "EntitlementSummary"
+}

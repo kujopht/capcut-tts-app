@@ -1,0 +1,18 @@
+{
+  "request": {
+    "auth": "Bearer <token of stranger>",
+    "body": null,
+    "method": "GET",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000001"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "draft_not_found",
+        "message": "Draft not found."
+      }
+    },
+    "status": 404
+  },
+  "response_model": "ErrorEnvelope"
+}

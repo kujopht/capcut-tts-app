@@ -1,0 +1,21 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": {
+      "expected_revision": 2
+    },
+    "method": "POST",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000002/publish"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "quota_exceeded",
+        "limit": 5,
+        "message": "Your plan allows 5 published quizzes."
+      }
+    },
+    "status": 403
+  },
+  "response_model": "ErrorEnvelope"
+}

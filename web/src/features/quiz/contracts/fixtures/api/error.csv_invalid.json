@@ -1,0 +1,36 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": {
+      "csv": "kind,prompt,options,correct,explanation,difficulty,time_limit_ms\nsingle,Mẫu CSV 1?,Một|Hai|Ba,2,Vì là hai.,easy,15000\nmultiple,Mẫu CSV 2?,A|B|C|D,1|4,,hard,\nboolean,Mẫu CSV 3?,Đúng|Sai|Không rõ,1,,,\nsingle,,A|B,1,,,\n",
+      "expected_revision": 2,
+      "strategy": "append"
+    },
+    "method": "POST",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000001/csv/commit"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "csv_invalid",
+        "csv_errors": [
+          {
+            "code": "invalid_options",
+            "column": "options",
+            "message": "boolean requires exactly 2 options.",
+            "row": 4
+          },
+          {
+            "code": "blank_required",
+            "column": "prompt",
+            "message": "prompt is required.",
+            "row": 5
+          }
+        ],
+        "message": "CSV has errors; nothing was imported."
+      }
+    },
+    "status": 422
+  },
+  "response_model": "ErrorEnvelope"
+}

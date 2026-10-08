@@ -1,0 +1,18 @@
+{
+  "request": {
+    "auth": "Bearer <token of stranger>",
+    "body": null,
+    "method": "GET",
+    "path": "/api/quiz/sessions/00000000-0000-0000-0000-00000000000c"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "session_not_found",
+        "message": "Session not found."
+      }
+    },
+    "status": 404
+  },
+  "response_model": "ErrorEnvelope"
+}

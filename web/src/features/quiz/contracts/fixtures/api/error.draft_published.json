@@ -1,0 +1,18 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": null,
+    "method": "DELETE",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000001?expected_revision=2"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "draft_published",
+        "message": "Published drafts cannot be deleted in Phase 1."
+      }
+    },
+    "status": 409
+  },
+  "response_model": "ErrorEnvelope"
+}

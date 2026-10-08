@@ -1,0 +1,38 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": null,
+    "method": "GET",
+    "path": "/api/quiz/drafts?limit=20&offset=0"
+  },
+  "response": {
+    "body": {
+      "items": [
+        {
+          "draft_id": "00000000-0000-0000-0000-000000000002",
+          "published_version": null,
+          "question_count": 2,
+          "revision": 2,
+          "share_id": null,
+          "theme_id": "neon-tactics",
+          "title": "Nhập CSV",
+          "updated_at": "2026-10-08T12:00:00.000000Z"
+        },
+        {
+          "draft_id": "00000000-0000-0000-0000-000000000001",
+          "published_version": null,
+          "question_count": 3,
+          "revision": 2,
+          "share_id": null,
+          "theme_id": "neon-tactics",
+          "title": "Quiz mẫu",
+          "updated_at": "2026-10-08T12:00:00.000000Z"
+        }
+      ],
+      "next_offset": null,
+      "total": 2
+    },
+    "status": 200
+  },
+  "response_model": "DraftList"
+}

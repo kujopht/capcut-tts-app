@@ -1,0 +1,18 @@
+{
+  "request": {
+    "auth": null,
+    "body": null,
+    "method": "GET",
+    "path": "/api/quiz/drafts"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "auth_required",
+        "message": "Sign in to continue."
+      }
+    },
+    "status": 401
+  },
+  "response_model": "ErrorEnvelope"
+}

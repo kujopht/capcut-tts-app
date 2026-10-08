@@ -1,0 +1,24 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": {
+      "expected_revision": 1,
+      "questions": [],
+      "theme_id": "neon-tactics",
+      "title": "Quiz cũ"
+    },
+    "method": "PUT",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000001"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "revision_conflict",
+        "current_revision": 2,
+        "message": "The draft changed since you loaded it. Reload and retry."
+      }
+    },
+    "status": 409
+  },
+  "response_model": "ErrorEnvelope"
+}

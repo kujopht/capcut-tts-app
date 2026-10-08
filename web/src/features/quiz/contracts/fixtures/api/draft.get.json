@@ -1,0 +1,108 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": null,
+    "method": "GET",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000001"
+  },
+  "response": {
+    "body": {
+      "created_at": "2026-10-08T12:00:00.000000Z",
+      "draft_id": "00000000-0000-0000-0000-000000000001",
+      "mode": {
+        "id": "tactical-summon",
+        "version": 1
+      },
+      "published_version": null,
+      "questions": [
+        {
+          "correct_option_ids": [
+            "00000000-0000-000c-0000-00000000000d"
+          ],
+          "difficulty": "medium",
+          "explanation": "Giải thích mẫu 1.",
+          "id": "00000000-0000-000c-0000-000000000001",
+          "kind": "single",
+          "options": [
+            {
+              "id": "00000000-0000-000c-0000-00000000000b",
+              "text": "Lam"
+            },
+            {
+              "id": "00000000-0000-000c-0000-00000000000c",
+              "text": "Đỏ"
+            },
+            {
+              "id": "00000000-0000-000c-0000-00000000000d",
+              "text": "Lục"
+            },
+            {
+              "id": "00000000-0000-000c-0000-00000000000e",
+              "text": "Vàng"
+            }
+          ],
+          "prompt": "Câu hỏi mẫu 1?",
+          "time_limit_ms": 20000
+        },
+        {
+          "correct_option_ids": [
+            "00000000-0000-000c-0000-000000000015",
+            "00000000-0000-000c-0000-000000000017"
+          ],
+          "difficulty": "medium",
+          "explanation": "Giải thích mẫu 2.",
+          "id": "00000000-0000-000c-0000-000000000002",
+          "kind": "multiple",
+          "options": [
+            {
+              "id": "00000000-0000-000c-0000-000000000015",
+              "text": "2"
+            },
+            {
+              "id": "00000000-0000-000c-0000-000000000016",
+              "text": "3"
+            },
+            {
+              "id": "00000000-0000-000c-0000-000000000017",
+              "text": "4"
+            },
+            {
+              "id": "00000000-0000-000c-0000-000000000018",
+              "text": "5"
+            }
+          ],
+          "prompt": "Câu hỏi mẫu 2?",
+          "time_limit_ms": null
+        },
+        {
+          "correct_option_ids": [
+            "00000000-0000-000c-0000-00000000001f"
+          ],
+          "difficulty": "medium",
+          "explanation": "Giải thích mẫu 3.",
+          "id": "00000000-0000-000c-0000-000000000003",
+          "kind": "boolean",
+          "options": [
+            {
+              "id": "00000000-0000-000c-0000-00000000001f",
+              "text": "Đúng"
+            },
+            {
+              "id": "00000000-0000-000c-0000-000000000020",
+              "text": "Sai"
+            }
+          ],
+          "prompt": "Câu hỏi mẫu 3?",
+          "time_limit_ms": null
+        }
+      ],
+      "revision": 2,
+      "share_id": null,
+      "theme_id": "neon-tactics",
+      "title": "Quiz mẫu",
+      "updated_at": "2026-10-08T12:00:00.000000Z"
+    },
+    "status": 200
+  },
+  "response_model": "CreatorDraft"
+}

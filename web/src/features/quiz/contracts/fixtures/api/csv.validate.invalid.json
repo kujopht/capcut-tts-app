@@ -1,0 +1,70 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": {
+      "csv": "kind,prompt,options,correct,explanation,difficulty,time_limit_ms\nsingle,Mẫu CSV 1?,Một|Hai|Ba,2,Vì là hai.,easy,15000\nmultiple,Mẫu CSV 2?,A|B|C|D,1|4,,hard,\nboolean,Mẫu CSV 3?,Đúng|Sai|Không rõ,1,,,\nsingle,,A|B,1,,,\n",
+      "strategy": "append"
+    },
+    "method": "POST",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000001/csv/validate"
+  },
+  "response": {
+    "body": {
+      "errors": [
+        {
+          "code": "invalid_options",
+          "column": "options",
+          "message": "boolean requires exactly 2 options.",
+          "row": 4
+        },
+        {
+          "code": "blank_required",
+          "column": "prompt",
+          "message": "prompt is required.",
+          "row": 5
+        }
+      ],
+      "resulting_question_count": 3,
+      "row_count": 4,
+      "rows": [
+        {
+          "correct_option_indexes": [
+            2
+          ],
+          "difficulty": "easy",
+          "explanation": "Vì là hai.",
+          "kind": "single",
+          "options": [
+            "Một",
+            "Hai",
+            "Ba"
+          ],
+          "prompt": "Mẫu CSV 1?",
+          "row": 2,
+          "time_limit_ms": 15000
+        },
+        {
+          "correct_option_indexes": [
+            1,
+            4
+          ],
+          "difficulty": "hard",
+          "explanation": "",
+          "kind": "multiple",
+          "options": [
+            "A",
+            "B",
+            "C",
+            "D"
+          ],
+          "prompt": "Mẫu CSV 2?",
+          "row": 3,
+          "time_limit_ms": null
+        }
+      ],
+      "valid": false
+    },
+    "status": 200
+  },
+  "response_model": "CsvValidationResult"
+}

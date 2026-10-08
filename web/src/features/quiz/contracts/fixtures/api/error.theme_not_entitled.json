@@ -1,0 +1,22 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": {
+      "questions": [],
+      "theme_id": "arcane-academy",
+      "title": "Quiz Pro"
+    },
+    "method": "POST",
+    "path": "/api/quiz/drafts"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "theme_not_entitled",
+        "message": "Theme 'arcane-academy' requires the Pro plan."
+      }
+    },
+    "status": 403
+  },
+  "response_model": "ErrorEnvelope"
+}

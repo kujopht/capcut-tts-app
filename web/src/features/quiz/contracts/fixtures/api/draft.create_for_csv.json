@@ -1,0 +1,30 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": {
+      "theme_id": "neon-tactics",
+      "title": "Nhập CSV"
+    },
+    "method": "POST",
+    "path": "/api/quiz/drafts"
+  },
+  "response": {
+    "body": {
+      "created_at": "2026-10-08T12:00:00.000000Z",
+      "draft_id": "00000000-0000-0000-0000-000000000002",
+      "mode": {
+        "id": "tactical-summon",
+        "version": 1
+      },
+      "published_version": null,
+      "questions": [],
+      "revision": 1,
+      "share_id": null,
+      "theme_id": "neon-tactics",
+      "title": "Nhập CSV",
+      "updated_at": "2026-10-08T12:00:00.000000Z"
+    },
+    "status": 201
+  },
+  "response_model": "CreatorDraft"
+}

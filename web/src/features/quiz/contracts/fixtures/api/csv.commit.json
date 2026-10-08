@@ -1,0 +1,87 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": {
+      "csv": "kind,prompt,options,correct,explanation,difficulty,time_limit_ms\nsingle,Mẫu CSV 1?,Một|Hai|Ba,2,Vì là hai.,easy,15000\nmultiple,Mẫu CSV 2?,A|B|C|D,1|4,,hard,\n",
+      "expected_revision": 1,
+      "strategy": "replace"
+    },
+    "method": "POST",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000002/csv/commit"
+  },
+  "response": {
+    "body": {
+      "created_at": "2026-10-08T12:00:00.000000Z",
+      "draft_id": "00000000-0000-0000-0000-000000000002",
+      "mode": {
+        "id": "tactical-summon",
+        "version": 1
+      },
+      "published_version": null,
+      "questions": [
+        {
+          "correct_option_ids": [
+            "00000000-0000-0000-0000-000000000004"
+          ],
+          "difficulty": "easy",
+          "explanation": "Vì là hai.",
+          "id": "00000000-0000-0000-0000-000000000006",
+          "kind": "single",
+          "options": [
+            {
+              "id": "00000000-0000-0000-0000-000000000003",
+              "text": "Một"
+            },
+            {
+              "id": "00000000-0000-0000-0000-000000000004",
+              "text": "Hai"
+            },
+            {
+              "id": "00000000-0000-0000-0000-000000000005",
+              "text": "Ba"
+            }
+          ],
+          "prompt": "Mẫu CSV 1?",
+          "time_limit_ms": 15000
+        },
+        {
+          "correct_option_ids": [
+            "00000000-0000-0000-0000-000000000007",
+            "00000000-0000-0000-0000-00000000000a"
+          ],
+          "difficulty": "hard",
+          "explanation": "",
+          "id": "00000000-0000-0000-0000-00000000000b",
+          "kind": "multiple",
+          "options": [
+            {
+              "id": "00000000-0000-0000-0000-000000000007",
+              "text": "A"
+            },
+            {
+              "id": "00000000-0000-0000-0000-000000000008",
+              "text": "B"
+            },
+            {
+              "id": "00000000-0000-0000-0000-000000000009",
+              "text": "C"
+            },
+            {
+              "id": "00000000-0000-0000-0000-00000000000a",
+              "text": "D"
+            }
+          ],
+          "prompt": "Mẫu CSV 2?",
+          "time_limit_ms": null
+        }
+      ],
+      "revision": 2,
+      "share_id": null,
+      "theme_id": "neon-tactics",
+      "title": "Nhập CSV",
+      "updated_at": "2026-10-08T12:00:00.000000Z"
+    },
+    "status": 200
+  },
+  "response_model": "CreatorDraft"
+}

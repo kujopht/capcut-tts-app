@@ -1,0 +1,18 @@
+{
+  "request": {
+    "auth": "Bearer <token of creator>",
+    "body": "{oops",
+    "method": "POST",
+    "path": "/api/quiz/drafts/00000000-0000-0000-0000-000000000001/publish"
+  },
+  "response": {
+    "body": {
+      "detail": {
+        "code": "invalid_json",
+        "message": "Request body is not valid JSON."
+      }
+    },
+    "status": 422
+  },
+  "response_model": "ErrorEnvelope"
+}

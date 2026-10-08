@@ -1,0 +1,1590 @@
+{
+  "$defs": {
+    "AdvanceRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_question_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Expected Question Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expected_question_revision"
+      ],
+      "title": "AdvanceRequest",
+      "type": "object"
+    },
+    "CreatorDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+          "title": "Created At",
+          "type": "string"
+        },
+        "draft_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Draft Id",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/ModeRef"
+        },
+        "published_version": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Published Version"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/DraftQuestion"
+          },
+          "maxItems": 200,
+          "title": "Questions",
+          "type": "array"
+        },
+        "revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "share_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Share Id"
+        },
+        "theme_id": {
+          "enum": [
+            "neon-tactics",
+            "arcane-academy"
+          ],
+          "title": "Theme Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "updated_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "draft_id",
+        "title",
+        "theme_id",
+        "mode",
+        "revision",
+        "questions",
+        "share_id",
+        "published_version",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "CreatorDraft",
+      "type": "object"
+    },
+    "CsvCommitRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "csv": {
+          "maxLength": 512000,
+          "minLength": 1,
+          "title": "Csv",
+          "type": "string"
+        },
+        "expected_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Expected Revision",
+          "type": "integer"
+        },
+        "strategy": {
+          "enum": [
+            "append",
+            "replace"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "csv",
+        "strategy",
+        "expected_revision"
+      ],
+      "title": "CsvCommitRequest",
+      "type": "object"
+    },
+    "CsvError": {
+      "additionalProperties": false,
+      "description": "`row` 1-based theo DONG VAT LY cua file (header = dong 1).",
+      "properties": {
+        "code": {
+          "enum": [
+            "empty_file",
+            "csv_syntax",
+            "too_many_rows",
+            "draft_capacity",
+            "missing_column",
+            "unknown_column",
+            "duplicate_column",
+            "blank_required",
+            "too_long",
+            "invalid_kind",
+            "invalid_options",
+            "invalid_correct",
+            "invalid_value"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "column": {
+          "enum": [
+            "file",
+            "header",
+            "kind",
+            "prompt",
+            "options",
+            "correct",
+            "explanation",
+            "difficulty",
+            "time_limit_ms"
+          ],
+          "title": "Column",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "row": {
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Row",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "column",
+        "code",
+        "message"
+      ],
+      "title": "CsvError",
+      "type": "object"
+    },
+    "CsvRowPreview": {
+      "additionalProperties": false,
+      "properties": {
+        "correct_option_indexes": {
+          "items": {
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Correct Option Indexes",
+          "type": "array"
+        },
+        "difficulty": {
+          "enum": [
+            "easy",
+            "medium",
+            "hard"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "explanation": {
+          "maxLength": 1000,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "single",
+            "multiple",
+            "boolean"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 2,
+          "title": "Options",
+          "type": "array"
+        },
+        "prompt": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "row": {
+          "maximum": 1000000,
+          "minimum": 2,
+          "title": "Row",
+          "type": "integer"
+        },
+        "time_limit_ms": {
+          "anyOf": [
+            {
+              "maximum": 120000,
+              "minimum": 5000,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time Limit Ms"
+        }
+      },
+      "required": [
+        "row",
+        "kind",
+        "prompt",
+        "options",
+        "correct_option_indexes",
+        "explanation",
+        "difficulty",
+        "time_limit_ms"
+      ],
+      "title": "CsvRowPreview",
+      "type": "object"
+    },
+    "CsvValidateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "csv": {
+          "maxLength": 512000,
+          "minLength": 1,
+          "title": "Csv",
+          "type": "string"
+        },
+        "strategy": {
+          "enum": [
+            "append",
+            "replace"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "csv",
+        "strategy"
+      ],
+      "title": "CsvValidateRequest",
+      "type": "object"
+    },
+    "CsvValidationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/CsvError"
+          },
+          "maxItems": 500,
+          "title": "Errors",
+          "type": "array"
+        },
+        "resulting_question_count": {
+          "minimum": 0,
+          "title": "Resulting Question Count",
+          "type": "integer"
+        },
+        "row_count": {
+          "maximum": 200,
+          "minimum": 0,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/CsvRowPreview"
+          },
+          "maxItems": 200,
+          "title": "Rows",
+          "type": "array"
+        },
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "valid",
+        "row_count",
+        "rows",
+        "errors",
+        "resulting_question_count"
+      ],
+      "title": "CsvValidationResult",
+      "type": "object"
+    },
+    "Cue": {
+      "additionalProperties": false,
+      "properties": {
+        "cue": {
+          "enum": [
+            "summon",
+            "hit-first",
+            "hit-second",
+            "miss",
+            "victory"
+          ],
+          "title": "Cue",
+          "type": "string"
+        },
+        "event_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "cue"
+      ],
+      "title": "Cue",
+      "type": "object"
+    },
+    "DraftCreateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/DraftQuestion"
+          },
+          "maxItems": 200,
+          "title": "Questions",
+          "type": "array"
+        },
+        "theme_id": {
+          "enum": [
+            "neon-tactics",
+            "arcane-academy"
+          ],
+          "title": "Theme Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "theme_id"
+      ],
+      "title": "DraftCreateRequest",
+      "type": "object"
+    },
+    "DraftList": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/DraftSummary"
+          },
+          "maxItems": 50,
+          "title": "Items",
+          "type": "array"
+        },
+        "next_offset": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Offset"
+        },
+        "total": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total",
+        "next_offset"
+      ],
+      "title": "DraftList",
+      "type": "object"
+    },
+    "DraftQuestion": {
+      "additionalProperties": false,
+      "description": "Cau hoi cua CHU SO HUU — co dap an. Chi xuat hien trong `CreatorDraft`.",
+      "properties": {
+        "correct_option_ids": {
+          "items": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Correct Option Ids",
+          "type": "array"
+        },
+        "difficulty": {
+          "enum": [
+            "easy",
+            "medium",
+            "hard"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "explanation": {
+          "maxLength": 1000,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "single",
+            "multiple",
+            "boolean"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/Option"
+          },
+          "maxItems": 8,
+          "minItems": 2,
+          "title": "Options",
+          "type": "array"
+        },
+        "prompt": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "time_limit_ms": {
+          "anyOf": [
+            {
+              "maximum": 120000,
+              "minimum": 5000,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time Limit Ms"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "prompt",
+        "options",
+        "correct_option_ids",
+        "explanation",
+        "difficulty",
+        "time_limit_ms"
+      ],
+      "title": "DraftQuestion",
+      "type": "object"
+    },
+    "DraftSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "draft_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Draft Id",
+          "type": "string"
+        },
+        "published_version": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Published Version"
+        },
+        "question_count": {
+          "maximum": 200,
+          "minimum": 0,
+          "title": "Question Count",
+          "type": "integer"
+        },
+        "revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "share_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Share Id"
+        },
+        "theme_id": {
+          "enum": [
+            "neon-tactics",
+            "arcane-academy"
+          ],
+          "title": "Theme Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "updated_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "draft_id",
+        "title",
+        "theme_id",
+        "revision",
+        "question_count",
+        "share_id",
+        "published_version",
+        "updated_at"
+      ],
+      "title": "DraftSummary",
+      "type": "object"
+    },
+    "DraftUpdateRequest": {
+      "additionalProperties": false,
+      "description": "Thay TOAN BO noi dung draft (PUT). `expected_revision` bat buoc.",
+      "properties": {
+        "expected_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Expected Revision",
+          "type": "integer"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/DraftQuestion"
+          },
+          "maxItems": 200,
+          "title": "Questions",
+          "type": "array"
+        },
+        "theme_id": {
+          "enum": [
+            "neon-tactics",
+            "arcane-academy"
+          ],
+          "title": "Theme Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "title",
+        "theme_id",
+        "questions"
+      ],
+      "title": "DraftUpdateRequest",
+      "type": "object"
+    },
+    "EntitlementSummary": {
+      "additionalProperties": false,
+      "description": "Chi de HIEN THI. Quyet dinh nam o server (`server/quiz/entitlements.py`).",
+      "properties": {
+        "plan": {
+          "enum": [
+            "free",
+            "pro"
+          ],
+          "title": "Plan",
+          "type": "string"
+        },
+        "pro_expires_at": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pro Expires At"
+        },
+        "published_limit": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Published Limit",
+          "type": "integer"
+        },
+        "published_used": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Published Used",
+          "type": "integer"
+        },
+        "themes": {
+          "items": {
+            "enum": [
+              "neon-tactics",
+              "arcane-academy"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Themes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "plan",
+        "published_limit",
+        "published_used",
+        "themes",
+        "pro_expires_at"
+      ],
+      "title": "EntitlementSummary",
+      "type": "object"
+    },
+    "ErrorBody": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "auth_required",
+            "identity_unavailable",
+            "invalid_request",
+            "invalid_json",
+            "payload_too_large",
+            "draft_not_found",
+            "share_not_found",
+            "session_not_found",
+            "revision_conflict",
+            "draft_published",
+            "draft_empty",
+            "publish_conflict",
+            "session_conflict",
+            "quota_exceeded",
+            "theme_not_entitled",
+            "csv_invalid",
+            "store_unavailable"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "csv_errors": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CsvError"
+              },
+              "maxItems": 500,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Csv Errors"
+        },
+        "current_revision": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Revision"
+        },
+        "field_errors": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FieldError"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field Errors"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "message": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ErrorBody",
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "additionalProperties": false,
+      "description": "Moi loi quiz: `{\"detail\": ErrorBody}` — cung dang `HTTPException(detail=dict)` cua host.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/ErrorBody"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "FieldError": {
+      "additionalProperties": false,
+      "properties": {
+        "loc": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "maxItems": 16,
+          "title": "Loc",
+          "type": "array"
+        },
+        "msg": {
+          "maxLength": 300,
+          "title": "Msg",
+          "type": "string"
+        },
+        "type": {
+          "maxLength": 80,
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "loc",
+        "msg",
+        "type"
+      ],
+      "title": "FieldError",
+      "type": "object"
+    },
+    "LastAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "correct": {
+          "title": "Correct",
+          "type": "boolean"
+        },
+        "selected_option_ids": {
+          "items": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Selected Option Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "attempt",
+        "correct",
+        "selected_option_ids"
+      ],
+      "title": "LastAttempt",
+      "type": "object"
+    },
+    "ModeRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "const": "tactical-summon",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "ModeRef",
+      "type": "object"
+    },
+    "Option": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "Option",
+      "type": "object"
+    },
+    "ParticipantView": {
+      "additionalProperties": false,
+      "description": "Phep chieu cho NGUOI CHOI. Khong bao gio chua dap an truoc reveal.",
+      "properties": {
+        "attempt_limit": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Attempt Limit",
+          "type": "integer"
+        },
+        "attempts_remaining": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Attempts Remaining",
+          "type": "integer"
+        },
+        "attempts_used": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Attempts Used",
+          "type": "integer"
+        },
+        "can_submit": {
+          "title": "Can Submit",
+          "type": "boolean"
+        },
+        "created_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+          "title": "Created At",
+          "type": "string"
+        },
+        "cue": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deadline_at": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Deadline At"
+        },
+        "eliminated_option_ids": {
+          "items": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Eliminated Option Ids",
+          "type": "array"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Finished At"
+        },
+        "last_attempt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LastAttempt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_score": {
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Max Score",
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/ModeRef"
+        },
+        "phase": {
+          "enum": [
+            "answering",
+            "revealed",
+            "finished"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "question": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublicQuestion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Question Count",
+          "type": "integer"
+        },
+        "question_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Question Revision",
+          "type": "integer"
+        },
+        "results": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/QuestionResult"
+              },
+              "maxItems": 200,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Results"
+        },
+        "reveal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reveal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "score": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "session_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "share_id": {
+          "pattern": "^[A-Za-z0-9]{16}$",
+          "title": "Share Id",
+          "type": "string"
+        },
+        "state_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "State Revision",
+          "type": "integer"
+        },
+        "theme_id": {
+          "enum": [
+            "neon-tactics",
+            "arcane-academy"
+          ],
+          "title": "Theme Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "share_id",
+        "version",
+        "title",
+        "theme_id",
+        "mode",
+        "phase",
+        "state_revision",
+        "question_revision",
+        "question_count",
+        "question",
+        "attempt_limit",
+        "attempts_used",
+        "attempts_remaining",
+        "can_submit",
+        "eliminated_option_ids",
+        "last_attempt",
+        "reveal",
+        "score",
+        "max_score",
+        "deadline_at",
+        "cue",
+        "results",
+        "created_at",
+        "finished_at"
+      ],
+      "title": "ParticipantView",
+      "type": "object"
+    },
+    "PublicQuestion": {
+      "additionalProperties": false,
+      "description": "Cau hoi KHONG co dap an — dung cho snapshot cong khai va view nguoi choi.",
+      "properties": {
+        "id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "single",
+            "multiple",
+            "boolean"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/Option"
+          },
+          "maxItems": 8,
+          "minItems": 2,
+          "title": "Options",
+          "type": "array"
+        },
+        "prompt": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "time_limit_ms": {
+          "anyOf": [
+            {
+              "maximum": 120000,
+              "minimum": 5000,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time Limit Ms"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "prompt",
+        "options",
+        "time_limit_ms"
+      ],
+      "title": "PublicQuestion",
+      "type": "object"
+    },
+    "PublicQuizSnapshot": {
+      "additionalProperties": false,
+      "description": "Snapshot BAT BIEN cua mot version — public, KHONG co dap an/giai thich.",
+      "properties": {
+        "content_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/ModeRef"
+        },
+        "published_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+          "title": "Published At",
+          "type": "string"
+        },
+        "question_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Question Count",
+          "type": "integer"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/PublicQuestion"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Questions",
+          "type": "array"
+        },
+        "share_id": {
+          "pattern": "^[A-Za-z0-9]{16}$",
+          "title": "Share Id",
+          "type": "string"
+        },
+        "theme_id": {
+          "enum": [
+            "neon-tactics",
+            "arcane-academy"
+          ],
+          "title": "Theme Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "contract_version",
+        "share_id",
+        "version",
+        "title",
+        "theme_id",
+        "mode",
+        "question_count",
+        "questions",
+        "content_hash",
+        "published_at"
+      ],
+      "title": "PublicQuizSnapshot",
+      "type": "object"
+    },
+    "PublishRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Expected Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "expected_revision"
+      ],
+      "title": "PublishRequest",
+      "type": "object"
+    },
+    "PublishResult": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "draft_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Draft Revision",
+          "type": "integer"
+        },
+        "published_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$",
+          "title": "Published At",
+          "type": "string"
+        },
+        "question_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Question Count",
+          "type": "integer"
+        },
+        "replayed": {
+          "title": "Replayed",
+          "type": "boolean"
+        },
+        "share_id": {
+          "pattern": "^[A-Za-z0-9]{16}$",
+          "title": "Share Id",
+          "type": "string"
+        },
+        "version": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "share_id",
+        "version",
+        "draft_revision",
+        "content_hash",
+        "question_count",
+        "published_at",
+        "replayed"
+      ],
+      "title": "PublishResult",
+      "type": "object"
+    },
+    "QuestionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts_used": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Attempts Used",
+          "type": "integer"
+        },
+        "correct": {
+          "title": "Correct",
+          "type": "boolean"
+        },
+        "question_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Question Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question_id",
+        "correct",
+        "attempts_used"
+      ],
+      "title": "QuestionResult",
+      "type": "object"
+    },
+    "Receipt": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "correct": {
+          "title": "Correct",
+          "type": "boolean"
+        },
+        "question_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Question Id",
+          "type": "string"
+        },
+        "receipt_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Receipt Id",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Request Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "receipt_id",
+        "request_id",
+        "question_id",
+        "attempt",
+        "correct"
+      ],
+      "title": "Receipt",
+      "type": "object"
+    },
+    "Reveal": {
+      "additionalProperties": false,
+      "description": "Chi co khi cau hien tai da dong (`phase == \"revealed\"`).",
+      "properties": {
+        "correct": {
+          "title": "Correct",
+          "type": "boolean"
+        },
+        "correct_option_ids": {
+          "items": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Correct Option Ids",
+          "type": "array"
+        },
+        "explanation": {
+          "maxLength": 1000,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "question_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Question Id",
+          "type": "string"
+        },
+        "timed_out": {
+          "title": "Timed Out",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "question_id",
+        "correct_option_ids",
+        "explanation",
+        "correct",
+        "timed_out"
+      ],
+      "title": "Reveal",
+      "type": "object"
+    },
+    "SubmitRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_attempt": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Expected Attempt",
+          "type": "integer"
+        },
+        "expected_question_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Expected Question Revision",
+          "type": "integer"
+        },
+        "question_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Question Id",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "selected_option_ids": {
+          "items": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Selected Option Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "question_id",
+        "selected_option_ids",
+        "expected_question_revision",
+        "expected_attempt"
+      ],
+      "title": "SubmitRequest",
+      "type": "object"
+    },
+    "SubmitResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "accepted",
+            "duplicate",
+            "rejected"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "late",
+                "not_answering",
+                "wrong_revision",
+                "attempt_mismatch",
+                "attempt_exhausted",
+                "invalid_option",
+                "payload_conflict"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Receipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "view": {
+          "$ref": "#/$defs/ParticipantView"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason",
+        "receipt",
+        "view"
+      ],
+      "title": "SubmitResponse",
+      "type": "object"
+    }
+  },
+  "$id": "https://fanfic.world/schemas/quiz-api/1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fanfic.world quiz API (Phase 1)",
+  "x-contract-version": "1.0.0",
+  "x-source": "server/quiz/contracts.py"
+}

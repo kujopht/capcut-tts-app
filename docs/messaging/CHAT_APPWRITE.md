@@ -207,6 +207,8 @@ Rào `guard.py` (fail-closed): chỉ **IP loopback** (không tên miền nào, k
 
 ## Phát hành production (CHƯA làm gì — chủ dự án chạy từng bước, sau khi duyệt)
 
+**Runbook từng lệnh (cổng backup, deploy, schema, canary, smoke, rollback): [`CHAT_CANARY_RUNBOOK.md`](CHAT_CANARY_RUNBOOK.md).**
+
 **Phụ thuộc:** #229 (Social Play V1) vào `main` trước (nó mang định nghĩa `user_blocks` chính tắc + sửa 5xx→503 của `GET /v1/account`), rồi PR Chat này. Không có #229 thì một lần Appwrite 5xx cho `GET /v1/account` bị ánh xạ thành 401 và luồng chat tự dừng tới khi tải lại trang.
 
 ### Bước 0 — schema (chỉ THÊM bảng; cờ vẫn TẮT)

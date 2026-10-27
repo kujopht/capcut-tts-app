@@ -1,0 +1,3 @@
+# Heroku Python buildpack chi nhan requirements.txt o root.
+# Backend thuc te o server/requirements.txt, giu nguyen file do.
+-r server/requirements.txt

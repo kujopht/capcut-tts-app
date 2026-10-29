@@ -32,6 +32,7 @@ export interface ChuongMucLuc {
   char_count: number;
   has_audio?: boolean;
   audio_outdated?: boolean;
+  locked?: boolean;
 }
 
 /** Tim/dao chi dang hien khi muc luc dai hon chung nay chuong. */
@@ -169,11 +170,19 @@ export function ChapterList({
                     ) : xong ? (
                       <span className="chapter-state is-done">✓ Đã đọc</span>
                     ) : null}
+                    {chapter.locked ? (
+                      <span className="chapter-state">🔒 Cần đăng nhập</span>
+                    ) : null}
                     <span>{formatNumber(chapter.char_count)} ký tự</span>
                   </span>
                 </span>
 
                 <span className="list-actions">
+                  {chapter.locked ? (
+                    <Link className="btn btn-sm btn-outline" href="/login" prefetch={false}>
+                      🔒 Đăng nhập để xem
+                    </Link>
+                  ) : (
                   <Link
                     className="btn btn-sm btn-ghost"
                     href={`/chapters/${chapter.chapter_id}${dang ? "?mode=read&resume=1" : ""}`}
@@ -207,6 +216,7 @@ export function ChapterList({
                     trong mot muc luc thi la nhieu, va trong nhu mot nut bi khoa.
                     Vang mat nut "Nghe" da noi dung dieu do.
                   */}
+                  )}
                 </span>
               </li>
             );

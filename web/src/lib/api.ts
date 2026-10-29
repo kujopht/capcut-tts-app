@@ -336,6 +336,12 @@ export interface Novel {
   state: PublishState;
   tags: string[];
   /**
+   * So chuong/tap moi nguoi deu xem duoc; chuong sau so nay can dang nhap.
+   * `null` (hoac vang mat) = truyen khong khoa tap nao. Tag ky thuat
+   * `gate:login-after-N` cua backend da bi loc khoi `tags` o tren.
+   */
+  login_gate_after?: number | null;
+  /**
    * ID fandom da duoc backend doi chieu thanh cong. Giu ID thay vi ten tu do
    * de bo loc/discovery khong bi tach thanh nhieu ban ghi do khac chinh ta.
    */
@@ -400,6 +406,8 @@ export interface Chapter {
    * Tuy chon de client cu van bien dich duoc.
    */
   audio_outdated?: boolean;
+  /** Tap bi khoa voi khach an danh (can dang nhap). Chi co trong muc luc. */
+  locked?: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -1377,6 +1377,11 @@ def _novel_out(novel: Novel, has_audio: Optional[bool] = None) -> Dict[str, Any]
         for t in tags
     )
     out["content_mode"] = "audio_only" if is_legacy_audio else "readable"
+    out["login_gate_after"] = _login_gate_after(novel)
+    # An tag ky thuat khoi API public: no chi de backend hieu, khong phai
+    # the loai de doc gia loc hay hien len trang truyen.
+    out["tags"] = [t for t in tags
+                   if not (isinstance(t, str) and t.startswith("gate:"))]
     return out
 
 
@@ -1627,6 +1632,30 @@ def _may_read(novel: Novel, viewer: Optional[Profile]) -> bool:
     return viewer is not None and viewer.user_id == novel.owner_id
 
 
+def _login_gate_after(novel: Optional[Novel]) -> Optional[int]:
+    """So tap moi nguoi deu xem duoc, doc tu tag `gate:login-after-N`.
+
+    KHONG them cot moi vao bang novels (doi schema tren production): gate
+    song trong `tags` san co, backend boc ra va GIU KHOI API public (xem
+    `_novel_out`). Tag khong co hoac sai dinh dang = khong khoa tap nao.
+    """
+    if novel is None:
+        return None
+    for tag in (novel.tags or []):
+        if isinstance(tag, str) and tag.startswith("gate:login-after-"):
+            try:
+                return int(tag.rsplit("-", 1)[1])
+            except ValueError:
+                return None
+    return None
+
+
+def _chapter_locked(chapter: Chapter, novel: Optional[Novel]) -> bool:
+    """Tap co nam sau nguong gate khong (chi co y nghia khi truyen da public)."""
+    gate = _login_gate_after(novel)
+    return gate is not None and chapter.order_index > gate
+
+
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:
     """
     Doc moc thoi gian ISO, tra None neu khong doc duoc.
@@ -1713,12 +1742,14 @@ def _with_job_settings(owner_id: str,
     return out
 
 
-def _chapter_row(chapter: Chapter, stamp: Optional[AudioStamp]) -> Dict[str, Any]:
+def _chapter_row(chapter: Chapter, stamp: Optional[AudioStamp],
+                   locked: bool = False) -> Dict[str, Any]:
     """Mot dong trong danh sach chuong: du de ve badge, khong kem noi dung."""
     return {
         **chapter.to_dict(include_content=False),
         "has_audio": stamp is not None,
         "audio_outdated": _audio_outdated(chapter, stamp),
+        "locked": locked,
     }
 
 
@@ -1742,7 +1773,8 @@ def get_novel(novel_id: str,
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
     # 404 chu khong phai 403: nguoi la khong can biet truyen nhap nay ton tai.
-    if not _may_read(novel, _optional_harvester_or_user(authorization)):
+    viewer = _optional_harvester_or_user(authorization)
+    if not _may_read(novel, viewer):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tiểu thuyết.")
 
     # Filter out archived chapters (e.g. author announcements) from reader TOC/navigation
@@ -1751,7 +1783,10 @@ def get_novel(novel_id: str,
         novel.owner_id, store.audio_by_chapter([c.chapter_id for c in chapters]))
     ra: Dict[str, Any] = {
         "novel": _novel_out(novel),
-        "chapters": [_chapter_row(c, stamps.get(c.chapter_id)) for c in chapters],
+        "chapters": [_chapter_row(c, stamps.get(c.chapter_id),
+                                   locked=_chapter_locked(c, novel)
+                                   and viewer is None)
+                     for c in chapters],
     }
     # Trang thai theo doi ghep vao CUNG lan goi nay, chi voi truyen DA XUAT BAN
     # (ban nhap khong theo doi duoc — xem `SocialService.follow_story`).
@@ -2238,6 +2273,10 @@ def get_chapter(chapter_id: str,
     """
     chapter, novel = _chapter_with_novel_or_404(chapter_id)
     viewer = _optional_harvester_or_user(authorization)
+    if novel is not None and _chapter_locked(chapter, novel) and viewer is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Tập này cần đăng nhập để xem. Vui lòng đăng nhập rồi thử lại.")
     if not _can_read_chapter(chapter, novel, viewer):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
 
@@ -2270,6 +2309,10 @@ def _chapter_with_novel_or_404(chapter_id: str) -> Tuple[Chapter, Optional[Novel
 def _can_read_chapter(chapter: Chapter, novel: Optional[Novel],
                       viewer: Optional[Profile]) -> bool:
     if novel is not None:
+        if _chapter_locked(chapter, novel):
+            # Tap khoa: truyen co public cung khong mo cho khach an danh —
+            # chi nguoi DA DANG NHAP (bat ky ai, khong rieng chu so huu).
+            return viewer is not None
         return _may_read(novel, viewer)
     # Chuong mo coi (khong co truyen cha) khong sinh ra tu duong chay nao —
     # xem docs/HANDOFF.md muc "Xu ly mo coi". Khong xac minh duoc trang thai
@@ -2302,6 +2345,10 @@ def get_chapter_transcript(
     # nay dung chung `_chapter_with_novel_or_404` chinh de khong lech nhau ve
     # "ai xem duoc gi"; de lech o buoc phan giai danh tinh thi cai y do mat.
     viewer = _optional_harvester_or_user(authorization)
+    if novel is not None and _chapter_locked(chapter, novel) and viewer is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Tập này cần đăng nhập để xem. Vui lòng đăng nhập rồi thử lại.")
     if not _can_read_chapter(chapter, novel, viewer):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
 
@@ -3719,6 +3766,13 @@ def _may_listen(chapter_id: str, authorization: Optional[str]) -> None:
         novel = store.get_novel(chapter.novel_id)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    if _chapter_locked(chapter, novel):
+        viewer = _optional_harvester_or_user(authorization)
+        if viewer is None:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Tập này cần đăng nhập để nghe. Vui lòng đăng nhập rồi thử lại.")
 
     if novel.state == PublishState.PUBLISHED:
         return

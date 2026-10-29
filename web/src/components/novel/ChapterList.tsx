@@ -183,6 +183,7 @@ export function ChapterList({
                       🔒 Đăng nhập để xem
                     </Link>
                   ) : (
+                  <>
                   <Link
                     className="btn btn-sm btn-ghost"
                     href={`/chapters/${chapter.chapter_id}${dang ? "?mode=read&resume=1" : ""}`}
@@ -216,6 +217,7 @@ export function ChapterList({
                     trong mot muc luc thi la nhieu, va trong nhu mot nut bi khoa.
                     Vang mat nut "Nghe" da noi dung dieu do.
                   */}
+                  </>
                   )}
                 </span>
               </li>

@@ -87,6 +87,7 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
       { href: "/admin/assets", nhan: "Bìa & Hero 16:9", icon: IconSparkles },
       { href: "/admin/posts", nhan: "Bài đăng", icon: IconMegaphone },
       { href: "/admin/comments", nhan: "Bình luận", icon: IconFeather },
+      { href: "/admin/scraper", nhan: "Quét truyện", icon: IconBook, vaiToiThieu: "admin" },
     ],
   },
   {
@@ -108,15 +109,6 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
     ],
   },
   {
-    nhom: "Truyện chữ",
-    muc: [
-      {
-        href: "/admin/scraper", nhan: "Quét truyện",
-        icon: IconBook, vaiToiThieu: "admin",
-      },
-    ],
-  },
-  {
     nhom: "Moderation",
     muc: [
       { href: "/admin/reports", nhan: "Báo cáo", icon: IconShield },
@@ -131,11 +123,21 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
       { href: "/admin/features", nhan: "Features", icon: IconSliders },
     ],
   },
-  { muc: [{ href: "/admin/analytics", nhan: "Analytics", icon: IconChart, vaiToiThieu: "admin" }] },
-  { muc: [{ href: "/admin/ai-credits", nhan: "AI / Credits", icon: IconSparkles, vaiToiThieu: "admin" }] },
-  { muc: [{ href: "/admin/ai", nhan: "AI Control Plane", icon: IconBulb, vaiToiThieu: "admin" }] },
-  { muc: [{ href: "/admin/system", nhan: "System", icon: IconGear, vaiToiThieu: "owner" }] },
-  { muc: [{ href: "/admin/audit-log", nhan: "Audit Log", icon: IconHistory, vaiToiThieu: "admin" }] },
+  {
+    nhom: "AI",
+    muc: [
+      { href: "/admin/ai-credits", nhan: "AI / Credits", icon: IconSparkles, vaiToiThieu: "admin" },
+      { href: "/admin/ai", nhan: "AI Control Plane", icon: IconBulb, vaiToiThieu: "admin" },
+    ],
+  },
+  {
+    nhom: "Hệ thống",
+    muc: [
+      { href: "/admin/analytics", nhan: "Analytics", icon: IconChart, vaiToiThieu: "admin" },
+      { href: "/admin/system", nhan: "System", icon: IconGear, vaiToiThieu: "owner" },
+      { href: "/admin/audit-log", nhan: "Audit Log", icon: IconHistory, vaiToiThieu: "admin" },
+    ],
+  },
 ];
 
 /** Vai tro co du cao de thay mot muc doi hoi `vaiToiThieu`? OWNER > ADMIN >

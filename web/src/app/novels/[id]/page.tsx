@@ -369,6 +369,12 @@ export default async function NovelDetailPage({
             action={<OwnerAddChapterAction ownerId={novel.owner_id} />}
           />
         ) : (
+          <>
+          {novel.login_gate_after != null ? (
+            <p className="hint">
+              Từ chương thứ {novel.login_gate_after + 1} trở đi cần đăng nhập để xem và nghe.
+            </p>
+          ) : null}
           <ChapterList
             novelId={novel.novel_id}
             chapters={chapters.map((c) => ({
@@ -377,8 +383,10 @@ export default async function NovelDetailPage({
               char_count: c.char_count,
               has_audio: c.has_audio,
               audio_outdated: c.audio_outdated,
+              locked: c.locked,
             }))}
           />
+          </>
         )}
       </section>
     </div>

@@ -106,6 +106,7 @@ export default async function ChapterPage({
     audio_outdated?: boolean;
   } | null = null;
   let missing = false;
+  let needsLogin = false;
   let errorMsg = "";
 
   try {
@@ -113,6 +114,8 @@ export default async function ChapterPage({
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       missing = true;
+    } else if (err instanceof ApiError && err.status === 403) {
+      needsLogin = true;
     } else {
       errorMsg = errorMessage(err);
     }
@@ -127,6 +130,22 @@ export default async function ChapterPage({
           action={
             <Link className="btn btn-primary" href="/library" prefetch={false}>
               Về Thư viện
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (needsLogin) {
+    return (
+      <div className="page">
+        <EmptyState
+          icon="🔒"
+          title="Tập này cần đăng nhập"
+          action={
+            <Link className="btn btn-primary" href="/login" prefetch={false}>
+              Đăng nhập
             </Link>
           }
         />

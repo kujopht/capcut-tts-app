@@ -99,11 +99,11 @@ test("7. AiLauncher: z-index 56, bottom offset, dịch trái theo .chat-dock (F1
   assert.match(launcherTsx, /if \(open\) return null;/, "F1: launcher phải tự ẩn khi panel đang mở, không đè lên góc panel");
 });
 
-test("8. AiPanel neo phải z-index 56, kích thước 380px x min(600px, 100dvh-160px), và tự dịch trái theo .chat-dock", () => {
+test("8. AiPanel neo phải z-index 56, kích thước 380px x min(520px, 100dvh-280px), và tự dịch trái theo .chat-dock", () => {
   const css = read("components/ai/ai.css");
   const khoiPanel = css.match(/\.ai-panel \{[\s\S]*?\n\}/)?.[0] ?? "";
   assert.match(khoiPanel, /width:\s*380px/);
-  assert.match(khoiPanel, /height:\s*min\(600px,\s*calc\(100dvh - 160px\)\)/);
+  assert.match(khoiPanel, /height:\s*min\(520px,\s*calc\(100dvh - 280px\)\)/);
   assert.match(khoiPanel, /z-index:\s*56/);
   const panelTsx = read("components/ai/AiPanel.tsx");
   assert.match(panelTsx, /useChatDockOffset/);

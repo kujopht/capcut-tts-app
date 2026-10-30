@@ -33,6 +33,7 @@ export interface ChuongMucLuc {
   has_audio?: boolean;
   audio_outdated?: boolean;
   locked?: boolean;
+  premium_locked?: boolean;
 }
 
 /** Tim/dao chi dang hien khi muc luc dai hon chung nay chuong. */
@@ -172,6 +173,8 @@ export function ChapterList({
                     ) : null}
                     {chapter.locked ? (
                       <span className="chapter-state">🔒 Cần đăng nhập</span>
+                    ) : chapter.premium_locked ? (
+                      <span className="chapter-state">⭐ Cần Premium</span>
                     ) : null}
                     <span>{formatNumber(chapter.char_count)} ký tự</span>
                   </span>
@@ -181,6 +184,10 @@ export function ChapterList({
                   {chapter.locked ? (
                     <Link className="btn btn-sm btn-outline" href="/login" prefetch={false}>
                       🔒 Đăng nhập để xem
+                    </Link>
+                  ) : chapter.premium_locked ? (
+                    <Link className="btn btn-sm btn-outline" href="/premium" prefetch={false}>
+                      ⭐ Xem với Premium
                     </Link>
                   ) : (
                   <>

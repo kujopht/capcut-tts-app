@@ -69,6 +69,10 @@ export const HO_ENDPOINT = [
   "notifications",
   "novels",
   "posts",
+  // Premium (cap theo tap, gate `gate:premium-after-N`) — trang thai cua
+  // chinh chu + kich hoat ULTRA cho tai khoan da xac minh Gmail:
+  // `GET /api/premium/status`, `POST /api/premium/activate`.
+  "premium",
   // V4 visual completion, Phan B — con tro CA NHAN "tiep tuc doc/nghe". Ho
   // RIENG voi `listens` co y: `listens` la UY TIN CONG KHAI cua tac gia,
   // con day la tien ich rieng tu, khac hoan toan quy tac va doi tuong doc.

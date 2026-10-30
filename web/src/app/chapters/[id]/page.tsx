@@ -107,6 +107,7 @@ export default async function ChapterPage({
   } | null = null;
   let missing = false;
   let needsLogin = false;
+  let needsPremium = false;
   let errorMsg = "";
 
   try {
@@ -115,7 +116,13 @@ export default async function ChapterPage({
     if (err instanceof ApiError && err.status === 404) {
       missing = true;
     } else if (err instanceof ApiError && err.status === 403) {
-      needsLogin = true;
+      // Backend tra 403 voi detail chua "Premium" cho tap khoa premium,
+      // "đăng nhập" cho tap khoa login — tach de hien dung nut CTA.
+      if (err.message.includes("Premium")) {
+        needsPremium = true;
+      } else {
+        needsLogin = true;
+      }
     } else {
       errorMsg = errorMessage(err);
     }
@@ -146,6 +153,22 @@ export default async function ChapterPage({
           action={
             <Link className="btn btn-primary" href="/login" prefetch={false}>
               Đăng nhập
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (needsPremium) {
+    return (
+      <div className="page">
+        <EmptyState
+          icon="⭐"
+          title="Tập này cần Premium"
+          action={
+            <Link className="btn btn-primary" href="/premium" prefetch={false}>
+              Xem gói Premium
             </Link>
           }
         />

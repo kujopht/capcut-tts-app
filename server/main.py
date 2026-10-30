@@ -152,6 +152,7 @@ from server.domain import (
     PublishState,
     RightsBasis,
     StorageTier,
+    Tier,
     TtsJob,
     job_fingerprint,
     now_iso,
@@ -1156,6 +1157,44 @@ def me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return {"profile": _ho_so_tra_ve(profile)}
 
 
+@app.get("/api/premium/status")
+def premium_status(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Trang thai premium cua chinh chu: tier + email da xac minh chua.
+
+    `email_verified` doc TRUC TIEP tu Appwrite Users API moi lan goi (cung
+    quy uoc voi `AccountStatus`), khong copy vao profiles — nen trang
+    /premium luon hien dung trang thai xac minh hien tai.
+    """
+    st = identity.account_status(profile.user_id)
+    return {
+        "tier": profile.tier.value,
+        "email": profile.email,
+        "email_verified": bool(st and st.email_verified),
+    }
+
+
+@app.post("/api/premium/activate")
+def premium_activate(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Kich hoat Premium (tier ULTRA) cho tai khoan da xac minh Gmail.
+
+    Giai doan dau: mien phi cho tai khoan dang ky bang Google (Appwrite
+    danh dau email cua OAuth Google la da xac minh) hoac da xac minh Gmail.
+    Tai khoan chua xac minh nhan 403 — trang /premium huong dan tiep.
+    """
+    if profile.tier in (Tier.LISTENER_PRO, Tier.ULTRA):
+        return {"tier": profile.tier.value, "already": True}
+    st = identity.account_status(profile.user_id)
+    if not (st and st.email_verified):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Cần xác minh Gmail trước khi kích hoạt Premium. "
+            "Đăng ký/đăng nhập bằng Google để xác minh ngay, hoặc kiểm tra "
+            "mail xác minh trong hộp thư của bạn.")
+    profile.tier = Tier.ULTRA
+    identity.save_profile(profile)
+    return {"tier": Tier.ULTRA.value, "already": False}
+
+
 @app.post("/api/auth/logout")
 def logout(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     """
@@ -1378,6 +1417,7 @@ def _novel_out(novel: Novel, has_audio: Optional[bool] = None) -> Dict[str, Any]
     )
     out["content_mode"] = "audio_only" if is_legacy_audio else "readable"
     out["login_gate_after"] = _login_gate_after(novel)
+    out["premium_gate_after"] = _premium_gate_after(novel)
     # An tag ky thuat khoi API public: no chi de backend hieu, khong phai
     # the loai de doc gia loc hay hien len trang truyen.
     out["tags"] = [t for t in tags
@@ -1656,6 +1696,46 @@ def _chapter_locked(chapter: Chapter, novel: Optional[Novel]) -> bool:
     return gate is not None and chapter.order_index > gate
 
 
+def _premium_gate_after(novel: Optional[Novel]) -> Optional[int]:
+    """So tap mien phi, doc tu tag `gate:premium-after-N`.
+
+    Cung quy uoc voi `_login_gate_after`: gate song trong `tags` san co,
+    khong doi schema bang novels; `_novel_out` loc tag `gate:*` khoi API
+    public. Tag khong co hoac sai dinh dang = khong khoa tap nao.
+    """
+    if novel is None:
+        return None
+    for tag in (novel.tags or []):
+        if isinstance(tag, str) and tag.startswith("gate:premium-after-"):
+            try:
+                return int(tag.rsplit("-", 1)[1])
+            except ValueError:
+                return None
+    return None
+
+
+def _la_premium(viewer: Optional[Profile], novel: Optional[Novel]) -> bool:
+    """Viewer co duoc mo khoa premium khong.
+
+    Mo khoa khi: tier nghe (LISTENER_PRO hoac ULTRA — CREATOR_PRO la goi
+    danh cho sang tac, khong mo khoa doc/nghe), hoac la chu so huu truyen
+    (harvester co user_id == owner nen cung duoc mien theo nhanh nay).
+    """
+    if viewer is None or novel is None:
+        return False
+    if viewer.user_id == novel.owner_id:
+        return True
+    return viewer.tier in (Tier.LISTENER_PRO, Tier.ULTRA)
+
+
+def _chapter_premium_locked(chapter: Chapter, novel: Optional[Novel],
+                            viewer: Optional[Profile]) -> bool:
+    """Tap co nam sau nguong premium va viewer khong co premium khong."""
+    gate = _premium_gate_after(novel)
+    return gate is not None and chapter.order_index > gate \
+        and not _la_premium(viewer, novel)
+
+
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:
     """
     Doc moc thoi gian ISO, tra None neu khong doc duoc.
@@ -1743,13 +1823,15 @@ def _with_job_settings(owner_id: str,
 
 
 def _chapter_row(chapter: Chapter, stamp: Optional[AudioStamp],
-                   locked: bool = False) -> Dict[str, Any]:
+                   locked: bool = False,
+                   premium_locked: bool = False) -> Dict[str, Any]:
     """Mot dong trong danh sach chuong: du de ve badge, khong kem noi dung."""
     return {
         **chapter.to_dict(include_content=False),
         "has_audio": stamp is not None,
         "audio_outdated": _audio_outdated(chapter, stamp),
         "locked": locked,
+        "premium_locked": premium_locked,
     }
 
 
@@ -1785,7 +1867,9 @@ def get_novel(novel_id: str,
         "novel": _novel_out(novel),
         "chapters": [_chapter_row(c, stamps.get(c.chapter_id),
                                    locked=_chapter_locked(c, novel)
-                                   and viewer is None)
+                                   and viewer is None,
+                                   premium_locked=_chapter_premium_locked(
+                                       c, novel, viewer))
                      for c in chapters],
     }
     # Trang thai theo doi ghep vao CUNG lan goi nay, chi voi truyen DA XUAT BAN
@@ -2277,6 +2361,10 @@ def get_chapter(chapter_id: str,
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Tập này cần đăng nhập để xem. Vui lòng đăng nhập rồi thử lại.")
+    if novel is not None and _chapter_premium_locked(chapter, novel, viewer):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Tập này cần Premium để xem. Vui lòng nâng cấp Premium rồi thử lại.")
     if not _can_read_chapter(chapter, novel, viewer):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
 
@@ -2349,6 +2437,10 @@ def get_chapter_transcript(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Tập này cần đăng nhập để xem. Vui lòng đăng nhập rồi thử lại.")
+    if novel is not None and _chapter_premium_locked(chapter, novel, viewer):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Tập này cần Premium để xem. Vui lòng nâng cấp Premium rồi thử lại.")
     if not _can_read_chapter(chapter, novel, viewer):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
 
@@ -3767,12 +3859,15 @@ def _may_listen(chapter_id: str, authorization: Optional[str]) -> None:
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
-    if _chapter_locked(chapter, novel):
-        viewer = _optional_harvester_or_user(authorization)
-        if viewer is None:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "Tập này cần đăng nhập để nghe. Vui lòng đăng nhập rồi thử lại.")
+    viewer = _optional_harvester_or_user(authorization)
+    if _chapter_locked(chapter, novel) and viewer is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Tập này cần đăng nhập để nghe. Vui lòng đăng nhập rồi thử lại.")
+    if _chapter_premium_locked(chapter, novel, viewer):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Tập này cần Premium để nghe. Vui lòng nâng cấp Premium rồi thử lại.")
 
     if novel.state == PublishState.PUBLISHED:
         return

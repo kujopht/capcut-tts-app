@@ -342,6 +342,12 @@ export interface Novel {
    */
   login_gate_after?: number | null;
   /**
+   * So chuong/tap mien phi; chuong sau so nay can Premium. `null` (hoac
+   * vang mat) = truyen khong khoa premium tap nao. Tag ky thuat
+   * `gate:premium-after-N` cua backend da bi loc khoi `tags` o tren.
+   */
+  premium_gate_after?: number | null;
+  /**
    * ID fandom da duoc backend doi chieu thanh cong. Giu ID thay vi ten tu do
    * de bo loc/discovery khong bi tach thanh nhieu ban ghi do khac chinh ta.
    */
@@ -408,6 +414,8 @@ export interface Chapter {
   audio_outdated?: boolean;
   /** Tap bi khoa voi khach an danh (can dang nhap). Chi co trong muc luc. */
   locked?: boolean;
+  /** Tap bi khoa premium (can Premium). Chi co trong muc luc. */
+  premium_locked?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -823,6 +831,15 @@ export const api = {
     }),
 
   me: () => request<{ profile: Profile }>("/api/auth/me"),
+
+  premiumStatus: () =>
+    request<{ tier: string; email: string; email_verified: boolean }>(
+      "/api/premium/status",
+    ),
+  premiumActivate: () =>
+    request<{ tier: string; already: boolean }>("/api/premium/activate", {
+      method: "POST",
+    }),
 
   // ---------------------------------------------------------------- tác giả
 

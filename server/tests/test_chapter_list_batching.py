@@ -264,7 +264,10 @@ class TestBackwardCompatible(BatchingTestCase):
         self.assertEqual(set(chapter) - self.OLD_CHAPTER_FIELDS,
                          # "locked": gate tap bang login — truong tinh, chi co
                          # trong muc luc, khong persist len Appwrite.
-                         {"has_audio", "audio_outdated", "locked"})
+                         # "premium_locked": gate tap bang premium (PR #279) —
+                         # cung quy uoc.
+                         {"has_audio", "audio_outdated", "locked",
+                          "premium_locked"})
 
     def test_novel_response_keeps_its_two_top_level_keys(self):
         token = self.user()

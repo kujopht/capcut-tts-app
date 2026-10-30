@@ -199,6 +199,8 @@ class TestBackwardCompatible(CoverTestCase):
     NEW_CONTENT_MODE_FIELDS = {"content_mode", "has_audio"}
     # Gate tap bang login (Khó dỗ dành): truong tinh, khong persist len Appwrite.
     NEW_LOGIN_GATE_FIELDS = {"login_gate_after"}
+    # Gate tap bang premium (PR #279): truong tinh, khong persist len Appwrite.
+    NEW_PREMIUM_GATE_FIELDS = {"premium_gate_after"}
 
     def test_only_cover_url_was_added(self):
         token = self.user()
@@ -210,7 +212,7 @@ class TestBackwardCompatible(CoverTestCase):
             {"cover_url"} | self.NEW_FANDOM_FIELDS | self.NEW_TAXONOMY_FIELDS
             | self.NEW_VIDEO_DRAFT_FIELDS | self.NEW_CHINESE_MEDIA_FIELDS
             | self.NEW_MEDIA_PROCESSING_FIELDS | self.NEW_CONTENT_MODE_FIELDS
-            | self.NEW_LOGIN_GATE_FIELDS)
+            | self.NEW_LOGIN_GATE_FIELDS | self.NEW_PREMIUM_GATE_FIELDS)
 
     def test_chapter_response_keeps_its_old_shape(self):
         token = self.user()

@@ -375,6 +375,11 @@ export default async function NovelDetailPage({
               Từ chương thứ {novel.login_gate_after + 1} trở đi cần đăng nhập để xem và nghe.
             </p>
           ) : null}
+          {novel.premium_gate_after != null ? (
+            <p className="hint">
+              Từ chương thứ {novel.premium_gate_after + 1} trở đi cần Premium để xem và nghe.
+            </p>
+          ) : null}
           <ChapterList
             novelId={novel.novel_id}
             chapters={chapters.map((c) => ({
@@ -384,6 +389,7 @@ export default async function NovelDetailPage({
               has_audio: c.has_audio,
               audio_outdated: c.audio_outdated,
               locked: c.locked,
+              premium_locked: c.premium_locked,
             }))}
           />
           </>

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Cửa sổ trợ lý AI trên desktop — 380px × min(600px, 100dvh-160px), neo phải
+ * Cửa sổ trợ lý AI trên desktop — 380px × min(520px, 100dvh-280px) — mép trên luôn cách đỉnh ~192px để Ink Scout có chỗ ngồi trên panel, neo phải
  * dưới `AiLauncher`. Nếu `.chat-dock` (Chat V1) đang có cửa sổ mở, panel này
  * tự dịch sang TRÁI của dock bằng `useChatDockOffset()` (đo DOM trực tiếp,
  * KHÔNG sửa `components/chat/**`).

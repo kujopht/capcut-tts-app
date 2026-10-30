@@ -41,7 +41,12 @@ body:has(.mini) .ai-launcher { bottom: 152px; }
   bottom: 88px;
   z-index: 56;
   width: 380px;
-  height: min(600px, calc(100dvh - 160px));
+  /* Chừa chỗ cho Ink Scout ngồi trên mép panel: mép trên panel luôn ở
+     ~192px dưới đỉnh viewport (đủ cho nav + linh vật 96px + khe 8px),
+     nên computeSeat() luôn chọn chỗ "top" thay vì rơi sang "side"
+     khi viewport thấp (panel cũ cao 600px, mép trên chạm header là
+     nguyên nhân linh vật bị đẩy sang trái panel trong ảnh báo lỗi). */
+  height: min(520px, calc(100dvh - 280px));
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line-strong);
@@ -52,7 +57,7 @@ body:has(.mini) .ai-launcher { bottom: 152px; }
   box-shadow: var(--shadow-3), var(--edge);
   overflow: hidden;
 }
-body:has(.mini) .ai-panel { bottom: 152px; height: min(600px, calc(100dvh - 224px)); }
+body:has(.mini) .ai-panel { bottom: 152px; height: min(520px, calc(100dvh - 344px)); }
 /*
   Mở panel: mờ dần vào (chỉ `opacity`, không `transform`): hộp của panel KHÔNG đổi trong lúc hiện, nên linh vật Ink Scout đo chỗ
   ngồi trên mép panel đúng ngay từ khung hình đầu. Không hoạt ảnh khi người dùng yêu cầu giảm chuyển động.

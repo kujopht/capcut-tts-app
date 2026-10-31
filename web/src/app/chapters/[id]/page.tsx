@@ -7,6 +7,12 @@
  * man hinh), metadata/canonical/OpenGraph giu nguyen. Phan tuong tac (che do,
  * trinh phat, to sang doan dang doc, tiep tuc doc/nghe) nam o
  * `components/reader/ChapterExperience.tsx`, dung CHUNG dong co audio toan cuc.
+ *
+ * NGOAI LE 403 (fix login-gate): may chu tra 403 cho tap bi gate ngay ca
+ * khi user DA dang nhap, vi request may chu khong kem token (token chi o
+ * localStorage). Hai nhanh 403 khong ve EmptyState kho nua ma ve
+ * `ChapterGateRetry` — no thu lai bang token o trinh duyet, thanh cong thi
+ * ve dung noi dung, khach khong token thi van thay EmptyState nhu cu.
  */
 
 import type { Metadata } from "next";
@@ -22,6 +28,7 @@ import {
   ChapterOwnerAudioAction,
 } from "@/components/ChapterInteractiveReader";
 import { ChapterExperience } from "@/components/reader/ChapterExperience";
+import { ChapterGateRetry } from "@/components/reader/ChapterGateRetry";
 import { ChapterNavLink, type ChuongLienKe } from "@/components/reader/ChapterNavLink";
 import { EmptyState, ErrorState } from "@/components/ui";
 import { formatNumber } from "@/lib/format";
@@ -144,35 +151,37 @@ export default async function ChapterPage({
     );
   }
 
+  /*
+    Cookie che do doc cho ChapterGateRetry: nhanh 403 ve truoc khi doc
+    cookie o duong thanh cong, nen doc o day. Khong doi hanh vi duong
+    thanh cong (no doc lai cookie sau nhu cu).
+  */
+  const khoGate = await cookies();
+  const prefsGate = giaiMaCookie(khoGate.get(COOKIE_CHE_DO)?.value);
+
   if (needsLogin) {
     return (
-      <div className="page">
-        <EmptyState
-          icon="🔒"
-          title="Tập này cần đăng nhập"
-          action={
-            <Link className="btn btn-primary" href="/login" prefetch={false}>
-              Đăng nhập
-            </Link>
-          }
-        />
-      </div>
+      <ChapterGateRetry
+        chapterId={id}
+        gateKind="login"
+        mode={sp.mode}
+        autoplay={sp.autoplay}
+        resume={sp.resume}
+        prefs={prefsGate}
+      />
     );
   }
 
   if (needsPremium) {
     return (
-      <div className="page">
-        <EmptyState
-          icon="⭐"
-          title="Tập này cần Premium"
-          action={
-            <Link className="btn btn-primary" href="/premium" prefetch={false}>
-              Xem gói Premium
-            </Link>
-          }
-        />
-      </div>
+      <ChapterGateRetry
+        chapterId={id}
+        gateKind="premium"
+        mode={sp.mode}
+        autoplay={sp.autoplay}
+        resume={sp.resume}
+        prefs={prefsGate}
+      />
     );
   }
 

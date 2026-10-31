@@ -15,11 +15,18 @@
  * - 500+ chuong: `content-visibility: auto` tren hang khi muc luc > 150 dong
  *   (trinh duyet bo qua bo cuc/ve cua hang ngoai man hinh), khong can thu
  *   vien ao hoa.
+ * - Muc luc theo VIEWER (fix login-gate): ban may chu ve khong co token
+ *   (token chi o localStorage) nen backend tra `locked`/`premium_locked`
+ *   theo khach. Sau khi mount, neu co token thi fetch lai `getNovel` bang
+ *   token roi cap nhat co khoa — khach khong co token thi giu nguyen ban
+ *   may chu (khong them request, SEO khong doi), fetch hong thi cung giu
+ *   ban may chu chu khong vo muc luc.
  */
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IconArrowDown, IconArrowUp, IconBook, IconHeadphones, IconSearch } from "@/components/Icons";
+import { api, getToken } from "@/lib/api";
 import { useReaderProgress } from "@/lib/useReaderProgress";
 import { chuanHoaTim } from "@/lib/libraryQuery";
 import { daXong } from "@/lib/novelProgress";
@@ -59,6 +66,43 @@ export function ChapterList({
   const banGhi = useReaderProgress();
   const hopDs = useRef<HTMLOListElement>(null);
 
+  // Ban may chu lam khoi diem (khach + SEO). Co token thi fetch lai de co
+  // khoa phan anh dung viewer (xem ghi chu o dau file).
+  const [chuongHienTai, setChuongHienTai] = useState(chapters);
+  // Dieu chinh state TRONG LUC RENDER khi props doi (mau React khuyen dung
+  // cho "reset state khi prop doi") — tranh setState dong bo trong effect.
+  const [banTruoc, setBanTruoc] = useState(chapters);
+  if (banTruoc !== chapters) {
+    setBanTruoc(chapters);
+    setChuongHienTai(chapters);
+  }
+  useEffect(() => {
+    if (!getToken()) return;
+    let huy = false;
+    api
+      .getNovel(novelId)
+      .then((data) => {
+        if (huy) return;
+        setChuongHienTai(
+          data.chapters.map((c) => ({
+            chapter_id: c.chapter_id,
+            title: c.title,
+            char_count: c.char_count,
+            has_audio: c.has_audio,
+            audio_outdated: c.audio_outdated,
+            locked: c.locked,
+            premium_locked: c.premium_locked,
+          })),
+        );
+      })
+      .catch(() => {
+        // Fetch lai hong thi giu ban may chu — muc luc khong vo.
+      });
+    return () => {
+      huy = true;
+    };
+  }, [novelId, chapters]);
+
   // Tien do theo chuong CUA TRUYEN NAY (ban ghi xep moi -> cu).
   const tienDo = useMemo(() => {
     const m = new Map<string, BanGhiTienDo>();
@@ -71,7 +115,7 @@ export function ChapterList({
   }, [banGhi, novelId]);
 
   // Giu SO THU TU goc (vi tri trong danh sach backend) — khong doi khi loc/dao.
-  const coSo = useMemo(() => chapters.map((chapter, i) => ({ chapter, so: i + 1 })), [chapters]);
+  const coSo = useMemo(() => chuongHienTai.map((chapter, i) => ({ chapter, so: i + 1 })), [chuongHienTai]);
   const hienThi = useMemo(() => {
     const kim = chuanHoaTim(tim);
     let ds = coSo;
@@ -95,7 +139,7 @@ export function ChapterList({
     }, 30);
   };
 
-  const congCu = chapters.length >= HIEN_CONG_CU_TU;
+  const congCu = chuongHienTai.length >= HIEN_CONG_CU_TU;
 
   return (
     <div className="chapter-list">
@@ -109,7 +153,7 @@ export function ChapterList({
                 type="search"
                 value={tim}
                 onChange={(e) => setTim(e.target.value)}
-                placeholder={`Tìm trong ${chapters.length} chương — số hoặc tên`}
+                placeholder={`Tìm trong ${chuongHienTai.length} chương — số hoặc tên`}
                 autoComplete="off"
                 enterKeyHint="search"
               />

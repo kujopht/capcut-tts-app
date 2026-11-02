@@ -48,6 +48,7 @@ from server.domain import (
     ModerationEvent,
     Notification,
     NotificationKind,
+    NovelLike,
     Post,
     PostKind,
     PostLike,
@@ -91,6 +92,7 @@ from server.social import (
     kiem_anh,
     kiem_han_muc,
     notification_key,
+    novel_like_key,
     object_key,
     parent_hop_le,
     post_key,
@@ -265,6 +267,8 @@ class SocialService:
         tong = len(ra)
         cua_so = ra[offset:offset + limit]
         dem = self._store.story_follower_counts([n.novel_id for n in cua_so])
+        xem = self.novel_view_counts([n.novel_id for n in cua_so])
+        thich = self.novel_like_counts([n.novel_id for n in cua_so])
         return {
             "novels": [{
                 "novel_id": n.novel_id,
@@ -276,6 +280,8 @@ class SocialService:
                 "external_author_name": n.external_author_name,
                 "updated_at": n.updated_at,
                 "follower_count": dem.get(n.novel_id, 0),
+                "view_count": xem.get(n.novel_id, 0),
+                "like_count": thich.get(n.novel_id, 0),
             } for n in cua_so],
             "total": tong,
             "limit": limit,
@@ -607,6 +613,66 @@ class SocialService:
         bai.comment_count = self._store.count_post_comments(post_id)
         self._store.save_post(bai)
         return {"like_count": bai.like_count, "comment_count": bai.comment_count}
+
+    # ================================================== THICH TRUYEN + LUOT XEM
+
+    def like_novel(self, actor: Profile, novel_id: str) -> Dict[str, Any]:
+        """Thich mot truyen. CHI thich duoc truyen DA XUAT BAN — giong theo doi:
+        mot ban nhap la thu rieng cua tac gia, khong phai thu de cong khai
+        dem tim. Khong gui thong bao cho tac gia (theo doi cung khong gui);
+        so tim chi hien tren the va trang truyen."""
+        novel = self._truyen(novel_id)
+        if novel.state is not PublishState.PUBLISHED:
+            raise NotFoundError("Không tìm thấy truyện.")
+        self._kiem_khong_bi_chan(actor.user_id, novel.owner_id)
+        khoa = novel_like_key(actor.user_id, novel_id)
+        self._store.like_novel(NovelLike(novel_id=novel_id,
+                                         user_id=actor.user_id, like_id=khoa))
+        return self.novel_like_state(novel_id, actor)
+
+    def unlike_novel(self, actor: Profile, novel_id: str) -> Dict[str, Any]:
+        """Bo thich. Khong kiem xuat ban — giong bo theo doi: quyen bo thich
+        mot truyen da go xuat ban phai luon mo."""
+        self._store.unlike_novel(novel_like_key(actor.user_id, novel_id))
+        return self.novel_like_state(novel_id, actor)
+
+    def novel_like_state(self, novel_id: str,
+                         viewer: Optional[Profile] = None) -> Dict[str, Any]:
+        """Trang thai thich mot truyen, cho trang chi tiet.
+
+        Giong `story_follow_state`: khach vang lai van thay so tim, chi `liked`
+        luon `false`. So tim dem truc tiep tu bang SU THAT (`novel_likes`),
+        khong qua bo dem tong hop — nen khong can duong sua `recount` nhu
+        `like_count` cua bai dang.
+        """
+        dem = self._store.count_novel_likes([novel_id])
+        liked = (viewer is not None
+                 and self._store.has_liked_novel(
+                     novel_like_key(viewer.user_id, novel_id)))
+        return {"liked": bool(liked),
+                "like_count": int(dem.get(novel_id, 0))}
+
+    def novel_like_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """So tim theo truyen, cho trang danh sach — mot lan dem cho ca trang."""
+        return self._store.count_novel_likes(novel_ids)
+
+    def record_novel_view(self, novel_id: str) -> Dict[str, Any]:
+        """Ghi MOT luot xem khi mo trang truyen.
+
+        CHI dem truyen DA XUAT BAN (mo trang ban nhap cua chinh minh khong
+        phai luot xem). Khong can dang nhap: khach vang lai mo trang cung
+        tinh. Khong chong mo lai — og chot \"mo trang tinh 1 luot xem\", nen
+        moi lan mo la mot don vi, ke ca F5.
+        """
+        novel = self._truyen(novel_id)
+        if novel.state is not PublishState.PUBLISHED:
+            raise NotFoundError("Không tìm thấy truyện.")
+        return {"view_count": int(
+            self._store.record_novel_view(novel_id, novel.owner_id))}
+
+    def novel_view_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """Bo dem luot xem theo truyen, cho trang danh sach."""
+        return self._store.novel_view_counts(novel_ids)
 
     # ===================================================================== BINH LUAN
 

@@ -43,6 +43,7 @@ import { errorMessage, useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { NovelCover } from "@/components/NovelCover";
 import { EmptyState, ErrorState } from "@/components/ui";
+import { formatNumber } from "@/lib/format";
 import {
   IconBook,
   IconClose,
@@ -257,6 +258,9 @@ interface TruyenTrenThe {
   updated_at?: string;
   has_audio?: boolean;
   content_mode?: "readable" | "audio_only";
+  /** Số lượt xem + tim, ghép sẵn từ backend; vắng thì coi như 0. */
+  view_count?: number;
+  like_count?: number;
 }
 
 function IconHanhDong({ hd, cu }: { hd: HanhDongTruyen; cu: boolean }) {
@@ -299,6 +303,8 @@ function TheTruyen({ n, banGhi, kieu }: { n: TruyenTrenThe; banGhi: BanGhiTienDo
                 <IconHeadphones size={13} /> Audio
               </span>
             ) : null}
+            <span title="Lượt xem">👁 {formatNumber(n.view_count ?? 0)}</span>
+            <span title="Lượt tim">❤ {formatNumber(n.like_count ?? 0)}</span>
           </p>
         </div>
         <Link
@@ -338,6 +344,8 @@ function TheTruyen({ n, banGhi, kieu }: { n: TruyenTrenThe; banGhi: BanGhiTienDo
               <IconHeadphones size={13} /> Audio
             </span>
           ) : null}
+          <span title="Lượt xem">👁 {formatNumber(n.view_count ?? 0)}</span>
+          <span title="Lượt tim">❤ {formatNumber(n.like_count ?? 0)}</span>
         </p>
         {tags.length > 0 ? (
           <ul className="lib-card-tags" aria-label="Thể loại">

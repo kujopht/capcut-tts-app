@@ -16,13 +16,14 @@ KHONG PHAI kho ben vung. Du lieu chi song trong vong doi tien trinh.
 from __future__ import annotations
 
 import threading
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from server.domain import (
     Comment,
     ContentReport,
     ContentState,
     Notification,
+    NovelLike,
     Post,
     PostLike,
     ReportStatus,
@@ -54,6 +55,10 @@ class MockSocialStore:
         self._posts: Dict[str, Post] = {}
         #: like_id (tat dinh) -> ban ghi
         self._post_likes: Dict[str, PostLike] = {}
+        #: like_id (tat dinh) -> ban ghi thich truyen
+        self._novel_likes: Dict[str, NovelLike] = {}
+        #: novel_id -> {"view_count": int, "updated_at": str}
+        self._novel_stats: Dict[str, Dict[str, Any]] = {}
         self._comments: Dict[str, Comment] = {}
         #: notification_id (tat dinh, co go ngay) -> ban ghi
         self._notifications: Dict[str, Notification] = {}
@@ -338,6 +343,69 @@ class MockSocialStore:
         with self._lock:
             return sum(1 for lk in self._post_likes.values()
                        if lk.post_id == post_id)
+
+    # ============================================================ THICH TRUYEN
+
+    def like_novel(self, like: NovelLike) -> bool:
+        """`False` = da thich tu truoc. Giong `like_post`."""
+        with self._lock:
+            if like.like_id in self._novel_likes:
+                return False
+            self._novel_likes[like.like_id] = like
+            return True
+
+    def unlike_novel(self, like_id: str) -> bool:
+        with self._lock:
+            return self._novel_likes.pop(like_id, None) is not None
+
+    def has_liked_novel(self, like_id: str) -> bool:
+        with self._lock:
+            return like_id in self._novel_likes
+
+    def liked_novel_flags(self, user_id: str,
+                          novel_ids: Sequence[str]) -> Set[str]:
+        """Trong danh sach nay, minh da thich nhung truyen nao. MOT luot."""
+        can = set(novel_ids)
+        with self._lock:
+            return {lk.novel_id for lk in self._novel_likes.values()
+                    if lk.user_id == user_id and lk.novel_id in can}
+
+    def count_novel_likes(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """Dem tim theo truyen, tu bang SU THAT — giong `story_follower_counts`."""
+        can = set(novel_ids)
+        dem = {nid: 0 for nid in can}
+        with self._lock:
+            for lk in self._novel_likes.values():
+                if lk.novel_id in can:
+                    dem[lk.novel_id] += 1
+        return dem
+
+    # ============================================================== LUOT XEM
+
+    def record_novel_view(self, novel_id: str, owner_id: str = "") -> int:
+        """Tang bo dem luot xem cua mot truyen, tra ve so moi.
+
+        MOT hang cho moi truyen (khong phai mot hang cho moi luot xem): luot
+        xem la su kien tan suat cao, ghi kieu do se lam bang phi to vo han
+        trong khi so dem moi la thu hien ra. Ban Appwrite bat chuoc dung han
+        che doc-roi-ghi (khong cong nguyen tu) — xem `MockSocialStore` noi
+        ve viec mock khong duoc gia vo manh hon ban that.
+        """
+        with self._lock:
+            hang = self._novel_stats.get(novel_id)
+            if hang is None:
+                hang = {"novel_id": novel_id, "view_count": 0,
+                        "updated_at": now_iso_us()}
+                self._novel_stats[novel_id] = hang
+            hang["view_count"] = int(hang.get("view_count") or 0) + 1
+            hang["updated_at"] = now_iso_us()
+            return int(hang["view_count"])
+
+    def novel_view_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """Bo dem luot xem theo truyen; truyen chua co hang = 0."""
+        with self._lock:
+            return {nid: int(self._novel_stats.get(nid, {}).get("view_count") or 0)
+                    for nid in novel_ids}
 
     # ============================================================== BINH LUAN
 

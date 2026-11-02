@@ -334,6 +334,16 @@ def post_like_key(user_id: str, post_id: str) -> str:
     return _khoa("plk", user_id, post_id)
 
 
+def novel_like_key(user_id: str, novel_id: str) -> str:
+    """
+    MỘT lượt thích cho mỗi cặp (người, truyện).
+
+    Cùng cơ chế với `post_like_key`: khóa tất định chặn hai lượt thích của
+    cùng một người, dù bấm nhanh liên tiếp.
+    """
+    return _khoa("nlk", user_id, novel_id)
+
+
 def comment_like_key(user_id: str, comment_id: str) -> str:
     return _khoa("clk", user_id, comment_id)
 

@@ -26,6 +26,8 @@ import {
 import { formatDate, formatNumber } from "@/lib/format";
 import { NovelCover } from "@/components/NovelCover";
 import { FollowButton } from "@/components/FollowButton";
+import { LikeButton } from "@/components/LikeButton";
+import { NovelViewBeacon } from "@/components/NovelViewBeacon";
 import {
   NovelOwnerActions,
   OwnerAddChapterAction,
@@ -123,6 +125,8 @@ export default async function NovelDetailPage({
     novel: Novel;
     chapters: Chapter[];
     follow?: { following: boolean; follower_count: number };
+    like?: { liked: boolean; like_count: number };
+    view_count?: number;
   } | null = null;
   let missing = false;
   let errorMsg = "";
@@ -282,6 +286,12 @@ export default async function NovelDetailPage({
                 {soChuongCoAudio === chapters.length ? "Có audio mọi chương" : `${soChuongCoAudio} chương có audio`}
               </span>
             ) : null}
+            {data?.view_count !== undefined ? (
+              <span title="Lượt xem">👁 {formatNumber(data.view_count)} lượt xem</span>
+            ) : null}
+            {data?.like ? (
+              <span title="Lượt tim">❤ {formatNumber(data.like.like_count)} lượt tim</span>
+            ) : null}
             <span>Cập nhật {formatDate(novel.updated_at)}</span>
             {novel.language ? <span>Ngôn ngữ gốc: {novel.language}</span> : null}
             {novel.external_source_url ? (
@@ -341,6 +351,22 @@ export default async function NovelDetailPage({
                 phu
               />
             ) : null}
+            {/*
+              Tim truyện — cùng lý do giấu với nút theo dõi: tác giả tự tim
+              truyện của mình chỉ làm con số phình lên. `data.like` chỉ có mặt
+              với truyện đã xuất bản, nên phép kiểm này đi theo đúng sự thật
+              của backend. Beacon đếm lượt xem đặt ở đây luôn: chỉ mở trang
+              truyện đã xuất bản mới tính, và chỉ tính một lần mỗi lần mở.
+            */}
+            {!isOwner && data?.like ? (
+              <LikeButton
+                targetId={novel.novel_id}
+                initialLiked={data.like.liked}
+                initialCount={data.like.like_count}
+                phu
+              />
+            ) : null}
+            {data?.like ? <NovelViewBeacon novelId={novel.novel_id} /> : null}
           </div>
 
           <NovelDescription text={novel.description || "Chưa có mô tả."} />

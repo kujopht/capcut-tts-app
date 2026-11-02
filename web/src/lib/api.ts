@@ -385,6 +385,13 @@ export interface Novel {
   updated_at: string;
   has_audio?: boolean;
   content_mode?: "readable" | "audio_only";
+  /**
+   * Số lượt xem (mở trang truyện) + số lượt tim, ghép sẵn từ backend ở route
+   * danh sách. Vắng mặt với truyện lấy từ nguồn chưa gắn số — giao diện coi
+   * như 0 chứ không đoán.
+   */
+  view_count?: number;
+  like_count?: number;
 }
 
 export interface Chapter {
@@ -1206,7 +1213,20 @@ export const api = {
       /** Trạng thái theo dõi, ghép sẵn. Vắng mặt với bản nháp — bản nháp không
           theo dõi được. Tuỳ chọn để client cũ vẫn biên dịch. */
       follow?: FollowState;
+      /** Trạng thái tim + số lượt xem, ghép sẵn. Vắng mặt với bản nháp. */
+      like?: LikeState;
+      view_count?: number;
     }>(`/api/novels/${novelId}`),
+
+  /**
+   * Ghi MỘT lượt xem khi mở trang truyện. Không cần đăng nhập. Lỗi thì nuốt
+   * im — lượt xem không được phép làm vỡ trang truyện.
+   */
+  recordNovelView: (novelId: string) =>
+    request<{ view_count: number }>(
+      `/api/novels/${encodeURIComponent(novelId)}/view`,
+      { method: "POST" },
+    ).catch(() => ({ view_count: 0 })),
 
   publishNovel: (novelId: string) =>
     request<{ novel: Novel }>(`/api/novels/${novelId}/publish`, {
@@ -3062,6 +3082,11 @@ export interface FollowState {
   follower_count: number;
 }
 
+export interface LikeState {
+  liked: boolean;
+  like_count: number;
+}
+
 /** Một truyện trong Thư viện — đủ để vẽ thẻ, không kéo cả nội dung chương. */
 export interface FollowedStory {
   novel_id: string;
@@ -3241,6 +3266,17 @@ export const social = {
 
   unfollowStory: (novelId: string) =>
     request<FollowState>(`/api/novels/${encodeURIComponent(novelId)}/follow`, {
+      method: "DELETE",
+    }),
+
+  likeStory: (novelId: string) =>
+    request<LikeState>(`/api/novels/${encodeURIComponent(novelId)}/like`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unlikeStory: (novelId: string) =>
+    request<LikeState>(`/api/novels/${encodeURIComponent(novelId)}/like`, {
       method: "DELETE",
     }),
 

@@ -376,6 +376,39 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("user_post_idx", "key", ["user_id", "post_id"]),
         ],
     },
+    "novel_likes": {
+        "name": "Novel likes",
+        # `rowId` = khoa tat dinh tu (nguoi, truyen) — xem `social.novel_like_key`.
+        # Giong `post_likes`: mot nguoi chi tim mot truyen mot lan, request thu
+        # hai va vao 409 cua Appwrite.
+        "attributes": [
+            ("like_id", "string", True, 64),
+            ("novel_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # `count_novel_likes` — dem lai tu bang su that.
+            ("novel_idx", "key", ["novel_id"]),
+            # `liked_novel_flags` — mot truy van cho ca trang.
+            ("user_novel_idx", "key", ["user_id", "novel_id"]),
+        ],
+    },
+    "novel_stats": {
+        "name": "Novel stats",
+        # MOT hang cho moi truyen: bo dem luot xem tich luy. Khong phai mot hang
+        # cho moi luot xem — luot xem mo trang truyen la su kien tan suat cao,
+        # ghi kieu do se lam bang phi to vo han trong khi so dem moi la thu
+        # hien ra. Doc-id = novel_id de doc/tang bang mot lan goi.
+        "attributes": [
+            ("novel_id", "string", True, 64),
+            ("view_count", "integer", False, None),
+            ("updated_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("novel_idx", "key", ["novel_id"]),
+        ],
+    },
     "comments": {
         "name": "Comments",
         "attributes": [

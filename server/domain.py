@@ -1191,6 +1191,24 @@ class PostLike:
 
 
 @dataclass
+class NovelLike:
+    """Mot luot thich truyen. `like_id` la khoa tat dinh — xem `social.novel_like_key`."""
+
+    novel_id: str
+    user_id: str
+    like_id: str = ""
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "like_id": self.like_id,
+            "novel_id": self.novel_id,
+            "user_id": self.user_id,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
 class Comment:
     """
     Mot binh luan, hoac mot tra loi cho binh luan goc.

@@ -9,10 +9,11 @@
  * linh vật khỏi tay người dùng đang kéo).
  *
  * Hai biến thể:
- *   * `floating` — desktop ≥1024px, cạnh nút mở trợ lý. Panel mở → nhảy lên mép TRÊN panel (ngoài panel: không che chữ/nút Gửi/nút
- *     Đóng), ngồi khi chỉ lắng nghe, đứng dậy khi làm việc; panel đóng → đứng dậy + về nhà. Không đủ chỗ an toàn dưới navbar → ẩn
- *     trong lúc panel mở. Không đi lang thang. NGƯỜI DÙNG kéo thả được (chuột/chạm): thả đâu hợp lệ thì đứng đó và được NHỚ; thả vào
- *     vùng cấm (panel/nút mở/Chat Dock/thanh phát) thì tự nhảy về chỗ an toàn.
+ *   * `floating` — desktop ≥1024px, cạnh nút mở trợ lý. Panel mở → nhảy lên GIỮA mép trên panel, chân thõng TRƯỚC khung chat
+ *     (lớp ngồi `ai-companion-ngoi`, z-index 57, trên panel — theo ý Phát 02/11; giữa mép nên không đè lên tiêu đề bên trái
+ *     hay nút bên phải), ngồi khi chỉ lắng nghe, đứng dậy khi làm việc; panel đóng → đứng dậy + về nhà. Không đủ chỗ an toàn
+ *     dưới navbar → ẩn trong lúc panel mở. Không đi lang thang. NGƯỜI DÙNG kéo thả được (chuột/chạm): thả đâu hợp lệ thì đứng
+ *     đó và được NHỚ; thả vào vùng cấm (panel/nút mở/Chat Dock/thanh phát) thì tự nhảy về chỗ an toàn.
  *   * `inline` — trong trang `/assistant` (mọi bề rộng): nằm TRONG luồng nội dung nên không bao giờ đè lên ô soạn; kéo thả trong dải
  *     của chính nó; bàn phím ảo mở (viewport thấp) → thu lại.
  *
@@ -147,6 +148,8 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
   const [engaged, setEngaged] = useState(false);
   const [flash, setFlash] = useState<"success" | null>(null);
   const [noSeat, setNoSeat] = useState(false);
+  /** Đang ngồi trên mép panel -> lớp `ai-companion-ngoi` nổi lên trên panel để chân thõng trước khung chat. */
+  const [seated, setSeated] = useState(false);
 
   const available = ai.availability === null ? null : !!(ai.availability && ai.availability.enabled);
   const onAssistantPage = pathname === "/assistant";
@@ -260,16 +263,18 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
           });
           if (verdict.kind === "seat") {
             dir.settle({ kind: "seat", x: rt.position.x, y: rt.position.y });
+            setSeated(true);
           } else if (verdict.kind === "floor") {
             const x = Math.min(0, verdict.x);
             rt.home = { x, y: 0 };
             dir.settle({ kind: "home" });
             writeCompanionPrefs({ homeX: x === 0 ? null : x });
+            setSeated(false);
           } else {
             // Vùng cấm: tới chỗ ngồi (panel đang mở và có chỗ) hoặc về nhà. `settle` "free" để mọi đích đều thật sự di chuyển.
             dir.settle({ kind: "free" });
-            if (verdict.to === "seat" && L.seat) dir.goSeat(L.seat.x, L.seat.y);
-            else dir.goHome();
+            if (verdict.to === "seat" && L.seat) { dir.goSeat(L.seat.x, L.seat.y); setSeated(true); }
+            else { dir.goHome(); setSeated(false); }
           }
         };
 
@@ -498,6 +503,7 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
       surfacesRef.current = panelSurfaces(seat, panel, home);
       if (!isOpen) {
         setNoSeat(false);
+        setSeated(false);
         // Đang đứng nhà mà nhà vừa đổi (khôi phục vị trí đã nhớ, thu nhỏ cửa sổ, "Đặt lại vị trí"): dời NGAY, không hoạt ảnh — kể cả khi
         // director đang bận áp trạng thái đầu tiên (dời ngay khi rảnh). Đang ở chỗ khác: `goHome` đi tới nhà mới.
         dir.rehome();
@@ -505,9 +511,9 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
         return;
       }
       setNoSeat(!seat);
-      if (!seat) dir.goHome();
-      else if (dir.currentPlace.kind === "seat") dir.relocate(seat.x, seat.y);
-      else dir.goSeat(seat.x, seat.y);
+      if (!seat) { dir.goHome(); setSeated(false); }
+      else if (dir.currentPlace.kind === "seat") { dir.relocate(seat.x, seat.y); setSeated(true); }
+      else { dir.goSeat(seat.x, seat.y); setSeated(true); }
     };
     const schedule = () => { if (!raf) raf = requestAnimationFrame(measure); };
     schedule();
@@ -558,7 +564,7 @@ export function AiCompanion({ variant }: { variant: CompanionVariant }) {
   const atHome = atHomeNow;
   return (
     <div
-      className={`ai-companion ai-companion-${variant}${visible ? "" : " ai-companion-an"}${atHome ? " ai-companion-nha" : ""}${ready ? "" : " ai-companion-cho"}${interactive && visible ? " ai-companion-live" : ""}${held ? " ai-companion-giu" : ""}`}
+      className={`ai-companion ai-companion-${variant}${visible ? "" : " ai-companion-an"}${atHome ? " ai-companion-nha" : ""}${ready ? "" : " ai-companion-cho"}${interactive && visible ? " ai-companion-live" : ""}${held ? " ai-companion-giu" : ""}${seated ? " ai-companion-ngoi" : ""}`}
       style={variant === "floating" && dockOffset ? ({ ["--ai-dock-offset" as string]: `${dockOffset}px` } as React.CSSProperties) : undefined}
       data-state={state}
       data-reduced={reduced ? "1" : undefined}

@@ -478,8 +478,9 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(520px, calc(100dvh - 344p
   CHỈ host (đúng ô của chính linh vật) nhận con trỏ để kéo thả, và chỉ khi physics đã gắn + linh vật đang hiện
   (`.ai-companion-live`) — nên trước đó, hoặc khi bị ẩn/yên lặng-hết-chỗ, 0 px của trang bị chặn.
   z-index 54 — DƯỚI Chat Dock (55), nút mở + panel AI (56): chồng lấn thì các lớp đó luôn thắng (linh vật không bao giờ
-  che nút Gửi/Dừng/Đóng/Lịch sử/điều hướng), và khi nhảy lên panel linh vật hiện ra "từ sau panel". Vị trí ngồi luôn
-  tính dưới đáy `.site-header`.
+  che nút Gửi/Dừng/Đóng/Lịch sử/điều hướng). NGOẠI LỆ khi ngồi (lớp `ai-companion-ngoi`, z-index 57, trên panel — theo ý
+  Phát 02/11): linh vật ngồi GIỮA mép trên panel, chân thõng TRƯỚC khung chat; giữa mép nên không đè lên tiêu đề bên
+  trái hay nút bên phải. Vị trí ngồi luôn tính dưới đáy `.site-header`.
   Runtime tự đặt kích thước + `translate(x,y)` cho host; KHÔNG bao giờ lật ngang
   (không scaleX âm ở bất cứ đâu — vệt tóc/cổ áo có bên trái/phải cố định). */
 .ai-companion { pointer-events: none; }
@@ -503,6 +504,8 @@ body:has(.mini) .ai-panel { bottom: 152px; height: min(520px, calc(100dvh - 344p
   height: 96px;
   transition: opacity var(--dur-fast, 0.15s) var(--ease, ease);
 }
+/* Đang ngồi trên mép panel: nổi lên trên panel (56) để chân thõng TRƯỚC khung chat. */
+.ai-companion-floating.ai-companion-ngoi { z-index: 57; }
 body:has(.mini) .ai-companion-floating { bottom: 152px; }
 @media (max-width: 1023px) { .ai-companion-floating { display: none; } }
 /* KHÔNG bắt con trỏ ở bất cứ đâu (review Codex #5: ô 96×96 từng chặn cú bấm vào trang

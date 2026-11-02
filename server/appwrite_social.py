@@ -40,6 +40,7 @@ from server.domain import (
     ContentState,
     Notification,
     NotificationKind,
+    NovelLike,
     Post,
     PostKind,
     PostLike,
@@ -55,6 +56,8 @@ COL_USER_FOLLOWS = "user_follows"
 COL_STORY_FOLLOWS = "story_follows"
 COL_POSTS = "posts"
 COL_POST_LIKES = "post_likes"
+COL_NOVEL_LIKES = "novel_likes"
+COL_NOVEL_STATS = "novel_stats"
 COL_COMMENTS = "comments"
 COL_NOTIFICATIONS = "notifications"
 COL_REPORTS = "content_reports"
@@ -86,6 +89,8 @@ SOCIAL_PERSISTED_FIELDS: Dict[str, tuple] = {
         "spoiler", "fandom_id", "edited_at",
     ),
     COL_POST_LIKES: ("like_id", "post_id", "user_id", "created_at"),
+    COL_NOVEL_LIKES: ("like_id", "novel_id", "user_id", "created_at"),
+    COL_NOVEL_STATS: ("novel_id", "view_count", "updated_at"),
     COL_COMMENTS: (
         "comment_id", "post_id", "author_user_id", "parent_id", "text",
         # V3: binh luan chuong/audio. Xem ghi chu o `domain.Comment`.
@@ -501,6 +506,87 @@ class AppwriteSocialStore:
 
         return self._page(COL_POST_LIKES, [q_equal("post_id", post_id),
                                            q_limit(1)])[1]
+
+    # ============================================================ THICH TRUYEN
+
+    def like_novel(self, like: NovelLike) -> bool:
+        return self._tao_mot_lan(COL_NOVEL_LIKES, like.like_id, like.to_dict(),
+                                 like.user_id)
+
+    def unlike_novel(self, like_id: str) -> bool:
+        return self._xoa_neu_co(COL_NOVEL_LIKES, like_id)
+
+    def has_liked_novel(self, like_id: str) -> bool:
+        return self._ton_tai(COL_NOVEL_LIKES, like_id)
+
+    def liked_novel_flags(self, user_id: str,
+                          novel_ids: Sequence[str]) -> Set[str]:
+        return self._co_theo_lo(COL_NOVEL_LIKES, "user_id", user_id,
+                                "novel_id", novel_ids)
+
+    def count_novel_likes(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        return self._dem_theo_khoa(COL_NOVEL_LIKES, "novel_id", novel_ids)
+
+    # ============================================================== LUOT XEM
+
+    def record_novel_view(self, novel_id: str, owner_id: str = "") -> int:
+        """Tang bo dem luot xem cua mot truyen, tra ve so moi.
+
+        DOC-ROI-GHI, khong cong nguyen tu — Appwrite khong co phep tang
+        nguyen tu. Hai request mo cung truyen cung luc co the lam mat mot
+        don vi (cung han che voi `bump_post_counter`); voi so dem hien thi
+        thi mat mot don vi khong phai loi nghiem trong, va khong co duong
+        sua tong hop nao re hon mot bang su kien vo han.
+
+        Bang CHUA TON TAI (code trien khai truoc khi chay
+        `scripts/setup_appwrite.py`) thi moi buoc deu roi vao `NotFoundError`
+        va ham tra 0 — dem xem chi im lang, khong lam vo request mo trang.
+        """
+        for _ in range(3):
+            try:
+                hang = self._get(COL_NOVEL_STATS, novel_id)
+            except NotFoundError:
+                try:
+                    self._create(COL_NOVEL_STATS, novel_id,
+                                 {"novel_id": novel_id, "view_count": 1,
+                                  "updated_at": now_iso_us()},
+                                 owner_id, public_read=True)
+                    return 1
+                except NotFoundError:
+                    continue
+            moi = int(hang.get("view_count") or 0) + 1
+            try:
+                self._update(COL_NOVEL_STATS, novel_id,
+                             {"view_count": moi, "updated_at": now_iso_us()})
+                return moi
+            except NotFoundError:
+                continue
+        try:
+            return int((self._get(COL_NOVEL_STATS, novel_id) or {}).get(
+                "view_count") or 0)
+        except NotFoundError:
+            return 0
+
+    def novel_view_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """Bo dem luot xem theo truyen; truyen chua co hang = 0.
+
+        MOT lan goi `_get` cho moi truyen — cung gioi han nhu `_dem_theo_khoa`
+        (tran theo kich thuoc trang, khong phai kich thuoc bang). Doc theo
+        doc-id thay vi truy van `equal` nhan nhieu gia tri: doc-id o day
+        CHINH LA novel_id, nen `_get` la duong ngan nhat va kho gia lap
+        Appwrite nao cung hieu.
+        """
+        ra: Dict[str, int] = {}
+        for nid in novel_ids:
+            if not nid:
+                ra[nid] = 0
+                continue
+            try:
+                hang = self._get(COL_NOVEL_STATS, nid)
+                ra[nid] = int(hang.get("view_count") or 0)
+            except NotFoundError:
+                ra[nid] = 0
+        return ra
 
     # ============================================================== BINH LUAN
 

@@ -1593,6 +1593,16 @@ def list_novels(mine: bool = False, q: str = "", tag: str = "",
         "offset": max(0, offset),
         "has_more": has_more,
     }
+    # So xem + so tim ghep vao CUNG lan goi nay (mot lan dem cho ca trang),
+    # de the truyen o Thu vien / Trang chu / Tim kiem khong phai goi them.
+    # Truyen chua co hang thong ke = 0 — dem bat dau tu luc tinh nang len
+    # song, khong khoi phuc duoc luot cu.
+    if novel_ids:
+        xem = social.novel_view_counts(novel_ids)
+        thich = social.novel_like_counts(novel_ids)
+        for hang in res["novels"]:
+            hang["view_count"] = int(xem.get(hang["novel_id"], 0))
+            hang["like_count"] = int(thich.get(hang["novel_id"], 0))
     if cursor is not None or limit is not None:
         res["cursor"] = cursor
         res["next_cursor"] = next_cursor
@@ -1881,6 +1891,10 @@ def get_novel(novel_id: str,
     if novel.state is PublishState.PUBLISHED:
         ra["follow"] = social.story_follow_state(
             novel_id, optional_profile(authorization))
+        ra["like"] = social.novel_like_state(
+            novel_id, optional_profile(authorization))
+        ra["view_count"] = int(
+            social.novel_view_counts([novel_id]).get(novel_id, 0))
     return ra
 
 
@@ -6749,6 +6763,26 @@ def follow_story(novel_id: str, payload: FollowIn,
 def unfollow_story(novel_id: str,
                    profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return _xa_hoi(social.unfollow_story, profile, novel_id)
+
+
+@app.post("/api/novels/{novel_id}/like")
+def like_novel(novel_id: str, payload: FollowIn,
+               profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.like_novel, profile, novel_id)
+
+
+@app.delete("/api/novels/{novel_id}/like")
+def unlike_novel(novel_id: str,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.unlike_novel, profile, novel_id)
+
+
+@app.post("/api/novels/{novel_id}/view")
+def record_novel_view(novel_id: str) -> Dict[str, Any]:
+    # Khong can dang nhap: khach vang lai mo trang truyen cung tinh mot luot
+    # xem. `_xa_hoi` doi `NotFoundError` (truyen khong co / chua xuat ban)
+    # thanh 404 — khong can `profile` de lam viec do.
+    return _xa_hoi(social.record_novel_view, novel_id)
 
 
 @app.get("/api/me/following/stories")

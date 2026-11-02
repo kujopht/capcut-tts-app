@@ -1235,5 +1235,78 @@ class AvatarLanTruyenTest(Nen):
         self.assertIsNone(bai["novel"]["cover_url"])
 
 
+class ThichTruyenTest(Nen):
+    def test_tim_va_bo_tim(self):
+        ra = self.social.like_novel(self.binh, self.truyen.novel_id)
+        self.assertTrue(ra["liked"])
+        self.assertEqual(ra["like_count"], 1)
+        ra = self.social.unlike_novel(self.binh, self.truyen.novel_id)
+        self.assertFalse(ra["liked"])
+        self.assertEqual(ra["like_count"], 0)
+
+    def test_tim_hai_lan_khong_dem_hai(self):
+        """Tinh duy nhat cua khoa tat dinh — giong tim bai dang."""
+        self.social.like_novel(self.binh, self.truyen.novel_id)
+        ra = self.social.like_novel(self.binh, self.truyen.novel_id)
+        self.assertEqual(ra["like_count"], 1)
+
+    def test_khach_vang_lai_thay_so_tim(self):
+        self.social.like_novel(self.binh, self.truyen.novel_id)
+        ra = self.social.novel_like_state(self.truyen.novel_id, None)
+        self.assertFalse(ra["liked"])
+        self.assertEqual(ra["like_count"], 1)
+
+    def test_khong_tim_duoc_ban_nhap(self):
+        nhap = self.store.create_novel(Novel(
+            owner_id=self.an.user_id, title="Nháp chưa xuất bản"))
+        with self.assertRaises(NotFoundError):
+            self.social.like_novel(self.binh, nhap.novel_id)
+
+    def test_bo_tim_khi_chua_tim_khong_nem(self):
+        ra = self.social.unlike_novel(self.binh, self.truyen.novel_id)
+        self.assertFalse(ra["liked"])
+        self.assertEqual(ra["like_count"], 0)
+
+    def test_so_tim_theo_truyen(self):
+        truyen2 = self.store.create_novel(Novel(
+            owner_id=self.an.user_id, title="Truyện thứ hai",
+            state=PublishState.PUBLISHED))
+        self.social.like_novel(self.binh, self.truyen.novel_id)
+        self.social.like_novel(self.cuc, self.truyen.novel_id)
+        self.social.like_novel(self.binh, truyen2.novel_id)
+        dem = self.social.novel_like_counts(
+            [self.truyen.novel_id, truyen2.novel_id, "khong-co"])
+        self.assertEqual(dem, {self.truyen.novel_id: 2,
+                               truyen2.novel_id: 1, "khong-co": 0})
+
+
+class LuotXemTruyenTest(Nen):
+    def test_moi_lan_mo_tang_mot(self):
+        """Og chot: mo trang tinh 1 luot xem — ke ca mo lai."""
+        for mong in (1, 2, 3):
+            ra = self.social.record_novel_view(self.truyen.novel_id)
+            self.assertEqual(ra["view_count"], mong)
+
+    def test_so_xem_theo_truyen(self):
+        truyen2 = self.store.create_novel(Novel(
+            owner_id=self.an.user_id, title="Truyện thứ hai",
+            state=PublishState.PUBLISHED))
+        self.social.record_novel_view(self.truyen.novel_id)
+        self.social.record_novel_view(self.truyen.novel_id)
+        dem = self.social.novel_view_counts(
+            [self.truyen.novel_id, truyen2.novel_id])
+        self.assertEqual(dem, {self.truyen.novel_id: 2, truyen2.novel_id: 0})
+
+    def test_khong_dem_truyen_nhap(self):
+        nhap = self.store.create_novel(Novel(
+            owner_id=self.an.user_id, title="Nháp chưa xuất bản"))
+        with self.assertRaises(NotFoundError):
+            self.social.record_novel_view(nhap.novel_id)
+
+    def test_truyen_khong_ton_tai(self):
+        with self.assertRaises(NotFoundError):
+            self.social.record_novel_view("khong-co-truyen-nay")
+
+
 if __name__ == "__main__":
     unittest.main()

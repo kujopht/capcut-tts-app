@@ -28,6 +28,7 @@ from server.domain import (
     ContentState,
     Notification,
     NotificationKind,
+    NovelLike,
     Post,
     PostKind,
     PostLike,
@@ -39,6 +40,7 @@ from server.domain import (
 )
 from server.social import (
     notification_key,
+    novel_like_key,
     post_like_key,
     report_key,
     story_follow_key,
@@ -800,6 +802,61 @@ class HopDongXaHoi(unittest.TestCase):
                 moc = (BAY_GIO - timedelta(hours=1)).isoformat(
                     timespec="microseconds")
                 self.assertEqual(kho.count_reports_since("u1", moc), 1)
+
+
+    # ===================================================== THICH TRUYEN
+
+    @staticmethod
+    def _tim_truyen(kho, nguoi="u1", truyen="t1") -> bool:
+        return kho.like_novel(NovelLike(
+            novel_id=truyen, user_id=nguoi,
+            like_id=novel_like_key(nguoi, truyen)))
+
+    def test_tim_truyen_lan_dau_tra_True_lan_hai_tra_False(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                self.assertTrue(self._tim_truyen(kho))
+                self.assertFalse(self._tim_truyen(kho))
+
+    def test_bo_tim_roi_tim_lai_duoc(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                self._tim_truyen(kho)
+                self.assertTrue(kho.unlike_novel(novel_like_key("u1", "t1")))
+                self.assertTrue(self._tim_truyen(kho))
+
+    def test_bo_tim_khi_chua_co_tra_False(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                self.assertFalse(kho.unlike_novel(novel_like_key("u1", "t1")))
+
+    def test_co_da_tim_va_dem_tim_theo_truyen(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                self._tim_truyen(kho, "u1", "t1")
+                self._tim_truyen(kho, "u2", "t1")
+                self._tim_truyen(kho, "u1", "t2")
+                self.assertTrue(kho.has_liked_novel(novel_like_key("u1", "t1")))
+                self.assertFalse(kho.has_liked_novel(novel_like_key("u1", "t3")))
+                self.assertEqual(kho.liked_novel_flags("u1", ["t1", "t2", "t3"]),
+                                 {"t1", "t2"})
+                dem = kho.count_novel_likes(["t1", "t2", "khong-ai"])
+                self.assertEqual(dem["t1"], 2)
+                self.assertEqual(dem["t2"], 1)
+                self.assertEqual(dem["khong-ai"], 0)
+
+    # ======================================================= LUOT XEM TRUYEN
+
+    def test_luot_xem_tang_dan_va_dem_theo_truyen(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                self.assertEqual(kho.record_novel_view("t1", "chu-truyen"), 1)
+                self.assertEqual(kho.record_novel_view("t1", "chu-truyen"), 2)
+                self.assertEqual(kho.record_novel_view("t2", "chu-truyen"), 1)
+                dem = kho.novel_view_counts(["t1", "t2", "chua-ai-xem"])
+                self.assertEqual(dem["t1"], 2)
+                self.assertEqual(dem["t2"], 1)
+                self.assertEqual(dem["chua-ai-xem"], 0)
 
 
 class QuyenTaiLieuTest(unittest.TestCase):

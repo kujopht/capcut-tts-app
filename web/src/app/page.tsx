@@ -75,6 +75,7 @@ import {
   MotifManuscript,
 } from "@/components/Ornaments";
 import { ErrorState, ProgressBar } from "@/components/ui";
+import { formatNumber } from "@/lib/format";
 import {
   IconBook,
   IconCompass,
@@ -345,6 +346,8 @@ function HomeHeroShowcase({
                             <IconHeadphones size={13} />
                           </span>
                         )}
+                        <span title="Lượt xem">👁 {formatNumber(n.view_count ?? 0)}</span>
+                        <span title="Lượt tim">❤ {formatNumber(n.like_count ?? 0)}</span>
                       </div>
                     </div>
                   </Link>

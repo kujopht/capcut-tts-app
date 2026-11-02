@@ -284,9 +284,10 @@ test("cho ngoi: mep TREN panel, ngoai panel, duoi navbar", () => {
   const s = computeSeat({ home, panel, navBottom: 72, viewportWidth: 1600, size: 96 });
   assert.equal(s.where, "top");
   const top = home.top + s.y, left = home.left + s.x;
-  assert.ok(top + 96 <= panel.top + 96 * 0.15, "chan cham mep, than ngoai panel (khong che chu/nut)");
+  assert.ok(top + 96 <= panel.top + 96 * 0.15, "chan cham mep panel");
   assert.ok(top >= 72, "khong len tren navbar");
-  assert.ok(left >= panel.left && left + 96 <= panel.left + panel.width / 2, "phia trai, xa nut Dong goc phai");
+  assert.ok(Math.abs(left - (panel.left + (panel.width - 96) / 2)) < 1, "chinh giua mep tren panel");
+  assert.ok(left + 96 <= panel.left + panel.width - 96, "xa nut Dong goc phai");
 });
 
 test("man thap: dung canh trai panel; khong con cho an toan -> null (an di)", () => {
@@ -377,6 +378,7 @@ test("mobile: khong linh vat noi o <=1023px; /assistant dung ban inline trong lu
   assert.match(c, /const home: Rect = rectOf\(wrap\)/, "nha = khung bao co dinh");
   assert.ok(!/r\.left - rt\.position\.x/.test(c), "khong suy nha tu host - runtime.position (nhan doi cho ngoi)");
   assert.match(css, /z-index: 54;/, "duoi Chat Dock (55) va panel/nut AI (56)");
+  assert.match(css, /\.ai-companion-floating\.ai-companion-ngoi \{ z-index: 57; \}/, "ngoi -> tren panel (56) de chan thong truoc khung chat");
 });
 
 test("giam chuyen dong: prefers-reduced-motion luon thang + tuy chon nguoi dung duoc luu", () => {

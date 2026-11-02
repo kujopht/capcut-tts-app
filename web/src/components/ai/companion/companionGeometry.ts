@@ -3,9 +3,11 @@
  *
  * Hệ toạ độ: runtime Ink Scout dịch chuyển host bằng `translate(x, y)` tính từ
  * vị trí "nhà" (host đặt `position: fixed` cạnh nút mở trợ lý). Hàm này trả về
- * độ dịch cần để host ngồi lên mép TRÊN của panel — NGOÀI panel, nên không bao
- * giờ che chữ, nút Gửi hay nút Đóng — hoặc `null` khi không có chỗ an toàn
- * (thì linh vật ẩn đi trong lúc panel mở, không đứng đè lên panel).
+ * độ dịch cần để host ngồi lên mép TRÊN của panel — CHÍNH GIỮA mép trên, chân
+ * thõng TRƯỚC khung chat (lớp ngồi `ai-companion-ngoi`, z-index 57, trên panel —
+ * theo ý Phát 02/11; giữa mép nên không đè lên tiêu đề bên trái hay nút bên
+ * phải) — hoặc `null` khi không có chỗ an toàn (thì linh vật ẩn đi trong lúc
+ * panel mở, không đứng đè lên panel).
  */
 
 export interface Rect {
@@ -37,15 +39,18 @@ export interface Seat {
 const GAP = 8;
 /**
  * Phần canvas trong suốt dưới chân nhân vật đứng — chân chạm mép panel. Nhỏ vì
- * `sit-down` của runtime tự hạ thêm 19% cỡ khi ngồi (linh vật nằm DƯỚI panel
- * theo z-index, nên phần chồng bị panel che — không đè lên chữ/nút — nhưng
- * chồng nhiều quá thì khuất mất thân, đo QA 2026-10-01).
+ * `sit-down` của runtime tự hạ thêm 19% cỡ khi ngồi; khi ngồi, linh vật nằm
+ * TRÊN panel (lớp `ai-companion-ngoi`, z-index 57) nên phần chồng đó hiện
+ * TRƯỚC khung chat thành chân thõng — theo ý Phát 02/11 (trước đây linh vật
+ * nằm dưới panel nên phần chồng bị che, nhìn như cụt chân).
  */
 const FOOT_OVERLAP = 0.06;
 
 export function computeSeat({ home, panel, navBottom, viewportWidth, size }: SeatInput): Seat | null {
-  // 1) Mép trên panel, sát góc trái (xa nút Đóng ở góc phải).
-  const topLeft = panel.left + 12;
+  // 1) Mép trên panel, CHÍNH GIỮA (xa cả tiêu đề bên trái lẫn nút Đóng bên phải).
+  // Panel hẹp hơn linh vật -> topLeft = mép trái panel, kiểm tra vừa khít bên
+  // dưới rớt sang chỗ "side" như cũ.
+  const topLeft = panel.left + Math.max(0, (panel.width - size) / 2);
   const topTop = panel.top - size + size * FOOT_OVERLAP;
   if (topTop >= navBottom + GAP && topLeft + size <= panel.left + panel.width) {
     return { x: topLeft - home.left, y: topTop - home.top, where: "top" };

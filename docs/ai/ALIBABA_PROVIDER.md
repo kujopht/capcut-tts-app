@@ -326,6 +326,27 @@ bỏ lọc loại slot, bỏ chặn xoá slot, chuẩn hoá tên, rơi về hồ
 Hệ quả khi rút mã về bản trước khi có tuyến này: bản cũ không biết loại hàng `canary`, đếm hàng `c-ALIBABA_CANARY` vào `unreadable` của vùng Alibaba (con số trên `/admin/ai`
 tăng 1) — chỉ là bộ đếm; không slot/hồ sơ nào bị ảnh hưởng và Gemini giữ nguyên.
 
+## 12d. Kết quả canary Owner (2026-10-03) & trạng thái ngủ đông
+
+**`ALIBABA_OWNER_CHAT_CANARY_VERIFIED`**: 9 lượt Owner QA thật qua `alibaba-sg-01` (`qwen3.7-plus`) — chat tiếng Việt, viết lại, sinh truyện, viết tiếp có ngữ cảnh, dừng giữa chừng,
+tạo lại, prompt dài, và 2 lượt `thinking=on` để so sánh — **0 lỗi, 0 giới hạn tốc độ**, Gemini +0 cho các lượt này; không rò `reasoning_content`/provider/model/slot/khoá vào luồng chat
+thường, lịch sử đã lưu, danh sách hội thoại hay availability. Với `thinking=off`: TTFT trung vị ≈ 1,6 s, tổng ≈ 6,9 s (phía trình duyệt), 240–400 token ra. Số liệu đầy đủ ở
+`docs/ai/alibaba_model_inventory.json` (`observations`).
+
+* **`qwen3.7-plus` = ứng viên SMART đã kiểm chứng với `thinking=off`.** Không bật thinking mặc định.
+* **`max_output_tokens` KHÔNG chặn token suy luận ẩn**: với `thinking=on` model ra 1.233–1.482 token dù `max_output_tokens=400` (gấp 3,7–6 lần khi tắt, TTFT chậm ~12 lần, chữ hiển thị
+  gần như không khác). **Mọi đường chạy production có bật thinking PHẢI làm ngân sách suy luận riêng, có giới hạn, TRƯỚC.** Chưa có — nên kiểm kê từ chối `slot_thinking=on`.
+* **Bài học sức chứa công khai**: lượt QA của Owner tính vào trần toàn cục. Preset `canary` (20/người, toàn cục 40/ngày) khi khán giả là `all` làm **giảm sức chứa Gemini công khai**;
+  đã khôi phục preset `beta` (5/người/ngày, 150 toàn cục, token 15.000/450.000), hạn mức QA riêng của Owner (20/ngày, cấu hình riêng) giữ nguyên. Lần canary sau không được dùng preset làm giảm trần công khai.
+* **Ngủ đông** (sau canary): slot `alibaba-sg-01` TẮT, cờ loại `alibaba` TẮT; cấu hình slot (tầng SMART, `thinking=off`, workload `general/story/writer`, hạn mức, RPM/TPM) và tuyến
+  `ALIBABA_CANARY` được **giữ nguyên, không xoá**; `qwen` cũ ĐÓNG; không hồ sơ nào chứa Alibaba; `FAS_AI_PREFER_FREE_QUOTA` chưa đặt. Cổng máy chủ `FAS_AI_ALIBABA_ENABLED` là biến môi trường
+  của Render (Owner tự quyết có đóng thêm hay không; slot tắt + cờ loại tắt đã đủ để không có lượt nào tới Alibaba).
+* Chưa kiểm: ánh xạ lỗi thật, 429, `Retry-After`, chế độ `support`, web search.
+* **Bảng Free Quota đầy đủ (2026-10-03)**: `qwen3.7-plus` còn 984.2K/1M (khớp ước tính của ta: 992.190 − 7.918 token canary) và console nay cho **`用完即停` = 已开启** (Free Quota Only). Cờ `free_quota_only` ở phía ứng dụng của slot
+  `alibaba-sg-01` vẫn `false` — Owner quyết có bật hay không. Kiểm kê 249 model và báo cáo ứng viên theo 12 nhóm: `docs/ai/ALIBABA_MODEL_INVENTORY.md`, `docs/ai/ALIBABA_CAPABILITY_CANDIDATES.md`.
+
+Bước tiếp theo — kiểm kê hạn mức và định tuyến theo tầng — xem `docs/ai/ALIBABA_MODEL_INVENTORY.md`.
+
 ## 13. Rút lui
 
 Nhanh nhất: `FAS_AI_ALIBABA_ENABLED` về 0 + khởi động lại (hoặc công tắc tổng ở `/admin/ai`); tắt cờ loại `alibaba`; tắt/xoá slot; xoá tuyến canary

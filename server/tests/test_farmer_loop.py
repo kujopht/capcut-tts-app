@@ -38,9 +38,10 @@ _NotFound.__name__ = "NotFoundError"
 class _Store:
     """Kho gia: hang doi rong, khong truyen nao — moi thu deu la moi."""
 
-    def __init__(self, queue=None, novels=None):
+    def __init__(self, queue=None, novels=None, chapters=None):
         self.queue = queue or {}
         self.novels = novels or []
+        self.chapters = chapters or {}
 
     def get_queue_item(self, item_id):
         if item_id not in self.queue:
@@ -49,6 +50,15 @@ class _Store:
 
     def find_novels(self, owner_id=None, limit=None, **kw):
         return list(self.novels), len(self.novels)
+
+    def get_novel(self, novel_id):
+        for n in self.novels:
+            if getattr(n, "novel_id", None) == novel_id:
+                return n
+        return mock.Mock(novel_id=novel_id, to_dict=lambda: {"novel_id": novel_id})
+
+    def list_chapters(self, novel_id):
+        return list(self.chapters.get(novel_id, []))
 
 
 class _Provider:
@@ -99,9 +109,29 @@ class _Harness:
             self.fetched.append(c.url)
             return "noi dung that su dai va mach lac " * 20
 
-        def publish(c, body):
-            self.published.append(c.url)
-            return f"nov_{len(self.published)}"
+        def publish(c, plan, novel_id=""):
+            if not novel_id:
+                self.published.append(c.url)
+            nid = novel_id or f"nov_{len(self.published)}"
+            if hasattr(self.store, "chapters"):
+                chs = []
+                for p in getattr(plan, "chapters", []):
+                    chs.append(mock.Mock(
+                        chapter_id=f"ch_{nid}_{p.order_index}",
+                        novel_id=nid,
+                        title=p.title,
+                        content=p.content,
+                        order_index=p.order_index,
+                        to_dict=lambda p=p, nid=nid: {
+                            "chapter_id": f"ch_{nid}_{p.order_index}",
+                            "novel_id": nid,
+                            "title": p.title,
+                            "content": p.content,
+                            "order_index": p.order_index,
+                        },
+                    ))
+                self.store.chapters[nid] = chs
+            return nid
 
         def enqueue_tts(novel_id):
             self.tts.append(novel_id)
@@ -219,9 +249,19 @@ class TextLaneOrderTest(unittest.TestCase):
                 return [n], 1
 
             def list_chapters(self, novel_id):
-                # Ban nhap DUNG DUOC: co chuong that. Xem
-                # `test_a_draft_with_no_chapter_is_not_reusable` cho nhanh kia.
-                return [mock.Mock(chapter_id="ch_1")]
+                if novel_id in self.chapters:
+                    return self.chapters[novel_id]
+                from server.farmer.story_text import normalize_text
+                return [mock.Mock(
+                    chapter_id="ch_1", novel_id="nov_cu", title="Tieu de",
+                    content=normalize_text("noi dung that su dai va mach lac " * 20),
+                    order_index=1,
+                    to_dict=lambda: {
+                        "chapter_id": "ch_1", "novel_id": "nov_cu", "title": "Tieu de",
+                        "content": normalize_text("noi dung that su dai va mach lac " * 20),
+                        "order_index": 1,
+                    }
+                )]
 
             def list_jobs(self, owner_id, chapter_id=None):
                 return [mock.Mock(job_id="job_cu")]
@@ -437,20 +477,27 @@ class ResumeTtsTest(unittest.TestCase):
                               novel_id="nov_cu")], 1
 
         def list_chapters(self, novel_id):
-            return [mock.Mock(chapter_id=f"ch_{i}")
-                    for i in range(self._chapters)]
+            if novel_id in self.chapters:
+                return self.chapters[novel_id]
+            from server.farmer.story_text import normalize_text
+            return [mock.Mock(
+                chapter_id=f"ch_{i}", novel_id="nov_cu", title=f"Tieu de {i}",
+                content=normalize_text("noi dung that su dai va mach lac " * 20),
+                order_index=i,
+                to_dict=lambda i=i: {
+                    "chapter_id": f"ch_{i}", "novel_id": "nov_cu", "title": f"Tieu de {i}",
+                    "content": normalize_text("noi dung that su dai va mach lac " * 20),
+                    "order_index": i,
+                }
+            ) for i in range(1, self._chapters + 1)]
 
         def list_jobs(self, owner_id, chapter_id=None):
             return list(self._jobs)
 
-    def test_a_draft_with_no_chapter_is_not_reusable(self):
-        """Ban nhap CO THAT khong dong nghia ban nhap DUNG DUOC.
-
-        `POST /api/novels` va `POST /api/chapters` la hai loi goi rieng. Da
-        xay ra that: hai tac pham 224k va 117k ky tu vuot MAX_CHAPTER_CHARS
-        (100.000), tao duoc novel roi truot o buoc chuong. Lan chay tiep dung
-        lai cai novel RONG do va van dat READY — mot tac pham "san sang" ma
-        tren trang khong co gi de doc.
+    def test_a_draft_with_no_chapter_is_resumable(self):
+        """P1-1: Ban nhap 0 chuong do gian doan o lan truoc phai duoc tiep tuc xuat ban.
+        Dung lai dung novel_cu do, tao chuong 1..N, khong sinh ra ban trung,
+        va chi dat READY sau khi xac minh phuc vu thanh cong.
         """
         with TemporaryDirectory() as d:
             h = _Harness(tmp=Path(d),
@@ -458,13 +505,11 @@ class ResumeTtsTest(unittest.TestCase):
                          text_candidates=[_text("https://e.com/a")])
             m = h.farmer.run_text_lane()
 
-        self.assertEqual(m.failed, 1)
-        self.assertEqual(m.resumed, 0)
-        self.assertEqual(m.published_candidates, 0)
-        self.assertFalse([k for k in h.objects if k.endswith("/manifest.json")],
-                         "khong duoc ghi manifest cho mot ban nhap hong")
-        self.assertTrue(any("khong co chuong nao" in e for e in m.errors),
-                        m.errors)
+        self.assertEqual(m.failed, 0)
+        self.assertEqual(m.resumed, 1)
+        self.assertEqual(h.published, [])  # Khong tao novel thu hai
+        self.assertEqual(m.published_candidates, 1)
+        self.assertTrue([k for k in h.objects if k.endswith("/manifest.json")])
 
     def test_resume_enqueues_tts_when_none_exists(self):
         with TemporaryDirectory() as d:
@@ -482,19 +527,19 @@ class ResumeTtsTest(unittest.TestCase):
                          text_candidates=[_text("https://e.com/a")])
             m = h.farmer.run_text_lane()
         self.assertEqual(m.resumed, 1)
-        self.assertEqual(h.tts, [])                  # KHONG xep trung
+        self.assertEqual(h.tts, [])                  # KHONG xep
         self.assertEqual(m.published_candidates, 1)
 
     def test_an_unreadable_job_list_defers_tts_instead_of_duplicating(self):
-        class _Hong(self._CoNovel):
+        class _LoiStore(self._CoNovel):
             def list_jobs(self, owner_id, chapter_id=None):
-                raise RuntimeError("Appwrite tu choi")
+                raise RuntimeError("Appwrite timeout")
 
         with TemporaryDirectory() as d:
-            h = _Harness(tmp=Path(d), store=_Hong(jobs=[]),
+            h = _Harness(tmp=Path(d), store=_LoiStore(jobs=[]),
                          text_candidates=[_text("https://e.com/a")])
             m = h.farmer.run_text_lane()
-        self.assertEqual(h.tts, [])                  # hoan, khong doan
+        self.assertEqual(h.tts, [])                  # KHONG xep lieu
         self.assertEqual(m.skipped_quota, 0)         # KHONG phai het han muc
         self.assertTrue(any("hoan TTS" in e for e in m.errors), m.errors)
 
@@ -513,7 +558,19 @@ class AudioReconcileTest(unittest.TestCase):
             self._jobs = jobs
 
         def list_chapters(self, novel_id):
-            return [mock.Mock(chapter_id="ch_1")]
+            if novel_id in self.chapters:
+                return self.chapters[novel_id]
+            from server.farmer.story_text import normalize_text
+            return [mock.Mock(
+                chapter_id="ch_1", novel_id="nov_1", title="Tieu de",
+                content=normalize_text("noi dung that su dai va mach lac " * 20),
+                order_index=1,
+                to_dict=lambda: {
+                    "chapter_id": "ch_1", "novel_id": "nov_1", "title": "Tieu de",
+                    "content": normalize_text("noi dung that su dai va mach lac " * 20),
+                    "order_index": 1,
+                }
+            )]
 
         def list_jobs(self, owner_id, chapter_id=None):
             return list(self._jobs)

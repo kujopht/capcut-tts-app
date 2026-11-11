@@ -34,7 +34,6 @@ import {
   IconCompass,
   IconFeather,
   IconFilm,
-  IconGamepad,
   IconGear,
   IconHistory,
   IconInbox,
@@ -117,13 +116,6 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
     ],
   },
   {
-    nhom: "Games & Features",
-    muc: [
-      { href: "/admin/games", nhan: "Games", icon: IconGamepad },
-      { href: "/admin/features", nhan: "Features", icon: IconSliders },
-    ],
-  },
-  {
     nhom: "AI",
     muc: [
       { href: "/admin/ai-credits", nhan: "AI / Credits", icon: IconSparkles, vaiToiThieu: "admin" },
@@ -136,6 +128,11 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
       { href: "/admin/analytics", nhan: "Analytics", icon: IconChart, vaiToiThieu: "admin" },
       { href: "/admin/system", nhan: "System", icon: IconGear, vaiToiThieu: "owner" },
       { href: "/admin/audit-log", nhan: "Audit Log", icon: IconHistory, vaiToiThieu: "admin" },
+      /* Trang doc trang thai co tinh nang (trong do co co tat/mo khu Giai
+         tri) — nam day cho gon, khong can mot nhom rieng. Trang /admin/games
+         van ton tai (go thang duong dan, van qua cong admin) nhung khong con
+         tren sidebar: backend games chua trien khai (xem trang do). */
+      { href: "/admin/features", nhan: "Features", icon: IconSliders },
     ],
   },
 ];

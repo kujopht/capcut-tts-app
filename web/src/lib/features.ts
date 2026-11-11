@@ -22,6 +22,23 @@
 export const MUSIC_ENABLED = process.env.NEXT_PUBLIC_MUSIC_ENABLED === "1";
 
 /**
+ * `ENTERTAINMENT_ENABLED` — khu Giải trí (`/entertainment`: mini-game, bảng
+ * xếp hạng, thành tựu) + mục "Games" trong admin. TẮT mặc định (ẩn tạm từ
+ * 11/11/2026): tắt thì KHÔNG có mục "Giải trí" ở điều hướng chính, KHÔNG có
+ * thẻ Giải trí trên trang chủ, và `/entertainment` chỉ hiện thông báo tạm ẩn
+ * — 0 request game nào. Bật lại = build với
+ * `NEXT_PUBLIC_ENTERTAINMENT_ENABLED=1` (production: biến repository
+ * `PRODUCTION_ENTERTAINMENT_ENABLED`, xem `production-deploy.yml` — không có
+ * biến thì mặc định tắt, workflow không dừng).
+ *
+ * KHÔNG xoá gì: mã trang Giải trí, `lib/games.ts`, trang `/admin/games` và
+ * trang `/leaderboard` vẫn còn nguyên — chỉ lối vào bị ẩn. Bảng xếp hạng XP
+ * (`/leaderboard`) và trang tài khoản (thành tựu) KHÔNG đi qua cờ này.
+ */
+export const ENTERTAINMENT_ENABLED =
+  process.env.NEXT_PUBLIC_ENTERTAINMENT_ENABLED === "1";
+
+/**
  * `CHAT_V1_ENABLED` — tin nhắn 1:1 (Chat V1 trên Appwrite). TẮT mặc định: chưa bật thì KHÔNG có nút Tin
  * nhắn, nút "Nhắn tin" ở hồ sơ, khung chat, và `/messages` chỉ báo "chưa mở" — 0 request chat nào. Bật
  * cần CẢ HAI: build web với `NEXT_PUBLIC_CHAT_V1_ENABLED=1` VÀ máy chủ `FAS_CHAT_V1=1` (thiếu máy chủ thì

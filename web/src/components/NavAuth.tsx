@@ -15,7 +15,7 @@ import { StreakBadge } from "@/components/StreakBadge";
 import { UserAvatar } from "@/components/UserAvatar";
 import { hoSoHref } from "@/lib/communityFeed";
 import { SoundwaveMini } from "@/components/SoundwaveVisualizer";
-import { AI_ASSISTANT_ENABLED, MUSIC_ENABLED } from "@/lib/features";
+import { AI_ASSISTANT_ENABLED, ENTERTAINMENT_ENABLED, MUSIC_ENABLED } from "@/lib/features";
 import { FanficIcon, type IconName } from "@/components/icons/FanficIcon";
 import { useAiSafe } from "@/components/ai/AiProvider";
 
@@ -90,9 +90,14 @@ export function NavLinks() {
   // Sprint 2: trang truyen / chuong sang "Thư viện", bai dang / trang ca nhan
   // sang "Cộng đồng" — xem `lib/navActive.ts`.
   const dangXem = mucDangXem(pathname);
+  /* Khu Giai tri tam an (`lib/features.ts`): tat co thi muc "Giai tri" bien
+     khoi dieu huong chinh — khong de mot lien ket chet dan toi trang tam an. */
+  const links = ENTERTAINMENT_ENABLED
+    ? LINKS
+    : LINKS.filter((link) => link.href !== "/entertainment");
   return (
     <nav className="nav-links" aria-label="Điều hướng chính" ref={hop}>
-      {LINKS.map((link) => {
+      {links.map((link) => {
         // "/" khop CHINH XAC, khong dung `startsWith`: neu khong thi moi trang
         // trong site deu sang muc "Trang chủ".
         const active = link.href === dangXem;

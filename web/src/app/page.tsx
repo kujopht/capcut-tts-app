@@ -58,7 +58,7 @@ import {
 } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
-import { MUSIC_ENABLED } from "@/lib/features";
+import { ENTERTAINMENT_ENABLED, MUSIC_ENABLED } from "@/lib/features";
 import { getReaderTags } from "@/lib/taxonomy";
 import {
   novelHasAudio,
@@ -891,7 +891,10 @@ export default function HomePage() {
             </div>
           </Link>
           {/* Nhac tam an (`lib/features.ts`): the nay tro thanh loi vao Giai tri
-              (mini-game, bang xep hang) thay vi hua mot kho nhac chua co. */}
+              (mini-game, bang xep hang) thay vi hua mot kho nhac chua co.
+              Giai tri tam an tu 11/11/2026 (`ENTERTAINMENT_ENABLED`): tat co
+              thi the bien khoi trang chu. */}
+          {ENTERTAINMENT_ENABLED ? (
           <Link href="/entertainment" className="home-util-card" prefetch={false}>
             <div className="home-util-icon home-util-icon-audio">
               {MUSIC_ENABLED ? <IconHeadphones size={20} /> : <IconGamepad size={20} />}
@@ -903,6 +906,7 @@ export default function HomePage() {
               </span>
             </div>
           </Link>
+          ) : null}
           <Link href="/studio" className="home-util-card" prefetch={false}>
             <div className="home-util-icon home-util-icon-studio">
               <IconSparkles size={20} />
@@ -991,6 +995,9 @@ export default function HomePage() {
             </div>
           </Link>
 
+          {/* The "Hoat hoa & Xuat ban" dan toi khu Giai tri — an tam cung co
+              `ENTERTAINMENT_ENABLED` (xem the Giai tri o tren). */}
+          {ENTERTAINMENT_ENABLED ? (
           <Link href="/entertainment" className="creator-feature-card" prefetch={false}>
             <div className="creator-feature-icon-wrap icon-anim">
               <IconFilm size={20} />
@@ -1000,6 +1007,7 @@ export default function HomePage() {
               <span>Gắn phụ đề, tạo animation và chia sẻ độc quyền</span>
             </div>
           </Link>
+          ) : null}
         </div>
       </section>
     </div>

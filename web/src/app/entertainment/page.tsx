@@ -22,7 +22,7 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import { IconSparkles } from "@/components/Icons";
 import { useAudioEngineOptional } from "@/components/AudioEngine";
-import { MUSIC_ENABLED } from "@/lib/features";
+import { ENTERTAINMENT_ENABLED, MUSIC_ENABLED } from "@/lib/features";
 
 /** Tải lười: nhạc tắt thì mã trình phát không nằm trong gói JS ban đầu của trang (đo bằng build). */
 const MusicSection = dynamic(
@@ -108,6 +108,9 @@ function KhungGame({ g, onDong, onRoiTrang }: { g: GameInfo; onDong: () => void;
 }
 
 export default function EntertainmentPage() {
+  /* Hook PHAI goi truoc moi `return` co dieu kien (Rules of Hooks) — co tat
+     thi cac gia tri duoi day khong duoc dung, nhung van phai goi du de thu tu
+     hook on dinh moi lan ve. */
   const engine = useAudioEngineOptional();
   const [dangChoi, setDangChoi] = useState<GameInfo | null>(null);
 
@@ -123,6 +126,37 @@ export default function EntertainmentPage() {
     },
     [tamDungLoiDoc],
   );
+
+  /* Khu Giai tri TAM AN tu 11/11/2026 (`ENTERTAINMENT_ENABLED`, xem
+     `lib/features.ts`): trang chi hien thong bao, khong tai game/nhac — ma
+     game van con nguyen, bat lai co la hien lai. */
+  if (!ENTERTAINMENT_ENABLED) {
+    return (
+      <div className="page stack-3 giai-tri" data-hero-theme="animation">
+        <header className="ent-header">
+          <div className="ent-header-copy">
+            <div className="ent-header-eyebrow">
+              <IconSparkles size={12} />
+              <span>KHU GIẢI TRÍ</span>
+            </div>
+            <h1 className="ent-header-title">Giải trí</h1>
+            <p className="ent-header-lead">
+              Khu giải trí tạm ẩn — mini-game, bảng xếp hạng và thành tựu sẽ
+              quay lại sau. Trong lúc chờ, truyện và Studio vẫn mở bình thường.
+            </p>
+          </div>
+        </header>
+        <div className="row">
+          <Link href="/" className="btn btn-primary" prefetch={false}>
+            Về trang chủ
+          </Link>
+          <Link href="/library" className="btn" prefetch={false}>
+            Vào thư viện truyện
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page stack-3 giai-tri" data-hero-theme="animation">

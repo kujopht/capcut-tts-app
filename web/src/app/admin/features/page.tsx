@@ -18,7 +18,7 @@
 import { useCallback } from "react";
 import { gamesConfig, social, type ServerLimits } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
-import { CHAT_V1_ENABLED, MUSIC_ENABLED } from "@/lib/features";
+import { CHAT_V1_ENABLED, ENTERTAINMENT_ENABLED, MUSIC_ENABLED } from "@/lib/features";
 import { Loading } from "@/components/ui";
 import { IconSliders } from "@/components/Icons";
 
@@ -136,6 +136,15 @@ export default function AdminFeaturesPage() {
       <div className="card stack-2">
         <h3 className="section-title-sm">Music (biến môi trường build NEXT_PUBLIC_MUSIC_ENABLED)</h3>
         <HangCo nhan="Nhạc nền / playlist" trangThai={MUSIC_ENABLED ? "on" : "off"} />
+      </div>
+
+      <div className="card stack-2">
+        <h3 className="section-title-sm">Giải trí (biến môi trường build NEXT_PUBLIC_ENTERTAINMENT_ENABLED)</h3>
+        <HangCo
+          nhan="Khu Giải trí · /entertainment · mục Games trên sidebar"
+          trangThai={ENTERTAINMENT_ENABLED ? "on" : "off"}
+          ghiChu="Tắt từ 11/11/2026 — ẩn tạm, không xoá mã. Bật lại: biến repository PRODUCTION_ENTERTAINMENT_ENABLED=1 rồi deploy lại web."
+        />
       </div>
 
       <div className="card stack-2">

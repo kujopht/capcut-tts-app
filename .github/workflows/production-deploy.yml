@@ -283,6 +283,10 @@ jobs:
           # dau job nay ("Refuse environment-level AI UI flag overrides").
           NEXT_PUBLIC_AI_ASSISTANT_ENABLED: ${{ needs.validate.outputs.ai_assistant_flag }}
           NEXT_PUBLIC_AI_COMPANION_ENABLED: ${{ needs.validate.outputs.ai_companion_flag }}
+          # Co Giai tri: KHONG nam trong vong kiem 0/1 bat buoc nhu co AI —
+          # khong co bien thi build voi gia tri rong = tat (trang tam an), workflow
+          # khong dung. Mo lai: dat bien repository PRODUCTION_ENTERTAINMENT_ENABLED=1.
+          NEXT_PUBLIC_ENTERTAINMENT_ENABLED: ${{ vars.PRODUCTION_ENTERTAINMENT_ENABLED }}
         run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then

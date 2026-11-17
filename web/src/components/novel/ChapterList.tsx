@@ -86,14 +86,17 @@ export function ChapterList({
   // (dang xuat / token het han) thi tra muc luc ve ban may chu NGAY TRONG
   // LUC RENDER (mau React khuyen dung, nhu banTruoc o tren) thay vi setState
   // trong effect — setState dong bo trong effect bi lint cam.
-  const { profile, loading: dangTaiPhien } = useSession();
+  // KHONG cho effect doi khoi phuc phien xong: neu co token thi fetch ngay
+  // (duong nhanh cu), chi dung thay doi profile lam co che kich lai cho
+  // truong hop dang nhap sau khi trang da mo. Cho khoi phuc phien (api.me
+  // co the lanh, hang chuc giay) moi fetch se lam muc luc khoa lau hon han.
+  const { profile } = useSession();
   const [phienTruoc, setPhienTruoc] = useState(profile);
   if (phienTruoc !== profile) {
     setPhienTruoc(profile);
-    if (!dangTaiPhien && !profile) setChuongHienTai(chapters);
+    if (!profile) setChuongHienTai(chapters);
   }
   useEffect(() => {
-    if (dangTaiPhien) return;
     if (!getToken()) return;
     let huy = false;
     api
@@ -118,7 +121,7 @@ export function ChapterList({
     return () => {
       huy = true;
     };
-  }, [novelId, chapters, dangTaiPhien, profile]);
+  }, [novelId, chapters, profile]);
 
   // Tien do theo chuong CUA TRUYEN NAY (ban ghi xep moi -> cu).
   const tienDo = useMemo(() => {

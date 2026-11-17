@@ -45,8 +45,18 @@ test("muc luc: dang nhap SAU khi mo trang thi tu fetch lai (khong khoa vinh vien
     "useSession phai lay tu lib/session (cung SessionProvider voi header)",
   );
   // Effect phu thuoc vao trang thai phien de chay lai khi dang nhap xong.
-  assert.ok(src.includes("dangTaiPhien"), "effect phai cho khoi phuc phien xong moi quyet dinh");
+  // KHONG cho khoi phuc phien xong moi fetch: api.me() lanh co the keo dai
+  // hang chuc giay, lam muc luc khoa lau hon han. Co token thi fetch ngay;
+  // profile thay doi (dang nhap sau) se kich effect chay lai.
+  assert.ok(
+    !src.includes("dangTaiPhien"),
+    "effect khong duoc doi khoi phuc phien xong — co token thi fetch ngay",
+  );
   assert.ok(src.includes("profile"), "effect phai phu thuoc vao profile de chay lai khi dang nhap");
+  assert.ok(
+    flat(src).includes("[novelId,chapters,profile]"),
+    "deps effect phai gom novelId, chapters, profile (khong loading)",
+  );
   // Dang xuat thi tra ve ban may chu (khoa lai) thay vi giu ban da mo khoa.
   assert.ok(
     src.includes("setChuongHienTai(chapters)"),

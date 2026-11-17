@@ -36,6 +36,24 @@ test("muc luc: server chapters lam khoi diem, co token thi fetch lai bang token"
   assert.ok(src.includes(".catch("), "ChapterList phai co catch giu ban server khi fetch lai hong");
 });
 
+test("muc luc: dang nhap SAU khi mo trang thi tu fetch lai (khong khoa vinh vien)", () => {
+  const src = chapterList();
+  // Theo doi phien dang nhap chu khong chi chay 1 lan luc mount.
+  assert.ok(src.includes("useSession"), "ChapterList phai doc phien dang nhap qua useSession");
+  assert.ok(
+    src.includes('from "@/lib/session"'),
+    "useSession phai lay tu lib/session (cung SessionProvider voi header)",
+  );
+  // Effect phu thuoc vao trang thai phien de chay lai khi dang nhap xong.
+  assert.ok(src.includes("dangTaiPhien"), "effect phai cho khoi phuc phien xong moi quyet dinh");
+  assert.ok(src.includes("profile"), "effect phai phu thuoc vao profile de chay lai khi dang nhap");
+  // Dang xuat thi tra ve ban may chu (khoa lai) thay vi giu ban da mo khoa.
+  assert.ok(
+    src.includes("setChuongHienTai(chapters)"),
+    "khong co token thi phai tra muc luc ve ban may chu",
+  );
+});
+
 test("trang truyen: van truyen chapters cua server xuong ChapterList (fallback)", () => {
   const src = novelPage();
   assert.ok(src.includes("<ChapterList"), "trang truyen phai render ChapterList");

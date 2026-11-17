@@ -21,12 +21,17 @@
  *   token roi cap nhat co khoa — khach khong co token thi giu nguyen ban
  *   may chu (khong them request, SEO khong doi), fetch hong thi cung giu
  *   ban may chu chu khong vo muc luc.
+ * - Hieu ung fetch lai PHU THUOC vao phien dang nhap (`useSession`): trang
+ *   mo TRUOC khi dang nhap (effect chay luc chua co token) se tu fetch lai
+ *   ngay khi dang nhap xong, thay vi khoa vinh vien cho toi khi tai lai
+ *   trang. Dang xuat thi tra ve ban may chu (khoa lai).
  */
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconArrowDown, IconArrowUp, IconBook, IconHeadphones, IconSearch } from "@/components/Icons";
 import { api, getToken } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import { useReaderProgress } from "@/lib/useReaderProgress";
 import { chuanHoaTim } from "@/lib/libraryQuery";
 import { daXong } from "@/lib/novelProgress";
@@ -76,7 +81,19 @@ export function ChapterList({
     setBanTruoc(chapters);
     setChuongHienTai(chapters);
   }
+  // Theo doi phien dang nhap: trang mo truoc khi dang nhap (effect chay luc
+  // chua co token) phai tu fetch lai khi dang nhap xong. Khi phien ket thuc
+  // (dang xuat / token het han) thi tra muc luc ve ban may chu NGAY TRONG
+  // LUC RENDER (mau React khuyen dung, nhu banTruoc o tren) thay vi setState
+  // trong effect — setState dong bo trong effect bi lint cam.
+  const { profile, loading: dangTaiPhien } = useSession();
+  const [phienTruoc, setPhienTruoc] = useState(profile);
+  if (phienTruoc !== profile) {
+    setPhienTruoc(profile);
+    if (!dangTaiPhien && !profile) setChuongHienTai(chapters);
+  }
   useEffect(() => {
+    if (dangTaiPhien) return;
     if (!getToken()) return;
     let huy = false;
     api
@@ -101,7 +118,7 @@ export function ChapterList({
     return () => {
       huy = true;
     };
-  }, [novelId, chapters]);
+  }, [novelId, chapters, dangTaiPhien, profile]);
 
   // Tien do theo chuong CUA TRUYEN NAY (ban ghi xep moi -> cu).
   const tienDo = useMemo(() => {

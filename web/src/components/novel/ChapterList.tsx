@@ -82,16 +82,19 @@ export function ChapterList({
     setChuongHienTai(chapters);
   }
   // Theo doi phien dang nhap: trang mo truoc khi dang nhap (effect chay luc
-  // chua co token) phai tu fetch lai khi dang nhap xong; dang xuat thi tra
-  // ve ban may chu. Cho khoi phuc phien xong moi quyet dinh de khong fetch
-  // bang token het han.
+  // chua co token) phai tu fetch lai khi dang nhap xong. Khi phien ket thuc
+  // (dang xuat / token het han) thi tra muc luc ve ban may chu NGAY TRONG
+  // LUC RENDER (mau React khuyen dung, nhu banTruoc o tren) thay vi setState
+  // trong effect — setState dong bo trong effect bi lint cam.
   const { profile, loading: dangTaiPhien } = useSession();
+  const [phienTruoc, setPhienTruoc] = useState(profile);
+  if (phienTruoc !== profile) {
+    setPhienTruoc(profile);
+    if (!dangTaiPhien && !profile) setChuongHienTai(chapters);
+  }
   useEffect(() => {
     if (dangTaiPhien) return;
-    if (!getToken()) {
-      setChuongHienTai(chapters);
-      return;
-    }
+    if (!getToken()) return;
     let huy = false;
     api
       .getNovel(novelId)

@@ -30,16 +30,15 @@ const TEN_GOC_NGAN: Record<string, string> = {
   nov_kho_do_danh: "Khó Dỗ Dành",
   nov_gao_wu_ji_yuan: "Cao Võ Kỷ Nguyên",
   nov_zombie_king: "Zombie King",
-  nov_s01_laopo: "Trùng Sinh Từ Vợ Đảo Truy",
+  nov_s01_laopo: "Trùng Sinh Từ Vợ Đảo Truy Tôi Bắt Đầu",
 };
 
 /**
- * Badge goc trai tren anh bia: LUON dang "Fanfic <ten goc/fandom>" (vd
- * "Fanfic One Piece", "Fanfic Harry Potter", "Fanfic Cao Võ Kỷ Nguyên").
- * Tra ve "Fanfic" tran khi khong xac dinh duoc gi — khi do the an badge
- * (kieu cu, `fandom !== "Fanfic"`).
+ * Ten goc/fandom KHONG tien to "Fanfic" ("" khi khong xac dinh duoc) — dung
+ * chung cho badge (`novelFandom`) VA chip loc fandom o Thu vien, de hai cho
+ * khong bao gio lech nhau nua.
  */
-export function novelFandom(novel: {
+export function novelFandomBase(novel: {
   novel_id?: string;
   title?: string;
   tags?: string[];
@@ -98,6 +97,22 @@ export function novelFandom(novel: {
     }
   }
 
+  return base;
+}
+
+/**
+ * Badge goc trai tren anh bia: LUON dang "Fanfic <ten goc/fandom>" (vd
+ * "Fanfic One Piece", "Fanfic Harry Potter", "Fanfic Cao Võ Kỷ Nguyên").
+ * Tra ve "Fanfic" tran khi khong xac dinh duoc gi — khi do the an badge
+ * (kieu cu, `fandom !== "Fanfic"`).
+ */
+export function novelFandom(novel: {
+  novel_id?: string;
+  title?: string;
+  tags?: string[];
+  fandom_ids?: string[];
+}): string {
+  const base = novelFandomBase(novel);
   return base ? `Fanfic ${base}` : "Fanfic";
 }
 

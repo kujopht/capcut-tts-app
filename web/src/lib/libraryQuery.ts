@@ -64,6 +64,14 @@ const BI_DANH_FANDOM: Record<string, string> = {
   genshin: "Genshin Impact",
   "genshin impact": "Genshin Impact",
   "fairy tail": "Fairy Tail",
+  "harry potter": "Harry Potter",
+  "re:zero": "Re:Zero",
+  bleach: "Bleach",
+  avatar: "Avatar",
+  "zombie king": "Zombie King",
+  "cao võ kỷ nguyên": "Cao Võ Kỷ Nguyên",
+  "khó dỗ dành": "Khó Dỗ Dành",
+  "trùng sinh từ vợ đảo truy tôi bắt đầu": "Trùng Sinh Từ Vợ Đảo Truy Tôi Bắt Đầu",
 };
 
 export function chuanHoaFandom(raw: string): string {
@@ -165,6 +173,14 @@ export const FANDOM_MAY_CHU: ReadonlySet<string> = new Set([
   "Detective Conan",
   "Genshin Impact",
   "Fairy Tail",
+  "Harry Potter",
+  "Re:Zero",
+  "Bleach",
+  "Avatar",
+  "Zombie King",
+  "Cao Võ Kỷ Nguyên",
+  "Khó Dỗ Dành",
+  "Trùng Sinh Từ Vợ Đảo Truy Tôi Bắt Đầu",
 ]);
 export function sapCucBo(sort: SapXep): boolean {
   return sort === "chapters" || sort === "title";
@@ -186,13 +202,14 @@ export function thamSoDuyet(t: TrangThaiThuVien, kichThuocTrang: number) {
     t.audio === "legacy" ? "audio_only" : t.audio === "audio" ? "all" : "readable";
   const cucBo = sapCucBo(t.sort);
   const coFandom = t.fandom !== "all";
-  // Backend co nhanh rieng cho nam fandom nay (so ca `fandom_ids` lan the
-  // "fandom:X"); fandom khac chi khop khi gui dung the "fandom:X" qua `tag`.
-  const quaFandom = coFandom && FANDOM_MAY_CHU.has(t.fandom);
+  // Backend co nhanh rieng cho moi fandom trong FANDOM_MAY_CHU (so ca
+  // `fandom_ids` lan the "fandom:X" / the chu thuong); gui MOI fandom qua
+  // param `fandom`, khong gui qua `tag` nua — the "fandom:X" khong ton tai
+  // voi hau het truyen nen duong cu tra ve trang rong.
   return {
     query: t.q,
-    fandom: quaFandom ? t.fandom : undefined,
-    tag: coFandom && !quaFandom ? `fandom:${t.fandom}` : undefined,
+    fandom: coFandom ? t.fandom : undefined,
+    tag: undefined,
     status: t.status === "all" ? undefined : t.status,
     audio: t.audio === "audio" || t.audio === "read_audio" ? true : t.audio === "text" ? false : undefined,
     sort: SAP_XEP_MAY_CHU[t.sort],

@@ -59,6 +59,7 @@ import {
   formatChapterCount,
   isLegacyAudioOnly,
   novelFandom,
+  novelFandomBase,
   novelHasAudio,
   novelHeroUrl,
 } from "@/lib/catalog";
@@ -236,7 +237,7 @@ function useKetQuaDuyet(khoa: string, batDuong: boolean) {
 /* Cach doc mot truyen cho `locToanKho` / `chipFandom` — cung nguon voi the. */
 const CUA_TRUYEN: CuaTruyen<Novel> = {
   co: (n) => ({ cu: isLegacyAudioOnly(n), audio: novelHasAudio(n), status: n.status }),
-  fandom: (n) => fandomCauTruc(n),
+  fandom: (n) => novelFandomBase(n),
   chu: (n) => `${n.title} ${n.external_author_name ?? ""} ${n.description ?? ""}`,
   capNhat: (n) => n.updated_at || n.created_at || "",
   taoLuc: (n) => n.created_at || "",

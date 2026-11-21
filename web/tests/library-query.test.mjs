@@ -73,9 +73,20 @@ test("tham so may chu: dinh dang, sap xep that cua backend, fandom qua dung kenh
   assert.equal(sapCucBo("chapters"), true);
   assert.equal(sapCucBo("updated"), false);
   assert.deepEqual([ts({ sort: "title", page: 2 }).limit, ts({ sort: "title", page: 2 }).offset], [TRAN_CUC_BO, 0]);
-  // Fandom backend nhan ra -> `fandom`; fandom khac -> the `fandom:X`.
+  // Moi fandom trong FANDOM_MAY_CHU (ke ca Bleach / Harry Potter / Cao Võ Kỷ
+  // Nguyên...) deu gui qua param `fandom` — backend co nhanh rieng cho tung
+  // cai; khong con fandom nao gui qua the `fandom:X` nua (the do khong ton
+  // tai voi hau het truyen nen tra ve trang rong).
   assert.deepEqual([ts({ fandom: "Naruto" }).fandom, ts({ fandom: "Naruto" }).tag], ["Naruto", undefined]);
-  assert.deepEqual([ts({ fandom: "Bleach" }).fandom, ts({ fandom: "Bleach" }).tag], [undefined, "fandom:Bleach"]);
+  assert.deepEqual([ts({ fandom: "Bleach" }).fandom, ts({ fandom: "Bleach" }).tag], ["Bleach", undefined]);
+  assert.deepEqual(
+    [ts({ fandom: "Harry Potter" }).fandom, ts({ fandom: "Harry Potter" }).tag],
+    ["Harry Potter", undefined],
+  );
+  assert.deepEqual(
+    [ts({ fandom: "Cao Võ Kỷ Nguyên" }).fandom, ts({ fandom: "Cao Võ Kỷ Nguyên" }).tag],
+    ["Cao Võ Kỷ Nguyên", undefined],
+  );
 });
 
 test("ten truyen: thu tu tieng Viet, bo tien to [Fandom]; nhieu chuong: giam dan", () => {

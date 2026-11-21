@@ -735,8 +735,30 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                 fandom_conds.extend([
                     q_contains("tags", "fairy tail"),
                 ])
+            elif "harry potter" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("tags", "fandom:Harry Potter"),
+                    q_contains("tags", "harry potter"),
+                ])
+            elif "re:zero" in fandom_clean or "rezero" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("tags", "fandom:Re:Zero"),
+                    q_contains("tags", "re:zero"),
+                ])
+            elif "bleach" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("tags", "fandom:Bleach"),
+                    q_contains("tags", "bleach"),
+                ])
+            elif "avatar" in fandom_clean:
+                fandom_conds.extend([
+                    q_contains("tags", "fandom:Avatar"),
+                    q_contains("tags", "avatar the last airbender"),
+                    q_contains("tags", "avatar"),
+                ])
             else:
                 fandom_conds.append(q_contains("tags", fandom))
+                fandom_conds.append(q_contains("tags", "fandom:" + fandom))
 
             unique_conds = []
             seen = set()

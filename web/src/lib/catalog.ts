@@ -21,7 +21,26 @@ export function novelHasAudio(novel: {
   return false;
 }
 
+/**
+ * Ten ngan hien tren badge cho cac truyen KHONG thuoc fandom nao (truyen
+ * Trung / ngon tinh goc...). Key theo novel_id de khong doan mo tu title
+ * (tieu de tieng Viet cua cac bo nay dai, cat ngan se xau).
+ */
+const TEN_GOC_NGAN: Record<string, string> = {
+  nov_kho_do_danh: "Khó Dỗ Dành",
+  nov_gao_wu_ji_yuan: "Cao Võ Kỷ Nguyên",
+  nov_zombie_king: "Zombie King",
+  nov_s01_laopo: "Trùng Sinh Từ Vợ Đảo Truy",
+};
+
+/**
+ * Badge goc trai tren anh bia: LUON dang "Fanfic <ten goc/fandom>" (vd
+ * "Fanfic One Piece", "Fanfic Harry Potter", "Fanfic Cao Võ Kỷ Nguyên").
+ * Tra ve "Fanfic" tran khi khong xac dinh duoc gi — khi do the an badge
+ * (kieu cu, `fandom !== "Fanfic"`).
+ */
 export function novelFandom(novel: {
+  novel_id?: string;
   title?: string;
   tags?: string[];
   fandom_ids?: string[];
@@ -29,35 +48,57 @@ export function novelFandom(novel: {
   const t = (novel.title ?? "").toLowerCase();
   const tags = (novel.tags ?? []).map((x) => x.toLowerCase());
   const fids = (novel.fandom_ids ?? []).map((x) => x.toLowerCase());
+  const has = (...k: string[]) => tags.some((x) => k.some((y) => x.includes(y)));
 
-  if (t.includes("naruto") || tags.some((x) => x.includes("naruto") || x.includes("làng lá")) || fids.includes("fan_naruto")) {
-    return "Naruto";
-  }
-  if (t.includes("one piece") || tags.some((x) => x.includes("one piece") || x.includes("hải tặc")) || fids.includes("fan_onepiece")) {
-    return "One Piece";
-  }
-  if (t.includes("conan") || tags.some((x) => x.includes("conan") || x.includes("thám tử")) || fids.includes("fan_conan")) {
-    return "Detective Conan";
-  }
-  if (t.includes("genshin") || tags.some((x) => x.includes("genshin")) || fids.includes("fan_genshin")) {
-    return "Genshin Impact";
-  }
-  if (t.includes("fairy tail") || tags.some((x) => x.includes("fairy tail"))) {
-    return "Fairy Tail";
-  }
-  if (t.includes("bóng rổ") || tags.some((x) => x.includes("bóng rổ") || x.includes("kuroko"))) {
-    return "Thể thao / Bóng rổ";
-  }
-  if (t.includes("warhammer") || t.includes("sci-fi") || tags.some((x) => x.includes("warhammer") || x.includes("scifi"))) {
-    return "Sci-Fi / Warhammer";
+  let base = "";
+  if (t.includes("naruto") || has("naruto", "làng lá") || fids.includes("fan_naruto")) {
+    base = "Naruto";
+  } else if (t.includes("one piece") || has("one piece", "hải tặc") || fids.includes("fan_onepiece")) {
+    base = "One Piece";
+  } else if (t.includes("conan") || has("conan", "thám tử") || fids.includes("fan_conan")) {
+    base = "Detective Conan";
+  } else if (t.includes("genshin") || has("genshin") || fids.includes("fan_genshin")) {
+    base = "Genshin Impact";
+  } else if (t.includes("fairy tail") || has("fairy tail")) {
+    base = "Fairy Tail";
+  } else if (t.includes("bleach") || has("bleach") || fids.includes("fan_bleach")) {
+    base = "Bleach";
+  } else if (t.includes("harry potter") || has("harry potter") || fids.includes("fan_harrypotter")) {
+    base = "Harry Potter";
+  } else if (t.includes("re:zero") || has("re:zero") || fids.includes("fan_rezero")) {
+    base = "Re:Zero";
+  } else if (t.includes("avatar") || has("avatar") || fids.includes("fan_avatar")) {
+    base = "Avatar";
+  } else if (t.includes("bóng rổ") || has("bóng rổ", "kuroko")) {
+    base = "Thể thao / Bóng rổ";
+  } else if (t.includes("warhammer") || t.includes("sci-fi") || has("warhammer", "scifi")) {
+    base = "Sci-Fi / Warhammer";
+  } else if (novel.novel_id && TEN_GOC_NGAN[novel.novel_id]) {
+    base = TEN_GOC_NGAN[novel.novel_id];
+  } else {
+    // Fallback: the co nghia dau tien (bo the ky thuat / trang thai / gate),
+    // viet hoa chu dau; khong dung the chung chung ("fanfic", "dong nhan").
+    const candidate = (novel.tags ?? []).find(
+      (tag) =>
+        !tag.startsWith("work:") &&
+        tag !== "imported" &&
+        tag !== "long_form_audio" &&
+        !tag.startsWith("fandom:Da Fandom") &&
+        !tag.startsWith("gate:") &&
+        tag.toLowerCase() !== "fanfic" &&
+        tag.toLowerCase() !== "đồng nhân" &&
+        tag.toLowerCase() !== "ongoing" &&
+        tag.toLowerCase() !== "completed" &&
+        tag.toLowerCase() !== "complete" &&
+        tag.toLowerCase() !== "hiatus" &&
+        tag.toLowerCase() !== "audio_novel",
+    );
+    if (candidate) {
+      base = candidate.charAt(0).toLocaleUpperCase("vi") + candidate.slice(1);
+    }
   }
 
-  // Fallback to first non-generic tag
-  const candidate = (novel.tags ?? []).find((tag) => !tag.startsWith("work:") && tag !== "imported" && tag !== "long_form_audio" && !tag.startsWith("fandom:Da Fandom"));
-  if (candidate) {
-    return candidate;
-  }
-  return "Fanfic";
+  return base ? `Fanfic ${base}` : "Fanfic";
 }
 
 export function formatAuthor(novel: {

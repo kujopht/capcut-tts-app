@@ -370,6 +370,7 @@ class AppwriteIdentityAdapter:
         profile.last_watch_duration_seconds = float(
             row.get("last_watch_duration_seconds") or 0.0)
         profile.last_watch_at = str(row.get("last_watch_at") or "")
+        profile.last_seen_at = str(row.get("last_seen_at") or "")
         # Social Play V1 — cung ly do voi `_profile_from` ben duoi.
         profile.banner_key, profile.accent, profile.fandom_ids = _truong_social_v1(row)
         return profile
@@ -592,6 +593,25 @@ class AppwriteIdentityAdapter:
                 },
             )
         return profile
+
+    def touch_last_seen(self, user_id: str, at: str) -> bool:
+        """
+        Ghi moc hien dien — xem contract o `IdentityAdapter`.
+
+        Chi PATCH dung mot truong `last_seen_at`, KHONG di qua `save_profile`
+        (ham do ghi lai toan bo truong V2 tu ban ghi trong bo nho — moc cu
+        trong do se dam vao moc moi). Thuoc tinh chua co trong bang (chua chay
+        migration) hoac hang ho so chua ton tai thi tra `False`, khong nem.
+        """
+        co = self._profile_attributes()
+        if co is None or "last_seen_at" not in co:
+            return False
+        try:
+            self._request("PATCH", self._profile_path(user_id),
+                          payload={"data": {"last_seen_at": at}})
+        except AuthError:
+            return False
+        return True
 
     def get_profile(self, user_id: str) -> Profile:
         """Doc ho so tu bang. Dung cho tang service, khong cho duong dang nhap."""
@@ -920,6 +940,7 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         last_watch_duration_seconds=float(
             row.get("last_watch_duration_seconds") or 0.0),
         last_watch_at=str(row.get("last_watch_at") or ""),
+        last_seen_at=str(row.get("last_seen_at") or ""),
         banner_key=banner_key,
         accent=accent,
         fandom_ids=fandom_ids,

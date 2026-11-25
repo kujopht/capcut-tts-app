@@ -91,6 +91,13 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("banner_key", "string", False, 512),
             ("accent", "string", False, 24),
             ("fandom_ids", "string", False, 32),    # mang, xem ARRAY_ATTRIBUTES
+            # --- Hien dien user (online-tracking) ------------------------------
+            # Moc "lan cuoi user mo web", ghi boi `POST /api/auth/me/heartbeat`
+            # qua `touch_last_seen` — chi PATCH dung truong nay, khong cham
+            # tier/quota. Cot da co san tren production (tao tay qua console
+            # 25/11); them vao day de `scripts/setup_appwrite.py` khoi tao
+            # dung schema cho moi truong moi.
+            ("last_seen_at", "datetime", False, None),
         ],
         "indexes": [
             ("email_unique", "unique", ["email"]),

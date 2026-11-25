@@ -329,6 +329,22 @@ class IdentityAdapter(Protocol):
         """
         ...
 
+    def touch_last_seen(self, user_id: str, at: str) -> bool:
+        """
+        Ghi moc \"lan cuoi user mo web\" (`Profile.last_seen_at`, ISO UTC) cho
+        mot tai khoan — duong heartbeat 60s tu trinh duyet
+        (`POST /api/auth/me/heartbeat`).
+
+        CHI ghi dung mot truong nay, khong cham vao danh tinh (username/bio/
+        tier...). IDEMPOTENT va KHONG BAO GIO nem vi ly do hien dien: thuoc
+        tinh chua ton tai trong bang `profiles` (chua chay migration) hoac
+        hang ho so chua co thi tra `False` thay vi lam vo request — tinh nang
+        chi an, giong co che \"dong-thieu-thi-bo-qua\" cua `_PROFILE_V2_FIELDS`.
+
+        Tra `True` neu that su vua ghi duoc moc moi.
+        """
+        ...
+
 
 class StorageAdapter(Protocol):
     """Luu file lon. Ban that se la Cloudflare R2 qua API tuong thich S3."""
@@ -977,6 +993,15 @@ class MockIdentityAdapter:
                         raise AuthError("Tên người dùng này đã có người dùng.")
             self._profiles[profile.user_id] = profile
             return profile
+
+    def touch_last_seen(self, user_id: str, at: str) -> bool:
+        """Ghi moc hien dien — xem contract o `IdentityAdapter`."""
+        with self._lock:
+            profile = self._profiles.get(user_id)
+            if profile is None:
+                return False
+            profile.last_seen_at = at
+            return True
 
     def profile_by_username(self, username: str) -> Optional[Profile]:
         ten = (username or "").strip().lower()

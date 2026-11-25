@@ -57,6 +57,27 @@ MAX_BIO = 400
 MAX_INTRO = 1000
 MAX_GENRES = 8
 
+#: Cua so "dang online": `last_seen_at` trong 5 phut qua tinh tu luc goi.
+#: Xem `POST /api/auth/me/heartbeat` (ping 60s/lan khi tab hien) va
+#: `GET /api/admin/users/online`. 300s = 5 lan ping, du cho mot lan ping
+#: bi rot mang ma van hien online.
+ONLINE_WINDOW_SECONDS = 300
+
+
+def _dang_online(last_seen_at: str, luc_nay: datetime) -> bool:
+    """`last_seen_at` (ISO UTC, rong = chua tung thay) co nam trong cua so
+    online khong. Chuoi rac/khong parse duoc = khong online, khong nem."""
+    if not last_seen_at:
+        return False
+    try:
+        moc = datetime.fromisoformat(last_seen_at)
+    except ValueError:
+        return False
+    if moc.tzinfo is None:
+        moc = moc.replace(tzinfo=timezone.utc)
+    delta = (luc_nay - moc).total_seconds()
+    return 0 <= delta <= ONLINE_WINDOW_SECONDS
+
 
 class CreatorService:
     """
@@ -777,6 +798,44 @@ class CreatorService:
             row["email_verified"] = acc.email_verified
             row["account_enabled"] = acc.enabled
             row["registered_at"] = acc.registered_at
+        return {"users": ra, "total": total, "limit": limit, "offset": offset}
+
+    def admin_users_online(self, query: str = "", limit: int = 50,
+                           offset: int = 0) -> Dict[str, Any]:
+        """
+        Danh sach user kem moc hien dien — trang quan tri "User online".
+
+        Cung nguon nhu `admin_users` (Appwrite Users API native + lam giau
+        theo lo qua `profiles_by_ids`), them `last_seen_at`/`is_online` lay
+        tu hang `profiles`. Khong keo thong ke nghe/truyen (`_lam_giau`) —
+        bang nay chi can danh tinh + moc hien dien.
+
+        Sap xep TRONG TRANG da lay: dang online len dau, roi theo
+        `last_seen_at` moi nhat, chua tung thay xuong cuoi. Voi luong user
+        hien tai (vai chuc) mot trang 50 bao het; khi user dong, trang sau
+        co the lan user online nam ngoai 50 tai khoan dau cua `list_accounts`
+        — chap nhan duoc, vi day la bang quan sat, khong phai hang doi xu ly.
+        """
+        accounts, total = self._identity.list_accounts(
+            query, limit=limit, offset=offset)
+        ho_so = self._identity.profiles_by_ids([a.user_id for a in accounts])
+        luc_nay = datetime.now(timezone.utc)
+        ra = []
+        for a in accounts:
+            p = ho_so.get(a.user_id)
+            last_seen = (p.last_seen_at if p else "") or ""
+            ra.append({
+                "user_id": a.user_id,
+                "email": a.email,
+                "display_name": (p.display_name if p else "") or a.name,
+                "username": p.username if p else "",
+                "last_seen_at": last_seen or None,
+                "is_online": _dang_online(last_seen, luc_nay),
+            })
+        # Sort on dinh hai buoc: last_seen moi nhat truoc (rong xuong cuoi),
+        # roi dang online len dau.
+        ra.sort(key=lambda r: r["last_seen_at"] or "", reverse=True)
+        ra.sort(key=lambda r: not r["is_online"])
         return {"users": ra, "total": total, "limit": limit, "offset": offset}
 
     def admin_user(self, user_id: str) -> Optional[Dict[str, Any]]:

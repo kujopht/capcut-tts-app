@@ -203,6 +203,11 @@ class TestQuotaFieldsOnlyChangeServerSide(unittest.TestCase):
         # TAO khi chua co va KHONG BAO GIO ghi de — chung minh o
         # `test_oauth_exchange_only_creates_never_overwrites` ngay duoi.
         "/api/auth/oauth/exchange",
+        # Nhip "toi dang mo web". CO ghi `profiles`, nhung CHI ghi dung mot
+        # truong `last_seen_at` qua `touch_last_seen` — khong cham tier, quota
+        # hay bat ky truong nao khac. Chung minh o
+        # `test_heartbeat_only_writes_last_seen_at` ngay duoi.
+        "/api/auth/me/heartbeat",
     }
 
     def test_no_backend_route_lets_a_client_write_profile_fields(self):
@@ -219,6 +224,42 @@ class TestQuotaFieldsOnlyChangeServerSide(unittest.TestCase):
             profile_writes, [],
             "chưa có route sửa hồ sơ; nếu thêm thì phải có allowlist trường",
         )
+
+    def test_heartbeat_only_writes_last_seen_at(self):
+        """
+        `/api/auth/me/heartbeat` nam trong allowlist o tren, nen phai chung
+        minh no that su vo hai — neu khong, allowlist chi la mot cach lam ngo
+        test.
+
+        Nhip hien dien chi duoc ghi moc thoi gian: route goi dung
+        `touch_last_seen(user_id, at)`; adapter PATCH dung mot truong
+        `last_seen_at` vao hang ho so cua chinh chu, khong di qua
+        `save_profile` (ham do ghi lai toan bo truong V2), khong tao/xoa
+        ban ghi, khong cham tier hay bo dem quota.
+        """
+        import inspect
+
+        from server import main as server_main
+        from server.appwrite_adapter import AppwriteIdentityAdapter
+
+        nguon_route = inspect.getsource(server_main.heartbeat_me)
+        # Route chi uy quyen cho adapter, khong tu cham kho.
+        self.assertIn("touch_last_seen", nguon_route)
+        for cam in ("store.", "save_profile", "tier", "listened_minutes",
+                    "tts_characters_used", '"POST"', '"PATCH"', '"PUT"',
+                    '"DELETE"'):
+            self.assertNotIn(cam, nguon_route,
+                             f"route heartbeat khong duoc cham {cam!r}")
+
+        nguon = inspect.getsource(AppwriteIdentityAdapter.touch_last_seen)
+        # PATCH dung mot truong duy nhat.
+        self.assertIn('payload={"data": {"last_seen_at": at}}', nguon)
+        self.assertIn('"PATCH"', nguon)
+        # Khong tao/xoa ban ghi, khong ghi qua duong day du truong V2.
+        for cam in ('"POST"', '"PUT"', '"DELETE"', "self.save_profile",
+                    "tier", "listened_minutes", "tts_characters_used"):
+            self.assertNotIn(cam, nguon,
+                             f"touch_last_seen khong duoc cham {cam!r}")
 
     def test_oauth_exchange_only_creates_never_overwrites(self):
         """

@@ -77,7 +77,12 @@ interface NhomDieuHuong {
  */
 const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
   { muc: [{ href: "/admin", nhan: "Dashboard", icon: IconCompass }] },
-  { muc: [{ href: "/admin/users", nhan: "Users", icon: IconUser, vaiToiThieu: "admin" }] },
+  {
+    muc: [
+      { href: "/admin/users", nhan: "Users", icon: IconUser, vaiToiThieu: "admin" },
+      { href: "/admin/users/online", nhan: "User online", icon: IconUser, vaiToiThieu: "admin" },
+    ],
+  },
   { muc: [{ href: "/admin/community", nhan: "Cộng đồng", icon: IconMegaphone }] },
   {
     nhom: "Content",

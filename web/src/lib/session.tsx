@@ -81,6 +81,43 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Nhip "toi dang mo web" — ghi `last_seen_at` cho trang quan tri
+  // "User online". Chi chay khi DA dang nhap (`profile` co gia tri), chi
+  // ping khi tab dang hien, 60s/lan. Loi mang duoc nuot im: mot nhi
+  // heartbeat hong khong bao gio duoc lam phien nguoi dung hay hien loi.
+  // Dung khi dong tab (cleanup) hoac dang xuat (`profile` ve null).
+  useEffect(() => {
+    if (!profile) return;
+    let dung = false;
+    let hen: number | undefined;
+
+    const ping = () => {
+      api.heartbeat().catch(() => {});
+    };
+    const lapLai = () => {
+      hen = window.setTimeout(() => {
+        if (dung) return;
+        if (document.visibilityState === "visible") ping();
+        lapLai();
+      }, 60_000);
+    };
+    const khiHienLai = () => {
+      if (dung || document.visibilityState !== "visible") return;
+      ping();
+      window.clearTimeout(hen);
+      lapLai();
+    };
+
+    if (document.visibilityState === "visible") ping();
+    lapLai();
+    document.addEventListener("visibilitychange", khiHienLai);
+    return () => {
+      dung = true;
+      window.clearTimeout(hen);
+      document.removeEventListener("visibilitychange", khiHienLai);
+    };
+  }, [profile]);
+
   const signIn = useCallback(async (email: string, password: string) => {
     const result = await api.login(email, password);
     setToken(result.token);

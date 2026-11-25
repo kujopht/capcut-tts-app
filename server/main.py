@@ -1157,6 +1157,21 @@ def me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return {"profile": _ho_so_tra_ve(profile)}
 
 
+@app.post("/api/auth/me/heartbeat")
+def heartbeat_me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Nhip "toi dang mo web" — trinh duyet ping 60s/lan khi tab dang hien
+    (xem `SessionProvider` o web).
+
+    Chi ghi `last_seen_at`, khong cham gi khac. `tracked=False` = bang
+    `profiles` chua co thuoc tinh `last_seen_at` (chua chay migration) hoac
+    hang ho so chua ton tai — tinh nang chi an, request van 200.
+    """
+    at = now_iso()
+    tracked = identity.touch_last_seen(profile.user_id, at)
+    return {"last_seen_at": at, "tracked": tracked}
+
+
 @app.get("/api/premium/status")
 def premium_status(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     """Trang thai premium cua chinh chu: tier + email da xac minh chua.
@@ -6229,6 +6244,20 @@ def admin_users(q: str = "", limit: int = 25, offset: int = 0,
         # moi lan tra ve, khong the luu san trong `creators.admin_users`.
         row["admin_role"] = settings.admin_role_of(row["user_id"]).value
     return data
+
+
+@app.get("/api/admin/users/online")
+def admin_users_online(q: str = "", limit: int = 50, offset: int = 0,
+                       admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """
+    Trang quan tri "User online" — user kem moc hien dien (`last_seen_at`,
+    `is_online`).
+
+    Dat TRUOC `/api/admin/users/{user_id}`: FastAPI khop route theo thu tu
+    dang ky, va "online" se bi nuot lam `user_id` neu route nay dung sau.
+    """
+    return creators.admin_users_online(
+        query=q, limit=max(1, min(100, limit)), offset=max(0, offset))
 
 
 @app.get("/api/admin/users/{user_id}")

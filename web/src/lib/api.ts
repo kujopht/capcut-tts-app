@@ -839,6 +839,17 @@ export const api = {
 
   me: () => request<{ profile: Profile }>("/api/auth/me"),
 
+  /**
+   * Nhip "toi dang mo web" — `SessionProvider` goi 60s/lan khi tab dang
+   * hien. Chi ghi `last_seen_at` o may chu; `tracked=false` = bang chua co
+   * thuoc tinh (chua chay migration) — tinh nang chi an.
+   */
+  heartbeat: () =>
+    request<{ last_seen_at: string; tracked: boolean }>(
+      "/api/auth/me/heartbeat",
+      { method: "POST" },
+    ),
+
   premiumStatus: () =>
     request<{ tier: string; email: string; email_verified: boolean }>(
       "/api/premium/status",
@@ -1860,6 +1871,22 @@ export interface AdminAccountSession {
   created_at: string;
 }
 
+/**
+ * Mot hang trong danh sach "User online" (`/api/admin/users/online`).
+ *
+ * `last_seen_at` null = chua tung ghi nhan heartbeat. `is_online` do may
+ * chu tinh (moc trong 5 phut qua) — khach khong tu tinh de hai ben khoi
+ * lech nhau vi dong ho.
+ */
+export interface AdminUserOnline {
+  user_id: string;
+  email: string;
+  display_name: string;
+  username: string;
+  last_seen_at: string | null;
+  is_online: boolean;
+}
+
 export interface AdminApplication {
   application_id: string;
   user_id: string;
@@ -2477,6 +2504,16 @@ export const adminApi = {
   users: (q = "", limit = 25, offset = 0) =>
     request<{ users: AdminUser[]; total: number }>(
       `/api/admin/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`,
+    ),
+
+  /**
+   * Trang quan tri "User online" — user kem moc hien dien. Sap xep
+   * (online len dau, roi theo last_seen moi nhat) do MAY CHU lam trong
+   * trang da lay. Gioi han mac dinh 50 — dung `offset` de tai them.
+   */
+  usersOnline: (q = "", limit = 50, offset = 0) =>
+    request<{ users: AdminUserOnline[]; total: number; limit: number; offset: number }>(
+      `/api/admin/users/online?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`,
     ),
 
   user: (userId: string) =>

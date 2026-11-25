@@ -320,6 +320,10 @@ class Profile:
     #: phai hoi lai YouTube. `0` = chua biet.
     last_watch_duration_seconds: float = 0.0
     last_watch_at: str = ""
+    #: Lan CUOI user mo web — heartbeat tu trinh duyet (60s/lan, chi khi tab
+    #: dang hien), ISO UTC. Rong = chua tung ghi nhan. Xem
+    #: `IdentityAdapter.touch_last_seen` va `/api/admin/users/online`.
+    last_seen_at: str = ""
 
     # -- Social Play V1 (capability `social_v1_schema`) ----------------------
     #: Khoa doi tuong anh bia (banner) trong R2, cung mau voi `avatar_key`.
@@ -364,6 +368,7 @@ class Profile:
             "last_watch_position_seconds": self.last_watch_position_seconds,
             "last_watch_duration_seconds": self.last_watch_duration_seconds or None,
             "last_watch_at": self.last_watch_at or None,
+            "last_seen_at": self.last_seen_at or None,
             "banner_key": self.banner_key,
             "accent": self.accent or None,
             "fandom_ids": list(self.fandom_ids),

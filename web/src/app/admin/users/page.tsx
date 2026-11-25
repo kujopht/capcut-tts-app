@@ -3,9 +3,10 @@
 /**
  * Tra cuu tai khoan.
  *
- * Day la duong DUY NHAT trong ca san pham co `email`. Moi API cong khai —
- * `/api/users/*`, `/api/search/people` — deu khong co truong do, va mot bai test
- * o backend doi chieu hai duong canh nhau de giu dieu do.
+ * Day la MOT trong hai duong trong ca san pham co `email` (duong kia la
+ * `/admin/users/online`). Moi API cong khai — `/api/users/*`,
+ * `/api/search/people` — deu khong co truong do, va mot bai test o backend
+ * doi chieu hai duong canh nhau de giu dieu do.
  *
  * Tim o MAY CHU, giam nhip go: cung mot ly do voi overlay tim kiem cong khai.
  *
